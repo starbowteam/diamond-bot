@@ -1145,7 +1145,7 @@ async def send_dm(member, content, embeds):
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
-        super().__init__(timeout=None)  # теперь бесконечный
+        super().__init__(timeout=None)
         catalog = load_shop_catalog()
         options = []
         for key, cat in catalog.items():
@@ -1162,7 +1162,6 @@ class BuySelectView(View):
         self.add_item(select)
 
     async def category_callback(self, inter: disnake.MessageInteraction):
-        # Сразу отвечаем, чтобы не было таймаута
         await inter.response.defer(ephemeral=True)
         category = inter.data.values[0]
         catalog = load_shop_catalog()
@@ -1180,7 +1179,7 @@ class BuySelectView(View):
                 description=item.get("description", "")[:100],
                 value=f"{category}_{key}"
             ))
-        view = View(timeout=None)  # бесконечный
+        view = View(timeout=None)
         select2 = Select(placeholder="Выберите товар...", options=options, custom_id="buy_item")
         select2.callback = self.item_callback
         view.add_item(select2)
@@ -1190,7 +1189,7 @@ class BuySelectView(View):
         await inter.edit_original_response(content="Выберите товар из категории:", view=view)
 
     async def item_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)  # важно!
+        await inter.response.defer(ephemeral=True)
         value = inter.data.values[0]
         try:
             category, item_key = value.split("_", 1)
@@ -1220,7 +1219,6 @@ class BuySelectView(View):
         elif category == "roles":
             item_type = "Роль"
             item_value = item["name"]
-            # Выдаём роль, если есть role_id
             role_id = item.get("role_id")
             if role_id:
                 guild = inter.guild
@@ -1249,7 +1247,7 @@ class BuySelectView(View):
                     await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
                     return
             else:
-                # Если role_id нет, просто сохраняем покупку
+                # Роль без role_id – просто покупка
                 success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
                 if not success:
                     return await inter.edit_original_response(content="❌ Ошибка списания.")
@@ -1285,6 +1283,10 @@ class BuySelectView(View):
     async def back_callback(self, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
         await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
+
+@bot.slash_command(name="buy", description="Купить товар за Diamond Coins")
+async def buy(inter: disnake.ApplicationCommandInteraction):
+    await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
 
 # ============================================================
 # КОМАНДА /profile (с прогресс-баром)
