@@ -1143,6 +1143,10 @@ async def send_dm(member, content, embeds):
 # ============================================================
 # КОМАНДА /buy (с выдачей ролей)
 # ============================================================
+# ============================================================
+# КОМАНДА /buy (полностью переработана)
+# ============================================================
+
 class BuySelectView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1189,12 +1193,15 @@ class BuySelectView(View):
         await inter.edit_original_response(content="Выберите товар из категории:", view=view)
 
     async def item_callback(self, inter: disnake.MessageInteraction):
+        # Отвечаем сразу, чтобы не было таймаута
         await inter.response.defer(ephemeral=True)
+
         value = inter.data.values[0]
         try:
             category, item_key = value.split("_", 1)
         except ValueError:
             return await inter.edit_original_response(content="❌ Ошибка формата товара.")
+
         catalog = load_shop_catalog()
         item = catalog.get(category, {}).get("items", {}).get(item_key)
         if not item:
@@ -1203,86 +1210,70 @@ class BuySelectView(View):
         user_id = inter.author.id
         balance = await get_user_balance(user_id)
         price = item["price"]
-        if balance < price:
-            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: {price}, у вас: {balance}")
 
-        # Определяем тип и значение для записи покупки
-        if category == "discounts":
-            item_type = "Скидка"
-            item_value = item["name"].replace("скидка", "").strip()
-        elif category == "design":
-            item_type = "Дизайн"
-            item_value = item["name"]
-        elif category == "ads":
-            item_type = "Реклама"
-            item_value = item["name"]
-        elif category == "roles":
-            item_type = "Роль"
-            item_value = item["name"]
-            role_id = item.get("role_id")
-            if role_id:
-                guild = inter.guild
-                role = guild.get_role(role_id)
-                if role:
-                    try:
-                        await inter.author.add_roles(role)
-                        success = await remove_dc(user_id, price, f"Покупка роли: {item['name']}")
-                        if not success:
-                            return await inter.edit_original_response(content="❌ Ошибка списания DC.")
-                        await add_purchase(user_id, item_type, item_value)
-                        await inter.edit_original_response(
-                            content=f"✅ Вы купили роль **{item['name']}** за **{price} DC**! Роль выдана. Не забудьте оставить отзыв в <#1462074763437543435>.",
-                            ephemeral=True
-                        )
-                        await log_discord(
-                            title="🛒 Покупка роли в магазине DC",
-                            description=f"> **Пользователь:** {inter.author.mention}\n> **Роль:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
-                            color=0x00aaff
-                        )
-                        return
-                    except Exception as e:
-                        await inter.edit_original_response(content=f"❌ Не удалось выдать роль: {e}")
-                        return
-                else:
-                    await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
+        if balance < price:
+            return await inter.edit_original_response(
+                content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**."
+            )
+
+        # Пытаемся списать DC
+        success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
+        if not success:
+            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуйте позже.")
+
+        # Запоминаем покупку
+        await add_purchase(user_id, category, item["name"])
+
+        # Если это роль – выдаём
+        if category == "roles" and item.get("role_id"):
+            role = inter.guild.get_role(item["role_id"])
+            if role:
+                try:
+                    await inter.author.add_roles(role)
+                    await inter.edit_original_response(
+                        content=f"✅ Вы купили роль **{item['name']}** за **{price} DC**!\n"
+                                f"🎭 Роль **{role.name}** выдана.\n"
+                                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                    )
+                    await log_discord(
+                        title="🛒 Покупка роли в магазине DC",
+                        description=f"> **Пользователь:** {inter.author.mention}\n> **Роль:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
+                        color=0x00aaff
+                    )
+                    return
+                except Exception as e:
+                    # В случае ошибки возвращаем DC
+                    await add_dc(user_id, price, "Возврат DC (ошибка выдачи роли)")
+                    await inter.edit_original_response(
+                        content=f"❌ Не удалось выдать роль: {e}\n"
+                                f"💎 {price} DC возвращены на баланс."
+                    )
                     return
             else:
-                # Роль без role_id – просто покупка
-                success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
-                if not success:
-                    return await inter.edit_original_response(content="❌ Ошибка списания.")
-                await add_purchase(user_id, item_type, item_value)
+                # Роль не найдена – возвращаем DC
+                await add_dc(user_id, price, "Возврат DC (роль не найдена)")
                 await inter.edit_original_response(
-                    content=f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.",
-                    ephemeral=True
-                )
-                await log_discord(
-                    title="🛒 Покупка в магазине DC",
-                    description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
-                    color=0x00aaff
+                    content=f"❌ Роль не найдена на сервере.\n"
+                            f"💎 {price} DC возвращены на баланс."
                 )
                 return
-        else:
-            item_type = "Другое"
-            item_value = item["name"]
-            success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
-            if not success:
-                return await inter.edit_original_response(content="❌ Ошибка списания.")
-            await add_purchase(user_id, item_type, item_value)
-            await inter.edit_original_response(
-                content=f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.",
-                ephemeral=True
-            )
-            await log_discord(
-                title="🛒 Покупка в магазине DC",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
-                color=0x00aaff
-            )
-            return
+
+        # Для остальных товаров (не роли)
+        await inter.edit_original_response(
+            content=f"✅ Вы купили **{item['name']}** за **{price} DC**!\n"
+                    f"📦 Товар будет выдан в ближайшее время.\n"
+                    f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+        )
+        await log_discord(
+            title="🛒 Покупка в магазине DC",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
+            color=0x00aaff
+        )
 
     async def back_callback(self, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
         await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
+
 
 @bot.slash_command(name="buy", description="Купить товар за Diamond Coins")
 async def buy(inter: disnake.ApplicationCommandInteraction):
