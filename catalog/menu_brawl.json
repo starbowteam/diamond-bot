@@ -1,0 +1,87 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007504805003324/image.png?ex=6a5f06cf&is=6a5db54f&hm=98274ab6b2eaa98c883e597f9e4d7b18542c56aa609eb058efa35725df4c5ae2&=&format=webp&quality=lossless&width=1766&height=686"
+      }
+    },
+    {
+      "title": "Brawl Stars",
+      "description": "> Валюта для игры, и игровые подписки, используй их с пользой! Покупка очень проста.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **30 Гемов**",
+          "value": "```280₽ | 1835₸```",
+          "inline": true
+        },
+        {
+          "name": "> **80 Гемов**",
+          "value": "```470₽ | 3080₸```",
+          "inline": true
+        },
+        {
+          "name": "> **170 Гемов**",
+          "value": "```890₽ | 5832₸```",
+          "inline": true
+        },
+        {
+          "name": "> **360 Гемов**",
+          "value": "```1820₽ | 11930₸```",
+          "inline": true
+        },
+        {
+          "name": "> **950 Гемов**",
+          "value": "```4020₽ | 26344₸```",
+          "inline": true
+        },
+        {
+          "name": "> **2000 Гемов**",
+          "value": "```800₽ | 26213₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Brawl Pass**",
+          "value": "```850₽ | 5570₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Brawl Pass Plus**",
+          "value": "```1190₽ | 7800₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Pro Pass**",
+          "value": "```2300₽ | 15073₸```",
+          "inline": true
+        }
+      ],
+      "footer": {
+        "text": "Цены на акции - уточнять в тикете! В том числе на особые скидки."
+      }
+    },
+    {
+      "title": "Clash Royale",
+      "description": "> Пасс Рояль, в легендарной игре от Supercell - Clash Royale. Купи - не пожалеешь!",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **Pass Royale**",
+          "value": "```1090₽ | 7143₸```",
+          "inline": true
+        }
+      ]
+    }
+  ],
+  "attachments": [],
+  "flags": 0,
+  "components": []
+}

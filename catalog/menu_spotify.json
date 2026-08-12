@@ -1,0 +1,29 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1528795680636928140/image.png?ex=6a5f996d&is=6a5e47ed&hm=9df30c012726faea938333535bff40a0d2b94f24195d268f97c5c4c7e29b00b2&"
+      }
+    },
+    {
+      "title": "Spotify",
+      "description": "> Получи свой доступ на безграничный мир красочной музыки без рекламы, почувствуй это!",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **Individual**",
+          "value": "```150₽ | 983₸```",
+          "inline": true
+        }
+      ]
+    }
+  ],
+  "attachments": [],
+  "flags": 0,
+  "components": []
+}

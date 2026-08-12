@@ -1,0 +1,84 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1527007504108617808/image.png?ex=6a5f06cf&is=6a5db54f&hm=4fccda715d36c1ce67cbb04aa2e04ddab812de6cf7575e97b8025e2fbcec6c61&"
+      }
+    },
+    {
+      "title": "Покупки в Fornite.",
+      "description": "> Валюта в Fortnite для покупке предметов в магазине, покупки Батл-Пасса и т.п! Смена региона игры, а также - отряд.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **1000 V-Bucks**",
+          "value": "```570₽ | 3735₸```",
+          "inline": true
+        },
+        {
+          "name": "> **2800 V-Bucks**",
+          "value": "```1320₽ | 8650₸```",
+          "inline": true
+        },
+        {
+          "name": "> **5000 V-Bucks**",
+          "value": "```2180₽ | 14285₸```",
+          "inline": true
+        },
+        {
+          "name": "> **13500 V-Bucks**",
+          "value": "```4850₽ | 28080₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Отряд Fortnite**",
+          "value": "```370₽ | 2424₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Стартер-Пак**",
+          "value": "```370₽ | 2424₸```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Услуги Epic-Games",
+      "description": "> Услуги, завязанные напрямую с игровым лаунчерос Epic Games. Воспользуйся ими.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1223595469746475049/1459289685405728951/image_2026-01-10_00-22-10.png?ex=696ca02d&is=696b4ead&hm=d291a46be81cec5007d79f32d062a6b22a7b0f8a1ddda749c2a9da093da1d965&"
+      },
+      "fields": [
+        {
+          "name": "> **Тег-Автора**",
+          "value": "```1200₽ | 7864₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Тег-Автора - Европа**",
+          "value": "```2200₽ | 14417₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Тег-Автора - Без захода**",
+          "value": "```3200₽ | 13125₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Смена региона**",
+          "value": "```150₽ | 982₸```",
+          "inline": true
+        }
+      ]
+    }
+  ],
+  "attachments": [],
+  "flags": 0,
+  "components": []
+}

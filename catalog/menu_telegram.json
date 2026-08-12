@@ -1,0 +1,67 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007502250807387/image.png?ex=6a5f06ce&is=6a5db54e&hm=160f3ee34b9af2d79bde69eab69ef57e989dae906350db96662c9238582006c3&=&format=webp&quality=lossless&width=1766&height=686"
+      }
+    },
+    {
+      "title": "Звёзды Telegram",
+      "description": "> Отличная валюта для покупки подарков, сообщений, или иных приспособлений в Telegram",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **1 ★**",
+          "value": "```1.58₽ | 11₸  ```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Аккаунты Telegram",
+      "description": "> Для личных целей, для работы, или как запасной аккаунт - отличный вариант!",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **Любой - Без спам-блока**",
+          "value": "```250₽ | 1640₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Любой - Спам-блока**",
+          "value": "```190₽ | 1250₸```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Прокси Telegram",
+      "description": "> Напишите нам в тикет, выдадим вам список качественных - а главное рабочих прокси-серверов.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": []
+    },
+    {
+      "title": "Подарки Telegram",
+      "description": "> Напишите нам в тикете, и мы подберем нужное вам украшение - по красивой цене!\n\n> Также есть возможность продажи подарков нам, цена также обсуждается в тикете.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": []
+    }
+  ],
+  "attachments": [],
+  "flags": 0,
+  "components": []
+}

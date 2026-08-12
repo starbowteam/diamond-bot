@@ -1,0 +1,129 @@
+{
+  "content": " ",
+  "embeds": [
+    {
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007500052988125/image.png?ex=6a5f06ce&is=6a5db54e&hm=85691a1888307277087653d35beb5e66f1f4192bc846fec17a3f0213efbc2378&=&format=webp&quality=lossless&width=1766&height=686"
+      },
+      "color": 6776679,
+      "type": "rich"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Month Trial**",
+          "value": "```155₽ | 930 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **Activation Nitro**",
+          "value": "```100₽ | 660 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **3 Month Trial**",
+          "value": "```250₽ | 1500 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Month**",
+          "value": "```445₽ | 2670 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **12 Month**",
+          "value": "```3300₽ | 19980 ₸ ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Выберите нужный вам товар, есть выбор нитро для тех у кого было и не было.  Товары категории **Trial** - покупаются если нитро не было  ранее, или не было год. По вопросам по товарам - обращайтесь к персоналу!",
+      "title": "Discord Nitro"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Month**",
+          "value": "```300₽ | 1800 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **12 Month**",
+          "value": "```1550₽ | 9300 ₸ ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Нужно нитро попроще? Сделаем! Оформление просиходит также быстро, как и обычное нитро!",
+      "title": "Discord Nitro Basic"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Month Basic**",
+          "value": "```350₽ | 2100 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Month Full**",
+          "value": "```750₽ | 4500 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Year Basic**",
+          "value": "```4150₽ | 24900 ₸ ```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Year Full**",
+          "value": "```8550₽ | 51300 ₸ ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Отличный выбор для тех, кто не хочет чтобы на его аккаунт заходили, а получить нитро быстро - еще как! Гарантия действует на весь срок Nitro Gift.",
+      "title": "Discord Nitro Gift"
+    },
+    {
+      "footer": {
+        "text": "Бусты покупаются строго от 2-х штук, и в количестве кратном двум."
+      },
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Week**",
+          "value": "```35₽ | 240 ₸  ```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Month**",
+          "value": "```45₽ | 300 ₸  ```",
+          "inline": true
+        },
+        {
+          "name": "> **3 Month**",
+          "value": "```90₽ | 470 ₸  ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Отличный способ поддержать любимый вами сервер - это подарить ему бусты!",
+      "title": "Boosts"
+    }
+  ]
+}

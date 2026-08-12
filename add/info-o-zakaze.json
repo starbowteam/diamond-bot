@@ -1,0 +1,38 @@
+{
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527179314465079417/image.png?ex=6a5efe12&is=6a5dac92&hm=128f983d9fcacd66b9fdac71708d848ee4a0a5777bc461004f7f161272b9403a&=&format=webp&quality=lossless&width=1870&height=727"
+      },
+      "fields": []
+    },
+    {
+      "title": "Информация о заказе по данному тикету:",
+      "description": "Статус - Не оплачен\n> Ожидайте <@&1154757071330365490> для подтверждкения.\n> Время: <t:1784558066:f>",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> Позиция:",
+          "value": "```Discord Nitro```",
+          "inline": true
+        },
+        {
+          "name": "> Способ оплаты:",
+          "value": "```Тинькофф```",
+          "inline": true
+        },
+        {
+          "name": "> Промокод",
+          "value": "```Не активирован```",
+          "inline": true
+        }
+      ]
+    }
+  ],
+  "attachments": [],
+  "components": []
+}

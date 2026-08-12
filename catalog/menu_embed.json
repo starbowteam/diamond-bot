@@ -1,0 +1,18 @@
+{
+  "content": "",
+  "tts": false,
+  "embeds": [
+    {
+      "id": 381955561,
+      "description": "",
+      "fields": [],
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007499595550912/image.png?ex=6a5f06ce&is=6a5db54e&hm=2274a3e34190b60cf5a3a4095f85dbd819de43680fd9f821cf7df952319a07e1&=&format=webp&quality=lossless&width=1766&height=686"
+      },
+      "color": 6776679
+    }
+  ],
+  "components": [],
+  "actions": {},
+  "flags": 0
+}

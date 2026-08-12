@@ -1,0 +1,59 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007501176803441/image.png?ex=6a5f06ce&is=6a5db54e&hm=e04fcddc9fe99b715cee1e8f3f5e936009bbf26f1d155f200b085893fe7e98be&=&format=webp&quality=lossless&width=1766&height=686"
+      }
+    },
+    {
+      "title": "Робуксы",
+      "description": "> Валюта в всей любимой игре. Отличная валюта для покупок геймпассов, дополнений игр либо одежды на персонажа.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1532434728056131695/pisk.png?ex=6a6cd68e&is=6a6b850e&hm=0a35c2149e9e1748dfad1463f39d4737f31654eac958749773cc33a69141da0a&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Robux**",
+          "value": "```0.82₽ | 4.88₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Подарочные карты**",
+          "value": "```Узнавать цену в тикете```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Roblox Plus",
+      "description": "> Ежемесячная подписка от Roblox, дающая преймущество в играх, тег, и начисление робуксов в течении месяца.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1532434728056131695/pisk.png?ex=6a6cd68e&is=6a6b850e&hm=0a35c2149e9e1748dfad1463f39d4737f31654eac958749773cc33a69141da0a&"
+      },
+      "fields": [
+        {
+          "name": "> **Trial**",
+          "value": "```90₽ | 540₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Plus +500**",
+          "value": "```1300₽ | 7740₸```",
+          "inline": true
+        },
+        {
+          "name": "> **Plus +1000**",
+          "value": "```1700₽ | 10210₸```",
+          "inline": true
+        }
+      ]
+    }
+  ],
+  "attachments": [],
+  "flags": 0,
+  "components": []
+}

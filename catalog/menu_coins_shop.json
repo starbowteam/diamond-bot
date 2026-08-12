@@ -1,0 +1,72 @@
+{
+  "embeds": [
+    {
+      "type": "rich",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1531725933944508689/image.png?ex=6a6a4270&is=6a68f0f0&hm=d3840fc3135c1969e6ead811d199145f202e3cf41f53efbd0eb3ede22cb504d6&"
+      }
+    },
+    {
+      "type": "rich",
+      "title": "Магазин за валюту Diamond Coins в Diamond Shop.",
+      "description": "> Это магазин, прайс листы, и ценовые категории, на которые можно потратить свои Diamond Coins. Покупка происходит через команду \"/buy\", по вопросам - к <@&1423360115335106570>!\n\n",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530795801268453447/pisk.png?ex=6a69832f&is=6a6831af&hm=106c0b5c55c83b94fce2e11af7a4c65ec26d550b6da30575f1fef0981f7dc914&"
+      },
+      "fields": [
+        {
+          "name": "> Скидки на товары",
+          "value": "",
+          "inline": false
+        },
+        {
+          "name": "> 3%",
+          "value": "**150 Diamond Coins**",
+          "inline": true
+        },
+        {
+          "name": "> 5%",
+          "value": "**250 Diamond Coins**",
+          "inline": true
+        },
+        {
+          "name": "> 7%",
+          "value": "**350 Diamond Coins**",
+          "inline": true
+        },
+        {
+          "name": "> 10%",
+          "value": "**500 Diamond Coins**",
+          "inline": true
+        },
+        {
+          "name": "> 15%",
+          "value": "**750 Diamond Coins**",
+          "inline": true
+        },
+        {
+          "name": "> 20%",
+          "value": "**1000 Diamond Coins**",
+          "inline": true
+        },
+        {
+          "name": "> Услуги в магазине",
+          "value": "",
+          "inline": false
+        },
+        {
+          "name": ">  Своя роль",
+          "value": "**200 Diamond Coins**",
+          "inline": true
+        },
+        {
+          "name": ">  Приоритетный тикет ",
+          "value": "**250 Diamond Coins**",
+          "inline": true
+        }
+      ]
+    }
+  ]
+}

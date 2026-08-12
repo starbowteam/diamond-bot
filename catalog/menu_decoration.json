@@ -1,0 +1,164 @@
+{
+  "content": " ",
+  "embeds": [
+    {
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007501684572282/image.png?ex=6a5f06ce&is=6a5db54e&hm=9bc5880f5a5be1cfc4523d6facdd5303862823eed187390a2fd0398efa017121&=&format=webp&quality=lossless&width=1766&height=686"
+      },
+      "color": 6776679,
+      "type": "rich"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **4.99 $ | 219 ₽**",
+          "value": "```180₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **5.99 $ | 260 ₽**",
+          "value": "```200₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **6.99 $ | 305 ₽**",
+          "value": "```240₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **7.99 $ | 349 ₽**",
+          "value": "```300₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **9.99 $ | 435 ₽**",
+          "value": "```350₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **11.99 $ | 469 ₽**",
+          "value": "```390₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **12.99 $ | 485 ₽**",
+          "value": "```430₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **15.99 $ | 535 ₽**",
+          "value": "```490₽  ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Выделись среди серверов своим изысканым вкусом в украшениях! Ниже представлены цены в формате - цены дискорда - ниже наши.",
+      "title": "Украшение Discord"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **9,99 $ | 435 ₽**",
+          "value": "```420₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **10.99 $ | 450 ₽**",
+          "value": "```450₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **12.99 $ | 485 ₽**",
+          "value": "```480₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **13.99 $ | 500 ₽**",
+          "value": "```510₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **14.99 $ | 519 ₽**",
+          "value": "```540₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **15.99 $ | 535 ₽**",
+          "value": "```560₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **17.99 $ |  569 ₽**",
+          "value": "```580₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **20.99 $ |  619 ₽**",
+          "value": "```620₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **21.99 $ |  635 ₽**",
+          "value": "```630₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **23.99 $ |  669 ₽**",
+          "value": "```670₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **28.99 $ |  750 ₽**",
+          "value": "```710₽  ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Удобно, когда все подходящее в одном месте! Ниже представлены цены в формате - цены дискорда - ниже наши.",
+      "title": "Наборы Discord"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": [
+        {
+          "name": "> **4.99 $ | 219 ₽**",
+          "value": "```180₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **5.99 $ | 260 ₽**",
+          "value": "```200₽  ```",
+          "inline": true
+        },
+        {
+          "name": "> **9.99 $ | 435 ₽**",
+          "value": "```350₽  ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Прекрасно видеть себя, подсвеченным изыскано. Ниже представлены цены в формате - цены дискорда - ниже наши.",
+      "title": "Бейджики Discord"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Мы рады вашим заказам!",
+      "title": "Помните - главное украшения магазина, это вы! < 3. Прайс уточняется каждый день"
+    }
+  ]
+}

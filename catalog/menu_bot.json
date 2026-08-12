@@ -1,0 +1,23 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1528795366114328646/image.png?ex=6a5f9922&is=6a5e47a2&hm=59347160ce98ba301e6163b60e3ae1cd7f905f32eb687a885a5522cc777581e3&"
+      }
+    },
+    {
+      "title": "Bot for Discord",
+      "description": "> Закажи в Diamond разработку собственного бота в Discord. Мы сделаем так - как ты скажешь, получиться красиво! Узнавать цену в тикете.\"\n> Разработка, поставка на хостинг, обслуживание и многое другое!",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+      },
+      "fields": []
+    }
+  ],
+  "attachments": [],
+  "flags": 0,
+  "components": []
+}

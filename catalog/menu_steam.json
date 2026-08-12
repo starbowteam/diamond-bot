@@ -1,0 +1,71 @@
+{
+  "content": " ",
+  "embeds": [
+    {
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007500577280191/image.png?ex=6a70d30e&is=6a6f818e&hm=5ae2a0c8801278ef2d74cd04d2e56fe6591dbcdb3f6b81825672a6aa2bd65c88&format=webp&quality=lossless&width=1766&height=686&"
+      },
+      "color": 6776679,
+      "type": "rich"
+    },
+    {
+      "footer": {
+        "text": "Пополнение начинается от суммы 100₽"
+      },
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a70dc2e&is=6a6f8aae&hm=0b1586db3ad7b2293cd80d32509d81523588046b5b74a3c6a3d935f598553d5a&"
+      },
+      "fields": [
+        {
+          "name": "> **RUB**",
+          "value": "```1.1₽ ```",
+          "inline": true
+        },
+        {
+          "name": "> **KZT**",
+          "value": "```0.298₽ ```",
+          "inline": true
+        },
+        {
+          "name": "> **UAH**",
+          "value": "```2.5₽ ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Времена когда важно пополнение аккаунта не на прямую, а через магазин - мы предоставляем вас одну из самых низкий цен! Пополнение доступно для России из-за сложностей с прямым пополнением. **Цена указана за одну единицу!**",
+      "title": "Пополнение аккаунта Steam"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a70dc2e&is=6a6f8aae&hm=0b1586db3ad7b2293cd80d32509d81523588046b5b74a3c6a3d935f598553d5a&"
+      },
+      "fields": [
+        {
+          "name": "> **RUB / KZT / UAH**",
+          "value": "```250₽ ```",
+          "inline": true
+        },
+        {
+          "name": "> **Новые аккаунты без пополнений ранее**",
+          "value": "```200₽ ```",
+          "inline": true
+        }
+      ],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> А почему не оботи проблему с пополнением и покупкой - и не купить на прямую? Поменяй регион аккаунта на нужный. Доступно для любого аккаунта.",
+      "title": "Смена региона аккаунта Steam"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a70dc2e&is=6a6f8aae&hm=0b1586db3ad7b2293cd80d32509d81523588046b5b74a3c6a3d935f598553d5a&"
+      },
+      "color": 6776679,
+      "type": "rich",
+      "description": "> Напишите нам в тикет - мы подберем вам ключ, игру по низкой цене, любая операция! По абсолютно любой валюте!",
+      "title": "Ключи и игры"
+    }
+  ]
+}
