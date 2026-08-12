@@ -1145,7 +1145,7 @@ async def send_dm(member, content, embeds):
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
-        super().__init__(timeout=120)
+        super().__init__(timeout=None)  # теперь бесконечный
         catalog = load_shop_catalog()
         options = []
         for key, cat in catalog.items():
@@ -1162,11 +1162,13 @@ class BuySelectView(View):
         self.add_item(select)
 
     async def category_callback(self, inter: disnake.MessageInteraction):
+        # Сразу отвечаем, чтобы не было таймаута
+        await inter.response.defer(ephemeral=True)
         category = inter.data.values[0]
         catalog = load_shop_catalog()
         items = catalog.get(category, {}).get("items", {})
         if not items:
-            return await inter.response.send_message("❌ В этой категории пока нет товаров.", ephemeral=True)
+            return await inter.edit_original_response(content="❌ В этой категории пока нет товаров.")
 
         options = []
         for key, item in items.items():
@@ -1178,32 +1180,34 @@ class BuySelectView(View):
                 description=item.get("description", "")[:100],
                 value=f"{category}_{key}"
             ))
-        view = View(timeout=120)
+        view = View(timeout=None)  # бесконечный
         select2 = Select(placeholder="Выберите товар...", options=options, custom_id="buy_item")
         select2.callback = self.item_callback
         view.add_item(select2)
         back_btn = Button(label="🔙 Назад", style=ButtonStyle.gray, custom_id="buy_back")
         back_btn.callback = self.back_callback
         view.add_item(back_btn)
-        await inter.response.edit_message(content="Выберите товар из категории:", view=view)
+        await inter.edit_original_response(content="Выберите товар из категории:", view=view)
 
     async def item_callback(self, inter: disnake.MessageInteraction):
+        await inter.response.defer(ephemeral=True)  # важно!
         value = inter.data.values[0]
         try:
             category, item_key = value.split("_", 1)
         except ValueError:
-            return await inter.response.send_message("❌ Ошибка формата товара.", ephemeral=True)
+            return await inter.edit_original_response(content="❌ Ошибка формата товара.")
         catalog = load_shop_catalog()
         item = catalog.get(category, {}).get("items", {}).get(item_key)
         if not item:
-            return await inter.response.send_message("❌ Товар не найден.", ephemeral=True)
+            return await inter.edit_original_response(content="❌ Товар не найден.")
 
         user_id = inter.author.id
         balance = await get_user_balance(user_id)
         price = item["price"]
         if balance < price:
-            return await inter.response.send_message(f"❌ Недостаточно DC. Нужно: {price}, у вас: {balance}", ephemeral=True)
+            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: {price}, у вас: {balance}")
 
+        # Определяем тип и значение для записи покупки
         if category == "discounts":
             item_type = "Скидка"
             item_value = item["name"].replace("скидка", "").strip()
@@ -1216,6 +1220,7 @@ class BuySelectView(View):
         elif category == "roles":
             item_type = "Роль"
             item_value = item["name"]
+            # Выдаём роль, если есть role_id
             role_id = item.get("role_id")
             if role_id:
                 guild = inter.guild
@@ -1225,15 +1230,10 @@ class BuySelectView(View):
                         await inter.author.add_roles(role)
                         success = await remove_dc(user_id, price, f"Покупка роли: {item['name']}")
                         if not success:
-                            return await inter.response.send_message("❌ Ошибка списания DC.", ephemeral=True)
+                            return await inter.edit_original_response(content="❌ Ошибка списания DC.")
                         await add_purchase(user_id, item_type, item_value)
-                        purchases = await get_user_purchases(user_id, only_unused=True)
-                        for idx, p in enumerate(purchases):
-                            if p["type"] == item_type and p["value"] == item_value and not p["used"]:
-                                await remove_purchase(user_id, idx)
-                                break
-                        await inter.response.send_message(
-                            f"✅ Вы купили роль **{item['name']}** за **{price} DC**! Роль выдана. Не забудьте оставить отзыв в <#1462074763437543435>.",
+                        await inter.edit_original_response(
+                            content=f"✅ Вы купили роль **{item['name']}** за **{price} DC**! Роль выдана. Не забудьте оставить отзыв в <#1462074763437543435>.",
                             ephemeral=True
                         )
                         await log_discord(
@@ -1243,17 +1243,21 @@ class BuySelectView(View):
                         )
                         return
                     except Exception as e:
-                        await inter.response.send_message(f"❌ Не удалось выдать роль: {e}", ephemeral=True)
+                        await inter.edit_original_response(content=f"❌ Не удалось выдать роль: {e}")
                         return
                 else:
-                    await inter.response.send_message("❌ Роль не найдена на сервере.", ephemeral=True)
+                    await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
                     return
             else:
+                # Если role_id нет, просто сохраняем покупку
                 success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
                 if not success:
-                    return await inter.response.send_message("❌ Ошибка списания.", ephemeral=True)
+                    return await inter.edit_original_response(content="❌ Ошибка списания.")
                 await add_purchase(user_id, item_type, item_value)
-                await inter.response.send_message(f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.", ephemeral=True)
+                await inter.edit_original_response(
+                    content=f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.",
+                    ephemeral=True
+                )
                 await log_discord(
                     title="🛒 Покупка в магазине DC",
                     description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
@@ -1265,9 +1269,12 @@ class BuySelectView(View):
             item_value = item["name"]
             success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
             if not success:
-                return await inter.response.send_message("❌ Ошибка списания.", ephemeral=True)
+                return await inter.edit_original_response(content="❌ Ошибка списания.")
             await add_purchase(user_id, item_type, item_value)
-            await inter.response.send_message(f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.", ephemeral=True)
+            await inter.edit_original_response(
+                content=f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.",
+                ephemeral=True
+            )
             await log_discord(
                 title="🛒 Покупка в магазине DC",
                 description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
@@ -1276,11 +1283,8 @@ class BuySelectView(View):
             return
 
     async def back_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.edit_message(content="Выберите категорию:", view=BuySelectView())
-
-@bot.slash_command(name="buy", description="Купить товар за Diamond Coins")
-async def buy(inter: disnake.ApplicationCommandInteraction):
-    await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
+        await inter.response.defer(ephemeral=True)
+        await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
 
 # ============================================================
 # КОМАНДА /profile (с прогресс-баром)
