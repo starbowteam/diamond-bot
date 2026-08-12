@@ -141,9 +141,8 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        # ===== СИНХРОНИЗАЦИЯ СЛЕШ-КОМАНД =====
-        await bot.sync_commands()
-        logger.info("Слеш-команды синхронизированы")
+        # Синхронизация слеш-команд происходит автоматически
+        # await bot.sync_commands()  # ЭТОЙ СТРОКИ НЕТ, ОНА НЕ НУЖНА
 
         from modules.commands import TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView
         bot.add_view(TicketPanelView())
@@ -202,7 +201,7 @@ async def on_ready():
             description=f"> **Ошибка:** `{str(e)}`",
             color=0xff0000
         )
-
+        
 # ============================================================
 # Фоновые задачи (панели)
 # ============================================================
