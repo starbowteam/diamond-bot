@@ -242,7 +242,7 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
 
     await add_purchase(user_id, cat_key, item_data["name"])
     await inter.response.send_message(
-        f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Активируйте товар в <#1462136361711829053>. Не забудьте оставить отзыв в <#1462074763437543435>.",
+        f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Активируйте товар в <#1462136361711829053>.",
         ephemeral=True
     )
     await log_discord(
