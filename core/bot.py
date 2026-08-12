@@ -111,7 +111,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
             )
 
 # ============================================================
-# Задачи (без аналитики)
+# Задачи
 # ============================================================
 @tasks.loop(hours=24)
 async def review_counter_task():
@@ -140,6 +140,10 @@ async def top_embed_task():
 async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
+
+        # ===== СИНХРОНИЗАЦИЯ СЛЕШ-КОМАНД =====
+        await bot.sync_commands()
+        logger.info("Слеш-команды синхронизированы")
 
         from modules.commands import TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView
         bot.add_view(TicketPanelView())
@@ -176,7 +180,6 @@ async def on_ready():
         await update_review_counter(silent=False)
         await update_top_embed()
 
-        # Запускаем задачи (без аналитики)
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
@@ -244,6 +247,9 @@ async def send_dc_panel():
     from modules.commands import send_dc_panel as _send_dc_panel
     await _send_dc_panel()
 
+# ============================================================
+# Глобальные обработчики (оставляем без изменений)
+# ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
     await log_discord(
@@ -513,13 +519,12 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
                     logger.error(f"Не удалось снять реакционную роль: {e}")
 
 # ============================================================
-# Обработка взаимодействий (кнопки) – добавлен вызов handle_flash_interaction
+# Обработка взаимодействий (кнопки)
 # ============================================================
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
     from modules.commands import handle_interaction
     await handle_interaction(inter)
-    # Обрабатываем кнопки акции (покупка по flash)
     await handle_flash_interaction(inter)
 
 # ============================================================
