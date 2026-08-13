@@ -2,287 +2,304 @@
 import os
 import io
 import json
-import time
-import aiohttp
-import asyncio
-import urllib.request
+import requests
+import textwrap
 from datetime import datetime
-from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+import disnake
+from core.utils import CONFIG, DATA_DIR, ADD_DIR, logger, FILES, load_json, get_roles_for_count
+from modules.dc import get_user_dc_data, get_user_balance
 
-from core.utils import (
-    BASE_DIR, ADD_DIR, DATA_DIR, logger,
-    load_json, save_json, FILES,
-    get_dc_cache, CONFIG
-)
-
-# Пути
-FONT_PATH = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
-BACKGROUND_URL = "https://cdn.discordapp.com/attachments/1527006158282555412/1537294943805112471/image.png?ex=6a7e84fc&is=6a7d337c&hm=a6713ca389191d2ed4d9bac61250791a22e8afdd7274d92ffde031145359cd13&"
-BACKGROUND_PATH = os.path.join(ADD_DIR, "profile_bg.png")
-
-# Цвета ролей
-ROLE_COLORS = {
-    "none": "#888888",
-    "bronze": "#d15640",
-    "silver": "#b0b0b0",
-    "gold": "#ae7911",
-    "diamond": "#149bd0",
-    "emerald": "#3d9e08",
-    "amethyst": "#d88edf",
-    "legendary": "#c51cb2",
-    "pka": "#b3d9ff"
+# ============================================================
+# Конфигурация ролей (цвета для текста и прогресс-бара)
+# ============================================================
+ROLE_CONFIG = {
+    "none": {
+        "label": "НЕТ РОЛИ",
+        "text_color": "#888888",
+        "progress_color": "#888888",
+        "threshold": 0
+    },
+    "bronze": {
+        "label": "BRONZE BUYER",
+        "text_color": "#d15640",
+        "progress_color": "#d15640",
+        "threshold": 1
+    },
+    "silver": {
+        "label": "SILVER BUYER",
+        "text_color": "#b0b0b0",
+        "progress_color": "#b0b0b0",
+        "threshold": 3
+    },
+    "gold": {
+        "label": "GOLD BUYER",
+        "text_color": "#ae7911",
+        "progress_color": "#ae7911",
+        "threshold": 5
+    },
+    "diamond": {
+        "label": "DIAMOND BUYER",
+        "text_color": "#149bd0",
+        "progress_color": "#149bd0",
+        "threshold": 9
+    },
+    "emerald": {
+        "label": "EMERALD BUYER",
+        "text_color": "#3d9e08",
+        "progress_color": "#3d9e08",
+        "threshold": 13
+    },
+    "amethyst": {
+        "label": "AMETHYST BUYER",
+        "text_color": "#d88edf",
+        "progress_color": "#d88edf",
+        "threshold": 18
+    },
+    "legendary": {
+        "label": "LEGENDARY BUYER",
+        "text_color": "#c51cb2",
+        "progress_color": "#c51cb2",
+        "threshold": 24
+    },
+    "pka": {
+        "label": "ПОКУПАТЕЛЬ ВЕКА",
+        "text_color": "#b3d9ff",
+        "progress_color": "#b3d9ff",
+        "threshold": 26
+    }
 }
 
-ROLE_GRADIENTS = {
-    "none": ["#888888", "#555555"],
-    "bronze": ["#e78f67", "#d15640"],
-    "silver": ["#ffffff", "#979797"],
-    "gold": ["#f7c991", "#ae7911"],
-    "diamond": ["#ddf0ef", "#149bd0"],
-    "emerald": ["#eff3d3", "#3d9e08"],
-    "amethyst": ["#9fc1ff", "#d88edf"],
-    "legendary": ["#e68585", "#c51cb2"],
-    "pka": ["#b3d9ff", "#d4bfff"]
-}
+# Пороги для прогресса (список в порядке возрастания)
+THRESHOLDS = [0, 1, 3, 5, 9, 13, 18, 24, 26]
+ROLE_KEYS = ["none", "bronze", "silver", "gold", "diamond", "emerald", "amethyst", "legendary", "pka"]
 
-ROLE_NAMES = {
-    "none": "НЕТ РОЛИ",
-    "bronze": "BRONZE BUYER",
-    "silver": "SILVER BUYER",
-    "gold": "GOLD BUYER",
-    "diamond": "DIAMOND BUYER",
-    "emerald": "EMERALD BUYER",
-    "amethyst": "AMETHYST BUYER",
-    "legendary": "LEGENDARY BUYER",
-    "pka": "ПОКУПАТЕЛЬ ВЕКА"
-}
+def get_role_info(count: int):
+    """Возвращает ключ роли, название и цвет на основе количества отзывов."""
+    for i, th in enumerate(THRESHOLDS):
+        if count < th:
+            idx = i - 1 if i > 0 else 0
+            key = ROLE_KEYS[idx]
+            return key, ROLE_CONFIG[key]
+    # Если больше максимального порога
+    key = "pka"
+    return key, ROLE_CONFIG[key]
 
-ROLE_THRESHOLDS = {
-    "none": 0,
-    "bronze": 1,
-    "silver": 3,
-    "gold": 5,
-    "diamond": 9,
-    "emerald": 13,
-    "amethyst": 18,
-    "legendary": 24,
-    "pka": 26
-}
-
-def get_role_from_count(count: int) -> str:
+def get_progress(count: int):
+    """Возвращает прогресс в процентах (0-100) до следующей роли."""
     if count >= 26:
-        return "pka"
-    elif count >= 24:
-        return "legendary"
-    elif count >= 18:
-        return "amethyst"
-    elif count >= 13:
-        return "emerald"
-    elif count >= 9:
-        return "diamond"
-    elif count >= 5:
-        return "gold"
-    elif count >= 3:
-        return "silver"
-    elif count >= 1:
-        return "bronze"
-    else:
-        return "none"
-
-def get_next_role(count: int) -> tuple:
-    if count >= 26:
-        return None, None, None
-    thresholds = sorted([(k, v) for k, v in ROLE_THRESHOLDS.items() if v > count], key=lambda x: x[1])
-    if not thresholds:
-        return None, None, None
-    next_role = thresholds[0][0]
-    next_count = thresholds[0][1]
-    return next_role, next_count, ROLE_NAMES[next_role]
-
-def get_progress(count: int) -> int:
-    current_role = get_role_from_count(count)
-    current_threshold = ROLE_THRESHOLDS[current_role]
-    next_role, next_count, _ = get_next_role(count)
-    if next_role is None:
         return 100
-    if next_count == current_threshold:
-        return 0
-    progress = int((count - current_threshold) / (next_count - current_threshold) * 100)
-    return min(progress, 100)
+    for i, th in enumerate(THRESHOLDS):
+        if count < th:
+            prev = THRESHOLDS[i-1] if i > 0 else 0
+            next_th = th
+            if next_th == prev:
+                return 0
+            progress = (count - prev) / (next_th - prev) * 100
+            return min(int(progress), 100)
+    return 100
 
-async def download_background():
-    if os.path.exists(BACKGROUND_PATH):
-        return
+def get_next_role_label(count: int):
+    """Возвращает текст для блока 'До следующей роли'."""
+    if count >= 26:
+        return "Максимальная роль"
+    for i, th in enumerate(THRESHOLDS):
+        if count < th:
+            remaining = th - count
+            if remaining == 1:
+                return f"Осталось {remaining} отзыв"
+            return f"Осталось {remaining} отзыва"
+    return ""
+
+# ============================================================
+# Загрузка фонового изображения
+# ============================================================
+BG_URL = "https://cdn.discordapp.com/attachments/1527006158282555412/1537294943805112471/image.png?ex=6a7e84fc&is=6a7d337c&hm=a6713ca389191d2ed4d9bac61250791a22e8afdd7274d92ffde031145359cd13&"
+BG_PATH = os.path.join(ADD_DIR, "profile_bg.png")
+
+def ensure_background():
+    """Скачивает фон, если его нет локально."""
+    if not os.path.exists(BG_PATH):
+        try:
+            r = requests.get(BG_URL, timeout=10)
+            with open(BG_PATH, "wb") as f:
+                f.write(r.content)
+            logger.info("Фон профиля скачан")
+        except Exception as e:
+            logger.error(f"Не удалось скачать фон профиля: {e}")
+            # Создаём заглушку – тёмный фон
+            img = Image.new("RGB", (1200, 700), color="#1a1a2e")
+            img.save(BG_PATH)
+
+# ============================================================
+# Основная функция генерации изображения
+# ============================================================
+async def generate_profile_image(member: disnake.Member, review_count: int, balance: int, purchases: list, history: list):
+    """
+    Генерирует изображение профиля и возвращает путь к файлу.
+    """
+    ensure_background()
+
+    # Размеры
+    W, H = 1200, 700
+    # Загружаем фон
+    bg = Image.open(BG_PATH).convert("RGBA")
+    bg = bg.resize((W, H), Image.Resampling.LANCZOS)
+
+    # Создаём оверлей с прозрачностью и размытием
+    # Делаем копию фона, размываем, затем накладываем полупрозрачный слой
+    overlay = bg.copy()
+    overlay = overlay.filter(ImageFilter.GaussianBlur(radius=3))
+    # Накладываем полупрозрачный чёрный слой
+    mask = Image.new("RGBA", (W, H), (0, 0, 0, 180))  # альфа 180
+    overlay = Image.alpha_composite(overlay, mask)
+    # Теперь overlay – это финальный фон
+
+    # Загружаем шрифт
+    font_path = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
+    if not os.path.exists(font_path):
+        # fallback шрифт
+        font_path = None
+
+    def get_font(size):
+        try:
+            return ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()
+        except:
+            return ImageFont.load_default()
+
+    # Рисуем на overlay
+    draw = ImageDraw.Draw(overlay)
+
+    # ========== ЛЕВАЯ ЧАСТЬ ==========
+    # Аватар
+    avatar_size = 180
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(BACKGROUND_URL, timeout=30) as resp:
-                if resp.status == 200:
-                    data = await resp.read()
-                    with open(BACKGROUND_PATH, "wb") as f:
-                        f.write(data)
-                    logger.info("Profile background downloaded.")
-                else:
-                    logger.error("Failed to download background: %s", resp.status)
+        avatar_url = member.display_avatar.replace(format="png", size=256).url
+        resp = requests.get(avatar_url, timeout=5)
+        avatar_img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+        avatar_img = avatar_img.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
+        # Обрезаем в круг
+        mask_avatar = Image.new("L", (avatar_size, avatar_size), 0)
+        draw_mask = ImageDraw.Draw(mask_avatar)
+        draw_mask.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+        avatar_img = Image.composite(avatar_img, Image.new("RGBA", (avatar_size, avatar_size), (0,0,0,0)), mask_avatar)
+        # Позиция аватара: левая часть, центрируем по вертикали, x=100
+        avatar_x = 100
+        avatar_y = (H - avatar_size) // 2 - 20  # сдвинем вверх
+        overlay.paste(avatar_img, (avatar_x, avatar_y), avatar_img)
     except Exception as e:
-        logger.exception("Failed to download background: %s", e)
+        logger.error(f"Не удалось загрузить аватар: {e}")
 
-def draw_gradient_text(draw, text, pos, font, colors, direction="horizontal"):
-    bbox = draw.textbbox((0, 0), text, font=font)
-    width = bbox[2] - bbox[0]
-    height = bbox[3] - bbox[1]
-    grad_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    grad_draw = ImageDraw.Draw(grad_img)
-    if direction == "horizontal":
-        for i in range(width):
-            ratio = i / width
-            r = int(int(colors[0][1:3], 16) + (int(colors[1][1:3], 16) - int(colors[0][1:3], 16)) * ratio)
-            g = int(int(colors[0][3:5], 16) + (int(colors[1][3:5], 16) - int(colors[0][3:5], 16)) * ratio)
-            b = int(int(colors[0][5:7], 16) + (int(colors[1][5:7], 16) - int(colors[0][5:7], 16)) * ratio)
-            grad_draw.line([(i, 0), (i, height)], fill=(r, g, b, 255), width=1)
-    else:
-        for j in range(height):
-            ratio = j / height
-            r = int(int(colors[0][1:3], 16) + (int(colors[1][1:3], 16) - int(colors[0][1:3], 16)) * ratio)
-            g = int(int(colors[0][3:5], 16) + (int(colors[1][3:5], 16) - int(colors[0][3:5], 16)) * ratio)
-            b = int(int(colors[0][5:7], 16) + (int(colors[1][5:7], 16) - int(colors[0][5:7], 16)) * ratio)
-            grad_draw.line([(0, j), (width, j)], fill=(r, g, b, 255), width=1)
-    grad_draw.text((0, 0), text, fill=(255, 255, 255, 255), font=font)
-    mask = grad_img.split()[3]
-    grad_img = Image.composite(grad_img, Image.new("RGBA", (width, height), (0, 0, 0, 0)), mask)
-    draw._image.paste(grad_img, (pos[0], pos[1]), mask)
-
-def generate_profile_image(member) -> bytes:
-    counts = load_json(FILES["review_counts"], {})
-    count = counts.get(str(member.id), 0)
-    balance = get_dc_cache(member.id)["balance"]
-    role_key = get_role_from_count(count)
-    role_display = ROLE_NAMES[role_key]
-    grad_colors = ROLE_GRADIENTS[role_key]
-    progress_color = ROLE_COLORS[role_key]
-    progress = get_progress(count)
-    next_role, next_count, next_role_name = get_next_role(count)
-    history = get_dc_cache(member.id).get("history", [])[-5:]
-    total_earned = sum(h["amount"] for h in history if h["amount"] > 0)
-
-    img = Image.open(BACKGROUND_PATH).convert("RGBA")
-    if img.size != (1200, 700):
-        img = img.resize((1200, 700), Image.Resampling.LANCZOS)
-
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 70))
-    img = Image.alpha_composite(img, overlay)
-
-    try:
-        font_big = ImageFont.truetype(FONT_PATH, 44)
-        font_role = ImageFont.truetype(FONT_PATH, 40)
-        font_stats = ImageFont.truetype(FONT_PATH, 28)
-        font_small = ImageFont.truetype(FONT_PATH, 24)
-        font_progress = ImageFont.truetype(FONT_PATH, 22)
-        font_meta = ImageFont.truetype(FONT_PATH, 16)
-        font_history = ImageFont.truetype(FONT_PATH, 18)
-    except:
-        font_big = font_role = font_stats = font_small = font_progress = font_meta = font_history = ImageFont.load_default()
-
-    draw = ImageDraw.Draw(img)
-
-    # ---- Аватар ----
-    avatar_size = 200
-    avatar_x = 50
-    avatar_y = 70
-    try:
-        with urllib.request.urlopen(member.display_avatar.url, timeout=5) as response:
-            avatar_img = Image.open(io.BytesIO(response.read())).convert("RGBA")
-            avatar_img = avatar_img.resize((avatar_size, avatar_size))
-    except:
-        avatar_img = Image.new("RGBA", (avatar_size, avatar_size), (50, 50, 80))
-    mask = Image.new("L", (avatar_size, avatar_size), 0)
-    mask_draw = ImageDraw.Draw(mask)
-    mask_draw.ellipse((0, 0, avatar_size-1, avatar_size-1), fill=255)
-    avatar_img.putalpha(mask)
-    img.paste(avatar_img, (avatar_x, avatar_y), avatar_img)
-    draw.ellipse((avatar_x-4, avatar_y-4, avatar_x+avatar_size+4, avatar_y+avatar_size+4), outline="rgba(255,255,255,0.6)", width=4)
-
-    # ---- Имя ----
+    # Никнейм
     username = member.display_name
-    draw.text((290, 80), f"@{username}", font=font_big, fill=(255, 255, 255))
+    username_font = get_font(44)
+    # рисуем текст с тенью для читаемости
+    draw.text((avatar_x + avatar_size//2 - len(username)*12, avatar_y + avatar_size + 10),
+              username, font=username_font, fill=(255,255,255,255), anchor="mt")
 
-    # ---- Роль (градиент) ----
-    draw_gradient_text(draw, role_display, (290, 155), font_role, grad_colors)
+    # Роль покупателя
+    role_key, role_info = get_role_info(review_count)
+    role_label = role_info["label"]
+    role_color = role_info["text_color"]
+    role_font = get_font(36)
+    draw.text((avatar_x + avatar_size//2, avatar_y + avatar_size + 70),
+              role_label, font=role_font, fill=role_color, anchor="mt")
 
-    # ---- Отзывы и баланс ----
-    draw.text((290, 220), f"{count} отзывов", font=font_stats, fill=(200, 200, 200))
-    draw.text((520, 220), f"{balance} DC", font=font_stats, fill=(200, 200, 200))
+    # Отзывы и баланс (строка)
+    stats_text = f"{review_count} отзывов    {balance} DC"
+    stats_font = get_font(24)
+    draw.text((avatar_x + avatar_size//2, avatar_y + avatar_size + 120),
+              stats_text, font=stats_font, fill=(220,220,220,255), anchor="mt")
 
-    # ---- Прогресс-бар ----
-    progress_x = 290
-    progress_y = 285
-    bar_width = 480
-    bar_height = 30
-    draw.rounded_rectangle((progress_x, progress_y, progress_x+bar_width, progress_y+bar_height), fill=(50, 50, 70), radius=15)
-    if progress > 0:
-        fill_width = int(bar_width * progress / 100)
-        color_rgb = ImageColor.getrgb(progress_color)
-        draw.rounded_rectangle((progress_x, progress_y, progress_x+fill_width, progress_y+bar_height), fill=color_rgb, radius=15)
-    draw.text((progress_x+bar_width//2, progress_y+5), f"{progress}%", font=font_progress, fill=(0,0,0), anchor="mt")
-    if next_role:
-        label = f"До {next_role_name} ({progress}%)"
-    else:
-        label = "Максимальная роль"
-    draw.text((progress_x, progress_y - 30), label, font=font_progress, fill=(200, 200, 200))
+    # Прогресс-бар
+    progress = get_progress(review_count)
+    progress_label = get_next_role_label(review_count)
+    # Рисуем полосу
+    bar_x = avatar_x
+    bar_y = avatar_y + avatar_size + 170
+    bar_w = 480
+    bar_h = 26
 
-    # ---- Мета-информация ----
-    top_role_name = member.top_role.name if member.top_role and member.top_role.name != "@everyone" else "Нет"
-    joined_at = member.joined_at.strftime("%d.%m.%Y") if member.joined_at else "Неизвестно"
-    meta_text = f"ID: {member.id}  |  Высшая роль: {top_role_name}  |  С: {joined_at}"
-    draw.text((50, 660), meta_text, font=font_meta, fill=(180, 180, 180))
+    # Фон полосы
+    draw.rounded_rectangle((bar_x, bar_y, bar_x+bar_w, bar_y+bar_h), radius=40, fill=(50,50,50,180), outline=(255,255,255,60), width=1)
+    # Заполнение
+    fill_w = int(bar_w * progress / 100)
+    if fill_w > 0:
+        prog_color = role_info["progress_color"]
+        # конвертируем hex в RGB
+        prog_color_rgb = tuple(int(prog_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+        draw.rounded_rectangle((bar_x, bar_y, bar_x+fill_w, bar_y+bar_h), radius=40, fill=prog_color_rgb, outline=None)
 
-    # ---- Правая часть ----
-    right_x = 760
-    right_y = 70
-    block = Image.new("RGBA", (420, 560), (255, 255, 255, 15))
-    img.paste(block, (right_x, right_y), block)
+    # Текст процента
+    percent_text = f"{progress}%"
+    draw.text((bar_x + bar_w - 40, bar_y + bar_h//2), percent_text, font=get_font(18), fill=(0,0,0,200), anchor="rm")
 
-    draw.text((right_x+210, 100), "СТАТИСТИКА", font=font_progress, fill=(200, 200, 200), anchor="mt")
+    # Подпись прогресса
+    draw.text((bar_x, bar_y + bar_h + 10), progress_label, font=get_font(16), fill=(200,200,200,255), anchor="la")
 
+    # Meta-info (ID, высшая роль, дата)
+    meta_y = bar_y + bar_h + 60
+    meta_text = f"ID: {member.id}   Высшая роль: {member.top_role.name}   С: {member.joined_at.strftime('%d.%m.%Y')}"
+    meta_font = get_font(14)
+    draw.text((avatar_x, meta_y), meta_text, font=meta_font, fill=(180,180,180,255), anchor="la")
+
+    # ========== ПРАВАЯ ЧАСТЬ ==========
+    right_x = 750
+    right_y = 50
+    right_w = 400
+    right_h = 600
+    # Прямоугольник с прозрачностью и размытием
+    # Используем отдельный слой
+    right_bg = Image.new("RGBA", (right_w, right_h), (255,255,255,20))
+    right_bg = right_bg.filter(ImageFilter.GaussianBlur(radius=2))
+    overlay.paste(right_bg, (right_x, right_y), right_bg)
+
+    # Заголовок "СТАТИСТИКА"
+    draw.text((right_x + right_w//2, right_y + 30), "СТАТИСТИКА", font=get_font(26), fill=(220,220,220,255), anchor="mt")
+
+    # Сетка 2x2
+    grid_x = right_x + 20
+    grid_y = right_y + 80
+    cell_w = (right_w - 60) // 2
+    cell_h = 70
     stats_data = [
-        ("Баланс DC", str(balance)),
-        ("Покупок", str(len(get_dc_cache(member.id).get("purchases", [])))),
-        ("Неиспользовано", str(len([p for p in get_dc_cache(member.id).get("purchases", []) if not p.get("used", False)]))),
-        ("Отзывов", str(count))
+        ("Баланс DC", f"{balance}"),
+        ("Покупок", str(len(purchases))),
+        ("Неиспользовано", str(sum(1 for p in purchases if not p.get("used", False)))),
+        ("Отзывов", str(review_count))
     ]
-    x_offsets = [right_x+30, right_x+220]
-    y_start = 140
     for i, (label, value) in enumerate(stats_data):
-        row = i // 2
-        col = i % 2
-        x = x_offsets[col]
-        y = y_start + row * 85
-        draw.rounded_rectangle((x, y, x+160, y+60), fill=(255, 255, 255, 10), radius=12)
-        draw.text((x+10, y+8), label, font=font_meta, fill=(150, 150, 150))
-        draw.text((x+10, y+32), value, font=font_stats, fill=(255, 255, 255))
+        cx = grid_x + (i % 2) * (cell_w + 20)
+        cy = grid_y + (i // 2) * (cell_h + 15)
+        # Фон ячейки
+        draw.rounded_rectangle((cx, cy, cx+cell_w, cy+cell_h), radius=16, fill=(255,255,255,20), outline=(255,255,255,30), width=1)
+        # Лейбл
+        draw.text((cx + cell_w//2, cy + 10), label, font=get_font(13), fill=(170,170,170,255), anchor="mt")
+        # Значение
+        draw.text((cx + cell_w//2, cy + 35), value, font=get_font(28), fill=(255,255,255,255), anchor="mt")
 
-    history_title_y = 320
-    draw.text((right_x+210, history_title_y), "ИСТОРИЯ ОПЕРАЦИЙ", font=font_progress, fill=(200, 200, 200), anchor="mt")
-    y_offset = 360
-    for h in history:
-        date_str = datetime.fromtimestamp(h["date"]).strftime("%d.%m.%Y")
-        amount = h["amount"]
-        sign = "+" if amount >= 0 else ""
-        color = (100, 200, 100) if amount >= 0 else (200, 100, 100)
-        line = f"{date_str}  {sign}{amount} DC"
-        draw.text((right_x+40, y_offset), line, font=font_history, fill=color)
-        y_offset += 30
+    # История операций
+    history_y = grid_y + 2 * (cell_h + 15) + 30
+    draw.text((right_x + right_w//2, history_y), "ИСТОРИЯ ОПЕРАЦИЙ", font=get_font(22), fill=(220,220,220,255), anchor="mt")
 
-    draw.line((right_x+40, y_offset+10, right_x+380, y_offset+10), fill=(255,255,255,20), width=2)
-    draw.text((right_x+210, y_offset+30), f"Всего заработано: {total_earned} DC", font=font_meta, fill=(200, 200, 200), anchor="mt")
+    history_start_y = history_y + 40
+    history_data = history[-5:] if history else []
+    for idx, entry in enumerate(history_data):
+        y = history_start_y + idx * 35
+        date_str = datetime.fromtimestamp(entry["date"]).strftime("%d.%m.%Y")
+        amount = entry["amount"]
+        sign = "+" if amount > 0 else ""
+        color = (125, 237, 159) if amount > 0 else (255, 107, 107)
+        draw.text((right_x + 20, y), date_str, font=get_font(16), fill=(200,200,200,255), anchor="la")
+        draw.text((right_x + right_w - 20, y), f"{sign}{amount} DC", font=get_font(16), fill=color, anchor="ra")
 
-    with io.BytesIO() as output:
-        img.save(output, format="PNG")
-        return output.getvalue()
+    # Всего заработано
+    total_earned = sum(entry["amount"] for entry in history_data if entry["amount"] > 0)
+    total_y = history_start_y + len(history_data) * 35 + 20
+    draw.text((right_x + right_w//2, total_y), f"Всего заработано: {total_earned} DC", font=get_font(18), fill=(200,200,200,255), anchor="mt")
 
-async def get_profile_image(member) -> bytes:
-    await download_background()
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, generate_profile_image, member)
-
-# Для совместимости с импортом generate_profile_image
-generate_profile_image = get_profile_image
+    # Сохраняем изображение
+    output_path = os.path.join(DATA_DIR, f"profile_{member.id}.png")
+    overlay.save(output_path, "PNG")
+    logger.info(f"Профиль сохранён: {output_path}")
+    return output_path
