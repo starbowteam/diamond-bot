@@ -5,6 +5,7 @@ import json
 import time
 import aiohttp
 import asyncio
+import requests
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter
 
@@ -19,7 +20,7 @@ FONT_PATH = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
 BACKGROUND_URL = "https://cdn.discordapp.com/attachments/1527006158282555412/1537294943805112471/image.png?ex=6a7e84fc&is=6a7d337c&hm=a6713ca389191d2ed4d9bac61250791a22e8afdd7274d92ffde031145359cd13&"
 BACKGROUND_PATH = os.path.join(ADD_DIR, "profile_bg.png")
 
-# Цвета ролей (для прогресс-бара и градиентов)
+# Цвета ролей
 ROLE_COLORS = {
     "none": "#888888",
     "bronze": "#d15640",
@@ -126,7 +127,6 @@ async def download_background():
         logger.exception("Failed to download background: %s", e)
 
 def draw_gradient_text(draw, text, pos, font, colors, direction="horizontal"):
-    """Рисует текст с линейным градиентом."""
     bbox = draw.textbbox((0, 0), text, font=font)
     width = bbox[2] - bbox[0]
     height = bbox[3] - bbox[1]
@@ -151,8 +151,7 @@ def draw_gradient_text(draw, text, pos, font, colors, direction="horizontal"):
     grad_img = Image.composite(grad_img, Image.new("RGBA", (width, height), (0, 0, 0, 0)), mask)
     draw._image.paste(grad_img, (pos[0], pos[1]), mask)
 
-def create_profile_image(member) -> bytes:
-    # Загружаем данные
+def generate_profile_image(member) -> bytes:
     counts = load_json(FILES["review_counts"], {})
     count = counts.get(str(member.id), 0)
     balance = get_dc_cache(member.id)["balance"]
@@ -165,16 +164,13 @@ def create_profile_image(member) -> bytes:
     history = get_dc_cache(member.id).get("history", [])[-5:]
     total_earned = sum(h["amount"] for h in history if h["amount"] > 0)
 
-    # Загружаем фон
     img = Image.open(BACKGROUND_PATH).convert("RGBA")
     if img.size != (1200, 700):
         img = img.resize((1200, 700), Image.Resampling.LANCZOS)
 
-    # Затемнение
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 70))
     img = Image.alpha_composite(img, overlay)
 
-    # Загружаем шрифт
     try:
         font_big = ImageFont.truetype(FONT_PATH, 44)
         font_role = ImageFont.truetype(FONT_PATH, 40)
@@ -188,76 +184,65 @@ def create_profile_image(member) -> bytes:
 
     draw = ImageDraw.Draw(img)
 
-    # ---- Левая часть (профиль) ----
-    # Аватар (круг)
+    # ---- Аватар ----
     avatar_size = 200
     avatar_x = 50
     avatar_y = 70
-    # Скачиваем аватар или используем заглушку
     try:
-        avatar_img = Image.open(io.BytesIO(requests.get(member.display_avatar.url, timeout=5).content)).convert("RGBA")
+        response = requests.get(member.display_avatar.url, timeout=5)
+        avatar_img = Image.open(io.BytesIO(response.content)).convert("RGBA")
         avatar_img = avatar_img.resize((avatar_size, avatar_size))
     except:
         avatar_img = Image.new("RGBA", (avatar_size, avatar_size), (50, 50, 80))
-    # Маска круга
     mask = Image.new("L", (avatar_size, avatar_size), 0)
     mask_draw = ImageDraw.Draw(mask)
     mask_draw.ellipse((0, 0, avatar_size-1, avatar_size-1), fill=255)
     avatar_img.putalpha(mask)
     img.paste(avatar_img, (avatar_x, avatar_y), avatar_img)
-
-    # Рамка аватара
     draw.ellipse((avatar_x-4, avatar_y-4, avatar_x+avatar_size+4, avatar_y+avatar_size+4), outline="rgba(255,255,255,0.6)", width=4)
 
-    # Имя пользователя
+    # ---- Имя ----
     username = member.display_name
     draw.text((290, 80), f"@{username}", font=font_big, fill=(255, 255, 255))
 
-    # Роль (градиент)
+    # ---- Роль (градиент) ----
     draw_gradient_text(draw, role_display, (290, 155), font_role, grad_colors)
 
-    # Отзывы и баланс
+    # ---- Отзывы и баланс ----
     draw.text((290, 220), f"{count} отзывов", font=font_stats, fill=(200, 200, 200))
     draw.text((520, 220), f"{balance} DC", font=font_stats, fill=(200, 200, 200))
 
-    # Прогресс-бар
+    # ---- Прогресс-бар ----
     progress_x = 290
     progress_y = 285
     bar_width = 480
     bar_height = 30
-    # Трек
     draw.rounded_rectangle((progress_x, progress_y, progress_x+bar_width, progress_y+bar_height), fill=(50, 50, 70), radius=15)
     if progress > 0:
         fill_width = int(bar_width * progress / 100)
         color_rgb = ImageColor.getrgb(progress_color)
         draw.rounded_rectangle((progress_x, progress_y, progress_x+fill_width, progress_y+bar_height), fill=color_rgb, radius=15)
-    # Процент
     draw.text((progress_x+bar_width//2, progress_y+5), f"{progress}%", font=font_progress, fill=(0,0,0), anchor="mt")
-
-    # Текст прогресса
     if next_role:
         label = f"До {next_role_name} ({progress}%)"
     else:
         label = "Максимальная роль"
     draw.text((progress_x, progress_y - 30), label, font=font_progress, fill=(200, 200, 200))
 
-    # Мета-информация
+    # ---- Мета-информация ----
     top_role_name = member.top_role.name if member.top_role and member.top_role.name != "@everyone" else "Нет"
     joined_at = member.joined_at.strftime("%d.%m.%Y") if member.joined_at else "Неизвестно"
     meta_text = f"ID: {member.id}  |  Высшая роль: {top_role_name}  |  С: {joined_at}"
     draw.text((50, 660), meta_text, font=font_meta, fill=(180, 180, 180))
 
-    # ---- Правая часть (статистика) ----
+    # ---- Правая часть ----
     right_x = 760
     right_y = 70
-    # Блок с фоном
     block = Image.new("RGBA", (420, 560), (255, 255, 255, 15))
     img.paste(block, (right_x, right_y), block)
 
-    # Заголовок
     draw.text((right_x+210, 100), "СТАТИСТИКА", font=font_progress, fill=(200, 200, 200), anchor="mt")
 
-    # Сетка 2x2
     stats_data = [
         ("Баланс DC", str(balance)),
         ("Покупок", str(len(get_dc_cache(member.id).get("purchases", [])))),
@@ -275,7 +260,6 @@ def create_profile_image(member) -> bytes:
         draw.text((x+10, y+8), label, font=font_meta, fill=(150, 150, 150))
         draw.text((x+10, y+32), value, font=font_stats, fill=(255, 255, 255))
 
-    # История операций
     history_title_y = 320
     draw.text((right_x+210, history_title_y), "ИСТОРИЯ ОПЕРАЦИЙ", font=font_progress, fill=(200, 200, 200), anchor="mt")
     y_offset = 360
@@ -288,11 +272,9 @@ def create_profile_image(member) -> bytes:
         draw.text((right_x+40, y_offset), line, font=font_history, fill=color)
         y_offset += 30
 
-    # Итого заработано
     draw.line((right_x+40, y_offset+10, right_x+380, y_offset+10), fill=(255,255,255,20), width=2)
     draw.text((right_x+210, y_offset+30), f"Всего заработано: {total_earned} DC", font=font_meta, fill=(200, 200, 200), anchor="mt")
 
-    # Сохраняем в байты
     with io.BytesIO() as output:
         img.save(output, format="PNG")
         return output.getvalue()
@@ -300,4 +282,7 @@ def create_profile_image(member) -> bytes:
 async def get_profile_image(member) -> bytes:
     await download_background()
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, create_profile_image, member)
+    return await loop.run_in_executor(None, generate_profile_image, member)
+
+# Для совместимости с импортом generate_profile_image
+generate_profile_image = get_profile_image
