@@ -1314,7 +1314,7 @@ async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Me
 
     try:
         from modules.profile import get_profile_image
-        image_bytes = await get_profile_image(user)
+        image_bytes = await get_profile_image(user)  # <--- ВОТ ЭТОТ await
         file = disnake.File(io.BytesIO(image_bytes), filename="profile.png")
         embed = disnake.Embed()
         embed.set_image(url="attachment://profile.png")
