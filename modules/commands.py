@@ -1314,30 +1314,24 @@ async def buy(inter: disnake.ApplicationCommandInteraction):
 @bot.slash_command(name="profile", description="Показать профиль пользователя")
 async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Member = None):
     user = user or inter.author
-
-    # Получаем данные
     counts = load_json(FILES["review_counts"], {})
     review_count = counts.get(str(user.id), 0)
-
-    # DC данные
     dc_data = get_user_dc_data(user.id)
     balance = dc_data.get("balance", 0)
     purchases = dc_data.get("purchases", [])
     history = dc_data.get("history", [])
 
-    # Генерируем изображение
-    from modules.profile import generate_profile_image
     try:
         image_path = await generate_profile_image(user, review_count, balance, purchases, history)
         file = disnake.File(image_path, filename="profile.png")
         await inter.response.send_message(file=file)
-        # Удаляем файл после отправки (опционально)
-        # os.remove(image_path)
         await log_discord(
             title="👤 Профиль просмотрен",
             description=f"> **Кто:** {inter.author.mention}\n> **Профиль:** {user.mention}",
             color=0x00aaff
         )
+        # Удаляем файл после отправки (чтобы не засорять диск)
+        os.remove(image_path)
     except Exception as e:
         logger.exception(f"Ошибка генерации профиля: {e}")
         await inter.response.send_message("❌ Не удалось сгенерировать профиль. Попробуйте позже.", ephemeral=True)
