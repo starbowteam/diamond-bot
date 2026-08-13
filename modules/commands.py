@@ -1323,11 +1323,14 @@ async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Me
     # Генерируем изображение
     img_bytes = await generate_profile_image(user, avatar_bytes)
 
-    # Отправляем файл
+    # Создаём эмбед с изображением
     file = disnake.File(img_bytes, filename="profile.png")
-    await inter.send(file=file)
+    embed = disnake.Embed(color=0x2f3136)
+    embed.set_image(url="attachment://profile.png")
+    embed.set_footer(text=f"Запросил {inter.author.display_name}", icon_url=inter.author.display_avatar.url)
 
-    # Логируем
+    await inter.send(embed=embed, file=file)
+
     await log_discord(
         title="👤 Просмотр профиля",
         description=f"> **Кто:** {inter.author.mention}\n> **Профиль:** {user.mention}",
