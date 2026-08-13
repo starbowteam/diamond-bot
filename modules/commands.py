@@ -1309,33 +1309,24 @@ async def buy(inter: disnake.ApplicationCommandInteraction):
 
 # ============================================================
 # КОМАНДА /profile (с генерацией картинки)
-# ============================================================
+# Эта часть только для команды profile – найди в своём файле старую команду и замени её этим кодом.
+# Весь остальной файл не трогай.
+
 @bot.slash_command(name="profile", description="Показать профиль пользователя")
 async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Member = None):
     user = user or inter.author
+    await inter.response.defer(ephemeral=False)  # не эфемерно, чтобы картинка была видна
 
-    # Получаем аватар в байтах
-    avatar_url = user.display_avatar.url
-    async with aiohttp.ClientSession() as session:
-        async with session.get(avatar_url) as resp:
-            avatar_bytes = await resp.read()
-
-    # Генерируем изображение
-    img_bytes = await generate_profile_image(user, avatar_bytes)
-
-    # Создаём эмбед с изображением
-    file = disnake.File(img_bytes, filename="profile.png")
-    embed = disnake.Embed(color=0x2f3136)
-    embed.set_image(url="attachment://profile.png")
-    embed.set_footer(text=f"Запросил {inter.author.display_name}", icon_url=inter.author.display_avatar.url)
-
-    await inter.send(embed=embed, file=file)
-
-    await log_discord(
-        title="👤 Просмотр профиля",
-        description=f"> **Кто:** {inter.author.mention}\n> **Профиль:** {user.mention}",
-        color=0x00aaff
-    )
+    try:
+        from modules.profile import get_profile_image
+        image_bytes = await get_profile_image(user)
+        file = disnake.File(io.BytesIO(image_bytes), filename="profile.png")
+        embed = disnake.Embed()
+        embed.set_image(url="attachment://profile.png")
+        await inter.edit_original_response(content=None, embed=embed, file=file)
+    except Exception as e:
+        logger.exception("Ошибка генерации профиля: %s", e)
+        await inter.edit_original_response(content="❌ Не удалось сгенерировать профиль. Попробуйте позже.")
 
 # ============================================================
 # Административные команды (без изменений)
