@@ -51,9 +51,6 @@ from modules.dc import (
 # ============================================================
 # Импорт для генерации профиля
 # ============================================================
-from modules.profile import generate_profile_image
-
-# ============================================================
 # Класс для модерации отзывов
 # ============================================================
 class ReviewModerationView(View):
@@ -1308,34 +1305,121 @@ class BuySelectView(View):
 async def buy(inter: disnake.ApplicationCommandInteraction):
     await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
 
-# ============================================================
-# КОМАНДА /profile (с генерацией изображения)
-# ============================================================
 @bot.slash_command(name="profile", description="Показать профиль пользователя")
 async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Member = None):
     user = user or inter.author
     counts = load_json(FILES["review_counts"], {})
-    review_count = counts.get(str(user.id), 0)
-    dc_data = get_user_dc_data(user.id)
-    balance = dc_data.get("balance", 0)
-    purchases = dc_data.get("purchases", [])
-    history = dc_data.get("history", [])
+    count = counts.get(str(user.id), 0)
+    target_role_ids = get_roles_for_count(count)
+    buyer_roles = [inter.guild.get_role(rid) for rid in target_role_ids if rid]
+    buyer_roles_names = ", ".join([r.mention for r in buyer_roles if r]) if buyer_roles else "Нет"
+    top_role = user.top_role
+    top_role_mention = top_role.mention if top_role else "Нет"
+    balance = await get_user_balance(user.id)
 
-    try:
-        image_path = await generate_profile_image(user, review_count, balance, purchases, history)
-        file = disnake.File(image_path, filename="profile.png")
-        await inter.response.send_message(file=file)
-        await log_discord(
-            title="👤 Профиль просмотрен",
-            description=f"> **Кто:** {inter.author.mention}\n> **Профиль:** {user.mention}",
-            color=0x00aaff
-        )
-        # Удаляем файл после отправки (чтобы не засорять диск)
-        os.remove(image_path)
-    except Exception as e:
-        logger.exception(f"Ошибка генерации профиля: {e}")
-        await inter.response.send_message("❌ Не удалось сгенерировать профиль. Попробуйте позже.", ephemeral=True)
+    purchases = await get_user_purchases(user.id, only_unused=True)
+    purchases_text = ""
+    if purchases:
+        for p in purchases:
+            purchases_text += f"> {p['type']} {p['value']} - ⌛\n"
+    else:
+        purchases_text = "> Отсутствует"
 
+    history = get_dc_cache(user.id).get("history", [])
+    history_text = ""
+    if history:
+        for h in reversed(history[-5:]):
+            date_str = datetime.fromtimestamp(h["date"]).strftime("%d.%m")
+            sign = "+" if h["amount"] > 0 else ""
+            history_text += f"[{date_str}] {sign}{h['amount']} DC — {h['reason']}\n"
+    else:
+        history_text = "Нет операций."
+
+    joined_at = user.joined_at
+    joined_str = joined_at.strftime("%d.%m.%Y") if joined_at else "Неизвестно"
+
+    # ===== ПРОГРЕСС-БАР (текстовый) =====
+    thresholds = [
+        (1, "Клуб"),
+        (2, "Бронзовый покупатель"),
+        (4, "Серебряный покупатель"),
+        (8, "Золотой покупатель"),
+        (12, "Алмазный покупатель"),
+        (17, "Изумрудный покупатель"),
+        (23, "Аметистовый покупатель"),
+        (25, "Легендарный покупатель"),
+        (float('inf'), "Покупатель века")
+    ]
+    current_role_name = "Нет"
+    next_role_name = "Клуб"
+    next_threshold = 1
+    for threshold, name in thresholds:
+        if count >= threshold:
+            current_role_name = name
+        else:
+            next_threshold = threshold
+            next_role_name = name
+            break
+
+    if count >= 26:
+        progress_bar = "█" * 10 + " (Максимум)"
+        progress_text = "Вы достигли максимальной роли! 🎉"
+    else:
+        progress = min(count / next_threshold, 1.0)
+        bar_length = 10
+        filled = int(progress * bar_length)
+        bar = "█" * filled + "░" * (bar_length - filled)
+        progress_bar = f"{bar} {int(progress*100)}%"
+        progress_text = f"Осталось {next_threshold - count} отзывов до {next_role_name}"
+
+    # Цвет embed в зависимости от роли
+    role_color = 0x676767
+    if count >= 26:
+        role_color = 0xb3d9ff
+    elif count >= 24:
+        role_color = 0xe68585
+    elif count >= 18:
+        role_color = 0x9fc1ff
+    elif count >= 13:
+        role_color = 0x3d9e08
+    elif count >= 9:
+        role_color = 0x149bd0
+    elif count >= 5:
+        role_color = 0xae7911
+    elif count >= 3:
+        role_color = 0xb0b0b0
+    elif count >= 1:
+        role_color = 0xd15640
+
+    embed = disnake.Embed(
+        title=f"📋 Профиль {user.display_name}",
+        description=(
+            f"> **Текущая роль:** {current_role_name}\n"
+            f"> **Следующая:** {next_role_name}\n"
+            f"> **Прогресс:** {progress_bar}\n"
+            f"> {progress_text}\n\n"
+            f"> **Покупатель:** {buyer_roles_names}\n"
+            f"> **Отзывов:** {count}"
+        ),
+        color=role_color
+    )
+    embed.set_thumbnail(url=user.display_avatar.url)
+    embed.add_field(name="💎 Diamond Coins", value=f"{balance} DC", inline=True)
+    embed.add_field(name="👑 Высшая роль", value=top_role_mention, inline=True)
+    embed.add_field(name="🛒 Купленные товары (ожидают)", value=purchases_text, inline=False)
+    embed.add_field(name="📜 История (последние 5)", value=f">>> {history_text}", inline=False)
+    embed.add_field(
+        name="📑 О пользователе",
+        value=f">>> ID: {user.id}\nНа сервере с {joined_str}",
+        inline=False
+    )
+
+    await inter.send(embed=embed)
+    await log_discord(
+        title="👤 Просмотр профиля",
+        description=f"> **Кто:** {inter.author.mention}\n> **Профиль:** {user.mention}",
+        color=0x00aaff
+    )
 # ============================================================
 # Административные команды (без изменений)
 # ============================================================
