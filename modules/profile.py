@@ -5,7 +5,7 @@ import json
 import time
 import aiohttp
 import asyncio
-import requests
+import urllib.request
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter
 
@@ -189,9 +189,9 @@ def generate_profile_image(member) -> bytes:
     avatar_x = 50
     avatar_y = 70
     try:
-        response = requests.get(member.display_avatar.url, timeout=5)
-        avatar_img = Image.open(io.BytesIO(response.content)).convert("RGBA")
-        avatar_img = avatar_img.resize((avatar_size, avatar_size))
+        with urllib.request.urlopen(member.display_avatar.url, timeout=5) as response:
+            avatar_img = Image.open(io.BytesIO(response.read())).convert("RGBA")
+            avatar_img = avatar_img.resize((avatar_size, avatar_size))
     except:
         avatar_img = Image.new("RGBA", (avatar_size, avatar_size), (50, 50, 80))
     mask = Image.new("L", (avatar_size, avatar_size), 0)
