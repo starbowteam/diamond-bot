@@ -1307,15 +1307,10 @@ class BuySelectView(View):
 async def buy(inter: disnake.ApplicationCommandInteraction):
     await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
 
-# ============================================================
-# КОМАНДА /profile (с генерацией картинки)
-# Эта часть только для команды profile – найди в своём файле старую команду и замени её этим кодом.
-# Весь остальной файл не трогай.
-
 @bot.slash_command(name="profile", description="Показать профиль пользователя")
 async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Member = None):
     user = user or inter.author
-    await inter.response.defer(ephemeral=False)  # не эфемерно, чтобы картинка была видна
+    await inter.response.defer(ephemeral=False)
 
     try:
         from modules.profile import get_profile_image
