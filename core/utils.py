@@ -394,7 +394,8 @@ def init_dc_cache_from_json():
     db.commit()
 
 def get_dc_cache(user_id: int) -> dict:
-    row = cur.execute("SELECT * FROM dc_cache WHERE user_id = ?", (user_id,)).fetchone()
+    """Возвращает DC-данные пользователя из SQLite."""
+    row = db.execute("SELECT * FROM dc_cache WHERE user_id = ?", (user_id,)).fetchone()
     if row:
         return {
             "balance": row["balance"],
