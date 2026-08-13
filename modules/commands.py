@@ -44,7 +44,8 @@ from modules.dc import (
     add_purchase, get_user_purchases, remove_purchase,
     get_dc_cache, save_dc_cache,
     get_progress_bar,
-    load_shop_catalog
+    load_shop_catalog,
+    get_user_dc_data  # <-- добавить
 )
 
 # ============================================================
