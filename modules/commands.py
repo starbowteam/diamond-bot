@@ -1337,7 +1337,7 @@ class AdminPanelView(View):
         await recalc_reviews(inter)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤОбновить баннерㅤㅤㅤㅤ",  # добавил по два пробела с каждой стороны
+        label="ㅤㅤㅤㅤБаннер",  # добавил по два пробела с каждой стороны
         style=disnake.ButtonStyle.gray,
         row=1,
         custom_id="admin_banner"
