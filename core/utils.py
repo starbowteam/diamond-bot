@@ -44,7 +44,7 @@ CONFIG = {
     "TOP_CHANNEL_ID": 1532278656519635104,
     "ACTIONS_CHANNEL_ID": 1469698608390606898,
     "ANALYTICS_CHANNEL_ID": 1536947571082403840,
-    "MANAGER_ROLE_ID": 1127428607606796290,  # для пинга в акциях
+    "MANAGER_ROLE_ID": 1127428607606796290,
     "EMBED_IMAGE_URL": "https://media.discordapp.net/attachments/1527006158282555412/1527007499192893561/image.png?ex=6a60584e&is=6a5f06ce&hm=1b0ba12a8c8d57f41c57bc03a6998178f6cfb6b83db5837d448d1ab495c46830&=&format=webp&quality=lossless&width=1766&height=686",
     "PANEL_CHANNEL_ID": 1462136361711829053,
     "TICKET_CATEGORY_ID": 1462419587835363614,
@@ -116,7 +116,7 @@ db.execute("PRAGMA synchronous=NORMAL")
 
 cur = db.cursor()
 
-# Таблицы (инвайты, реакции, кеш DC)
+# Таблицы (инвайты, реакции, кеш DC, промокоды)
 cur.executescript("""
 CREATE TABLE IF NOT EXISTS invites_snapshot (
     invite_code TEXT PRIMARY KEY,
@@ -153,6 +153,10 @@ CREATE TABLE IF NOT EXISTS dc_cache (
     voice_time_today INTEGER DEFAULT 0,
     last_reset_date INTEGER DEFAULT 0,
     last_voice_dc   INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS promo_codes (
+    code TEXT PRIMARY KEY,
+    value TEXT
 );
 """)
 db.commit()
@@ -463,3 +467,26 @@ def sync_dc_to_json():
 # При первом запуске инициализируем кеш, если таблица пуста
 if cur.execute("SELECT COUNT(*) FROM dc_cache").fetchone()[0] == 0:
     init_dc_cache_from_json()
+
+# ============================================================
+# Промокоды в SQLite
+# ============================================================
+def get_promo_codes() -> dict:
+    """Возвращает все промокоды из БД в виде {code: value}."""
+    rows = cur.execute("SELECT code, value FROM promo_codes").fetchall()
+    return {row["code"]: row["value"] for row in rows}
+
+def add_promo_code(code: str, value: str):
+    """Добавляет промокод в БД."""
+    cur.execute("INSERT OR REPLACE INTO promo_codes (code, value) VALUES (?, ?)", (code, value))
+    db.commit()
+
+def remove_promo_code(code: str):
+    """Удаляет промокод из БД."""
+    cur.execute("DELETE FROM promo_codes WHERE code = ?", (code,))
+    db.commit()
+
+def clear_promo_codes():
+    """Очищает все промокоды (для синхронизации, если надо)."""
+    cur.execute("DELETE FROM promo_codes")
+    db.commit()
