@@ -6,7 +6,6 @@ import asyncio
 import time
 import re
 import io
-import aiohttp
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 import disnake
@@ -28,28 +27,23 @@ from core.utils import (
     clean_embed_for_discohook, parse_emoji,
     update_user_roles,
     get_roles_for_count,
-    get_dc_cache, save_dc_cache
+    get_dc_cache, save_dc_cache,
+    promo_codes, used_promo, rates, reload_promo
 )
 
 # ============================================================
 # Импорт из core.bot
 # ============================================================
-from core.bot import update_review_counter, bot
-
-# ============================================================
-# Импорты из modules.dc
-# ============================================================
+from core.bot import update_review_counter, bot, voice_track
 from modules.dc import (
     get_user_balance, add_dc, remove_dc,
     add_purchase, get_user_purchases, remove_purchase,
     get_dc_cache, save_dc_cache,
     get_progress_bar,
     load_shop_catalog,
-    get_user_dc_data  # <-- добавить
+    sync_dc_to_json, get_dc_cache_all
 )
 
-# ============================================================
-# Импорт для генерации профиля
 # ============================================================
 # Класс для модерации отзывов
 # ============================================================
@@ -65,7 +59,6 @@ class ReviewModerationView(View):
     async def update_status_and_log(self, inter: disnake.MessageInteraction, status: str, log_title: str, log_color: int):
         if not has_review_moderation_roles(inter.author):
             return await inter.response.send_message("⛔ У вас нет прав.", ephemeral=True)
-
         if self.message and self.message.embeds:
             embeds = self.message.embeds
             new_embeds = []
@@ -81,11 +74,9 @@ class ReviewModerationView(View):
                 else:
                     new_embeds.append(embed)
             await self.message.edit(embeds=new_embeds, view=None)
-
         for child in self.children:
             child.disabled = True
         await inter.response.edit_message(view=self)
-
         log_chan = bot.get_channel(CONFIG["LOG_CHANNEL_ID"])
         if log_chan:
             await log_chan.send(
@@ -101,33 +92,28 @@ class ReviewModerationView(View):
     async def approve(self, button: Button, inter: disnake.MessageInteraction):
         if not has_review_moderation_roles(inter.author):
             return await inter.response.send_message("⛔ У вас нет прав для одобрения.", ephemeral=True)
-
         await add_dc(self.user_id, 10, "Одобрение отзыва")
         data = get_dc_cache(self.user_id)
         data["last_review"] = now_ts()
         save_dc_cache(self.user_id, data)
-
         try:
             user = bot.get_user(self.user_id)
             if user:
                 await user.send("✅ Ваш отзыв одобрен! Вам начислено **+10 DC**.")
         except:
             pass
-
         await self.update_status_and_log(inter, "✅ Одобрено", "✅ Отзыв одобрен", 0x00ff00)
 
     @disnake.ui.button(label="❌ Отклонить", style=ButtonStyle.danger)
     async def reject(self, button: Button, inter: disnake.MessageInteraction):
         if not has_review_moderation_roles(inter.author):
             return await inter.response.send_message("⛔ У вас нет прав для отклонения.", ephemeral=True)
-
         try:
             user = bot.get_user(self.user_id)
             if user:
                 await user.send("❌ Ваш отзыв был отклонён администратором.")
         except:
             pass
-
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
@@ -157,7 +143,6 @@ class BuyTicketModal(Modal):
         promo = inter.text_values.get("promo_code", "").strip().upper()
         promo_display = "Не введён"
         if promo:
-            from core.utils import promo_codes
             if promo in promo_codes:
                 promo_display = f"{promo} — {promo_codes[promo]}"
             else:
@@ -715,7 +700,7 @@ async def send_menu_panel():
     )
 
 # ============================================================
-# АДМИН-ПАНЕЛЬ DC
+# АДМИН-ПАНЕЛЬ DC (полная)
 # ============================================================
 class DCPanelView(View):
     def __init__(self):
@@ -819,7 +804,7 @@ class DCPanelView(View):
         )
 
 # ============================================================
-# МОДАЛЬНЫЕ ОКНА ДЛЯ ПАНЕЛИ
+# МОДАЛКИ ДЛЯ DC-ПАНЕЛИ
 # ============================================================
 class GiveDcModal(Modal):
     def __init__(self):
@@ -1017,6 +1002,7 @@ async def send_dc_panel():
     embed2.add_field(name="> Статистика DC", value="**Показать общую статистику и топ-5.**", inline=True)
     embed2.add_field(name="> Управление покупками", value="**Удалить неиспользованные покупки.**", inline=True)
     embed2.add_field(name="> Удалить все DC", value="**Удаление коинов в корень (установить 0).**", inline=True)
+    embed2.add_field(name="> Обновить акцию", value="**Обновить акционный товар в меню Actions.**", inline=True)
 
     await channel.send(embeds=[embed1, embed2], view=DCPanelView())
 
@@ -1040,71 +1026,92 @@ async def handle_interaction(inter: disnake.MessageInteraction):
         )
 
 # ============================================================
-# РАССЫЛКА (MassSender)
+# РАССЫЛКА (MassSender) – используется в модалке
 # ============================================================
 class MassSender:
     active_task = None
     stop_flag = False
 
-@bot.slash_command(
-    name="рассылка",
-    description="Массовая рассылка в ЛС (админ)",
-    default_member_permissions=disnake.Permissions(administrator=True)
-)
-async def рассылка(
-    ctx,
-    embed_json: Optional[str] = commands.Param(default=None, description="JSON с embed"),
-    файл_embed: Optional[disnake.Attachment] = commands.Param(default=None, description="JSON-файл"),
-    только_с_ролью: Optional[disnake.Role] = commands.Param(default=None, description="Роль для фильтра")
-):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    await ctx.response.defer(ephemeral=True)
+# ============================================================
+# МОДАЛКА ДЛЯ РАССЫЛКИ
+# ============================================================
+class MassSendModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(label="JSON с embed (как в /say)", custom_id="embed_json", style=disnake.TextInputStyle.paragraph, placeholder='{"embeds": [...]}', required=False),
+            TextInput(label="Роль для фильтра (ID или @упоминание, опционально)", custom_id="role_filter", required=False, placeholder="ID роли или @роль")
+        ]
+        super().__init__(title="Массовая рассылка", components=components)
 
-    if not embed_json and not файл_embed:
-        return await ctx.edit_original_response("❌ Укажите JSON или файл.")
-    try:
-        if файл_embed:
-            raw = await файл_embed.read()
-            data = json.loads(raw.decode("utf-8"))
-        else:
+    async def callback(self, inter: disnake.ModalInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        embed_json = inter.text_values.get("embed_json", "").strip()
+        role_input = inter.text_values.get("role_filter", "").strip()
+        if not embed_json:
+            return await inter.response.send_message("❌ Введите JSON с embed.", ephemeral=True)
+        try:
             data = json.loads(embed_json)
-        if "embeds" not in data:
-            return await ctx.edit_original_response("❌ Нет поля 'embeds'.")
-        embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
-        content = data.get("content", " ")
-    except Exception as e:
-        return await ctx.edit_original_response(f"❌ Ошибка парсинга: {e}")
+            if "embeds" not in data:
+                return await inter.response.send_message("❌ Нет поля 'embeds'.", ephemeral=True)
+            embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
+            content = data.get("content", " ")
+        except Exception as e:
+            return await inter.response.send_message(f"❌ Ошибка парсинга JSON: {e}", ephemeral=True)
 
-    guild = ctx.guild or bot.get_guild(int(CONFIG["GUILD_ID"]))
-    if not guild:
-        return await ctx.edit_original_response("❌ Сервер не найден.")
-    members = [m for m in guild.members if not m.bot and m != ctx.author]
-    if только_с_ролью:
-        members = [m for m in members if только_с_ролью in m.roles]
-    if not members:
-        return await ctx.edit_original_response("❌ Нет получателей.")
-    if MassSender.active_task and not MassSender.active_task.done():
-        return await ctx.edit_original_response("⚠️ Уже идёт рассылка.")
+        guild = inter.guild or bot.get_guild(int(CONFIG["GUILD_ID"]))
+        if not guild:
+            return await inter.response.send_message("❌ Сервер не найден.", ephemeral=True)
 
-    progress_embed = disnake.Embed(
-        title="📨 Массовая рассылка",
-        description=(
-            f"**Получателей:** {len(members)}\n"
-            f"**Успешно:** 0\n"
-            f"**Ошибок:** 0\n"
-            f"**Осталось:** {len(members)}"
-        ),
-        color=0x00aaff
-    )
-    stop_view = View()
-    stop_view.add_item(Button(label="⏹️ Остановить", style=ButtonStyle.danger, custom_id="stop_mass_send"))
-    progress_msg = await ctx.edit_original_response(embed=progress_embed, view=stop_view)
+        role = None
+        if role_input:
+            if role_input.isdigit():
+                role = guild.get_role(int(role_input))
+            else:
+                match = re.search(r'<@&?(\d+)>', role_input)
+                if match:
+                    role = guild.get_role(int(match.group(1)))
+            if not role:
+                return await inter.response.send_message("❌ Роль не найдена.", ephemeral=True)
 
-    MassSender.stop_flag = False
-    task = bot.loop.create_task(send_mass_messages(members, content, embeds, progress_msg, progress_embed, ctx))
-    MassSender.active_task = task
+        members = [m for m in guild.members if not m.bot and m != inter.author]
+        if role:
+            members = [m for m in members if role in m.roles]
+        if not members:
+            return await inter.response.send_message("❌ Нет получателей.", ephemeral=True)
 
+        if MassSender.active_task and not MassSender.active_task.done():
+            return await inter.response.send_message("⚠️ Уже идёт рассылка.", ephemeral=True)
+
+        progress_embed = disnake.Embed(
+            title="📨 Массовая рассылка",
+            description=(
+                f"**Получателей:** {len(members)}\n"
+                f"**Успешно:** 0\n"
+                f"**Ошибок:** 0\n"
+                f"**Осталось:** {len(members)}"
+            ),
+            color=0x00aaff
+        )
+        stop_view = View()
+        stop_view.add_item(Button(label="⏹️ Остановить", style=ButtonStyle.danger, custom_id="stop_mass_send"))
+        progress_msg = await inter.response.send_message(embed=progress_embed, view=stop_view, ephemeral=True)
+        MassSender.stop_flag = False
+        task = bot.loop.create_task(
+            send_mass_messages(
+                members=members,
+                content=content,
+                embeds=embeds,
+                progress_msg=progress_msg,
+                progress_embed=progress_embed,
+                ctx=inter
+            )
+        )
+        MassSender.active_task = task
+
+# ============================================================
+# Функции для рассылки
+# ============================================================
 async def send_mass_messages(members, content, embeds, progress_msg, progress_embed, ctx):
     total = len(members)
     sent = 0
@@ -1157,7 +1164,282 @@ async def send_dm(member, content, embeds):
         raise e
 
 # ============================================================
-# КОМАНДА /buy (с выдачей ролей)
+# МОДАЛКИ ДЛЯ НОВЫХ ПАНЕЛЕЙ (admin_panel, promocodes)
+# ============================================================
+class SayModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(label="Канал (ID или упоминание)", custom_id="channel", placeholder="Введите ID канала или #канал", min_length=1, max_length=50),
+            TextInput(label="Тип", custom_id="type", placeholder="text или embed", min_length=3, max_length=10),
+            TextInput(label="Содержание", custom_id="content", style=disnake.TextInputStyle.paragraph, placeholder="Текст или JSON для embed", max_length=2000)
+        ]
+        super().__init__(title="Отправить сообщение от бота", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        channel_input = inter.text_values["channel"].strip()
+        msg_type = inter.text_values["type"].strip().lower()
+        content = inter.text_values["content"].strip()
+
+        channel = None
+        if channel_input.isdigit():
+            channel = bot.get_channel(int(channel_input))
+        else:
+            match = re.search(r'<#(\d+)>', channel_input)
+            if match:
+                channel = bot.get_channel(int(match.group(1)))
+        if not channel:
+            return await inter.response.send_message("❌ Канал не найден.", ephemeral=True)
+
+        try:
+            if msg_type == "text":
+                await channel.send(content)
+                await inter.response.send_message(f"✅ Сообщение отправлено в {channel.mention}", ephemeral=True)
+                await log_discord("📨 Say: текст отправлен", f"Админ {inter.author.mention} → {channel.mention}", color=0x00ff00)
+            elif msg_type == "embed":
+                data = json.loads(content)
+                if "embeds" not in data:
+                    return await inter.response.send_message("❌ Нет поля 'embeds'.", ephemeral=True)
+                embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
+                await channel.send(content=data.get("content", " "), embeds=embeds)
+                await inter.response.send_message(f"✅ Embed отправлен в {channel.mention}", ephemeral=True)
+                await log_discord("📨 Say: embed отправлен", f"Админ {inter.author.mention} → {channel.mention}", color=0x00ff00)
+            else:
+                await inter.response.send_message("❌ Тип должен быть 'text' или 'embed'.", ephemeral=True)
+        except Exception as e:
+            await inter.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+
+class GetJsonModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(label="Ссылка на сообщение", custom_id="link", placeholder="https://discord.com/channels/.../...", min_length=10, max_length=200)
+        ]
+        super().__init__(title="Получить JSON сообщения", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        link = inter.text_values["link"].strip()
+        try:
+            parts = link.strip("/").split("/")
+            guild_id, channel_id, message_id = map(int, parts[-3:])
+        except:
+            return await inter.response.send_message("❌ Неверная ссылка.", ephemeral=True)
+        try:
+            channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+            msg = await channel.fetch_message(message_id)
+        except Exception as e:
+            return await inter.response.send_message(f"Ошибка получения сообщения: {e}", ephemeral=True)
+        payload = {"content": msg.content or " ", "embeds": [clean_embed_for_discohook(e.to_dict()) for e in msg.embeds]}
+        buf = io.StringIO(json.dumps(payload, ensure_ascii=False, indent=2))
+        await inter.response.send_message(file=disnake.File(fp=buf, filename="message.json"), ephemeral=True)
+        await log_discord("📥 Выгрузка JSON", f"Админ {inter.author.mention} выгрузил JSON из {channel.mention}", color=0x00ff00)
+
+class PromoAddModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(label="Код промокода", custom_id="code", placeholder="Например VSEMPROMO25", min_length=2, max_length=50),
+            TextInput(label="Скидка (например 10%)", custom_id="value", placeholder="10%", min_length=1, max_length=20)
+        ]
+        super().__init__(title="Добавить промокод", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        code = inter.text_values["code"].strip().upper()
+        value = inter.text_values["value"].strip()
+        promo_codes[code] = value
+        save_json(FILES["promo"], promo_codes)
+        try:
+            lines = [f"{k} - {v}" for k, v in promo_codes.items()]
+            with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+        except Exception as e:
+            logger.exception("write_promo_txt error: %s", e)
+        await inter.response.send_message(f"✅ Промокод `{code}` добавлен → {value}", ephemeral=True)
+        await log_discord("➕ Промокод добавлен", f"Админ {inter.author.mention} добавил `{code}` → {value}", color=0x00ff00)
+
+class PromoRemoveSelectView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        options = []
+        if not promo_codes:
+            options.append(SelectOption(label="Нет промокодов", value="none", default=True))
+        else:
+            for code, value in promo_codes.items():
+                label = f"{code} - {value}"
+                if len(label) > 100:
+                    label = label[:97] + "..."
+                options.append(SelectOption(label=label, value=code))
+        select = Select(placeholder="Выберите промокод для удаления...", options=options, custom_id="promo_remove_select")
+        select.callback = self.select_callback
+        self.add_item(select)
+
+    async def select_callback(self, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        code = inter.data.values[0]
+        if code == "none":
+            return await inter.response.send_message("Нет промокодов для удаления.", ephemeral=True)
+        if code in promo_codes:
+            promo_codes.pop(code)
+            save_json(FILES["promo"], promo_codes)
+            try:
+                lines = [f"{k} - {v}" for k, v in promo_codes.items()]
+                with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
+                    f.write("\n".join(lines))
+            except Exception as e:
+                logger.exception("write_promo_txt error: %s", e)
+            await inter.response.send_message(f"✅ Промокод `{code}` удалён.", ephemeral=True)
+            await log_discord("➖ Промокод удалён", f"Админ {inter.author.mention} удалил `{code}`", color=0xff6600)
+        else:
+            await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
+
+# ============================================================
+# НОВЫЕ ПАНЕЛИ (admin_panel, promocodes)
+# ============================================================
+class AdminPanelView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(label="Сообщение от бота", style=ButtonStyle.gray, custom_id="admin_say")
+    async def admin_say(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.send_modal(SayModal())
+
+    @disnake.ui.button(label="Получить JSON", style=ButtonStyle.gray, custom_id="admin_get_json")
+    async def admin_get_json(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.send_modal(GetJsonModal())
+
+    @disnake.ui.button(label="Рассылка", style=ButtonStyle.gray, custom_id="admin_mass")
+    async def admin_mass(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.send_modal(MassSendModal())
+
+    @disnake.ui.button(label="Пересчитать отзывы", style=ButtonStyle.gray, custom_id="admin_recalc")
+    async def admin_recalc(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.defer(ephemeral=True)
+        await recalc_reviews(inter)
+
+    @disnake.ui.button(label="Обновить баннер", style=ButtonStyle.gray, custom_id="admin_banner")
+    async def admin_banner(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.defer(ephemeral=True)
+        await update_review_counter(silent=False)
+        await inter.edit_original_message(content="✅ Баннер обновлён!")
+
+class PromoPanelView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(label="Список промокодов", style=ButtonStyle.gray, custom_id="promo_list")
+    async def promo_list(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        if not promo_codes:
+            await inter.response.send_message("Промокодов нет.", ephemeral=True)
+            return
+        text = "\n".join([f"{k} → {v}" for k, v in promo_codes.items()])
+        await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
+
+    @disnake.ui.button(label="Добавить промокод", style=ButtonStyle.gray, custom_id="promo_add")
+    async def promo_add(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.send_modal(PromoAddModal())
+
+    @disnake.ui.button(label="Удалить промокод", style=ButtonStyle.gray, custom_id="promo_remove")
+    async def promo_remove(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.send_message("Выберите промокод для удаления:", ephemeral=True, view=PromoRemoveSelectView())
+
+# ============================================================
+# Функция для пересчёта отзывов (вынесена)
+# ============================================================
+async def recalc_reviews(inter):
+    channel_id = CONFIG["REVIEW_COUNT_CHANNEL"]
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        channel = await bot.fetch_channel(channel_id)
+    if not channel or not isinstance(channel, disnake.TextChannel):
+        return await inter.edit_original_response(content="❌ Канал отзывов не найден.")
+    counts = {}
+    try:
+        async for message in channel.history(limit=None):
+            if message.author.bot:
+                continue
+            uid = str(message.author.id)
+            counts[uid] = counts.get(uid, 0) + 1
+    except Exception as e:
+        logger.exception("Ошибка чтения истории: %s", e)
+        return await inter.edit_original_response(content=f"❌ Ошибка: {e}")
+    if not counts:
+        return await inter.edit_original_response(content="ℹ️ Нет сообщений.")
+    save_json(FILES["review_counts"], counts)
+    guild = inter.guild or bot.get_guild(int(CONFIG["GUILD_ID"]))
+    if not guild:
+        return await inter.edit_original_response(content="❌ Сервер не найден.")
+    updated = 0
+    for uid_str, count in counts.items():
+        uid = int(uid_str)
+        member = guild.get_member(uid)
+        if member:
+            await update_user_roles(member, count, keep_pka=True)
+            updated += 1
+    await update_review_counter(silent=False)
+    await inter.edit_original_response(
+        content=f"✅ Пересчёт завершён!\n"
+                f"Всего: {len(counts)}\n"
+                f"Обновлено: {updated}"
+    )
+    await log_discord(
+        title="📊 Пересчёт отзывов",
+        description=f"> **Админ:** {inter.author.mention}\n> **Записей:** `{len(counts)}`\n> **Ролей обновлено:** `{updated}`",
+        color=0x00aaff
+    )
+
+# ============================================================
+# НОВЫЕ СЛЕШ-КОМАНДЫ (admin_panel, promocodes)
+# ============================================================
+@bot.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
+async def admin_panel(inter: disnake.ApplicationCommandInteraction):
+    if not has_admin_command_roles(inter.author):
+        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
+    embeds = [
+        disnake.Embed(color=6776679).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&"),
+        disnake.Embed(
+            title="Панель управление сервером",
+            description="> С помощью данной панели, происходит управление сервером, старые команды, были заменены одной панелью, что дает доступ, в одном виде. Ниже - предоставлены кнопки. Используй с умом.",
+            color=6776679
+        ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+    ]
+    await inter.send(embeds=embeds, ephemeral=True, view=AdminPanelView())
+
+@bot.slash_command(name="promocodes", description="Управление промокодами (админ)")
+async def promocodes(inter: disnake.ApplicationCommandInteraction):
+    if not has_admin_command_roles(inter.author):
+        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
+    embeds = [
+        disnake.Embed(color=6776679).set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1537853007754957021/image.png?ex=6a808cb8&is=6a7f3b38&hm=9a8ed29d187e151fe6fe207910dd8665d74b9e2ab794c62e364e72e17079d7f6&=&format=webp&quality=lossless"),
+        disnake.Embed(
+            title="Управление промокодами",
+            description="> Используй данную панель, для управления промокодами.",
+            color=6776679
+        ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+    ]
+    await inter.send(embeds=embeds, ephemeral=True, view=PromoPanelView())
+
+# ============================================================
+# КОМАНДА /buy (с классом BuySelectView)
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
@@ -1220,82 +1502,55 @@ class BuySelectView(View):
         balance = await get_user_balance(user_id)
         price = item["price"]
         if balance < price:
-            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: {price}, у вас: {balance}")
+            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.")
 
-        # Определяем тип и значение для записи покупки
-        if category == "discounts":
-            item_type = "Скидка"
-            item_value = item["name"].replace("скидка", "").strip()
-        elif category == "design":
-            item_type = "Дизайн"
-            item_value = item["name"]
-        elif category == "ads":
-            item_type = "Реклама"
-            item_value = item["name"]
-        elif category == "roles":
-            item_type = "Роль"
-            item_value = item["name"]
-            # Выдаём роль, если есть role_id
-            role_id = item.get("role_id")
-            if role_id:
-                guild = inter.guild
-                role = guild.get_role(role_id)
-                if role:
-                    try:
-                        await inter.author.add_roles(role)
-                        success = await remove_dc(user_id, price, f"Покупка роли: {item['name']}")
-                        if not success:
-                            return await inter.edit_original_response(content="❌ Ошибка списания DC.")
-                        await add_purchase(user_id, item_type, item_value)
-                        await inter.edit_original_response(
-                            content=f"✅ Вы купили роль **{item['name']}** за **{price} DC**! Роль выдана. Не забудьте оставить отзыв в <#1462074763437543435>.",
-                            ephemeral=True
-                        )
-                        await log_discord(
-                            title="🛒 Покупка роли в магазине DC",
-                            description=f"> **Пользователь:** {inter.author.mention}\n> **Роль:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
-                            color=0x00aaff
-                        )
-                        return
-                    except Exception as e:
-                        await inter.edit_original_response(content=f"❌ Не удалось выдать роль: {e}")
-                        return
-                else:
-                    await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
+        success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
+        if not success:
+            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуйте позже.")
+
+        await add_purchase(user_id, category, item["name"])
+
+        if category == "roles" and item.get("role_id"):
+            role = inter.guild.get_role(item["role_id"])
+            if role:
+                try:
+                    await inter.author.add_roles(role)
+                    await inter.edit_original_response(
+                        content=f"✅ Вы купили роль **{item['name']}** за **{price} DC**!\n"
+                                f"🎭 Роль **{role.name}** выдана.\n"
+                                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                    )
+                    await log_discord(
+                        title="🛒 Покупка роли в магазине DC",
+                        description=f"> **Пользователь:** {inter.author.mention}\n> **Роль:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
+                        color=0x00aaff
+                    )
+                    return
+                except Exception as e:
+                    await add_dc(user_id, price, "Возврат DC (ошибка выдачи роли)")
+                    await inter.edit_original_response(
+                        content=f"❌ Не удалось выдать роль: {e}\n"
+                                f"💎 {price} DC возвращены на баланс."
+                    )
                     return
             else:
-                # Если role_id нет, просто сохраняем покупку
-                success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
-                if not success:
-                    return await inter.edit_original_response(content="❌ Ошибка списания.")
-                await add_purchase(user_id, item_type, item_value)
+                await add_dc(user_id, price, "Возврат DC (роль не найдена)")
                 await inter.edit_original_response(
-                    content=f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.",
-                    ephemeral=True
-                )
-                await log_discord(
-                    title="🛒 Покупка в магазине DC",
-                    description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
-                    color=0x00aaff
+                    content=f"❌ Роль не найдена на сервере.\n"
+                            f"💎 {price} DC возвращены на баланс."
                 )
                 return
-        else:
-            item_type = "Другое"
-            item_value = item["name"]
-            success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
-            if not success:
-                return await inter.edit_original_response(content="❌ Ошибка списания.")
-            await add_purchase(user_id, item_type, item_value)
-            await inter.edit_original_response(
-                content=f"✅ Вы купили **{item['name']}** за **{price} DC**. Проверьте свои покупки в `/profile`.",
-                ephemeral=True
-            )
-            await log_discord(
-                title="🛒 Покупка в магазине DC",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
-                color=0x00aaff
-            )
-            return
+
+        await inter.edit_original_response(
+            content=f"✅ Вы купили **{item['name']}** за **{price} DC**!\n"
+                    f"📦 Товар будет выдан в ближайшее время.\n"
+                    f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+        )
+        await log_discord(
+            title="🛒 Покупка в магазине DC",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC\n> **Категория:** {catalog[category]['label']}",
+            color=0x00aaff
+        )
 
     async def back_callback(self, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
@@ -1304,6 +1559,48 @@ class BuySelectView(View):
 @bot.slash_command(name="buy", description="Купить товар за Diamond Coins")
 async def buy(inter: disnake.ApplicationCommandInteraction):
     await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
+
+# ============================================================
+# ОСТАВЛЯЕМ КОМАНДЫ: /расчет, /profile, /cleaning
+# ============================================================
+@bot.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
+async def cleaning(ctx, количество: int):
+    if not has_admin_command_roles(ctx.author):
+        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
+    if количество < 1 or количество > 100:
+        return await ctx.send("❌ Укажите число от 1 до 100.", ephemeral=True)
+    try:
+        deleted = await ctx.channel.purge(limit=количество)
+        await ctx.send(f"✅ Удалено {len(deleted)} сообщений.", ephemeral=True)
+        await log_discord(
+            title="🗑️ Очистка канала",
+            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {ctx.channel.mention}\n> **Удалено:** `{len(deleted)}`",
+            color=0xff6600
+        )
+    except Exception as e:
+        await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
+
+@bot.slash_command(name="расчет", description="Рассчитать скидку")
+async def расчет(ctx, цена: float, скидка: float):
+    await ctx.response.defer(ephemeral=True)
+    try:
+        if скидка < 0 or скидка > 100:
+            return await ctx.edit_original_response(content="❌ Скидка от 0 до 100%.")
+        итог = цена - (цена * (скидка / 100))
+        экономия = цена - итог
+        embed = disnake.Embed(title="💰 Расчёт скидки", color=0x2ecc71)
+        embed.add_field(name="Исходная цена", value=f"`{цена:.2f} ₽`", inline=True)
+        embed.add_field(name="Скидка", value=f"`{скидка}%`", inline=True)
+        embed.add_field(name="Экономия", value=f"`{экономия:.2f} ₽`", inline=True)
+        embed.add_field(name="✅ Итого", value=f"**`{итог:.2f} ₽`**", inline=False)
+        await ctx.edit_original_response(embed=embed)
+        await log_discord(
+            title="🧮 Расчёт скидки",
+            description=f"> **Пользователь:** {ctx.author.mention}\n> **Цена:** `{цена}`\n> **Скидка:** `{скидка}%`\n> **Итог:** `{итог:.2f}`",
+            color=0x00ff00
+        )
+    except Exception as e:
+        await ctx.edit_original_response(content=f"Ошибка: {e}")
 
 @bot.slash_command(name="profile", description="Показать профиль пользователя")
 async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Member = None):
@@ -1338,7 +1635,7 @@ async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Me
     joined_at = user.joined_at
     joined_str = joined_at.strftime("%d.%m.%Y") if joined_at else "Неизвестно"
 
-    # ===== ПРОГРЕСС-БАР (текстовый) =====
+    # Прогресс-бар
     thresholds = [
         (1, "Клуб"),
         (2, "Бронзовый покупатель"),
@@ -1372,7 +1669,7 @@ async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Me
         progress_bar = f"{bar} {int(progress*100)}%"
         progress_text = f"Осталось {next_threshold - count} отзывов до {next_role_name}"
 
-    # Цвет embed в зависимости от роли
+    # Цвет embed
     role_color = 0x676767
     if count >= 26:
         role_color = 0xb3d9ff
@@ -1420,295 +1717,9 @@ async def profile(inter: disnake.ApplicationCommandInteraction, user: disnake.Me
         description=f"> **Кто:** {inter.author.mention}\n> **Профиль:** {user.mention}",
         color=0x00aaff
     )
-# ============================================================
-# Административные команды (без изменений)
-# ============================================================
-@bot.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def cleaning(ctx, количество: int):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    if количество < 1 or количество > 100:
-        return await ctx.send("❌ Укажите число от 1 до 100.", ephemeral=True)
-    try:
-        deleted = await ctx.channel.purge(limit=количество)
-        await ctx.send(f"✅ Удалено {len(deleted)} сообщений.", ephemeral=True)
-        await log_discord(
-            title="🗑️ Очистка канала",
-            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {ctx.channel.mention}\n> **Удалено:** `{len(deleted)}`",
-            color=0xff6600
-        )
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
-
-@bot.slash_command(name="set_rate", description="Установить курс (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def set_rate(ctx, имя: str, коэффициент: float):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    from core.utils import rates, save_json, FILES
-    имя = имя.upper()
-    rates[имя] = float(коэффициент)
-    save_json(FILES["rates"], rates)
-    await ctx.send(f"✅ Установлено: {имя} → {коэффициент}", ephemeral=True)
-    await log_discord(
-        title="📊 Изменён курс",
-        description=f"> **Админ:** {ctx.author.mention}\n> **Валюта:** `{имя}`\n> **Курс:** `{коэффициент}`",
-        color=0x00ff00
-    )
-
-@bot.slash_command(name="get_rates", description="Показать курсы (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def get_rates(ctx):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    from core.utils import rates
-    embed = disnake.Embed(title="📊 Текущие курсы", description=json.dumps(rates, ensure_ascii=False, indent=2))
-    await ctx.send(embed=embed, ephemeral=True)
-
-@bot.slash_command(name="say", description="Отправить сообщение от бота (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def say(ctx, канал: disnake.TextChannel, тип_сообщения: str = commands.Param(choices=["text", "embed"]), текст: Optional[str] = None, файл: Optional[disnake.Attachment] = None):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    if тип_сообщения == "text":
-        if not текст:
-            return await ctx.send("Введите текст.", ephemeral=True)
-        await канал.send(текст)
-        await ctx.send("✅ Отправлено", ephemeral=True)
-        await log_discord(
-            title="📨 Say: текст",
-            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
-            color=0x00ff00
-        )
-        return
-    if тип_сообщения == "embed":
-        if not текст and not файл:
-            return await ctx.send("Укажите JSON или файл.", ephemeral=True)
-        if текст and файл:
-            return await ctx.send("Только один источник.", ephemeral=True)
-        try:
-            if файл:
-                raw = await файл.read()
-                data = json.loads(raw.decode("utf-8"))
-            else:
-                data = json.loads(текст)
-            if "embeds" not in data:
-                return await ctx.send("Нет поля 'embeds'.", ephemeral=True)
-            embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
-            content = data.get("content", " ")
-            await канал.send(content=content, embeds=embeds)
-            await ctx.send("✅ Embed отправлен", ephemeral=True)
-            await log_discord(
-                title="📨 Say: embed",
-                description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
-                color=0x00ff00
-            )
-        except Exception as e:
-            logger.exception("say embed error: %s", e)
-            await ctx.send("❌ Ошибка.", ephemeral=True)
-
-@bot.slash_command(name="get_json", description="Получить JSON сообщения (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def get_json(ctx, message_link: str):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    try:
-        parts = message_link.strip("/").split("/")
-        guild_id, channel_id, message_id = map(int, parts[-3:])
-    except Exception:
-        return await ctx.send("Неверная ссылка.", ephemeral=True)
-    try:
-        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
-        msg = await channel.fetch_message(message_id)
-    except Exception as e:
-        return await ctx.send(f"Ошибка: {e}", ephemeral=True)
-    payload = {"content": msg.content or " ", "embeds": [clean_embed_for_discohook(e.to_dict()) for e in msg.embeds]}
-    buf = io.StringIO(json.dumps(payload, ensure_ascii=False, indent=2))
-    await ctx.response.send_message(file=disnake.File(fp=buf, filename="message.json"), ephemeral=True)
-    await log_discord(
-        title="📥 Выгрузка JSON",
-        description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {channel.mention}",
-        color=0x00ff00
-    )
-
-@bot.slash_command(name="promo_add", description="Добавить промокод (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def promo_add(ctx, code: str, value: str):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    from core.utils import promo_codes, save_json, FILES
-    code = code.upper()
-    promo_codes[code] = value
-    save_json(FILES["promo"], promo_codes)
-    try:
-        lines = [f"{k} - {v}" for k, v in promo_codes.items()]
-        with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-    except Exception as e:
-        logger.exception("write_promo_txt error: %s", e)
-    await ctx.send(f"✅ Добавлен `{code}` → {value}", ephemeral=True)
-    await log_discord(
-        title="➕ Промокод добавлен",
-        description=f"> **Админ:** {ctx.author.mention}\n> **Код:** `{code}`\n> **Скидка:** `{value}`",
-        color=0x00ff00
-    )
-
-@bot.slash_command(name="promo_remove", description="Удалить промокод (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def promo_remove(ctx, code: str):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    from core.utils import promo_codes, save_json, FILES
-    code = code.upper()
-    if code in promo_codes:
-        promo_codes.pop(code)
-        save_json(FILES["promo"], promo_codes)
-        try:
-            lines = [f"{k} - {v}" for k, v in promo_codes.items()]
-            with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-        except Exception as e:
-            logger.exception("write_promo_txt error: %s", e)
-        await ctx.send(f"✅ Удалён `{code}`", ephemeral=True)
-        await log_discord(
-            title="➖ Промокод удалён",
-            description=f"> **Админ:** {ctx.author.mention}\n> **Код:** `{code}`",
-            color=0xff6600
-        )
-    else:
-        await ctx.send("❌ Нет такого промокода.", ephemeral=True)
-
-@bot.slash_command(name="promo_list", description="Список промокодов (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def promo_list(ctx):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    from core.utils import promo_codes
-    if not promo_codes:
-        return await ctx.send("Промокодов нет.", ephemeral=True)
-    text = "\n".join([f"{k} → {v}" for k, v in promo_codes.items()])
-    await ctx.send(f"```\n{text}\n```", ephemeral=True)
-
-@bot.slash_command(name="расчет", description="Рассчитать скидку")
-async def расчет(ctx, цена: float, скидка: float):
-    await ctx.response.defer(ephemeral=True)
-    try:
-        if скидка < 0 or скидка > 100:
-            return await ctx.edit_original_response(content="❌ Скидка от 0 до 100%.")
-        итог = цена - (цена * (скидка / 100))
-        экономия = цена - итог
-        embed = disnake.Embed(title="💰 Расчёт скидки", color=0x2ecc71)
-        embed.add_field(name="Исходная цена", value=f"`{цена:.2f} ₽`", inline=True)
-        embed.add_field(name="Скидка", value=f"`{скидка}%`", inline=True)
-        embed.add_field(name="Экономия", value=f"`{экономия:.2f} ₽`", inline=True)
-        embed.add_field(name="✅ Итого", value=f"**`{итог:.2f} ₽`**", inline=False)
-        await ctx.edit_original_response(embed=embed)
-        await log_discord(
-            title="🧮 Расчёт скидки",
-            description=f"> **Пользователь:** {ctx.author.mention}\n> **Цена:** `{цена}`\n> **Скидка:** `{скидка}%`\n> **Итог:** `{итог:.2f}`",
-            color=0x00ff00
-        )
-    except Exception as e:
-        await ctx.edit_original_response(content=f"Ошибка: {e}")
-
-@bot.slash_command(name="обновить_баннер", description="Обновить баннер (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def обновить_баннер(ctx):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    await ctx.response.defer(ephemeral=True)
-    await update_review_counter(silent=False)
-    await ctx.edit_original_response(content="✅ Баннер обновлён!")
-
-@bot.slash_command(name="пересчитать_отзывы", description="Пересчитать отзывы и роли (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def пересчитать_отзывы(ctx: disnake.ApplicationCommandInteraction):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    await ctx.response.defer(ephemeral=True)
-    channel_id = CONFIG["REVIEW_COUNT_CHANNEL"]
-    channel = bot.get_channel(channel_id)
-    if not channel:
-        channel = await bot.fetch_channel(channel_id)
-    if not channel or not isinstance(channel, disnake.TextChannel):
-        return await ctx.edit_original_response(content="❌ Канал не найден.")
-    counts = {}
-    try:
-        async for message in channel.history(limit=None):
-            if message.author.bot:
-                continue
-            uid = str(message.author.id)
-            counts[uid] = counts.get(uid, 0) + 1
-    except Exception as e:
-        logger.exception("Ошибка чтения истории: %s", e)
-        return await ctx.edit_original_response(content=f"❌ Ошибка: {e}")
-    if not counts:
-        return await ctx.edit_original_response(content="ℹ️ Нет сообщений.")
-    save_json(FILES["review_counts"], counts)
-    guild = ctx.guild or bot.get_guild(int(CONFIG["GUILD_ID"]))
-    if not guild:
-        return await ctx.edit_original_response(content="❌ Сервер не найден.")
-    updated = 0
-    for uid_str, count in counts.items():
-        uid = int(uid_str)
-        member = guild.get_member(uid)
-        if member:
-            await update_user_roles(member, count, keep_pka=True)
-            updated += 1
-    await update_review_counter(silent=False)
-    await ctx.edit_original_response(
-        content=f"✅ Пересчёт завершён!\n"
-                f"Всего: {len(counts)}\n"
-                f"Обновлено: {updated}"
-    )
-    await log_discord(
-        title="📊 Пересчёт отзывов",
-        description=f"> **Админ:** {ctx.author.mention}\n> **Записей:** `{len(counts)}`\n> **Ролей обновлено:** `{updated}`",
-        color=0x00aaff
-    )
-
-@bot.slash_command(name="export_dc", description="Экспорт всех данных DC (только для владельца)")
-async def export_dc(inter: disnake.ApplicationCommandInteraction):
-    if inter.author.id != 796293832751972352:
-        return await inter.send("⛔ Эта команда доступна только владельцу.", ephemeral=True)
-    data = get_dc_cache_all()
-    if not data:
-        return await inter.send("❌ Нет данных для экспорта.", ephemeral=True)
-    json_str = json.dumps(data, ensure_ascii=False, indent=2)
-    file = disnake.File(io.StringIO(json_str), filename="dc_data_export.json")
-    await inter.send("📁 Вот актуальный файл DC данных:", file=file, ephemeral=True)
-    await log_discord(
-        title="📤 Экспорт DC данных",
-        description=f"> **Владелец:** {inter.author.mention} выполнил экспорт.",
-        color=0x00aaff
-    )
 
 # ============================================================
-# Обеспечение панели (ensure_panel)
-# ============================================================
-async def ensure_panel():
-    await bot.wait_until_ready()
-    chan = bot.get_channel(CONFIG["PANEL_CHANNEL_ID"])
-    if not chan:
-        chan = await bot.fetch_channel(CONFIG["PANEL_CHANNEL_ID"])
-    if not chan or not isinstance(chan, disnake.TextChannel):
-        logger.warning("Panel channel not found")
-        return
-    while not bot.is_closed():
-        try:
-            panel_msg = None
-            async for m in chan.history(limit=50):
-                if m.author == bot.user and m.components:
-                    panel_msg = m
-                    break
-            if not panel_msg:
-                embed = disnake.Embed(color=disnake.Color(0x676767))
-                embed.set_image(url=CONFIG["EMBED_IMAGE_URL"])
-                sent_msg = await chan.send(embed=embed, view=TicketPanelView())
-                bot.add_view(TicketPanelView(), message_id=sent_msg.id)
-                await log_discord(
-                    title="🖼️ Панель отправлена",
-                    description=f"> Сообщение `{sent_msg.id}` отправлено заново",
-                    color=0x00ff00
-                )
-                logger.info("Panel message sent %s", sent_msg.id)
-        except Exception as e:
-            logger.exception("ensure_panel error: %s", e)
-        await asyncio.sleep(7200)
-
-# ============================================================
-# Настройка модуля
+# НАСТРОЙКА МОДУЛЯ (для main.py)
 # ============================================================
 def setup_commands(bot):
     pass
