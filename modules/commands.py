@@ -28,7 +28,7 @@ from core.utils import (
     update_user_roles,
     get_roles_for_count,
     get_dc_cache, save_dc_cache,
-    promo_codes, used_promo, rates, reload_promo
+    get_promo_codes, add_promo_code, remove_promo_code, clear_promo_codes
 )
 
 # ============================================================
@@ -43,6 +43,15 @@ from modules.dc import (
     load_shop_catalog,
     sync_dc_to_json, get_dc_cache_all
 )
+
+# ============================================================
+# Загружаем промокоды в память для быстрого доступа (используется в тикетах)
+# ============================================================
+promo_codes = get_promo_codes()
+
+def reload_promo_cache():
+    global promo_codes
+    promo_codes = get_promo_codes()
 
 # ============================================================
 # Класс для модерации отзывов
@@ -143,6 +152,7 @@ class BuyTicketModal(Modal):
         promo = inter.text_values.get("promo_code", "").strip().upper()
         promo_display = "Не введён"
         if promo:
+            reload_promo_cache()
             if promo in promo_codes:
                 promo_display = f"{promo} — {promo_codes[promo]}"
             else:
@@ -1026,14 +1036,14 @@ async def handle_interaction(inter: disnake.MessageInteraction):
         )
 
 # ============================================================
-# РАССЫЛКА (MassSender) – используется в модалке
+# РАССЫЛКА (MassSender) – используется в модалке (оставлена для совместимости, но кнопка убрана)
 # ============================================================
 class MassSender:
     active_task = None
     stop_flag = False
 
 # ============================================================
-# МОДАЛКА ДЛЯ РАССЫЛКИ
+# МОДАЛКА ДЛЯ РАССЫЛКИ (оставлена, но не используется в панели)
 # ============================================================
 class MassSendModal(Modal):
     def __init__(self):
@@ -1110,7 +1120,7 @@ class MassSendModal(Modal):
         MassSender.active_task = task
 
 # ============================================================
-# Функции для рассылки
+# Функции для рассылки (оставлены для совместимости)
 # ============================================================
 async def send_mass_messages(members, content, embeds, progress_msg, progress_embed, ctx):
     total = len(members)
@@ -1249,14 +1259,8 @@ class PromoAddModal(Modal):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         code = inter.text_values["code"].strip().upper()
         value = inter.text_values["value"].strip()
-        promo_codes[code] = value
-        save_json(FILES["promo"], promo_codes)
-        try:
-            lines = [f"{k} - {v}" for k, v in promo_codes.items()]
-            with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-        except Exception as e:
-            logger.exception("write_promo_txt error: %s", e)
+        add_promo_code(code, value)
+        reload_promo_cache()
         await inter.response.send_message(f"✅ Промокод `{code}` добавлен → {value}", ephemeral=True)
         await log_discord("➕ Промокод добавлен", f"Админ {inter.author.mention} добавил `{code}` → {value}", color=0x00ff00)
 
@@ -1264,6 +1268,7 @@ class PromoRemoveSelectView(View):
     def __init__(self):
         super().__init__(timeout=60)
         options = []
+        reload_promo_cache()
         if not promo_codes:
             options.append(SelectOption(label="Нет промокодов", value="none", default=True))
         else:
@@ -1283,14 +1288,8 @@ class PromoRemoveSelectView(View):
         if code == "none":
             return await inter.response.send_message("Нет промокодов для удаления.", ephemeral=True)
         if code in promo_codes:
-            promo_codes.pop(code)
-            save_json(FILES["promo"], promo_codes)
-            try:
-                lines = [f"{k} - {v}" for k, v in promo_codes.items()]
-                with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
-                    f.write("\n".join(lines))
-            except Exception as e:
-                logger.exception("write_promo_txt error: %s", e)
+            remove_promo_code(code)
+            reload_promo_cache()
             await inter.response.send_message(f"✅ Промокод `{code}` удалён.", ephemeral=True)
             await log_discord("➖ Промокод удалён", f"Админ {inter.author.mention} удалил `{code}`", color=0xff6600)
         else:
@@ -1303,60 +1302,56 @@ class AdminPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label="Сообщение от бота", style=ButtonStyle.gray, custom_id="admin_say")
+    @disnake.ui.button(label="Сообщение от бота", style=ButtonStyle.gray, row=0)
     async def admin_say(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.send_modal(SayModal())
 
-    @disnake.ui.button(label="Получить JSON", style=ButtonStyle.gray, custom_id="admin_get_json")
+    @disnake.ui.button(label="Получить JSON", style=ButtonStyle.gray, row=0)
     async def admin_get_json(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.send_modal(GetJsonModal())
 
-    @disnake.ui.button(label="Рассылка", style=ButtonStyle.gray, custom_id="admin_mass")
-    async def admin_mass(self, button: Button, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        await inter.response.send_modal(MassSendModal())
-
-    @disnake.ui.button(label="Пересчитать отзывы", style=ButtonStyle.gray, custom_id="admin_recalc")
+    @disnake.ui.button(label="Пересчитать отзывы", style=ButtonStyle.gray, row=1)
     async def admin_recalc(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.defer(ephemeral=True)
         await recalc_reviews(inter)
+        # Не отправляем дополнительное сообщение
 
-    @disnake.ui.button(label="Обновить баннер", style=ButtonStyle.gray, custom_id="admin_banner")
+    @disnake.ui.button(label="Обновить баннер", style=ButtonStyle.gray, row=1)
     async def admin_banner(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.defer(ephemeral=True)
         await update_review_counter(silent=False)
-        await inter.edit_original_message(content="✅ Баннер обновлён!")
+        # Не отправляем дополнительное сообщение
 
 class PromoPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label="Список промокодов", style=ButtonStyle.gray, custom_id="promo_list")
+    @disnake.ui.button(label="Список промокодов", style=ButtonStyle.gray, row=0)
     async def promo_list(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        reload_promo_cache()
         if not promo_codes:
             await inter.response.send_message("Промокодов нет.", ephemeral=True)
             return
-        text = "\n".join([f"{k} → {v}" for k, v in promo_codes.items()])
+        text = "\n".join([f"{code} → {value}" for code, value in promo_codes.items()])
         await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
 
-    @disnake.ui.button(label="Добавить промокод", style=ButtonStyle.gray, custom_id="promo_add")
+    @disnake.ui.button(label="Добавить промокод", style=ButtonStyle.gray, row=0)
     async def promo_add(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.send_modal(PromoAddModal())
 
-    @disnake.ui.button(label="Удалить промокод", style=ButtonStyle.gray, custom_id="promo_remove")
+    @disnake.ui.button(label="Удалить промокод", style=ButtonStyle.gray, row=0)
     async def promo_remove(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
@@ -1371,7 +1366,8 @@ async def recalc_reviews(inter):
     if not channel:
         channel = await bot.fetch_channel(channel_id)
     if not channel or not isinstance(channel, disnake.TextChannel):
-        return await inter.edit_original_response(content="❌ Канал отзывов не найден.")
+        await inter.edit_original_response(content="❌ Канал отзывов не найден.")
+        return
     counts = {}
     try:
         async for message in channel.history(limit=None):
@@ -1381,13 +1377,16 @@ async def recalc_reviews(inter):
             counts[uid] = counts.get(uid, 0) + 1
     except Exception as e:
         logger.exception("Ошибка чтения истории: %s", e)
-        return await inter.edit_original_response(content=f"❌ Ошибка: {e}")
+        await inter.edit_original_response(content=f"❌ Ошибка: {e}")
+        return
     if not counts:
-        return await inter.edit_original_response(content="ℹ️ Нет сообщений.")
+        await inter.edit_original_response(content="ℹ️ Нет сообщений.")
+        return
     save_json(FILES["review_counts"], counts)
     guild = inter.guild or bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
-        return await inter.edit_original_response(content="❌ Сервер не найден.")
+        await inter.edit_original_response(content="❌ Сервер не найден.")
+        return
     updated = 0
     for uid_str, count in counts.items():
         uid = int(uid_str)
