@@ -1302,33 +1302,51 @@ class AdminPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label="Сообщение от бота", style=ButtonStyle.gray, row=0)
+    @disnake.ui.button(
+        label="ㅤㅤㅤСообщение от ботаㅤㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        row=0,
+        custom_id="admin_say"
+    )
     async def admin_say(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.send_modal(SayModal())
 
-    @disnake.ui.button(label="Получить JSON", style=ButtonStyle.gray, row=0)
+    @disnake.ui.button(
+        label="ㅤㅤㅤПолучить JSONㅤㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        row=0,
+        custom_id="admin_get_json"
+    )
     async def admin_get_json(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.send_modal(GetJsonModal())
 
-    @disnake.ui.button(label="Пересчитать отзывы", style=ButtonStyle.gray, row=1)
+    @disnake.ui.button(
+        label="ㅤㅤПересчитать отзывыㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        row=1,
+        custom_id="admin_recalc"
+    )
     async def admin_recalc(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.defer(ephemeral=True)
         await recalc_reviews(inter)
-        # Не отправляем дополнительное сообщение
 
-    @disnake.ui.button(label="Обновить баннер", style=ButtonStyle.gray, row=1)
+    @disnake.ui.button(
+        label="ㅤㅤОбновить баннерㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        row=1,
+        custom_id="admin_banner"
+    )
     async def admin_banner(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.defer(ephemeral=True)
         await update_review_counter(silent=False)
-        # Не отправляем дополнительное сообщение
 
 class PromoPanelView(View):
     def __init__(self):
