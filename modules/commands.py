@@ -1314,7 +1314,7 @@ class AdminPanelView(View):
         await inter.response.send_modal(SayModal())
 
     @disnake.ui.button(
-        label="ㅤㅤㅤПолучить JSONㅤㅤㅤ",
+        label="ㅤㅤПолучить JSONㅤㅤㅤ",  # убрал один пробел слева
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_get_json"
@@ -1337,7 +1337,7 @@ class AdminPanelView(View):
         await recalc_reviews(inter)
 
     @disnake.ui.button(
-        label="ㅤㅤОбновить баннерㅤㅤ",
+        label="ㅤㅤㅤㅤОбновить баннерㅤㅤㅤㅤ",  # добавил по два пробела с каждой стороны
         style=disnake.ButtonStyle.gray,
         row=1,
         custom_id="admin_banner"
