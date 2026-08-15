@@ -14,7 +14,7 @@ from disnake.ui import Modal, TextInput, View, Button, Select
 from disnake import PartialEmoji, ui, ButtonStyle, Embed, SelectOption
 
 # ============================================================
-# Импорты из core.utils
+# Импорты из core.utils (без bot)
 # ============================================================
 from core.utils import (
     CONFIG, FILES, BASE_DIR, DATA_DIR, CATALOG_DIR, ADD_DIR,
@@ -32,12 +32,7 @@ from core.utils import (
 )
 
 # ============================================================
-# Импорт из core.bot (без update_review_counter, чтобы избежать цикла)
-# ============================================================
-from core.bot import bot, voice_track
-
-# ============================================================
-# Импорты из modules.dc
+# Импорт из modules.dc (без проблем)
 # ============================================================
 from modules.dc import (
     get_user_balance, add_dc, remove_dc,
@@ -50,7 +45,7 @@ from modules.dc import (
 )
 
 # ============================================================
-# Загружаем промокоды в память для быстрого доступа (используется в тикетах)
+# Загружаем промокоды в память для быстрого доступа
 # ============================================================
 promo_codes = get_promo_codes()
 
@@ -91,7 +86,7 @@ class ReviewModerationView(View):
         for child in self.children:
             child.disabled = True
         await inter.response.edit_message(view=self)
-        log_chan = bot.get_channel(CONFIG["LOG_CHANNEL_ID"])
+        log_chan = self.get_log_channel(inter)
         if log_chan:
             await log_chan.send(
                 embed=disnake.Embed(
@@ -102,6 +97,10 @@ class ReviewModerationView(View):
                 )
             )
 
+    def get_log_channel(self, inter):
+        from core.bot import bot
+        return bot.get_channel(CONFIG["LOG_CHANNEL_ID"])
+
     @disnake.ui.button(label="✅ Одобрить", style=ButtonStyle.success)
     async def approve(self, button: Button, inter: disnake.MessageInteraction):
         if not has_review_moderation_roles(inter.author):
@@ -111,6 +110,7 @@ class ReviewModerationView(View):
         data["last_review"] = now_ts()
         save_dc_cache(self.user_id, data)
         try:
+            from core.bot import bot
             user = bot.get_user(self.user_id)
             if user:
                 await user.send("✅ Ваш отзыв одобрен! Вам начислено **+10 DC**.")
@@ -123,6 +123,7 @@ class ReviewModerationView(View):
         if not has_review_moderation_roles(inter.author):
             return await inter.response.send_message("⛔ У вас нет прав для отклонения.", ephemeral=True)
         try:
+            from core.bot import bot
             user = bot.get_user(self.user_id)
             if user:
                 await user.send("❌ Ваш отзыв был отклонён администратором.")
@@ -131,7 +132,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ (без изменений)
+# ТИКЕТЫ
 # ============================================================
 class BuyTicketModal(Modal):
     def __init__(self):
@@ -143,6 +144,7 @@ class BuyTicketModal(Modal):
         super().__init__(title="Создание тикета на покупку", components=components, custom_id="buy_ticket_modal")
 
     async def callback(self, inter: disnake.ModalInteraction):
+        from core.bot import bot
         uid = inter.author.id
         now = time.time()
         last = getattr(bot, "_user_ticket_cooldowns", {})
@@ -611,7 +613,7 @@ class TicketPanelView(View):
         )
 
 # ============================================================
-# МЕНЮ (catalog) – без изменений
+# МЕНЮ (catalog)
 # ============================================================
 MENU_CHANNEL_ID = 1462140026073776280
 MENU_OPTIONS = [
@@ -686,6 +688,7 @@ class MenuView(disnake.ui.View):
         self.add_item(MenuSelect())
 
 async def send_menu_panel():
+    from core.bot import bot
     await bot.wait_until_ready()
     channel = bot.get_channel(MENU_CHANNEL_ID)
     if not channel:
@@ -992,6 +995,7 @@ async def show_profile(inter: disnake.MessageInteraction, user: disnake.Member):
     )
 
 async def send_home_panel():
+    from core.bot import bot
     await bot.wait_until_ready()
     channel = bot.get_channel(HOME_CHANNEL_ID)
     if not channel:
@@ -1029,7 +1033,7 @@ async def send_home_panel():
 # ============================================================
 # НОВАЯ КОМАНДА /panel_dc (экономическая панель для админов)
 # ============================================================
-@bot.slash_command(name="panel_dc", description="Экономическая панель Diamond Coins (админ)")
+@commands.slash_command(name="panel_dc", description="Экономическая панель Diamond Coins (админ)")
 async def panel_dc(inter: disnake.ApplicationCommandInteraction):
     if not has_admin_command_roles(inter.author):
         return await inter.send("⛔ У вас нет прав.", ephemeral=True)
@@ -1047,7 +1051,7 @@ async def panel_dc(inter: disnake.ApplicationCommandInteraction):
     await inter.send(embeds=[embed1, embed2], ephemeral=True, view=DCPanelView())
 
 # ============================================================
-# ПАНЕЛЬ DC (новая, только нужные кнопки)
+# ПАНЕЛЬ DC
 # ============================================================
 class DCPanelView(View):
     def __init__(self):
@@ -1231,6 +1235,7 @@ class GetJsonModal(Modal):
         except:
             return await inter.response.send_message("❌ Неверная ссылка.", ephemeral=True)
         try:
+            from core.bot import bot
             channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
             msg = await channel.fetch_message(message_id)
         except Exception as e:
@@ -1290,7 +1295,7 @@ class PromoRemoveSelectView(View):
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
 
 # ============================================================
-# НОВЫЕ ПАНЕЛИ (admin_panel, promocodes) – только нужные кнопки
+# НОВЫЕ ПАНЕЛИ (admin_panel, promocodes)
 # ============================================================
 class AdminPanelView(View):
     def __init__(self):
@@ -1375,9 +1380,10 @@ class PromoPanelView(View):
         await inter.response.send_message("Выберите промокод для удаления:", ephemeral=True, view=PromoRemoveSelectView())
 
 # ============================================================
-# Функция для пересчёта отзывов (вынесена)
+# Функция для пересчёта отзывов
 # ============================================================
 async def recalc_reviews(inter):
+    from core.bot import bot
     channel_id = CONFIG["REVIEW_COUNT_CHANNEL"]
     channel = bot.get_channel(channel_id)
     if not channel:
@@ -1427,7 +1433,7 @@ async def recalc_reviews(inter):
 # ============================================================
 # НОВЫЕ СЛЕШ-КОМАНДЫ (admin_panel, promocodes)
 # ============================================================
-@bot.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
+@commands.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
 async def admin_panel(inter: disnake.ApplicationCommandInteraction):
     if not has_admin_command_roles(inter.author):
         return await inter.send("⛔ У вас нет прав.", ephemeral=True)
@@ -1441,7 +1447,7 @@ async def admin_panel(inter: disnake.ApplicationCommandInteraction):
     ]
     await inter.send(embeds=embeds, ephemeral=True, view=AdminPanelView())
 
-@bot.slash_command(name="promocodes", description="Управление промокодами (админ)")
+@commands.slash_command(name="promocodes", description="Управление промокодами (админ)")
 async def promocodes(inter: disnake.ApplicationCommandInteraction):
     if not has_admin_command_roles(inter.author):
         return await inter.send("⛔ У вас нет прав.", ephemeral=True)
@@ -1458,7 +1464,7 @@ async def promocodes(inter: disnake.ApplicationCommandInteraction):
 # ============================================================
 # ОСТАВЛЯЕМ КОМАНДЫ: /расчет, /cleaning
 # ============================================================
-@bot.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
+@commands.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
 async def cleaning(ctx, количество: int):
     if not has_admin_command_roles(ctx.author):
         return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
@@ -1475,7 +1481,7 @@ async def cleaning(ctx, количество: int):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
 
-@bot.slash_command(name="расчет", description="Рассчитать скидку")
+@commands.slash_command(name="расчет", description="Рассчитать скидку")
 async def расчет(ctx, цена: float, скидка: float):
     await ctx.response.defer(ephemeral=True)
     try:
@@ -1508,4 +1514,9 @@ async def handle_interaction(inter: disnake.MessageInteraction):
 # НАСТРОЙКА МОДУЛЯ (для main.py)
 # ============================================================
 def setup_commands(bot):
-    pass
+    # Регистрируем команды
+    bot.add_slash_command(panel_dc)
+    bot.add_slash_command(admin_panel)
+    bot.add_slash_command(promocodes)
+    bot.add_slash_command(cleaning)
+    bot.add_slash_command(расчет)
