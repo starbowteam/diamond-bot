@@ -29,7 +29,7 @@ from modules.dc import (
     get_user_dc_data, save_user_dc_data,
     daily_bonus, monthly_fee
 )
-from modules.commands import send_home_panel  # Домик
+# Импорт send_home_panel убран отсюда, будет импортирован внутри on_ready
 
 # ============================================================
 # Инициализация бота
@@ -140,7 +140,8 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        from modules.commands import TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView
+        # Импортируем классы View и панели только внутри on_ready
+        from modules.commands import TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView, send_home_panel
         bot.add_view(TicketPanelView())
         bot.add_view(TicketButtons())
         bot.add_view(TicketButtonsPaid())
