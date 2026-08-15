@@ -1303,7 +1303,7 @@ class AdminPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="Пересчитать отзывы",
+        label="Пересчёт отзывов",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_recalc"
@@ -1315,7 +1315,7 @@ class AdminPanelView(View):
         await recalc_reviews(inter)
 
     @disnake.ui.button(
-        label="Обновить баннер - Экстра",
+        label="Обновление баннера",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_banner"
@@ -1327,7 +1327,7 @@ class AdminPanelView(View):
         await update_review_counter(silent=False)
 
     @disnake.ui.button(
-        label="Получить JSON-SM",
+        label="Выгрузка JSON",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_get_json"
@@ -1342,7 +1342,7 @@ class PromoPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="Список Промокодов",
+        label="Список промокодов",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_list"
@@ -1358,7 +1358,7 @@ class PromoPanelView(View):
         await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤДобавление промокода",
+        label="Добавление промокода",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_add"
@@ -1369,7 +1369,7 @@ class PromoPanelView(View):
         await inter.response.send_modal(PromoAddModal())
 
     @disnake.ui.button(
-        label="ㅤУдалить промокоды",
+        label="Удаление промокода",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_remove"
@@ -1378,7 +1378,7 @@ class PromoPanelView(View):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.send_message("Выберите промокод для удаления:", ephemeral=True, view=PromoRemoveSelectView())
-
+        
 # ============================================================
 # Функция для пересчёта отзывов (вынесена)
 # ============================================================
