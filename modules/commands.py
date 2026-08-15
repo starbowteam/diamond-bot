@@ -1342,7 +1342,7 @@ class PromoPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="Список",
+        label="Промокоды",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_list"
