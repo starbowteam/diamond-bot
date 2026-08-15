@@ -32,9 +32,13 @@ from core.utils import (
 )
 
 # ============================================================
-# Импорт из core.bot
+# Импорт из core.bot (без update_review_counter, чтобы избежать цикла)
 # ============================================================
-from core.bot import update_review_counter, bot, voice_track
+from core.bot import bot, voice_track
+
+# ============================================================
+# Импорты из modules.dc
+# ============================================================
 from modules.dc import (
     get_user_balance, add_dc, remove_dc,
     add_purchase, get_user_purchases, remove_purchase,
@@ -1314,6 +1318,8 @@ class AdminPanelView(View):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.defer(ephemeral=True)
+        # Локальный импорт для избежания цикла
+        from core.bot import update_review_counter
         await update_review_counter(silent=False)
 
     @disnake.ui.button(
@@ -1406,6 +1412,8 @@ async def recalc_reviews(inter):
         if member:
             await update_user_roles(member, count, keep_pka=True)
             updated += 1
+    # локальный импорт
+    from core.bot import update_review_counter
     await update_review_counter(silent=False)
     await inter.edit_original_response(
         content=f"✅ Пересчёт завершён!\n"
