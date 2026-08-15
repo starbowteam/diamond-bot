@@ -29,7 +29,6 @@ from modules.dc import (
     get_user_dc_data, save_user_dc_data,
     daily_bonus, monthly_fee
 )
-# Импорт send_home_panel убран отсюда, будет импортирован внутри on_ready
 
 # ============================================================
 # Инициализация бота
@@ -148,7 +147,7 @@ async def on_ready():
         bot.add_view(MenuView())
 
         bot.loop.create_task(send_menu_panel())
-        bot.loop.create_task(ensure_panel())
+        # Убрали вызов ensure_panel – его нет
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_home_panel())  # Домик
@@ -205,11 +204,6 @@ async def send_menu_panel():
     from modules.commands import send_menu_panel as _send_menu_panel
     await _send_menu_panel()
 
-async def ensure_panel():
-    await bot.wait_until_ready()
-    from modules.commands import ensure_panel as _ensure_panel
-    await _ensure_panel()
-
 async def keep_voice_alive():
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -237,7 +231,7 @@ async def keep_voice_alive():
         await asyncio.sleep(60)
 
 # ============================================================
-# Глобальные обработчики событий (логирование) – оставляем без изменений
+# Глобальные обработчики событий (логирование)
 # ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
