@@ -1303,7 +1303,7 @@ class AdminPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤСообщение от ботаㅤㅤㅤ",
+        label="ㅤㅤㅤㅤСообщение от ботаㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_say"
@@ -1314,7 +1314,7 @@ class AdminPanelView(View):
         await inter.response.send_modal(SayModal())
 
     @disnake.ui.button(
-        label="ㅤㅤПолучить JSONㅤㅤㅤ",  # убрал один пробел слева
+        label="ㅤㅤㅤㅤㅤㅤПолучить JSONㅤㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_get_json"
@@ -1325,7 +1325,7 @@ class AdminPanelView(View):
         await inter.response.send_modal(GetJsonModal())
 
     @disnake.ui.button(
-        label="ㅤㅤПересчитать отзывыㅤㅤ",
+        label="ㅤㅤㅤПересчитать отзывыㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=1,
         custom_id="admin_recalc"
@@ -1337,7 +1337,7 @@ class AdminPanelView(View):
         await recalc_reviews(inter)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤПринудительно Банр",  # добавил по два пробела с каждой стороны
+        label="ㅤㅤㅤㅤㅤОбновить баннерㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=1,
         custom_id="admin_banner"
@@ -1352,7 +1352,12 @@ class PromoPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label="Список промокодов", style=ButtonStyle.gray, row=0)
+    @disnake.ui.button(
+        label="ㅤㅤㅤСписок промокодовㅤㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        row=0,
+        custom_id="promo_list"
+    )
     async def promo_list(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
@@ -1363,13 +1368,23 @@ class PromoPanelView(View):
         text = "\n".join([f"{code} → {value}" for code, value in promo_codes.items()])
         await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
 
-    @disnake.ui.button(label="Добавить промокод", style=ButtonStyle.gray, row=0)
+    @disnake.ui.button(
+        label="ㅤㅤㅤДобавить промокодㅤㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        row=0,
+        custom_id="promo_add"
+    )
     async def promo_add(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.send_modal(PromoAddModal())
 
-    @disnake.ui.button(label="Удалить промокод", style=ButtonStyle.gray, row=0)
+    @disnake.ui.button(
+        label="ㅤㅤㅤУдалить промокодㅤㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        row=0,
+        custom_id="promo_remove"
+    )
     async def promo_remove(self, button: Button, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
