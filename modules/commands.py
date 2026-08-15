@@ -131,7 +131,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ
+# ТИКЕТЫ (без изменений)
 # ============================================================
 class BuyTicketModal(Modal):
     def __init__(self):
@@ -1297,7 +1297,7 @@ class AdminPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="Пересчёт отзывов",
+        label="ㅤㅤㅤПересчёт отзывовㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_recalc"
@@ -1309,7 +1309,7 @@ class AdminPanelView(View):
         await recalc_reviews(inter)
 
     @disnake.ui.button(
-        label="Обновление баннера",
+        label="ㅤㅤОбновление баннераㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_banner"
@@ -1318,12 +1318,11 @@ class AdminPanelView(View):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await inter.response.defer(ephemeral=True)
-        # Локальный импорт для избежания цикла
         from core.bot import update_review_counter
         await update_review_counter(silent=False)
 
     @disnake.ui.button(
-        label="Выгрузка JSON",
+        label="ㅤㅤㅤВыгрузка JSONㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="admin_get_json"
@@ -1338,7 +1337,7 @@ class PromoPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="Список промокодов",
+        label="ㅤㅤㅤСписок промокодовㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_list"
@@ -1354,7 +1353,7 @@ class PromoPanelView(View):
         await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
 
     @disnake.ui.button(
-        label="Добавление промокода",
+        label="ㅤㅤДобавление промокодаㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_add"
@@ -1365,7 +1364,7 @@ class PromoPanelView(View):
         await inter.response.send_modal(PromoAddModal())
 
     @disnake.ui.button(
-        label="Удаление промокода",
+        label="ㅤㅤУдаление промокодаㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_remove"
@@ -1412,7 +1411,6 @@ async def recalc_reviews(inter):
         if member:
             await update_user_roles(member, count, keep_pka=True)
             updated += 1
-    # локальный импорт
     from core.bot import update_review_counter
     await update_review_counter(silent=False)
     await inter.edit_original_response(
