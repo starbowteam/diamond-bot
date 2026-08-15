@@ -26,7 +26,10 @@ from modules.dc import (
     get_user_dc_data, save_user_dc_data,
     daily_bonus, monthly_fee
 )
-from modules.commands import send_home_panel, handle_interaction  # добавили send_home_panel
+from modules.commands import (
+    send_menu_panel, ensure_panel,
+    send_dc_panel, send_home_panel
+)
 
 # ============================================================
 # Инициализация бота
@@ -129,8 +132,6 @@ async def monthly_fee_task():
     await bot.wait_until_ready()
     await monthly_fee()
 
-# top_embed_task УДАЛЁН
-
 # ============================================================
 # Глобальные события
 # ============================================================
@@ -139,20 +140,18 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        # Регистрируем постоянные view
-        from modules.commands import TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView, HomeView
+        from modules.commands import TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView
         bot.add_view(TicketPanelView())
         bot.add_view(TicketButtons())
         bot.add_view(TicketButtonsPaid())
         bot.add_view(MenuView())
-        bot.add_view(HomeView())  # добавили для домика
 
-        # Фоновые задачи
         bot.loop.create_task(send_menu_panel())
         bot.loop.create_task(ensure_panel())
         bot.loop.create_task(keep_voice_alive())
+        bot.loop.create_task(send_dc_panel())
         bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_home_panel())  # вместо send_dc_panel
+        bot.loop.create_task(send_home_panel())  # новая панель "Домик"
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
@@ -175,7 +174,6 @@ async def on_ready():
                 logger.info("Нет данных об отзывах для обновления ролей")
 
         await update_review_counter(silent=False)
-        # await update_top_embed()  УДАЛЕНО
 
         if not review_counter_task.is_running():
             review_counter_task.start()
@@ -183,7 +181,6 @@ async def on_ready():
             daily_bonus_task.start()
         if not monthly_fee_task.is_running():
             monthly_fee_task.start()
-        # top_embed_task больше не запускаем
 
         logger.info("%s is ready", bot.user)
         await log_discord(
@@ -198,7 +195,7 @@ async def on_ready():
             description=f"> **Ошибка:** `{str(e)}`",
             color=0xff0000
         )
-
+        
 # ============================================================
 # Фоновые задачи (панели)
 # ============================================================
@@ -238,7 +235,15 @@ async def keep_voice_alive():
             logger.exception("keep_voice_alive loop error: %s", e)
         await asyncio.sleep(60)
 
-# send_dc_panel УДАЛЁН — заменён на send_home_panel
+async def send_dc_panel():
+    await bot.wait_until_ready()
+    from modules.commands import send_dc_panel as _send_dc_panel
+    await _send_dc_panel()
+
+async def send_home_panel():
+    await bot.wait_until_ready()
+    from modules.commands import send_home_panel as _send_home_panel
+    await _send_home_panel()
 
 # ============================================================
 # Глобальные обработчики (оставляем без изменений)
