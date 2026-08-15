@@ -180,10 +180,14 @@ async def on_ready():
         if not monthly_fee_task.is_running():
             monthly_fee_task.start()
 
+        # ЯВНАЯ СИНХРОНИЗАЦИЯ СЛЕШ-КОМАНД
+        await bot.sync_commands()
+        logger.info("✅ Слеш-команды синхронизированы")
+
         logger.info("%s is ready", bot.user)
         await log_discord(
             title="✅ Бот запустился",
-            description=f"> **{bot.user}** готов и онлайн.\n> Роли обновлены для {len(counts) if counts else 0} пользователей.",
+            description=f"> **{bot.user}** готов и онлайн.\n> Роли обновлены для {len(counts) if counts else 0} пользователей.\n> Команды синхронизированы.",
             color=0x00ff00
         )
     except Exception as e:
@@ -193,7 +197,6 @@ async def on_ready():
             description=f"> **Ошибка:** `{str(e)}`",
             color=0xff0000
         )
-        
 # ============================================================
 # Фоновые задачи (панели)
 # ============================================================
