@@ -27,8 +27,8 @@ from modules.dc import (
     daily_bonus, monthly_fee
 )
 from modules.commands import (
-    send_menu_panel, ensure_panel,
-    send_dc_panel, send_home_panel
+    send_menu_panel,
+    send_home_panel
 )
 
 # ============================================================
@@ -147,11 +147,9 @@ async def on_ready():
         bot.add_view(MenuView())
 
         bot.loop.create_task(send_menu_panel())
-        bot.loop.create_task(ensure_panel())
         bot.loop.create_task(keep_voice_alive())
-        bot.loop.create_task(send_dc_panel())
         bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_home_panel())  # новая панель "Домик"
+        bot.loop.create_task(send_home_panel())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
@@ -204,11 +202,6 @@ async def send_menu_panel():
     from modules.commands import send_menu_panel as _send_menu_panel
     await _send_menu_panel()
 
-async def ensure_panel():
-    await bot.wait_until_ready()
-    from modules.commands import ensure_panel as _ensure_panel
-    await _ensure_panel()
-
 async def keep_voice_alive():
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -235,10 +228,10 @@ async def keep_voice_alive():
             logger.exception("keep_voice_alive loop error: %s", e)
         await asyncio.sleep(60)
 
-async def send_dc_panel():
+async def send_actions_panel():
     await bot.wait_until_ready()
-    from modules.commands import send_dc_panel as _send_dc_panel
-    await _send_dc_panel()
+    from modules.actions import send_actions_panel as _send_actions_panel
+    await _send_actions_panel()
 
 async def send_home_panel():
     await bot.wait_until_ready()
