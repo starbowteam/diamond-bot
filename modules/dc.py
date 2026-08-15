@@ -10,6 +10,9 @@ from disnake.ext import commands
 from disnake.ui import View, Button, Select, Modal, TextInput
 from disnake import ButtonStyle, SelectOption
 
+# Добавляем импорт бота, чтобы использовать в daily_bonus и monthly_fee
+from core.bot import bot
+
 from core.utils import (
     CONFIG, FILES, BASE_DIR, DATA_DIR, CATALOG_DIR, ADD_DIR,
     logger, db, cur,
@@ -240,6 +243,7 @@ def create_default_catalog() -> dict:
 # Ежедневный бонус и комиссия
 # ============================================================
 async def daily_bonus():
+    # bot уже импортирован сверху
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
         return
