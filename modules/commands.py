@@ -53,7 +53,7 @@ def reload_promo_cache():
     promo_codes = get_promo_codes()
 
 # ============================================================
-# Класс для модерации отзывов (без изменений, но bot используется внутри)
+# Класс для модерации отзывов
 # ============================================================
 class ReviewModerationView(View):
     def __init__(self, user_id: int, content: str, msg_id: int, channel_id: int):
@@ -128,7 +128,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ (без изменений, но bot используется внутри методов)
+# ТИКЕТЫ (без изменений)
 # ============================================================
 class BuyTicketModal(Modal):
     def __init__(self):
@@ -753,7 +753,7 @@ class DCPanelView(View):
         )
 
 # ============================================================
-# МОДАЛКИ ДЛЯ DC-ПАНЕЛИ (Начислить, Снять, Покупки)
+# МОДАЛКИ ДЛЯ DC-ПАНЕЛИ
 # ============================================================
 class GiveDcModal(Modal):
     def __init__(self):
@@ -861,27 +861,6 @@ class ManagePurchasesModal(Modal):
 
         select.callback = select_callback
         await inter.response.send_message(f"Выберите покупку пользователя <@{user_id}>, которую хотите удалить:", ephemeral=True, view=view)
-
-# ============================================================
-# КОМАНДА /panel_dc (новая админ-панель)
-# ============================================================
-@bot.slash_command(name="panel_dc", description="Админ-панель управления Diamond Coins")
-async def panel_dc(inter: disnake.ApplicationCommandInteraction):
-    from core.bot import bot
-    if not has_admin_command_roles(inter.author):
-        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
-
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202627005874318/image.png?ex=6a81d254&is=6a8080d4&hm=638d4a0af652ad4a72f25c2d193abff8e74879cf2dd173079a863484559c1dca&=&format=webp&quality=lossless")
-
-    embed2 = disnake.Embed(
-        title="Экономическая панель Diamond Coins",
-        description="> В данном разделе, происходит ручная корректировка валютного дела, связанного с акциями, и самой валютой, ниже - кнопки. Нажимай с умом.",
-        color=6776679
-    )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
-
-    await inter.send(embeds=[embed1, embed2], ephemeral=True, view=DCPanelView())
 
 # ============================================================
 # НОВАЯ ПАНЕЛЬ "ДОМИК" (канал 1532398684074016870)
@@ -1428,7 +1407,7 @@ class PromoRemoveSelectView(View):
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
 
 # ============================================================
-# ПАНЕЛИ (admin_panel, promocodes) – без изменений, но с локальным bot
+# ПАНЕЛИ (admin_panel, promocodes) – без изменений
 # ============================================================
 class AdminPanelView(View):
     def __init__(self):
@@ -1563,130 +1542,149 @@ async def recalc_reviews(inter):
     )
 
 # ============================================================
-# СЛЕШ-КОМАНДЫ (без изменений, но с локальным bot в декораторах – они уже есть)
+# РЕГИСТРАЦИЯ КОМАНД (все команды регистрируются через эту функцию)
 # ============================================================
-@bot.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
-async def admin_panel(inter: disnake.ApplicationCommandInteraction):
-    if not has_admin_command_roles(inter.author):
-        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
-    embeds = [
-        disnake.Embed(color=6776679).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&"),
-        disnake.Embed(
-            title="Панель управление сервером",
-            description="> С помощью данной панели, происходит управление сервером, старые команды, были заменены одной панелью, что дает доступ, в одном виде. Ниже - предоставлены кнопки. Используй с умом.",
+def setup_commands(bot):
+    """Регистрирует все слеш-команды, передавая объект bot."""
+    
+    @bot.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
+    async def admin_panel(inter: disnake.ApplicationCommandInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.send("⛔ У вас нет прав.", ephemeral=True)
+        embeds = [
+            disnake.Embed(color=6776679).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&"),
+            disnake.Embed(
+                title="Панель управление сервером",
+                description="> С помощью данной панели, происходит управление сервером, старые команды, были заменены одной панелью, что дает доступ, в одном виде. Ниже - предоставлены кнопки. Используй с умом.",
+                color=6776679
+            ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+        ]
+        await inter.send(embeds=embeds, ephemeral=True, view=AdminPanelView())
+
+    @bot.slash_command(name="promocodes", description="Управление промокодами (админ)")
+    async def promocodes(inter: disnake.ApplicationCommandInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.send("⛔ У вас нет прав.", ephemeral=True)
+        embeds = [
+            disnake.Embed(color=6776679).set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1537853007754957021/image.png?ex=6a808cb8&is=6a7f3b38&hm=9a8ed29d187e151fe6fe207910dd8665d74b9e2ab794c62e364e72e17079d7f6&=&format=webp&quality=lossless"),
+            disnake.Embed(
+                title="Управление промокодами",
+                description="> Используй данную панель, для управления промокодами.",
+                color=6776679
+            ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+        ]
+        await inter.send(embeds=embeds, ephemeral=True, view=PromoPanelView())
+
+    @bot.slash_command(name="panel_dc", description="Админ-панель управления Diamond Coins")
+    async def panel_dc(inter: disnake.ApplicationCommandInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.send("⛔ У вас нет прав.", ephemeral=True)
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202627005874318/image.png?ex=6a81d254&is=6a8080d4&hm=638d4a0af652ad4a72f25c2d193abff8e74879cf2dd173079a863484559c1dca&=&format=webp&quality=lossless")
+        embed2 = disnake.Embed(
+            title="Экономическая панель Diamond Coins",
+            description="> В данном разделе, происходит ручная корректировка валютного дела, связанного с акциями, и самой валютой, ниже - кнопки. Нажимай с умом.",
             color=6776679
-        ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
-    ]
-    await inter.send(embeds=embeds, ephemeral=True, view=AdminPanelView())
-
-@bot.slash_command(name="promocodes", description="Управление промокодами (админ)")
-async def promocodes(inter: disnake.ApplicationCommandInteraction):
-    if not has_admin_command_roles(inter.author):
-        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
-    embeds = [
-        disnake.Embed(color=6776679).set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1537853007754957021/image.png?ex=6a808cb8&is=6a7f3b38&hm=9a8ed29d187e151fe6fe207910dd8665d74b9e2ab794c62e364e72e17079d7f6&=&format=webp&quality=lossless"),
-        disnake.Embed(
-            title="Управление промокодами",
-            description="> Используй данную панель, для управления промокодами.",
-            color=6776679
-        ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
-    ]
-    await inter.send(embeds=embeds, ephemeral=True, view=PromoPanelView())
-
-@bot.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def cleaning(ctx, количество: int):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    if количество < 1 or количество > 100:
-        return await ctx.send("❌ Укажите число от 1 до 100.", ephemeral=True)
-    try:
-        deleted = await ctx.channel.purge(limit=количество)
-        await ctx.send(f"✅ Удалено {len(deleted)} сообщений.", ephemeral=True)
-        await log_discord(
-            title="🗑️ Очистка канала",
-            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {ctx.channel.mention}\n> **Удалено:** `{len(deleted)}`",
-            color=0xff6600
         )
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
+        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
+        await inter.send(embeds=[embed1, embed2], ephemeral=True, view=DCPanelView())
 
-@bot.slash_command(
-    name="say",
-    description="Отправить сообщение от лица бота (текст или embed)",
-    default_member_permissions=disnake.Permissions(administrator=True)
-)
-async def say(
-    ctx,
-    канал: disnake.TextChannel,
-    тип_сообщения: str = commands.Param(choices=["text", "embed"], description="Тип сообщения"),
-    текст: Optional[str] = None,
-    файл: Optional[disnake.Attachment] = None
-):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав на использование этой команды.", ephemeral=True)
-
-    if тип_сообщения == "text":
-        if not текст:
-            return await ctx.send("❌ Введите текст для отправки.", ephemeral=True)
-        await канал.send(текст)
-        await ctx.send(f"✅ Сообщение отправлено в {канал.mention}", ephemeral=True)
-        await log_discord(
-            title="📨 Say: текст отправлен",
-            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}\n> **Текст:** {текст[:500]}",
-            color=0x00ff00
-        )
-        return
-
-    if тип_сообщения == "embed":
-        if not текст and not файл:
-            return await ctx.send("❌ Укажите JSON текст или файл с JSON для embed.", ephemeral=True)
-        if текст and файл:
-            return await ctx.send("❌ Только один источник: либо текст JSON, либо файл.", ephemeral=True)
+    @bot.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
+    async def cleaning(ctx, количество: int):
+        if not has_admin_command_roles(ctx.author):
+            return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
+        if количество < 1 or количество > 100:
+            return await ctx.send("❌ Укажите число от 1 до 100.", ephemeral=True)
         try:
-            if файл:
-                raw = await файл.read()
-                data = json.loads(raw.decode("utf-8"))
-            else:
-                data = json.loads(текст)
-            if "embeds" not in data:
-                return await ctx.send("❌ Нет поля 'embeds' в JSON.", ephemeral=True)
-            embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
-            content = data.get("content", " ")
-            await канал.send(content=content, embeds=embeds)
-            await ctx.send(f"✅ Embed отправлен в {канал.mention}", ephemeral=True)
+            deleted = await ctx.channel.purge(limit=количество)
+            await ctx.send(f"✅ Удалено {len(deleted)} сообщений.", ephemeral=True)
             await log_discord(
-                title="📨 Say: embed отправлен",
-                description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
+                title="🗑️ Очистка канала",
+                description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {ctx.channel.mention}\n> **Удалено:** `{len(deleted)}`",
+                color=0xff6600
+            )
+        except Exception as e:
+            await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
+
+    @bot.slash_command(
+        name="say",
+        description="Отправить сообщение от лица бота (текст или embed)",
+        default_member_permissions=disnake.Permissions(administrator=True)
+    )
+    async def say(
+        ctx,
+        канал: disnake.TextChannel,
+        тип_сообщения: str = commands.Param(choices=["text", "embed"], description="Тип сообщения"),
+        текст: Optional[str] = None,
+        файл: Optional[disnake.Attachment] = None
+    ):
+        if not has_admin_command_roles(ctx.author):
+            return await ctx.send("⛔ У вас нет прав на использование этой команды.", ephemeral=True)
+
+        if тип_сообщения == "text":
+            if not текст:
+                return await ctx.send("❌ Введите текст для отправки.", ephemeral=True)
+            await канал.send(текст)
+            await ctx.send(f"✅ Сообщение отправлено в {канал.mention}", ephemeral=True)
+            await log_discord(
+                title="📨 Say: текст отправлен",
+                description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}\n> **Текст:** {текст[:500]}",
+                color=0x00ff00
+            )
+            return
+
+        if тип_сообщения == "embed":
+            if not текст and not файл:
+                return await ctx.send("❌ Укажите JSON текст или файл с JSON для embed.", ephemeral=True)
+            if текст and файл:
+                return await ctx.send("❌ Только один источник: либо текст JSON, либо файл.", ephemeral=True)
+            try:
+                if файл:
+                    raw = await файл.read()
+                    data = json.loads(raw.decode("utf-8"))
+                else:
+                    data = json.loads(текст)
+                if "embeds" not in data:
+                    return await ctx.send("❌ Нет поля 'embeds' в JSON.", ephemeral=True)
+                embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
+                content = data.get("content", " ")
+                await канал.send(content=content, embeds=embeds)
+                await ctx.send(f"✅ Embed отправлен в {канал.mention}", ephemeral=True)
+                await log_discord(
+                    title="📨 Say: embed отправлен",
+                    description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
+                    color=0x00ff00
+                )
+            except Exception as e:
+                logger.exception("say embed error: %s", e)
+                await ctx.send(f"❌ Ошибка при отправке embed: {e}", ephemeral=True)
+
+    @bot.slash_command(name="расчет", description="Рассчитать скидку")
+    async def расчет(ctx, цена: float, скидка: float):
+        await ctx.response.defer(ephemeral=True)
+        try:
+            if скидка < 0 or скидка > 100:
+                return await ctx.edit_original_response(content="❌ Скидка от 0 до 100%.")
+            итог = цена - (цена * (скидка / 100))
+            экономия = цена - итог
+            embed = disnake.Embed(title="💰 Расчёт скидки", color=0x2ecc71)
+            embed.add_field(name="Исходная цена", value=f"`{цена:.2f} ₽`", inline=True)
+            embed.add_field(name="Скидка", value=f"`{скидка}%`", inline=True)
+            embed.add_field(name="Экономия", value=f"`{экономия:.2f} ₽`", inline=True)
+            embed.add_field(name="✅ Итого", value=f"**`{итог:.2f} ₽`**", inline=False)
+            await ctx.edit_original_response(embed=embed)
+            await log_discord(
+                title="🧮 Расчёт скидки",
+                description=f"> **Пользователь:** {ctx.author.mention}\n> **Цена:** `{цена}`\n> **Скидка:** `{скидка}%`\n> **Итог:** `{итог:.2f}`",
                 color=0x00ff00
             )
         except Exception as e:
-            logger.exception("say embed error: %s", e)
-            await ctx.send(f"❌ Ошибка при отправке embed: {e}", ephemeral=True)
-
-@bot.slash_command(name="расчет", description="Рассчитать скидку")
-async def расчет(ctx, цена: float, скидка: float):
-    await ctx.response.defer(ephemeral=True)
-    try:
-        if скидка < 0 or скидка > 100:
-            return await ctx.edit_original_response(content="❌ Скидка от 0 до 100%.")
-        итог = цена - (цена * (скидка / 100))
-        экономия = цена - итог
-        embed = disnake.Embed(title="💰 Расчёт скидки", color=0x2ecc71)
-        embed.add_field(name="Исходная цена", value=f"`{цена:.2f} ₽`", inline=True)
-        embed.add_field(name="Скидка", value=f"`{скидка}%`", inline=True)
-        embed.add_field(name="Экономия", value=f"`{экономия:.2f} ₽`", inline=True)
-        embed.add_field(name="✅ Итого", value=f"**`{итог:.2f} ₽`**", inline=False)
-        await ctx.edit_original_response(embed=embed)
-        await log_discord(
-            title="🧮 Расчёт скидки",
-            description=f"> **Пользователь:** {ctx.author.mention}\n> **Цена:** `{цена}`\n> **Скидка:** `{скидка}%`\n> **Итог:** `{итог:.2f}`",
-            color=0x00ff00
-        )
-    except Exception as e:
-        await ctx.edit_original_response(content=f"Ошибка: {e}")
+            await ctx.edit_original_response(content=f"Ошибка: {e}")
 
 # ============================================================
 # НАСТРОЙКА МОДУЛЯ (для main.py)
 # ============================================================
 def setup_commands(bot):
+    # Уже реализовано выше – эта функция регистрирует команды.
+    # Чтобы не дублировать, просто вызываем основную функцию.
     pass
