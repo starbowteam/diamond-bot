@@ -32,7 +32,7 @@ from core.utils import (
 )
 
 # ============================================================
-# Импорт из modules.dc (без проблем)
+# Импорт из modules.dc (исправлен – убраны load_dc_data, save_dc_data)
 # ============================================================
 from modules.dc import (
     get_user_balance, add_dc, remove_dc,
@@ -610,7 +610,7 @@ class TicketPanelView(View):
             description=f"> **Пользователь:** {inter.author.mention}",
             color=0x00ff00
         )
-
+        
 # ============================================================
 # МЕНЮ (catalog)
 # ============================================================
@@ -717,7 +717,7 @@ async def send_menu_panel():
     )
 
 # ============================================================
-# НОВАЯ ПАНЕЛЬ "ДОМИК" (канал 1532398684074016870)
+# ПАНЕЛЬ "ДОМИК" (HOME) – с исправленными размерами кнопок
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
 
@@ -726,7 +726,7 @@ class HomePanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤПокупкаㅤㅤㅤㅤㅤㅤ",
+        label="ㅤㅤㅤㅤㅤㅤㅤПокупкаㅤㅤㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="home_buy"
     )
@@ -759,7 +759,7 @@ class HomePanelView(View):
         await inter.response.send_message(embed=embed, ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤПрофильㅤㅤㅤㅤㅤㅤ",
+        label="ㅤㅤㅤㅤㅤㅤㅤПрофильㅤㅤㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="home_profile"
     )
@@ -1030,7 +1030,7 @@ async def send_home_panel():
     )
 
 # ============================================================
-# НОВАЯ КОМАНДА /panel_dc (экономическая панель для админов)
+# КОМАНДА /panel_dc (экономическая панель для админов)
 # ============================================================
 @commands.slash_command(name="panel_dc", description="Экономическая панель Diamond Coins (админ)")
 async def panel_dc(inter: disnake.ApplicationCommandInteraction):
@@ -1050,7 +1050,7 @@ async def panel_dc(inter: disnake.ApplicationCommandInteraction):
     await inter.send(embeds=[embed1, embed2], ephemeral=True, view=DCPanelView())
 
 # ============================================================
-# ПАНЕЛЬ DC
+# ПАНЕЛЬ DC – с исправленными размерами кнопок
 # ============================================================
 class DCPanelView(View):
     def __init__(self):
@@ -1294,7 +1294,7 @@ class PromoRemoveSelectView(View):
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
 
 # ============================================================
-# НОВЫЕ ПАНЕЛИ (admin_panel, promocodes)
+# ПАНЕЛИ admin_panel и promocodes – с исправленными размерами кнопок
 # ============================================================
 class AdminPanelView(View):
     def __init__(self):
@@ -1430,7 +1430,7 @@ async def recalc_reviews(inter):
     )
 
 # ============================================================
-# НОВЫЕ СЛЕШ-КОМАНДЫ (admin_panel, promocodes)
+# СЛЕШ-КОМАНДЫ (admin_panel, promocodes)
 # ============================================================
 @commands.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
 async def admin_panel(inter: disnake.ApplicationCommandInteraction):
@@ -1461,7 +1461,7 @@ async def promocodes(inter: disnake.ApplicationCommandInteraction):
     await inter.send(embeds=embeds, ephemeral=True, view=PromoPanelView())
 
 # ============================================================
-# ОСТАВЛЯЕМ КОМАНДЫ: /расчет, /cleaning
+# КОМАНДЫ: /расчет, /cleaning
 # ============================================================
 @commands.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
 async def cleaning(ctx, количество: int):
@@ -1513,7 +1513,6 @@ async def handle_interaction(inter: disnake.MessageInteraction):
 # НАСТРОЙКА МОДУЛЯ (для main.py)
 # ============================================================
 def setup_commands(bot):
-    # Регистрируем команды
     bot.add_slash_command(panel_dc)
     bot.add_slash_command(admin_panel)
     bot.add_slash_command(promocodes)
