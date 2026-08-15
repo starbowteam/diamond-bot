@@ -1303,31 +1303,9 @@ class AdminPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤСообщение от ботаㅤㅤㅤㅤㅤ",
+        label="Пересчитать отзывы",
         style=disnake.ButtonStyle.gray,
         row=0,
-        custom_id="admin_say"
-    )
-    async def admin_say(self, button: Button, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        await inter.response.send_modal(SayModal())
-
-    @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤПолучить JSONㅤㅤㅤㅤㅤㅤ",
-        style=disnake.ButtonStyle.gray,
-        row=0,
-        custom_id="admin_get_json"
-    )
-    async def admin_get_json(self, button: Button, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        await inter.response.send_modal(GetJsonModal())
-
-    @disnake.ui.button(
-        label="ㅤㅤㅤПересчитать отзывыㅤㅤㅤ",
-        style=disnake.ButtonStyle.gray,
-        row=1,
         custom_id="admin_recalc"
     )
     async def admin_recalc(self, button: Button, inter: disnake.MessageInteraction):
@@ -1337,9 +1315,9 @@ class AdminPanelView(View):
         await recalc_reviews(inter)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤОбновить баннерㅤㅤㅤㅤㅤ",
+        label="Обновить баннер - Экстра",
         style=disnake.ButtonStyle.gray,
-        row=1,
+        row=0,
         custom_id="admin_banner"
     )
     async def admin_banner(self, button: Button, inter: disnake.MessageInteraction):
@@ -1348,12 +1326,23 @@ class AdminPanelView(View):
         await inter.response.defer(ephemeral=True)
         await update_review_counter(silent=False)
 
+    @disnake.ui.button(
+        label="Получить JSON-SM",
+        style=disnake.ButtonStyle.gray,
+        row=0,
+        custom_id="admin_get_json"
+    )
+    async def admin_get_json(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.send_modal(GetJsonModal())
+
 class PromoPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤСписок промокодовㅤㅤㅤ",
+        label="Список Промокодов",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_list"
@@ -1369,7 +1358,7 @@ class PromoPanelView(View):
         await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤДобавить промокодㅤㅤㅤ",
+        label="ㅤДобавление промокода",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_add"
@@ -1380,7 +1369,7 @@ class PromoPanelView(View):
         await inter.response.send_modal(PromoAddModal())
 
     @disnake.ui.button(
-        label="ㅤㅤㅤУдалить промокодㅤㅤㅤ",
+        label="ㅤУдалить промокоды",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_remove"
