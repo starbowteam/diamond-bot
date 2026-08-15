@@ -1601,6 +1601,59 @@ async def cleaning(ctx, количество: int):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
 
+@bot.slash_command(
+    name="say",
+    description="Отправить сообщение от лица бота (текст или embed)",
+    default_member_permissions=disnake.Permissions(administrator=True)
+)
+async def say(
+    ctx,
+    канал: disnake.TextChannel,
+    тип_сообщения: str = commands.Param(choices=["text", "embed"], description="Тип сообщения"),
+    текст: Optional[str] = None,
+    файл: Optional[disnake.Attachment] = None
+):
+    if not has_admin_command_roles(ctx.author):
+        return await ctx.send("⛔ У вас нет прав на использование этой команды.", ephemeral=True)
+
+    if тип_сообщения == "text":
+        if not текст:
+            return await ctx.send("❌ Введите текст для отправки.", ephemeral=True)
+        await канал.send(текст)
+        await ctx.send(f"✅ Сообщение отправлено в {канал.mention}", ephemeral=True)
+        await log_discord(
+            title="📨 Say: текст отправлен",
+            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}\n> **Текст:** {текст[:500]}",
+            color=0x00ff00
+        )
+        return
+
+    if тип_сообщения == "embed":
+        if not текст and not файл:
+            return await ctx.send("❌ Укажите JSON текст или файл с JSON для embed.", ephemeral=True)
+        if текст and файл:
+            return await ctx.send("❌ Только один источник: либо текст JSON, либо файл.", ephemeral=True)
+        try:
+            if файл:
+                raw = await файл.read()
+                data = json.loads(raw.decode("utf-8"))
+            else:
+                data = json.loads(текст)
+            if "embeds" not in data:
+                return await ctx.send("❌ Нет поля 'embeds' в JSON.", ephemeral=True)
+            embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
+            content = data.get("content", " ")
+            await канал.send(content=content, embeds=embeds)
+            await ctx.send(f"✅ Embed отправлен в {канал.mention}", ephemeral=True)
+            await log_discord(
+                title="📨 Say: embed отправлен",
+                description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
+                color=0x00ff00
+            )
+        except Exception as e:
+            logger.exception("say embed error: %s", e)
+            await ctx.send(f"❌ Ошибка при отправке embed: {e}", ephemeral=True)
+            
 @bot.slash_command(name="расчет", description="Рассчитать скидку")
 async def расчет(ctx, цена: float, скидка: float):
     await ctx.response.defer(ephemeral=True)
