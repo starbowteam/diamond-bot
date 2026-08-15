@@ -20,13 +20,16 @@ from core.utils import (
     get_dc_cache, save_dc_cache, sync_dc_to_json
 )
 
+# ============================================================
+# Импорт модулей (без топ-задачи)
+# ============================================================
 from modules.actions import send_actions_panel, handle_flash_interaction
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
     daily_bonus, monthly_fee
 )
-from modules.commands import send_home_panel
+from modules.commands import send_home_panel  # Домик
 
 # ============================================================
 # Инициализация бота
@@ -147,7 +150,7 @@ async def on_ready():
         bot.loop.create_task(ensure_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_home_panel())  # Новая панель "Домик"
+        bot.loop.create_task(send_home_panel())  # Домик
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
@@ -171,6 +174,7 @@ async def on_ready():
 
         await update_review_counter(silent=False)
 
+        # Запускаем задачи (без топа)
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
@@ -232,7 +236,7 @@ async def keep_voice_alive():
         await asyncio.sleep(60)
 
 # ============================================================
-# Глобальные обработчики событий (логирование) – без изменений
+# Глобальные обработчики событий (логирование) – оставляем без изменений
 # ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
