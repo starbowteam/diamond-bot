@@ -1057,7 +1057,7 @@ class DCPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤНачислить DCㅤㅤㅤㅤㅤ",
+        label="ㅤㅤㅤㅤНачислить DCㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="dc_give"
     )
@@ -1067,7 +1067,7 @@ class DCPanelView(View):
         await inter.response.send_modal(GiveDcModal())
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤСнять DCㅤㅤㅤㅤㅤㅤ",
+        label="ㅤㅤㅤㅤㅤСнять DCㅤㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="dc_take"
     )
@@ -1077,7 +1077,7 @@ class DCPanelView(View):
         await inter.response.send_modal(TakeDcModal())
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤПокупкиㅤㅤㅤㅤㅤㅤ",
+        label="ㅤㅤㅤㅤㅤПокупкиㅤㅤㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="dc_purchases"
     )
@@ -1087,7 +1087,7 @@ class DCPanelView(View):
         await inter.response.send_modal(ManagePurchasesModal())
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤАкцияㅤㅤㅤㅤㅤㅤ",
+        label="ㅤㅤㅤㅤㅤㅤАкцияㅤㅤㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="dc_flash"
     )
@@ -1341,7 +1341,7 @@ class PromoPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤСписок промокодовㅤㅤㅤ",
+        label="ㅤㅤㅤㅤㅤПромокодㅤㅤㅤㅤㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_list"
@@ -1357,7 +1357,7 @@ class PromoPanelView(View):
         await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤㅤДобавление промокодаㅤㅤ",
+        label="ㅤДобавление промокодаㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_add"
@@ -1368,7 +1368,7 @@ class PromoPanelView(View):
         await inter.response.send_modal(PromoAddModal())
 
     @disnake.ui.button(
-        label="ㅤㅤУдаление промокодаㅤㅤ",
+        label="ㅤУдаление промокодаㅤ",
         style=disnake.ButtonStyle.gray,
         row=0,
         custom_id="promo_remove"
