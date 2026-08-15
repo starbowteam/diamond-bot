@@ -40,8 +40,7 @@ from modules.dc import (
     get_dc_cache, save_dc_cache,
     get_progress_bar,
     load_shop_catalog,
-    sync_dc_to_json, get_dc_cache_all,
-    load_dc_data, save_dc_data
+    sync_dc_to_json, get_dc_cache_all
 )
 
 # ============================================================
