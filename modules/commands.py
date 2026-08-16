@@ -15,7 +15,7 @@ from disnake.ui import Modal, TextInput, View, Button, Select
 from disnake import PartialEmoji, ui, ButtonStyle, Embed, SelectOption
 
 # ============================================================
-# Импорты из core.utils (без bot)
+# Импорты из core.utils
 # ============================================================
 from core.utils import (
     CONFIG, FILES, BASE_DIR, DATA_DIR, CATALOG_DIR, ADD_DIR, ACTIONS_DIR,
@@ -33,13 +33,7 @@ from core.utils import (
 )
 
 # ============================================================
-# ДОБАВЛЯЕМ РОЛЬ В МОДЕРАТОРЫ ОТЗЫВОВ (1513935883475226796)
-# ============================================================
-if 1513935883475226796 not in CONFIG["REVIEW_MODERATION_ROLES"]:
-    CONFIG["REVIEW_MODERATION_ROLES"].append(1513935883475226796)
-
-# ============================================================
-# Импорт из modules.dc (исправлен – убраны load_dc_data, save_dc_data)
+# Импорт из modules.dc
 # ============================================================
 from modules.dc import (
     get_user_balance, add_dc, remove_dc,
@@ -51,7 +45,7 @@ from modules.dc import (
 )
 
 # ============================================================
-# Загружаем промокоды в память для быстрого доступа
+# Загружаем промокоды в память
 # ============================================================
 promo_codes = get_promo_codes()
 
@@ -60,25 +54,11 @@ def reload_promo_cache():
     promo_codes = get_promo_codes()
 
 # ============================================================
-# НАСТРОЙКИ ЗАРПЛАТЫ И АВАНСА ПО РОЛЯМ
-# ============================================================
-SALARY_ROLES = {
-    1471844291595731016: {"salary": 120, "advance": 50},  # Высшая
-    1513935883475226796: {"salary": 90, "advance": 30},
-    1154757071330365490: {"salary": 90, "advance": 30},
-    1471190371181789234: {"salary": 70, "advance": 25},
-    1457964854441672806: {"salary": 60, "advance": 20},   # Низшая
-}
-# Порядок ролей от высшей к низшей (для определения высшей роли у пользователя)
-SALARY_ROLE_ORDER = [1471844291595731016, 1513935883475226796, 1154757071330365490, 1471190371181789234, 1457964854441672806]
-
-# ============================================================
 # Функция загрузки "Доски" (board.json из ADD_DIR)
 # ============================================================
 def load_board_embed() -> list[Embed]:
     board_path = os.path.join(ADD_DIR, "board.json")
     if not os.path.exists(board_path):
-        # Если файла нет – создаём заглушку с сообщением
         return [disnake.Embed(
             title="📋 Доска объявлений",
             description="> Здесь будет важная информация. Пока данных нет.",
@@ -100,7 +80,7 @@ def load_board_embed() -> list[Embed]:
         )]
 
 # ============================================================
-# Класс для модерации отзывов (использует обновлённый CONFIG)
+# Класс для модерации отзывов
 # ============================================================
 class ReviewModerationView(View):
     def __init__(self, user_id: int, content: str, msg_id: int, channel_id: int):
@@ -659,7 +639,7 @@ class TicketPanelView(View):
         )
 
 # ============================================================
-# МЕНЮ (catalog)
+# МЕНЮ (catalog) – без изменений
 # ============================================================
 MENU_CHANNEL_ID = 1462140026073776280
 MENU_OPTIONS = [
@@ -764,7 +744,7 @@ async def send_menu_panel():
     )
 
 # ============================================================
-# ПАНЕЛЬ "ДОМИК" (HOME) – с селект-меню (добавлены Доска, Калькулятор, Расчет скидки)
+# ПАНЕЛЬ "ДОМИК" (HOME) – с селект-меню
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
 
@@ -908,7 +888,6 @@ class CalcModal(Modal):
 
     async def callback(self, inter: disnake.ModalInteraction):
         expr = inter.text_values["expression"].strip()
-        # Безопасное вычисление: разрешены только цифры, операторы, скобки, пробелы
         allowed = set("0123456789+-*/().% ")
         if not all(c in allowed for c in expr):
             return await inter.response.send_message(
@@ -916,7 +895,6 @@ class CalcModal(Modal):
                 ephemeral=True
             )
         try:
-            # Используем eval с ограниченным пространством имён
             result = eval(expr, {"__builtins__": None}, {})
             if isinstance(result, float) and result.is_integer():
                 result = int(result)
@@ -974,8 +952,18 @@ class DiscountModal(Modal):
         await inter.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
-# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – селект-меню (ДОБАВЛЕНЫ ЗАРПЛАТА И АВАНС)
+# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – с зарплатой и авансом
 # ============================================================
+# Настройки зарплат
+SALARY_ROLES = {
+    1471844291595731016: {"salary": 120, "advance": 50},
+    1513935883475226796: {"salary": 90, "advance": 30},
+    1154757071330365490: {"salary": 90, "advance": 30},
+    1471190371181789234: {"salary": 70, "advance": 25},
+    1457964854441672806: {"salary": 60, "advance": 20},
+}
+SALARY_ROLE_ORDER = [1471844291595731016, 1513935883475226796, 1154757071330365490, 1471190371181789234, 1457964854441672806]
+
 class DCSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -1055,8 +1043,6 @@ class DCSelect(disnake.ui.StringSelect):
             await self.process_salary(inter, "advance")
 
     async def process_salary(self, inter: disnake.MessageInteraction, mode: str):
-        """Обрабатывает выдачу зарплаты или аванса всем сотрудникам."""
-        # Проверяем права админа
         if not has_admin_command_roles(inter.author):
             await inter.edit_original_response(content="⛔ У вас нет прав на это действие.")
             return
@@ -1066,20 +1052,16 @@ class DCSelect(disnake.ui.StringSelect):
             await inter.edit_original_response(content="❌ Не удалось определить сервер.")
             return
 
-        # Получаем всех участников гильдии
         members = guild.members
         total = 0
         awarded = 0
         errors = 0
-
-        # Словарь для подсчёта выданных сумм по ролям (для статистики)
         stats = {role_id: 0 for role_id in SALARY_ROLE_ORDER}
 
         for member in members:
             if member.bot:
                 continue
 
-            # Определяем высшую роль из списка
             top_role_id = None
             for role_id in SALARY_ROLE_ORDER:
                 if member.get_role(role_id):
@@ -1089,12 +1071,10 @@ class DCSelect(disnake.ui.StringSelect):
             if not top_role_id:
                 continue
 
-            # Получаем сумму для данного режима
             amount = SALARY_ROLES[top_role_id][mode]
             if amount <= 0:
                 continue
 
-            # Начисляем
             try:
                 await add_dc(member.id, amount, f"{'Зарплата' if mode == 'salary' else 'Аванс'} по роли {top_role_id}")
                 stats[top_role_id] += 1
@@ -1104,7 +1084,6 @@ class DCSelect(disnake.ui.StringSelect):
                 logger.error(f"Ошибка начисления {mode} пользователю {member.id}: {e}")
                 errors += 1
 
-        # Логируем результат
         result_lines = []
         for role_id in SALARY_ROLE_ORDER:
             count = stats[role_id]
@@ -1123,7 +1102,6 @@ class DCSelect(disnake.ui.StringSelect):
                     f"⚠️ Ошибок: {errors}"
         )
 
-        # Лог в канал
         await log_discord(
             title=f"💰 Выдача {'зарплаты' if mode == 'salary' else 'аванса'}",
             description=(
@@ -1199,8 +1177,74 @@ class PromoView(disnake.ui.View):
         self.add_item(PromoSelect())
 
 # ============================================================
-# ПАНЕЛЬ АДМИНА (admin_panel) – селект-меню
+# ПАНЕЛЬ АДМИНА (admin_panel) – с добавленной Очисткой и /say
 # ============================================================
+class ClearModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="ID канала",
+                placeholder="Введите числовой ID канала",
+                custom_id="channel_id",
+                min_length=1,
+                max_length=30
+            ),
+            TextInput(
+                label="Количество сообщений",
+                placeholder="От 1 до 100",
+                custom_id="amount",
+                min_length=1,
+                max_length=3
+            )
+        ]
+        super().__init__(title="🧹 Очистка канала", components=components)
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        channel_id_str = inter.text_values["channel_id"].strip()
+        amount_str = inter.text_values["amount"].strip()
+
+        if not channel_id_str.isdigit():
+            return await inter.response.send_message("❌ ID канала должен быть числом.", ephemeral=True)
+        try:
+            amount = int(amount_str)
+        except ValueError:
+            return await inter.response.send_message("❌ Количество должно быть числом.", ephemeral=True)
+
+        if amount < 1 or amount > 100:
+            return await inter.response.send_message("❌ Количество должно быть от 1 до 100.", ephemeral=True)
+
+        channel_id = int(channel_id_str)
+        guild = inter.guild
+        if not guild:
+            return await inter.response.send_message("❌ Не удалось определить сервер.", ephemeral=True)
+
+        channel = guild.get_channel(channel_id)
+        if not channel:
+            return await inter.response.send_message("❌ Канал с таким ID не найден.", ephemeral=True)
+
+        if not isinstance(channel, disnake.TextChannel):
+            return await inter.response.send_message("❌ Это не текстовый канал.", ephemeral=True)
+
+        # Проверка прав бота
+        bot_member = guild.get_member(inter.bot.user.id)
+        if not channel.permissions_for(bot_member).manage_messages:
+            return await inter.response.send_message("❌ У бота нет прав на удаление сообщений в этом канале.", ephemeral=True)
+
+        try:
+            deleted = await channel.purge(limit=amount, bulk=True)
+            await inter.response.send_message(
+                f"✅ Удалено **{len(deleted)}** сообщений в канале {channel.mention}.",
+                ephemeral=True
+            )
+            await log_discord(
+                title="🧹 Очистка канала",
+                description=f"> **Админ:** {inter.author.mention}\n> **Канал:** {channel.mention}\n> **Удалено:** {len(deleted)}",
+                color=0xff6600
+            )
+        except Exception as e:
+            logger.exception("Ошибка очистки: %s", e)
+            await inter.response.send_message(f"❌ Ошибка при очистке: {e}", ephemeral=True)
+
 class AdminSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -1221,6 +1265,12 @@ class AdminSelect(disnake.ui.StringSelect):
                 description="Сообщение - Скрипт",
                 emoji="<:jsons:1538401299459080263>",
                 value="json"
+            ),
+            disnake.SelectOption(
+                label="・Очистка",
+                description="Удаление сообщений в определенном чате",
+                emoji="<:clear:1538561439491686410>",
+                value="clear"
             )
         ]
         super().__init__(
@@ -1247,6 +1297,8 @@ class AdminSelect(disnake.ui.StringSelect):
             await update_review_counter(silent=False)
         elif value == "json":
             await inter.response.send_modal(GetJsonModal())
+        elif value == "clear":
+            await inter.response.send_modal(ClearModal())
 
 class AdminView(disnake.ui.View):
     def __init__(self):
@@ -1254,7 +1306,62 @@ class AdminView(disnake.ui.View):
         self.add_item(AdminSelect())
 
 # ============================================================
-# КОМАНДЫ (обновлены для использования селектов)
+# КОМАНДА /say (админ) – из приложенного кода
+# ============================================================
+@commands.slash_command(
+    name="say",
+    description="Отправить сообщение от бота (админ)"
+)
+async def say(
+    ctx,
+    канал: disnake.TextChannel,
+    тип_сообщения: str = commands.Param(choices=["text", "embed"]),
+    текст: Optional[str] = None,
+    файл: Optional[disnake.Attachment] = None
+):
+    if not has_admin_command_roles(ctx.author):
+        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
+
+    if тип_сообщения == "text":
+        if not текст:
+            return await ctx.send("Введите текст.", ephemeral=True)
+        await канал.send(текст)
+        await ctx.send("✅ Отправлено", ephemeral=True)
+        await log_discord(
+            title="📨 Say: текст",
+            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
+            color=0x00ff00
+        )
+        return
+
+    if тип_сообщения == "embed":
+        if not текст and not файл:
+            return await ctx.send("Укажите JSON или файл.", ephemeral=True)
+        if текст and файл:
+            return await ctx.send("Только один источник.", ephemeral=True)
+        try:
+            if файл:
+                raw = await файл.read()
+                data = json.loads(raw.decode("utf-8"))
+            else:
+                data = json.loads(текст)
+            if "embeds" not in data:
+                return await ctx.send("Нет поля 'embeds'.", ephemeral=True)
+            embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
+            content = data.get("content", " ")
+            await канал.send(content=content, embeds=embeds)
+            await ctx.send("✅ Embed отправлен", ephemeral=True)
+            await log_discord(
+                title="📨 Say: embed",
+                description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
+                color=0x00ff00
+            )
+        except Exception as e:
+            logger.exception("say embed error: %s", e)
+            await ctx.send("❌ Ошибка.", ephemeral=True)
+
+# ============================================================
+# КОМАНДЫ (панели) – с проверкой роли
 # ============================================================
 @commands.slash_command(name="panel_dc", description="Экономическая панель Diamond Coins (админ)")
 async def panel_dc(inter: disnake.ApplicationCommandInteraction):
@@ -1480,7 +1587,7 @@ class PromoRemoveSelectView(View):
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
 
 # ============================================================
-# BuySelectView, show_profile, recalc_reviews, cleaning
+# BuySelectView, show_profile, recalc_reviews
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
@@ -1743,23 +1850,6 @@ async def recalc_reviews(inter):
         color=0x00aaff
     )
 
-@commands.slash_command(name="cleaning", description="Удалить указанное количество сообщений (админ)", default_member_permissions=disnake.Permissions(administrator=True))
-async def cleaning(ctx, количество: int):
-    if not has_admin_command_roles(ctx.author):
-        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
-    if количество < 1 or количество > 100:
-        return await ctx.send("❌ Укажите число от 1 до 100.", ephemeral=True)
-    try:
-        deleted = await ctx.channel.purge(limit=количество)
-        await ctx.send(f"✅ Удалено {len(deleted)} сообщений.", ephemeral=True)
-        await log_discord(
-            title="🗑️ Очистка канала",
-            description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {ctx.channel.mention}\n> **Удалено:** `{len(deleted)}`",
-            color=0xff6600
-        )
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
-
 # ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ (кнопки)
 # ============================================================
@@ -1774,4 +1864,5 @@ def setup_commands(bot):
     bot.add_slash_command(panel_dc)
     bot.add_slash_command(admin_panel)
     bot.add_slash_command(promocodes)
-    bot.add_slash_command(cleaning)
+    bot.add_slash_command(say)  # добавляем /say
+    # /cleaning удалена – больше не регистрируем
