@@ -33,6 +33,12 @@ from core.utils import (
 )
 
 # ============================================================
+# ДОБАВЛЯЕМ РОЛЬ В МОДЕРАТОРЫ ОТЗЫВОВ (1513935883475226796)
+# ============================================================
+if 1513935883475226796 not in CONFIG["REVIEW_MODERATION_ROLES"]:
+    CONFIG["REVIEW_MODERATION_ROLES"].append(1513935883475226796)
+
+# ============================================================
 # Импорт из modules.dc (исправлен – убраны load_dc_data, save_dc_data)
 # ============================================================
 from modules.dc import (
@@ -52,6 +58,19 @@ promo_codes = get_promo_codes()
 def reload_promo_cache():
     global promo_codes
     promo_codes = get_promo_codes()
+
+# ============================================================
+# НАСТРОЙКИ ЗАРПЛАТЫ И АВАНСА ПО РОЛЯМ
+# ============================================================
+SALARY_ROLES = {
+    1471844291595731016: {"salary": 120, "advance": 50},  # Высшая
+    1513935883475226796: {"salary": 90, "advance": 30},
+    1154757071330365490: {"salary": 90, "advance": 30},
+    1471190371181789234: {"salary": 70, "advance": 25},
+    1457964854441672806: {"salary": 60, "advance": 20},   # Низшая
+}
+# Порядок ролей от высшей к низшей (для определения высшей роли у пользователя)
+SALARY_ROLE_ORDER = [1471844291595731016, 1513935883475226796, 1154757071330365490, 1471190371181789234, 1457964854441672806]
 
 # ============================================================
 # Функция загрузки "Доски" (board.json из ADD_DIR)
@@ -81,7 +100,7 @@ def load_board_embed() -> list[Embed]:
         )]
 
 # ============================================================
-# Класс для модерации отзывов
+# Класс для модерации отзывов (использует обновлённый CONFIG)
 # ============================================================
 class ReviewModerationView(View):
     def __init__(self, user_id: int, content: str, msg_id: int, channel_id: int):
@@ -159,7 +178,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ
+# ТИКЕТЫ (без изменений)
 # ============================================================
 class BuyTicketModal(Modal):
     def __init__(self):
@@ -955,7 +974,7 @@ class DiscountModal(Modal):
         await inter.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
-# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – селект-меню
+# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – селект-меню (ДОБАВЛЕНЫ ЗАРПЛАТА И АВАНС)
 # ============================================================
 class DCSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -983,6 +1002,18 @@ class DCSelect(disnake.ui.StringSelect):
                 description="Ручное обновление акций",
                 emoji="<:actops:1538399662921490432>",
                 value="flash"
+            ),
+            disnake.SelectOption(
+                label="・Зарплата",
+                description="Выдача зарплаты сотруднику: 31 число.",
+                emoji="<:zapa:1538557843228332053>",
+                value="salary"
+            ),
+            disnake.SelectOption(
+                label="・Аванс",
+                description="Выдача аванса сотруднику: 15 число.",
+                emoji="<:avans:1538557862689902733>",
+                value="advance"
             )
         ]
         super().__init__(
@@ -1016,6 +1047,94 @@ class DCSelect(disnake.ui.StringSelect):
                 description=f"> **Админ:** {inter.author.mention} обновил акцию.",
                 color=0x00aaff
             )
+        elif value == "salary":
+            await inter.response.defer(ephemeral=True)
+            await self.process_salary(inter, "salary")
+        elif value == "advance":
+            await inter.response.defer(ephemeral=True)
+            await self.process_salary(inter, "advance")
+
+    async def process_salary(self, inter: disnake.MessageInteraction, mode: str):
+        """Обрабатывает выдачу зарплаты или аванса всем сотрудникам."""
+        # Проверяем права админа
+        if not has_admin_command_roles(inter.author):
+            await inter.edit_original_response(content="⛔ У вас нет прав на это действие.")
+            return
+
+        guild = inter.guild
+        if not guild:
+            await inter.edit_original_response(content="❌ Не удалось определить сервер.")
+            return
+
+        # Получаем всех участников гильдии
+        members = guild.members
+        total = 0
+        awarded = 0
+        errors = 0
+
+        # Словарь для подсчёта выданных сумм по ролям (для статистики)
+        stats = {role_id: 0 for role_id in SALARY_ROLE_ORDER}
+
+        for member in members:
+            if member.bot:
+                continue
+
+            # Определяем высшую роль из списка
+            top_role_id = None
+            for role_id in SALARY_ROLE_ORDER:
+                if member.get_role(role_id):
+                    top_role_id = role_id
+                    break
+
+            if not top_role_id:
+                continue
+
+            # Получаем сумму для данного режима
+            amount = SALARY_ROLES[top_role_id][mode]
+            if amount <= 0:
+                continue
+
+            # Начисляем
+            try:
+                await add_dc(member.id, amount, f"{'Зарплата' if mode == 'salary' else 'Аванс'} по роли {top_role_id}")
+                stats[top_role_id] += 1
+                awarded += 1
+                total += amount
+            except Exception as e:
+                logger.error(f"Ошибка начисления {mode} пользователю {member.id}: {e}")
+                errors += 1
+
+        # Логируем результат
+        result_lines = []
+        for role_id in SALARY_ROLE_ORDER:
+            count = stats[role_id]
+            if count > 0:
+                role = guild.get_role(role_id)
+                role_name = role.name if role else str(role_id)
+                result_lines.append(f"**{role_name}** – {count} чел.")
+
+        result_text = "\n".join(result_lines) if result_lines else "Никто не получил."
+
+        await inter.edit_original_response(
+            content=f"✅ **{'Зарплата' if mode == 'salary' else 'Аванс'}** выдана!\n"
+                    f"👥 Всего сотрудников: {awarded}\n"
+                    f"💎 Всего выдано: **{total} DC**\n"
+                    f"📊 Распределение:\n{result_text}\n"
+                    f"⚠️ Ошибок: {errors}"
+        )
+
+        # Лог в канал
+        await log_discord(
+            title=f"💰 Выдача {'зарплаты' if mode == 'salary' else 'аванса'}",
+            description=(
+                f"> **Админ:** {inter.author.mention}\n"
+                f"> **Сотрудников:** {awarded}\n"
+                f"> **Всего выдано:** {total} DC\n"
+                f"> **Ошибок:** {errors}\n"
+                f"> **Распределение:**\n{result_text}"
+            ),
+            color=0x00ff00
+        )
 
 class DCView(disnake.ui.View):
     def __init__(self):
@@ -1361,7 +1480,7 @@ class PromoRemoveSelectView(View):
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
 
 # ============================================================
-# BuySelectView, show_profile, recalc_reviews, cleaning, расчет
+# BuySelectView, show_profile, recalc_reviews, cleaning
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
@@ -1640,8 +1759,6 @@ async def cleaning(ctx, количество: int):
         )
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
-
-
 
 # ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ (кнопки)
