@@ -36,8 +36,9 @@ CONFIG = {
     "ADMIN_COMMAND_ROLES": [
         1127428607606796294,
         1471844291595731016,
-        1530822331188903966   # Добавлена новая роль
+        1530822331188903966
     ],
+    "ADMIN_USER_IDS": [1415191217179856967],   # ID пользователей с админ-доступом без роли
     "REVIEW_MODERATION_ROLES": [1154757071330365490, 1513935883475226796, 1127428607606796294, 1471844291595731016],
     "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
@@ -120,7 +121,7 @@ db.execute("PRAGMA synchronous=NORMAL")
 
 cur = db.cursor()
 
-# Таблицы (инвайты, реакции, кеш DC, промокоды)
+# Таблицы
 cur.executescript("""
 CREATE TABLE IF NOT EXISTS invites_snapshot (
     invite_code TEXT PRIMARY KEY,
@@ -149,8 +150,8 @@ CREATE TABLE IF NOT EXISTS reaction_roles (
 CREATE TABLE IF NOT EXISTS dc_cache (
     user_id         INTEGER PRIMARY KEY,
     balance         INTEGER DEFAULT 0,
-    purchases       TEXT,   -- JSON-строка
-    history         TEXT,   -- JSON-строка
+    purchases       TEXT,
+    history         TEXT,
     last_review     INTEGER DEFAULT 0,
     last_bonus      INTEGER DEFAULT 0,
     messages_today  INTEGER DEFAULT 0,
@@ -166,7 +167,7 @@ CREATE TABLE IF NOT EXISTS promo_codes (
 db.commit()
 
 # ============================================================
-# Загрузка JSON (промо, курсы)
+# Загрузка JSON
 # ============================================================
 def load_json(path: str, default):
     try:
@@ -203,10 +204,16 @@ def clean_embed_for_discohook(embed_dict: Dict[str, Any]) -> Dict[str, Any]:
     return e
 
 # ============================================================
-# Проверки ролей
+# Проверки ролей (с поддержкой пользователей по ID)
 # ============================================================
 def has_admin_command_roles(author):
-    return any(r.id in CONFIG["ADMIN_COMMAND_ROLES"] for r in author.roles)
+    # Проверка по ролям
+    if any(r.id in CONFIG["ADMIN_COMMAND_ROLES"] for r in author.roles):
+        return True
+    # Проверка по ID пользователя
+    if author.id in CONFIG.get("ADMIN_USER_IDS", []):
+        return True
+    return False
 
 def has_review_moderation_roles(author):
     return any(r.id in CONFIG["REVIEW_MODERATION_ROLES"] for r in author.roles)
@@ -222,7 +229,7 @@ def has_ticket_manage_roles(author):
 # ============================================================
 async def log_discord(title: str, description: str, color: int = 0x00ff00, panel: bool = False, fields: list = None):
     try:
-        from core.bot import bot  # импорт внутри для избежания циклической зависимости
+        from core.bot import bot
     except ImportError:
         return
     try:
@@ -377,7 +384,6 @@ reload_promo()
 # Кеширование DC в SQLite
 # ============================================================
 def init_dc_cache_from_json():
-    """Загружает DC данные из JSON в SQLite (при первом запуске или синхронизации)."""
     data = load_json(FILES["dc_data"], {})
     for uid_str, user_data in data.items():
         uid = int(uid_str)
@@ -402,7 +408,6 @@ def init_dc_cache_from_json():
     db.commit()
 
 def get_dc_cache(user_id: int) -> dict:
-    """Возвращает DC-данные пользователя из SQLite."""
     row = db.execute("SELECT * FROM dc_cache WHERE user_id = ?", (user_id,)).fetchone()
     if row:
         return {
@@ -450,7 +455,6 @@ def save_dc_cache(user_id: int, data: dict):
     db.commit()
 
 def sync_dc_to_json():
-    """Синхронизирует все данные из SQLite обратно в JSON (для безопасности)."""
     rows = cur.execute("SELECT * FROM dc_cache").fetchall()
     data = {}
     for row in rows:
@@ -468,7 +472,6 @@ def sync_dc_to_json():
         }
     save_json(FILES["dc_data"], data)
 
-# При первом запуске инициализируем кеш, если таблица пуста
 if cur.execute("SELECT COUNT(*) FROM dc_cache").fetchone()[0] == 0:
     init_dc_cache_from_json()
 
@@ -476,21 +479,17 @@ if cur.execute("SELECT COUNT(*) FROM dc_cache").fetchone()[0] == 0:
 # Промокоды в SQLite
 # ============================================================
 def get_promo_codes() -> dict:
-    """Возвращает все промокоды из БД в виде {code: value}."""
     rows = cur.execute("SELECT code, value FROM promo_codes").fetchall()
     return {row["code"]: row["value"] for row in rows}
 
 def add_promo_code(code: str, value: str):
-    """Добавляет промокод в БД."""
     cur.execute("INSERT OR REPLACE INTO promo_codes (code, value) VALUES (?, ?)", (code, value))
     db.commit()
 
 def remove_promo_code(code: str):
-    """Удаляет промокод из БД."""
     cur.execute("DELETE FROM promo_codes WHERE code = ?", (code,))
     db.commit()
 
 def clear_promo_codes():
-    """Очищает все промокоды (для синхронизации, если надо)."""
     cur.execute("DELETE FROM promo_codes")
     db.commit()
