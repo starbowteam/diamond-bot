@@ -1641,27 +1641,7 @@ async def cleaning(ctx, количество: int):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", ephemeral=True)
 
-@commands.slash_command(name="расчет", description="Рассчитать скидку")
-async def расчет(ctx, цена: float, скидка: float):
-    await ctx.response.defer(ephemeral=True)
-    try:
-        if скидка < 0 or скидка > 100:
-            return await ctx.edit_original_response(content="❌ Скидка от 0 до 100%.")
-        итог = цена - (цена * (скидка / 100))
-        экономия = цена - итог
-        embed = disnake.Embed(title="💰 Расчёт скидки", color=0x2ecc71)
-        embed.add_field(name="Исходная цена", value=f"`{цена:.2f} ₽`", inline=True)
-        embed.add_field(name="Скидка", value=f"`{скидка}%`", inline=True)
-        embed.add_field(name="Экономия", value=f"`{экономия:.2f} ₽`", inline=True)
-        embed.add_field(name="✅ Итого", value=f"**`{итог:.2f} ₽`**", inline=False)
-        await ctx.edit_original_response(embed=embed)
-        await log_discord(
-            title="🧮 Расчёт скидки",
-            description=f"> **Пользователь:** {ctx.author.mention}\n> **Цена:** `{цена}`\n> **Скидка:** `{скидка}%`\n> **Итог:** `{итог:.2f}`",
-            color=0x00ff00
-        )
-    except Exception as e:
-        await ctx.edit_original_response(content=f"Ошибка: {e}")
+
 
 # ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ (кнопки)
@@ -1678,4 +1658,3 @@ def setup_commands(bot):
     bot.add_slash_command(admin_panel)
     bot.add_slash_command(promocodes)
     bot.add_slash_command(cleaning)
-    bot.add_slash_command(расчет)
