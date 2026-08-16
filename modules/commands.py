@@ -610,7 +610,7 @@ class TicketPanelView(View):
             description=f"> **Пользователь:** {inter.author.mention}",
             color=0x00ff00
         )
-        
+
 # ============================================================
 # МЕНЮ (catalog)
 # ============================================================
@@ -717,55 +717,117 @@ async def send_menu_panel():
     )
 
 # ============================================================
-# ПАНЕЛЬ "ДОМИК" (HOME) – с исправленными размерами кнопок
+# ПАНЕЛЬ "ДОМИК" (HOME) – с селект-меню вместо кнопок
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
 
-class HomePanelView(View):
+class HomeSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="・Профиль",
+                description="О себе ・Данные пользователя",
+                emoji="<:people:1538395694648529009>",
+                value="profile"
+            ),
+            disnake.SelectOption(
+                label="・Покупка",
+                description="Магазин ・Всё за Diamond Coins",
+                emoji="<:home:1538395735907901460>",
+                value="buy"
+            ),
+            disnake.SelectOption(
+                label="・Получение валюты",
+                description="Как получить? ・Справочник",
+                emoji="<:buy:1538395716920148079>",
+                value="earn"
+            )
+        ]
+        super().__init__(
+            placeholder="Выберите действие...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="home_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        # Логируем выбор
+        await log_discord(
+            title="🏠 Выбор в меню HOME",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
+
+        value = inter.data.values[0]
+        if value == "profile":
+            await show_profile(inter, inter.author)
+        elif value == "buy":
+            await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
+        elif value == "earn":
+            embed = disnake.Embed(
+                title="💎 Как заработать Diamond Coins?",
+                description=(
+                    "> **1. Сообщения в чате**\n"
+                    "> За каждые 10 сообщений вы получаете **1 DC** (до 20 в день).\n\n"
+                    "> **2. Голосовая активность**\n"
+                    "> За каждый час в голосовом канале – **3 DC** (до 15 в день).\n\n"
+                    "> **3. Ежедневный бонус**\n"
+                    "> Если у вас есть роль **Клуб**, каждый день вы получаете **3 DC**.\n\n"
+                    "> **4. Отзывы**\n"
+                    "> За каждый одобренный отзыв – **+10 DC**.\n\n"
+                    "> **5. Акции**\n"
+                    "> Следите за акциями в канале <#1469698608390606898> – там можно купить товары со скидкой."
+                ),
+                color=6776679
+            )
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+            await inter.response.send_message(embed=embed, ephemeral=True)
+
+class HomeView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.add_item(HomeSelect())
 
-    @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤㅤПокупкаㅤㅤㅤㅤㅤㅤㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="home_buy"
+async def send_home_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(HOME_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(HOME_CHANNEL_ID)
+    if not channel:
+        logger.warning("Home panel channel not found")
+        return
+
+    # Удаляем старое сообщение с кнопками (если есть)
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
+
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202626448171088/image.png?ex=6a81d254&is=6a8080d4&hm=3c8318fb665830d99422f59fe9cf66d8307cfbd1bc89d07525301190e36bd7fa&=&format=webp&quality=lossless")
+
+    embed2 = disnake.Embed(
+        title="Домик посетителя Diamond Shop",
+        description="> Привет дорогой посетитель! В данном канале, ты можешь узнать о том: какие есть товары за Diamond Coins, как вообще - заработать Diamond Coin, а также - можешь увидеть свой профиль, отслеживать свои покупки, баланс валюты, и прочие изменения.",
+        color=6776679
     )
-    async def home_buy(self, button: Button, inter: disnake.MessageInteraction):
-        await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
+    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
 
-    @disnake.ui.button(
-        label="ㅤㅤㅤПолучение валютыㅤㅤㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="home_earn"
+    await channel.send(embeds=[embed1, embed2], view=HomeView())
+    await log_discord(
+        title="🏠 Панель «Домик» отправлена (с селект-меню)",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
     )
-    async def home_earn(self, button: Button, inter: disnake.MessageInteraction):
-        embed = disnake.Embed(
-            title="💎 Как заработать Diamond Coins?",
-            description=(
-                "> **1. Сообщения в чате**\n"
-                "> За каждые 10 сообщений вы получаете **1 DC** (до 20 в день).\n\n"
-                "> **2. Голосовая активность**\n"
-                "> За каждый час в голосовом канале – **3 DC** (до 15 в день).\n\n"
-                "> **3. Ежедневный бонус**\n"
-                "> Если у вас есть роль **Клуб**, каждый день вы получаете **3 DC**.\n\n"
-                "> **4. Отзывы**\n"
-                "> За каждый одобренный отзыв – **+10 DC**.\n\n"
-                "> **5. Акции**\n"
-                "> Следите за акциями в канале <#1469698608390606898> – там можно купить товары со скидкой."
-            ),
-            color=6776679
-        )
-        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
-        await inter.response.send_message(embed=embed, ephemeral=True)
 
-    @disnake.ui.button(
-        label="ㅤㅤㅤㅤㅤㅤㅤПрофильㅤㅤㅤㅤㅤㅤㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="home_profile"
-    )
-    async def home_profile(self, button: Button, inter: disnake.MessageInteraction):
-        await show_profile(inter, inter.author)
-
+# ============================================================
+# BuySelectView, show_profile, остальные функции (без изменений)
+# ============================================================
 class BuySelectView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -991,42 +1053,6 @@ async def show_profile(inter: disnake.MessageInteraction, user: disnake.Member):
         title="👤 Просмотр профиля",
         description=f"> **Кто:** {inter.author.mention}\n> **Профиль:** {user.mention}",
         color=0x00aaff
-    )
-
-async def send_home_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(HOME_CHANNEL_ID)
-    if not channel:
-        channel = await bot.fetch_channel(HOME_CHANNEL_ID)
-    if not channel:
-        logger.warning("Home panel channel not found")
-        return
-
-    existing_msg = None
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            existing_msg = msg
-            break
-
-    if existing_msg:
-        return
-
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202626448171088/image.png?ex=6a81d254&is=6a8080d4&hm=3c8318fb665830d99422f59fe9cf66d8307cfbd1bc89d07525301190e36bd7fa&=&format=webp&quality=lossless")
-
-    embed2 = disnake.Embed(
-        title="Домик посетителя Diamond Shop",
-        description="> Привет дорогой посетитель!  В данном канале, ты можешь узнать о том: какие есть товары за Diamond Coins, как вообще - заработать Diamond Coin, а также - можешь увидеть свой профиль, отслеживать свои покупки, баланс валюты, и прочие изменения.",
-        color=6776679
-    )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
-
-    await channel.send(embeds=[embed1, embed2], view=HomePanelView())
-    await log_discord(
-        title="🏠 Панель «Домик» отправлена",
-        description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00
     )
 
 # ============================================================
