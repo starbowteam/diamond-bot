@@ -6,6 +6,7 @@ import asyncio
 import time
 import re
 import io
+import math
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 import disnake
@@ -17,7 +18,7 @@ from disnake import PartialEmoji, ui, ButtonStyle, Embed, SelectOption
 # Импорты из core.utils (без bot)
 # ============================================================
 from core.utils import (
-    CONFIG, FILES, BASE_DIR, DATA_DIR, CATALOG_DIR, ADD_DIR,
+    CONFIG, FILES, BASE_DIR, DATA_DIR, CATALOG_DIR, ADD_DIR, ACTIONS_DIR,
     db, cur,
     logger,
     load_json, save_json, now_ts,
@@ -51,6 +52,33 @@ promo_codes = get_promo_codes()
 def reload_promo_cache():
     global promo_codes
     promo_codes = get_promo_codes()
+
+# ============================================================
+# Функция загрузки "Доски" (board.json из ADD_DIR)
+# ============================================================
+def load_board_embed() -> list[Embed]:
+    board_path = os.path.join(ADD_DIR, "board.json")
+    if not os.path.exists(board_path):
+        # Если файла нет – создаём заглушку с сообщением
+        return [disnake.Embed(
+            title="📋 Доска объявлений",
+            description="> Здесь будет важная информация. Пока данных нет.",
+            color=6776679
+        )]
+    try:
+        with open(board_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds = []
+        for e in data.get("embeds", []):
+            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
+        return embeds
+    except Exception as e:
+        logger.error(f"Ошибка загрузки board.json: {e}")
+        return [disnake.Embed(
+            title="❌ Ошибка",
+            description="Не удалось загрузить доску объявлений.",
+            color=0xff0000
+        )]
 
 # ============================================================
 # Класс для модерации отзывов
@@ -131,7 +159,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ (без изменений)
+# ТИКЕТЫ
 # ============================================================
 class BuyTicketModal(Modal):
     def __init__(self):
@@ -612,7 +640,7 @@ class TicketPanelView(View):
         )
 
 # ============================================================
-# МЕНЮ (catalog) – без изменений
+# МЕНЮ (catalog)
 # ============================================================
 MENU_CHANNEL_ID = 1462140026073776280
 MENU_OPTIONS = [
@@ -717,7 +745,7 @@ async def send_menu_panel():
     )
 
 # ============================================================
-# ПАНЕЛЬ "ДОМИК" (HOME) – с селект-меню
+# ПАНЕЛЬ "ДОМИК" (HOME) – с селект-меню (добавлены Доска, Калькулятор, Расчет скидки)
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
 
@@ -741,6 +769,24 @@ class HomeSelect(disnake.ui.StringSelect):
                 description="Как получить? ・Справочник",
                 emoji="<:buy:1538395716920148079>",
                 value="earn"
+            ),
+            disnake.SelectOption(
+                label="・Доска",
+                description="Знай о важном・Информация",
+                emoji="<:banne1:1538551829246513312>",
+                value="board"
+            ),
+            disnake.SelectOption(
+                label="・Калькулятор",
+                description="Расчет цен・Корзина покупок",
+                emoji="<:calcu1:1538551848301109299>",
+                value="calc"
+            ),
+            disnake.SelectOption(
+                label="・Расчет скидки",
+                description="Узнай и посчитай・Снижение цены",
+                emoji="<:ckidsk:1538551877665427557>",
+                value="discount"
             )
         ]
         super().__init__(
@@ -781,6 +827,13 @@ class HomeSelect(disnake.ui.StringSelect):
             )
             embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
             await inter.response.send_message(embed=embed, ephemeral=True)
+        elif value == "board":
+            embeds = load_board_embed()
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "calc":
+            await inter.response.send_modal(CalcModal())
+        elif value == "discount":
+            await inter.response.send_modal(DiscountModal())
 
 class HomeView(disnake.ui.View):
     def __init__(self):
@@ -817,6 +870,89 @@ async def send_home_panel():
         description=f"> Сообщение отправлено в {channel.mention}",
         color=0x00ff00
     )
+
+# ============================================================
+# МОДАЛКИ ДЛЯ КАЛЬКУЛЯТОРА И РАСЧЁТА СКИДКИ
+# ============================================================
+class CalcModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Введите выражение",
+                placeholder="Например: 2 + 2 * 10",
+                custom_id="expression",
+                min_length=1,
+                max_length=100
+            )
+        ]
+        super().__init__(title="🧮 Калькулятор", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        expr = inter.text_values["expression"].strip()
+        # Безопасное вычисление: разрешены только цифры, операторы, скобки, пробелы
+        allowed = set("0123456789+-*/().% ")
+        if not all(c in allowed for c in expr):
+            return await inter.response.send_message(
+                "❌ Разрешены только цифры и операторы + - * / ( ) . %",
+                ephemeral=True
+            )
+        try:
+            # Используем eval с ограниченным пространством имён
+            result = eval(expr, {"__builtins__": None}, {})
+            if isinstance(result, float) and result.is_integer():
+                result = int(result)
+            await inter.response.send_message(
+                f"🧮 **Результат:** `{result}`",
+                ephemeral=True
+            )
+        except Exception as e:
+            await inter.response.send_message(
+                f"❌ Ошибка в выражении: {str(e)}",
+                ephemeral=True
+            )
+
+class DiscountModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Исходная цена",
+                placeholder="Введите сумму",
+                custom_id="price",
+                min_length=1,
+                max_length=20
+            ),
+            TextInput(
+                label="Скидка (%)",
+                placeholder="Введите процент скидки",
+                custom_id="discount_percent",
+                min_length=1,
+                max_length=10
+            )
+        ]
+        super().__init__(title="💰 Расчёт скидки", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        try:
+            price = float(inter.text_values["price"].replace(",", ".").strip())
+            discount = float(inter.text_values["discount_percent"].replace(",", ".").strip())
+        except ValueError:
+            return await inter.response.send_message("❌ Введите корректные числа.", ephemeral=True)
+
+        if discount < 0 or discount > 100:
+            return await inter.response.send_message("❌ Скидка должна быть от 0 до 100%.", ephemeral=True)
+
+        final_price = price * (1 - discount / 100)
+        savings = price - final_price
+
+        embed = disnake.Embed(
+            title="🧾 Результат расчёта скидки",
+            color=0x2ecc71
+        )
+        embed.add_field(name="Исходная цена", value=f"`{price:.2f} ₽`", inline=True)
+        embed.add_field(name="Скидка", value=f"`{discount:.0f}%`", inline=True)
+        embed.add_field(name="Экономия", value=f"`{savings:.2f} ₽`", inline=True)
+        embed.add_field(name="✅ Итоговая цена", value=f"**`{final_price:.2f} ₽`**", inline=False)
+        await inter.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
 # ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – селект-меню
@@ -1044,7 +1180,7 @@ async def admin_panel(inter: disnake.ApplicationCommandInteraction):
     await inter.send(embeds=embeds, ephemeral=True, view=AdminView())
 
 # ============================================================
-# МОДАЛКИ ДЛЯ DC-ПАНЕЛИ (остаются без изменений)
+# МОДАЛКИ ДЛЯ DC-ПАНЕЛИ (без изменений)
 # ============================================================
 class GiveDcModal(Modal):
     def __init__(self):
