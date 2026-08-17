@@ -147,7 +147,6 @@ async def on_ready():
         bot.add_view(MenuView())
 
         bot.loop.create_task(send_menu_panel())
-        # Убрали вызов ensure_panel – его нет
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_home_panel())  # Домик
@@ -174,7 +173,7 @@ async def on_ready():
 
         await update_review_counter(silent=False)
 
-        # Запускаем задачи (без топа)
+        # Запускаем задачи
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
@@ -523,12 +522,21 @@ async def on_message(message: disnake.Message):
         if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
             await add_message_dc(message.author.id)
 
+    # ===== КАНАЛ ОТЗЫВОВ =====
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
+        # 1. Ставим реакцию 💎
+        try:
+            await message.add_reaction("💎")
+        except Exception as e:
+            logger.warning(f"Не удалось поставить реакцию на отзыв: {e}")
+
+        # 2. Увеличиваем счётчик отзывов
         counts = load_json(FILES["review_counts"], {})
         user_id = str(message.author.id)
         counts[user_id] = counts.get(user_id, 0) + 1
         save_json(FILES["review_counts"], counts)
 
+        # 3. Обновляем роли
         if isinstance(message.author, disnake.Member):
             await update_user_roles(message.author, counts[user_id], keep_pka=True)
             await log_discord(
@@ -537,6 +545,7 @@ async def on_message(message: disnake.Message):
                 color=0x00ff00
             )
 
+        # 4. Отправляем на модерацию
         from modules.commands import ReviewModerationView
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1531737026322370872/image.png?ex=6a6a4cc5&is=6a68fb45&hm=e5cf13f52a87fc671b53b8422a3cffa149579ce66d40846ed15a8c9d2ec89d76&")
