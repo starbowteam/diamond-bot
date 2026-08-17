@@ -900,7 +900,7 @@ async def send_home_panel():
                 pass
             break
     embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202626448171088/image.png?ex=6a81d254&is=6a8080d4&hm=3c8318fb665830d99422f59fe9cf66d8307cfbd1bc89d07525301190e36bd7fa&=&format=webp&quality=lossless")
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1538771484778958898/image.png?ex=6a83e41e&is=6a82929e&hm=78e0190f6955969d2c2f630b4e9d560557c5c08d4f0c5caf8b32fbfd520332ab&")
     embed2 = disnake.Embed(
         title="Справочник посетителя Diamond Shop",
         description="> Привет дорогой посетитель! В данном канале, ты можешь узнать о том: какие есть товары за Diamond Coins, как вообще - заработать Diamond Coin, а также - можешь увидеть свой профиль, отслеживать свои покупки, баланс валюты, и прочие изменения.",
