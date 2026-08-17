@@ -54,7 +54,7 @@ def reload_promo_cache():
     promo_codes = get_promo_codes()
 
 # ============================================================
-# Функция загрузки "Доски" (board.json из ADD_DIR)
+# Функции загрузки эмбедов из add/
 # ============================================================
 def load_board_embed() -> list[Embed]:
     board_path = os.path.join(ADD_DIR, "board.json")
@@ -76,6 +76,52 @@ def load_board_embed() -> list[Embed]:
         return [disnake.Embed(
             title="❌ Ошибка",
             description="Не удалось загрузить доску объявлений.",
+            color=0xff0000
+        )]
+
+def load_work_embed() -> list[Embed]:
+    work_path = os.path.join(ADD_DIR, "work.json")
+    if not os.path.exists(work_path):
+        return [disnake.Embed(
+            title="💼 Работа в Diamond",
+            description="> Информация о работе будет здесь.",
+            color=6776679
+        )]
+    try:
+        with open(work_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds = []
+        for e in data.get("embeds", []):
+            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
+        return embeds
+    except Exception as e:
+        logger.error(f"Ошибка загрузки work.json: {e}")
+        return [disnake.Embed(
+            title="❌ Ошибка",
+            description="Не удалось загрузить информацию о работе.",
+            color=0xff0000
+        )]
+
+def load_eco_embed() -> list[Embed]:
+    eco_path = os.path.join(ADD_DIR, "eco.json")
+    if not os.path.exists(eco_path):
+        return [disnake.Embed(
+            title="🌐 Экосистема Diamond",
+            description="> Наши сайты и ресурсы будут здесь.",
+            color=6776679
+        )]
+    try:
+        with open(eco_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds = []
+        for e in data.get("embeds", []):
+            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
+        return embeds
+    except Exception as e:
+        logger.error(f"Ошибка загрузки eco.json: {e}")
+        return [disnake.Embed(
+            title="❌ Ошибка",
+            description="Не удалось загрузить экосистему.",
             color=0xff0000
         )]
 
@@ -639,7 +685,7 @@ class TicketPanelView(View):
         )
 
 # ============================================================
-# МЕНЮ (catalog) – без изменений
+# МЕНЮ (catalog)
 # ============================================================
 MENU_CHANNEL_ID = 1462140026073776280
 MENU_OPTIONS = [
@@ -744,7 +790,7 @@ async def send_menu_panel():
     )
 
 # ============================================================
-# ПАНЕЛЬ "ДОМИК" (HOME) – с селект-меню
+# ПАНЕЛЬ "ДОМИК" (HOME) – добавлены Работа и Экосистема
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
 
@@ -756,6 +802,12 @@ class HomeSelect(disnake.ui.StringSelect):
                 description="О себе ・Данные пользователя",
                 emoji="<:people:1538395694648529009>",
                 value="profile"
+            ),
+            disnake.SelectOption(
+                label="・Работа в Diamond",
+                description="Карьера・Заработная плата",
+                emoji="<:working:1538767619602120744>",
+                value="work"
             ),
             disnake.SelectOption(
                 label="・Покупка",
@@ -786,6 +838,12 @@ class HomeSelect(disnake.ui.StringSelect):
                 description="Узнай и посчитай・Снижение цены",
                 emoji="<:ckidsk:1538551877665427557>",
                 value="discount"
+            ),
+            disnake.SelectOption(
+                label="・Экосистема Diamond",
+                description="Наши сайты・Лучшая жизнь",
+                emoji="<:site:1538768985602916352>",
+                value="eco"
             )
         ]
         super().__init__(
@@ -805,6 +863,9 @@ class HomeSelect(disnake.ui.StringSelect):
         value = inter.data.values[0]
         if value == "profile":
             await show_profile(inter, inter.author)
+        elif value == "work":
+            embeds = load_work_embed()
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
         elif value == "buy":
             await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
         elif value == "earn":
@@ -833,6 +894,9 @@ class HomeSelect(disnake.ui.StringSelect):
             await inter.response.send_modal(CalcModal())
         elif value == "discount":
             await inter.response.send_modal(DiscountModal())
+        elif value == "eco":
+            embeds = load_eco_embed()
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
 
 class HomeView(disnake.ui.View):
     def __init__(self):
@@ -954,7 +1018,6 @@ class DiscountModal(Modal):
 # ============================================================
 # ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – с зарплатой и авансом
 # ============================================================
-# Настройки зарплат
 SALARY_ROLES = {
     1471844291595731016: {"salary": 120, "advance": 50},
     1513935883475226796: {"salary": 90, "advance": 30},
@@ -1177,7 +1240,7 @@ class PromoView(disnake.ui.View):
         self.add_item(PromoSelect())
 
 # ============================================================
-# ПАНЕЛЬ АДМИНА (admin_panel) – с добавленной Очисткой и /say
+# ПАНЕЛЬ АДМИНА (admin_panel) – с очисткой и /say
 # ============================================================
 class ClearModal(Modal):
     def __init__(self):
@@ -1225,7 +1288,6 @@ class ClearModal(Modal):
         if not isinstance(channel, disnake.TextChannel):
             return await inter.response.send_message("❌ Это не текстовый канал.", ephemeral=True)
 
-        # Проверка прав бота
         bot_member = guild.get_member(inter.bot.user.id)
         if not channel.permissions_for(bot_member).manage_messages:
             return await inter.response.send_message("❌ У бота нет прав на удаление сообщений в этом канале.", ephemeral=True)
@@ -1306,7 +1368,7 @@ class AdminView(disnake.ui.View):
         self.add_item(AdminSelect())
 
 # ============================================================
-# КОМАНДА /say (админ) – из приложенного кода
+# КОМАНДА /say
 # ============================================================
 @commands.slash_command(
     name="say",
@@ -1361,7 +1423,7 @@ async def say(
             await ctx.send("❌ Ошибка.", ephemeral=True)
 
 # ============================================================
-# КОМАНДЫ (панели) – с проверкой роли
+# КОМАНДЫ (панели)
 # ============================================================
 @commands.slash_command(name="panel_dc", description="Экономическая панель Diamond Coins (админ)")
 async def panel_dc(inter: disnake.ApplicationCommandInteraction):
@@ -1406,7 +1468,7 @@ async def admin_panel(inter: disnake.ApplicationCommandInteraction):
     await inter.send(embeds=embeds, ephemeral=True, view=AdminView())
 
 # ============================================================
-# МОДАЛКИ ДЛЯ DC-ПАНЕЛИ (без изменений)
+# МОДАЛКИ ДЛЯ DC-ПАНЕЛИ
 # ============================================================
 class GiveDcModal(Modal):
     def __init__(self):
@@ -1864,5 +1926,4 @@ def setup_commands(bot):
     bot.add_slash_command(panel_dc)
     bot.add_slash_command(admin_panel)
     bot.add_slash_command(promocodes)
-    bot.add_slash_command(say)  # добавляем /say
-    # /cleaning удалена – больше не регистрируем
+    bot.add_slash_command(say)
