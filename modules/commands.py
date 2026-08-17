@@ -915,6 +915,103 @@ async def send_home_panel():
     )
 
 # ============================================================
+# ПАНЕЛЬ "EARLY TAROLOGY" (новый канал)
+# ============================================================
+TAROLOGY_CHANNEL_ID = 1536796929873420308
+
+class TarologySelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="・Контакты для связи",
+                description="Связь для заказа",
+                emoji="<:people:1538395694648529009>",
+                value="contacts"
+            ),
+            disnake.SelectOption(
+                label="・Подробности и акции",
+                description="Узнайте больше, о данной сфере и бонусах",
+                emoji="<:CARDS:1538780592425017454>",
+                value="details"
+            )
+        ]
+        super().__init__(
+            placeholder="Узнать о раскладах",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="tarology_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="🔮 Выбор в Early Tarology",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
+        value = inter.data.values[0]
+        if value == "contacts":
+            embed = disnake.Embed(
+                title="📞 Контакты для связи",
+                description="> Связаться можно в ТГК - https://t.me/earlytarology",
+                color=6776679
+            )
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
+            await inter.response.send_message(embed=embed, ephemeral=True)
+        elif value == "details":
+            embed = disnake.Embed(
+                title="🔮 Подробности и акции.",
+                description=(
+                    "> Данный канал, сделан для того, чтобы помочь человеку, Diamond Lady-сервера, влиться в сферу заработка.\n\n"
+                    "> При покупке расклада, а цена его - 40₽. Вы получаете и расклад на любую интересующую вас тему, с точностью до 99,8% правды. А при отзыве в Early Tarology и в Diamond - Кэшбек в виде Diamond Coin-ов в сумме 20 шт, вы - поможете человеку влиться в бизнес, и узнать интересующую вас правду - а вам, кэшбек, на основные покупки."
+                ),
+                color=6776679
+            )
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
+            await inter.response.send_message(embed=embed, ephemeral=True)
+
+class TarologyView(disnake.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TarologySelect())
+
+async def send_tarology_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(TAROLOGY_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(TAROLOGY_CHANNEL_ID)
+    if not channel:
+        logger.warning("Tarology panel channel not found")
+        return
+
+    # Удаляем старое сообщение бота с компонентами
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
+
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1536977317912518677/image.png?ex=6a834bec&is=6a81fa6c&hm=a2a91a7975af349270ec5d97d17f7814e87de0da7943103eceb10dbbb3725978&=&format=webp&quality=lossless&width=1536&height=597")
+
+    embed2 = disnake.Embed(
+        title="Early Tarology от Diamond Lady",
+        description="> Данный канал, путь в мистику и веру. Расклады неимоверно точные, она приугадала почти все, что произошло в магазине за Пол-Года до событий. Цены низкие, качество высокое. Информация - ниже по категориям.",
+        color=6776679
+    )
+    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
+
+    await channel.send(embeds=[embed1, embed2], view=TarologyView())
+    await log_discord(
+        title="🔮 Панель Early Tarology отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+
+# ============================================================
 # МОДАЛКИ ДЛЯ КАЛЬКУЛЯТОРА И РАСЧЁТА СКИДКИ
 # ============================================================
 class CalcModal(Modal):
