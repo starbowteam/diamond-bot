@@ -20,19 +20,13 @@ from core.utils import (
     get_dc_cache, save_dc_cache, sync_dc_to_json
 )
 
-# ============================================================
-# Импорт модулей (без топ-задачи)
-# ============================================================
 from modules.actions import send_actions_panel, handle_flash_interaction
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
-    daily_bonus, monthly_fee
+    daily_bonus
 )
 
-# ============================================================
-# Инициализация бота
-# ============================================================
 intents = disnake.Intents.default()
 intents.members = True
 intents.messages = True
@@ -45,9 +39,6 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# ============================================================
-# Обновление баннера
-# ============================================================
 async def update_review_counter(silent: bool = False):
     try:
         text_ch = bot.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
@@ -113,9 +104,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
                 color=0xff0000
             )
 
-# ============================================================
-# Задачи (без топа)
-# ============================================================
 @tasks.loop(hours=24)
 async def review_counter_task():
     await bot.wait_until_ready()
@@ -126,20 +114,11 @@ async def daily_bonus_task():
     await bot.wait_until_ready()
     await daily_bonus()
 
-@tasks.loop(hours=24)
-async def monthly_fee_task():
-    await bot.wait_until_ready()
-    await monthly_fee()
-
-# ============================================================
-# Глобальные события
-# ============================================================
 @bot.event
 async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        # Импортируем классы View и панели только внутри on_ready
         from modules.commands import (
             TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView,
             send_home_panel, send_tarology_panel
@@ -152,8 +131,8 @@ async def on_ready():
         bot.loop.create_task(send_menu_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_home_panel())          # Справочник
-        bot.loop.create_task(send_tarology_panel())      # Early Tarology
+        bot.loop.create_task(send_home_panel())
+        bot.loop.create_task(send_tarology_panel())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
@@ -177,13 +156,10 @@ async def on_ready():
 
         await update_review_counter(silent=False)
 
-        # Запускаем задачи
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
             daily_bonus_task.start()
-        if not monthly_fee_task.is_running():
-            monthly_fee_task.start()
 
         logger.info("%s is ready", bot.user)
         await log_discord(
@@ -199,9 +175,6 @@ async def on_ready():
             color=0xff0000
         )
 
-# ============================================================
-# Фоновые задачи (панели)
-# ============================================================
 async def send_menu_panel():
     await bot.wait_until_ready()
     from modules.commands import send_menu_panel as _send_menu_panel
@@ -233,9 +206,6 @@ async def keep_voice_alive():
             logger.exception("keep_voice_alive loop error: %s", e)
         await asyncio.sleep(60)
 
-# ============================================================
-# Глобальные обработчики событий (логирование)
-# ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
     await log_discord(
@@ -504,18 +474,12 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
                 except Exception as e:
                     logger.error(f"Не удалось снять реакционную роль: {e}")
 
-# ============================================================
-# Обработка взаимодействий (кнопки)
-# ============================================================
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
     from modules.commands import handle_interaction
     await handle_interaction(inter)
     await handle_flash_interaction(inter)
 
-# ============================================================
-# Обработка сообщений (отзывы, активность)
-# ============================================================
 @bot.event
 async def on_message(message: disnake.Message):
     if message.author.bot:
@@ -526,21 +490,17 @@ async def on_message(message: disnake.Message):
         if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
             await add_message_dc(message.author.id)
 
-    # ===== КАНАЛ ОТЗЫВОВ =====
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
-        # 1. Ставим реакцию 💎
         try:
             await message.add_reaction("💎")
         except Exception as e:
             logger.warning(f"Не удалось поставить реакцию на отзыв: {e}")
 
-        # 2. Увеличиваем счётчик отзывов
         counts = load_json(FILES["review_counts"], {})
         user_id = str(message.author.id)
         counts[user_id] = counts.get(user_id, 0) + 1
         save_json(FILES["review_counts"], counts)
 
-        # 3. Обновляем роли
         if isinstance(message.author, disnake.Member):
             await update_user_roles(message.author, counts[user_id], keep_pka=True)
             await log_discord(
@@ -549,7 +509,6 @@ async def on_message(message: disnake.Message):
                 color=0x00ff00
             )
 
-        # 4. Отправляем на модерацию
         from modules.commands import ReviewModerationView
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1531737026322370872/image.png?ex=6a6a4cc5&is=6a68fb45&hm=e5cf13f52a87fc671b53b8422a3cffa149579ce66d40846ed15a8c9d2ec89d76&")
@@ -579,10 +538,7 @@ async def on_message(message: disnake.Message):
 
     await bot.process_commands(message)
 
-# ============================================================
-# Голосовые события (для DC)
-# ============================================================
-voice_track = {}  # {user_id: (channel_id, join_time)}
+voice_track = {}
 
 @bot.event
 async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceState, after: disnake.VoiceState):
