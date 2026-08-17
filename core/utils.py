@@ -38,7 +38,7 @@ CONFIG = {
         1471844291595731016,
         1530822331188903966
     ],
-    "ADMIN_USER_IDS": [1415191217179856967],   # ID пользователей с админ-доступом без роли
+    "ADMIN_USER_IDS": [1415191217179856967],
     "REVIEW_MODERATION_ROLES": [1154757071330365490, 1513935883475226796, 1127428607606796294, 1471844291595731016],
     "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
@@ -76,7 +76,7 @@ CONFIG = {
     },
     "DC_RECALC_IGNORE": [796293832751972352, 1168943921171288135],
     "FIXED_PKA_ROLE_ID": 1208442176321626162,
-    "MAX_DAILY_MESSAGES": 20,
+    "MAX_DAILY_MESSAGES": 30,   # Изменено с 20 на 30
     "MAX_DAILY_VOICE": 15,
     "VOICE_RATE": 3,
     "MESSAGE_RATE": 1,
@@ -207,10 +207,8 @@ def clean_embed_for_discohook(embed_dict: Dict[str, Any]) -> Dict[str, Any]:
 # Проверки ролей (с поддержкой пользователей по ID)
 # ============================================================
 def has_admin_command_roles(author):
-    # Проверка по ролям
     if any(r.id in CONFIG["ADMIN_COMMAND_ROLES"] for r in author.roles):
         return True
-    # Проверка по ID пользователя
     if author.id in CONFIG.get("ADMIN_USER_IDS", []):
         return True
     return False
