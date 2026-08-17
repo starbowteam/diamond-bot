@@ -140,7 +140,10 @@ async def on_ready():
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
         # Импортируем классы View и панели только внутри on_ready
-        from modules.commands import TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView, send_home_panel
+        from modules.commands import (
+            TicketPanelView, TicketButtons, TicketButtonsPaid, MenuView,
+            send_home_panel, send_tarology_panel
+        )
         bot.add_view(TicketPanelView())
         bot.add_view(TicketButtons())
         bot.add_view(TicketButtonsPaid())
@@ -149,7 +152,8 @@ async def on_ready():
         bot.loop.create_task(send_menu_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_home_panel())  # Домик
+        bot.loop.create_task(send_home_panel())          # Справочник
+        bot.loop.create_task(send_tarology_panel())      # Early Tarology
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
