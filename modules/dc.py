@@ -237,10 +237,10 @@ def create_default_catalog() -> dict:
     return catalog
 
 # ============================================================
-# Ежедневный бонус и комиссия
+# Ежедневный бонус (комиссия удалена)
 # ============================================================
 async def daily_bonus():
-    from core.bot import bot  # локальный импорт для избежания цикла
+    from core.bot import bot
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
         return
@@ -259,35 +259,6 @@ async def daily_bonus():
             data["last_bonus"] = now
             save_dc_cache(member.id, data)
             sync_dc_to_json()
-
-async def monthly_fee():
-    rows = cur.execute("SELECT user_id, balance FROM dc_cache").fetchall()
-    now = int(time.time())
-    month = datetime.fromtimestamp(now).strftime("%Y-%m")
-    for row in rows:
-        uid = row["user_id"]
-        balance = row["balance"]
-        if balance > 500:
-            fee = int(balance * 0.05)
-            if fee > 50:
-                fee = 50
-            if fee > 0:
-                data = get_dc_cache(uid)
-                data["balance"] -= fee
-                data["history"].append({
-                    "date": now,
-                    "amount": -fee,
-                    "reason": f"Ежемесячная комиссия ({month})"
-                })
-                if len(data["history"]) > 50:
-                    data["history"] = data["history"][-50:]
-                save_dc_cache(uid, data)
-                sync_dc_to_json()
-                await log_discord(
-                    title="💸 Ежемесячная комиссия",
-                    description=f"> **Пользователь:** <@{uid}>\n> **Списано:** `{fee} DC`\n> **Причина:** хранение >500 DC",
-                    color=0xff6600
-                )
 
 # ============================================================
 # Прогресс-бар для профиля
