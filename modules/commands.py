@@ -687,23 +687,20 @@ class CoinsTicketButtons(View):
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤКупленноеㅤ",
+        label="ㅤㅤКупленноеㅤ",   # ← здесь два пробела слева, один справа
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:items",
         emoji=PartialEmoji(name="prize", id=1539657202170859561),
         row=0
     )
     async def items(self, button, inter: disnake.MessageInteraction):
-        # Проверка: только создатель тикета может нажать
         if inter.author.id != self.user_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
-        # Получаем неиспользованные покупки пользователя
         purchases = await get_user_purchases(self.user_id, only_unused=True)
         if not purchases:
             return await inter.response.send_message("❌ У вас нет неиспользованных товаров для этого тикета.", ephemeral=True)
 
-        # Загружаем эмбед из add/invet.json (если есть)
         invet_path = os.path.join(ADD_DIR, "invet.json")
         if os.path.exists(invet_path):
             try:
@@ -728,7 +725,6 @@ class CoinsTicketButtons(View):
                 )
             ]
 
-        # Создаём View с кнопками товаров (только названия, без категории)
         view = View(timeout=300)
         for idx, p in enumerate(purchases):
             label = p['value']
