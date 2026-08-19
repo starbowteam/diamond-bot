@@ -1981,6 +1981,46 @@ async def recalc_reviews(inter):
     )
 
 # ============================================================
+# Отправка панели тикетов в канал 1462136361711829053
+# ============================================================
+TICKET_PANEL_CHANNEL_ID = 1462136361711829053
+
+async def send_ticket_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(TICKET_PANEL_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(TICKET_PANEL_CHANNEL_ID)
+    if not channel:
+        logger.warning("Ticket panel channel not found")
+        return
+
+    # Удаляем старое сообщение бота с компонентами (если есть)
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
+
+    # Отправляем панель с кнопками
+    embed = disnake.Embed(
+        title="🛒 Панель покупок",
+        description="> Нажмите **Купить**, чтобы создать тикет для заказа.\n"
+                    "> Нажмите **Промокоды**, чтобы узнать о текущих акциях.\n"
+                    "> Нажмите **Каталог**, чтобы посмотреть ассортимент товаров.",
+        color=6776679
+    )
+    embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
+    await channel.send(embed=embed, view=TicketPanelView())
+    await log_discord(
+        title="🛒 Панель тикетов отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+    
+# ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ (кнопки)
 # ============================================================
 async def handle_interaction(inter: disnake.MessageInteraction):
