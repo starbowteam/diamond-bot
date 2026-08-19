@@ -1,0 +1,22 @@
+{
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1539657912543092766/image.png?ex=6a871dab&is=6a85cc2b&hm=09dfaa02317c8f825bf34116c33f0a83b349577673e6f450544f72b3976c4b84&"
+      },
+      "fields": []
+    },
+    {
+      "title": "Инвентарь товаров за Diamond Coin",
+      "description": "> Если вы создали тикет в данной категории, у вас должны быть товары, которые куплены за них, если вы получаете товар, оплатой в Diamond Coin-ах.\n\n> Выберите товар, который относится к вашему тикету, он обновит статус в \"Подтверждения Наличия\"",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a8679e3&is=6a852863&hm=59892e8783bfb24b381e2a76e3689f727bef8f1e3aea9595dd3d130b587dede4&"
+      },
+      "fields": []
+    }
+  ],
+  "attachments": [],
+  "components": []
+}
