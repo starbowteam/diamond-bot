@@ -106,6 +106,11 @@ FILES = {
 }
 
 # ============================================================
+# СПИСОК ИСКЛЮЧЕНИЙ (всегда Покупатель века)
+# ============================================================
+EXEMPT_USERS = [562318422982262793, 1168943921171288135, 796293832751972352]
+
+# ============================================================
 # Logging
 # ============================================================
 LOG_FILE = os.path.join(BASE_DIR, "bot.log")
@@ -300,7 +305,7 @@ def log_command(func):
     return wrapper
 
 # ============================================================
-# Система ролей по отзывам
+# Система ролей по отзывам (с исключениями)
 # ============================================================
 def get_roles_for_count(count: int) -> list[int]:
     roles = []
@@ -326,6 +331,32 @@ def get_roles_for_count(count: int) -> list[int]:
     return roles
 
 async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool = False):
+    # Если пользователь в исключениях – выдаём только club и pka
+    if member.id in EXEMPT_USERS:
+        role_ids = CONFIG["ROLE_IDS"]
+        club_role_id = role_ids["club"]
+        pka_role_id = role_ids["pka"]
+        current_role_ids = [r.id for r in member.roles]
+        all_buyer_roles = list(role_ids.values())
+        # Убираем все роли покупателя (кроме club и pka)
+        to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in [club_role_id, pka_role_id]]
+        to_add = []
+        if club_role_id not in current_role_ids:
+            to_add.append(club_role_id)
+        if pka_role_id not in current_role_ids:
+            to_add.append(pka_role_id)
+        guild = member.guild
+        for rid in to_remove:
+            role = guild.get_role(rid)
+            if role:
+                await member.remove_roles(role)
+        for rid in to_add:
+            role = guild.get_role(rid)
+            if role:
+                await member.add_roles(role)
+        return  # Выходим, не выполняем обычную логику
+
+    # Обычная логика для всех остальных
     role_ids = CONFIG["ROLE_IDS"]
     all_buyer_roles = list(role_ids.values())
     target_role_ids = get_roles_for_count(count)
