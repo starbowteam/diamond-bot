@@ -620,6 +620,9 @@ class ConfirmCloseView(View):
 # ============================================================
 # ПАНЕЛЬ ТИКЕТОВ (кнопки) – обновлены эмодзи и метод каталога
 # ============================================================
+# ============================================================
+# ПАНЕЛЬ ТИКЕТОВ (кнопки) – обновлены эмодзи
+# ============================================================
 class TicketPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -628,7 +631,7 @@ class TicketPanelView(View):
         label="ㅤㅤКупитьㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="panel:buy",
-        emoji=PartialEmoji(name="bbuy", id=1539643798626508964)   # новый эмодзи
+        emoji=PartialEmoji(name="shopg", id=1539646815530651718)   # новый эмодзи
     )
     async def buy(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         await inter.response.send_modal(BuyTicketModal())
@@ -642,7 +645,7 @@ class TicketPanelView(View):
         label="ㅤПромокодыㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="panel:promo",
-        emoji=PartialEmoji(name="proros", id=1539643768808931368)   # новый эмодзи
+        emoji=PartialEmoji(name="prom1", id=1539646792139014234)   # новый эмодзи
     )
     async def promo(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         text = "🎟️ Промокоды публикуются в <#1462070136856117258>, следи и забирай свою скидку!"
@@ -657,7 +660,7 @@ class TicketPanelView(View):
         label="ㅤКаталогㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="panel:catalog",
-        emoji=PartialEmoji(name="ccaal", id=1539643738400366653)   # новый эмодзи
+        emoji=PartialEmoji(name="catal", id=1539646769053306980)   # новый эмодзи
     )
     async def catalog(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         # Логирование в канал 1530453871581855744
@@ -674,7 +677,7 @@ class TicketPanelView(View):
         except Exception as e:
             logger.error(f"Ошибка логирования каталога: {e}")
 
-        # Отправляем ОДИН embed (как в JSON)
+        # Отправляем ОДИН embed
         embed = disnake.Embed(
             color=6776679,
             title="Выбор для покупки в каталоге товаров",
