@@ -641,7 +641,7 @@ class CoinsTicketButtons(View):
         self.order_embed_index = 1
 
     @disnake.ui.button(
-        label="Закрыть",
+        label="ㅤㅤЗакрытьㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:close",
         emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -660,7 +660,7 @@ class CoinsTicketButtons(View):
         )
 
     @disnake.ui.button(
-        label="Политика",
+        label="ㅤㅤПолитикаㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:policy",
         emoji=PartialEmoji(name="Politic", id=1539657020695650384),
@@ -687,7 +687,7 @@ class CoinsTicketButtons(View):
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
     @disnake.ui.button(
-        label="Товары",
+        label="ㅤㅤТоварыㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:items",
         emoji=PartialEmoji(name="prize", id=1539657202170859561),
@@ -731,7 +731,6 @@ class CoinsTicketButtons(View):
         # Создаём View с кнопками товаров (только названия, без категории)
         view = View(timeout=300)
         for idx, p in enumerate(purchases):
-            # Используем только p['value'] (название товара без категории)
             label = p['value']
             if len(label) > 80:
                 label = label[:77] + "..."
@@ -743,7 +742,6 @@ class CoinsTicketButtons(View):
             btn.callback = self.create_apply_callback(idx, inter)
             view.add_item(btn)
 
-        # Отправляем эфемерное сообщение
         await inter.response.send_message(embeds=embeds, view=view, ephemeral=True)
 
     def create_apply_callback(self, purchase_index, original_inter):
@@ -751,18 +749,15 @@ class CoinsTicketButtons(View):
             if inter.author.id != self.user_id:
                 return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
 
-            # Получаем название товара до удаления
             purchases = await get_user_purchases(self.user_id, only_unused=False)
             if purchase_index >= len(purchases):
                 return await inter.response.send_message("❌ Товар уже применён.", ephemeral=True)
             item_value = purchases[purchase_index]['value']
 
-            # Удаляем товар из покупок
             success = await remove_purchase(self.user_id, purchase_index)
             if not success:
                 return await inter.response.send_message("❌ Ошибка применения товара.", ephemeral=True)
 
-            # Обновляем embed в тикете (поле "Подтверждение наличия")
             if self.message and self.message.embeds:
                 embeds = list(self.message.embeds)
                 if len(embeds) > self.order_embed_index:
