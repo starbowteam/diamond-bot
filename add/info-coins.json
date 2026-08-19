@@ -1,0 +1,33 @@
+{
+  "embeds": [
+    {
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1527179314465079417/image.png?ex=6a868b12&is=6a853992&hm=4dbce32222b58fb9ce6069881e7069a6380da42e538c99d39279ea74c91dc60e&"
+      },
+      "fields": []
+    },
+    {
+      "title": "Информация о заказе по данному тикету:",
+      "description": "\n> Время: <t:1784558066:f>\n> Заказ на Diamond Coin-ы, либо на Инвайты",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&"
+      },
+      "fields": [
+        {
+          "name": "> Позиция:",
+          "value": "```Пример, из формы подхватывается```",
+          "inline": true
+        },
+        {
+          "name": "> Подтверждение наличия",
+          "value": "```Не активирован```",
+          "inline": true
+        }
+      ]
+    }
+  ],
+  "attachments": [],
+  "components": []
+}
