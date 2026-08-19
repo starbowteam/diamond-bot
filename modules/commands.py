@@ -262,9 +262,6 @@ class BuyTicketModal(Modal):
         )
         await inter.response.send_message(f"✅ Тикет создан: {ticket_channel.mention}", ephemeral=True)
 
-        # Убираем автоматическое уведомление о скидке!
-        # Больше не отправляем embed_apply
-
         log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
         if log_ch:
             await log_ch.send(embed=disnake.Embed(
@@ -330,7 +327,6 @@ class CoinsTicketModal(Modal):
         current_time = int(time.time())
         embed_order_info.description = f"\n> Время: <t:{current_time}:f>\n> Заказ на Diamond Coin-ы, либо на Инвайты"
 
-        # Сохраняем сообщение в view для обновления
         sent_msg = await ticket_channel.send(
             f"> Добрый день, {inter.author.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n",
             embeds=[embeds_list[0], embed_order_info],
@@ -632,6 +628,9 @@ class TicketButtonsPaid(View):
     async def paid_done(self, button, inter: disnake.MessageInteraction):
         await inter.response.send_message("Заказ уже оплачен.", ephemeral=True)
 
+# ============================================================
+# КНОПКИ ДЛЯ ТИКЕТОВ С DC/ИНВАЙТАМИ (исправлены)
+# ============================================================
 class CoinsTicketButtons(View):
     """Кнопки для тикетов с DC/Инвайтами (закрыть, политика, товары)"""
     def __init__(self, channel, user_id):
@@ -642,7 +641,7 @@ class CoinsTicketButtons(View):
         self.order_embed_index = 1
 
     @disnake.ui.button(
-        label="ㅤㅤЗакрыть тикетㅤㅤㅤ",
+        label="Закрыть",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:close",
         emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -661,7 +660,7 @@ class CoinsTicketButtons(View):
         )
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤПолитикаㅤㅤㅤㅤ",
+        label="Политика",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:policy",
         emoji=PartialEmoji(name="Politic", id=1539657020695650384),
@@ -688,38 +687,52 @@ class CoinsTicketButtons(View):
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤㅤㅤㅤТоварыㅤㅤㅤㅤ",
+        label="Товары",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:items",
         emoji=PartialEmoji(name="prize", id=1539657202170859561),
         row=0
     )
     async def items(self, button, inter: disnake.MessageInteraction):
+        # Проверка: только создатель тикета может нажать
+        if inter.author.id != self.user_id:
+            return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
+
         # Получаем неиспользованные покупки пользователя
         purchases = await get_user_purchases(self.user_id, only_unused=True)
         if not purchases:
             return await inter.response.send_message("❌ У вас нет неиспользованных товаров для этого тикета.", ephemeral=True)
 
-        # Загружаем шаблон info-coins.json для инвентаря
-        embed_path = os.path.join(ADD_DIR, "info-coins.json")
-        try:
-            with open(embed_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
-        except Exception as e:
-            logger.error(f"Ошибка загрузки info-coins.json для инвентаря: {e}")
+        # Загружаем эмбед из add/invet.json (если есть)
+        invet_path = os.path.join(ADD_DIR, "invet.json")
+        if os.path.exists(invet_path):
+            try:
+                with open(invet_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
+            except Exception as e:
+                logger.error(f"Ошибка загрузки invet.json: {e}")
+                embeds = [
+                    disnake.Embed(
+                        title="📦 Инвентарь товаров за Diamond Coin",
+                        description="> Если вы создали тикет в данной категории, у вас должны быть товары, которые куплены за них, если вы получаете товар, оплатой в Diamond Coin-ах.\n\n> Выберите товар, который относится к вашему тикету, он обновит статус в \"Подтверждения Наличия\"",
+                        color=6776679
+                    )
+                ]
+        else:
             embeds = [
                 disnake.Embed(
-                    title="📦 Инвентарь товаров",
-                    description="> Ваши неиспользованные товары:",
+                    title="📦 Инвентарь товаров за Diamond Coin",
+                    description="> Если вы создали тикет в данной категории, у вас должны быть товары, которые куплены за них, если вы получаете товар, оплатой в Diamond Coin-ах.\n\n> Выберите товар, который относится к вашему тикету, он обновит статус в \"Подтверждения Наличия\"",
                     color=6776679
                 )
             ]
 
-        # Создаём View с кнопками товаров
+        # Создаём View с кнопками товаров (только названия, без категории)
         view = View(timeout=300)
         for idx, p in enumerate(purchases):
-            label = f"{p['type']} {p['value']}"
+            # Используем только p['value'] (название товара без категории)
+            label = p['value']
             if len(label) > 80:
                 label = label[:77] + "..."
             btn = Button(
@@ -738,6 +751,12 @@ class CoinsTicketButtons(View):
             if inter.author.id != self.user_id:
                 return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
 
+            # Получаем название товара до удаления
+            purchases = await get_user_purchases(self.user_id, only_unused=False)
+            if purchase_index >= len(purchases):
+                return await inter.response.send_message("❌ Товар уже применён.", ephemeral=True)
+            item_value = purchases[purchase_index]['value']
+
             # Удаляем товар из покупок
             success = await remove_purchase(self.user_id, purchase_index)
             if not success:
@@ -750,26 +769,19 @@ class CoinsTicketButtons(View):
                     embed_dict = embeds[self.order_embed_index].to_dict()
                     for field in embed_dict.get("fields", []):
                         if "подтверждение наличия" in field.get("name", "").lower():
-                            # Заменяем значение на название товара из покупки
-                            # Нужно получить название из покупки, но мы его не храним в колбэке
-                            # Поэтому получаем его из оригинального взаимодействия
-                            # Просто используем простой текст
-                            purchases = await get_user_purchases(self.user_id, only_unused=False)
-                            # Находим удалённую покупку по индексу (уже удалена, поэтому не можем)
-                            # Просто ставим "Применён"
-                            field["value"] = "```Применён```"
+                            field["value"] = f"```{item_value}```"
                             break
                     new_embed = disnake.Embed.from_dict(embed_dict)
                     embeds[self.order_embed_index] = new_embed
                     await self.message.edit(embeds=embeds)
 
             await inter.response.send_message(
-                f"✅ Товар применён к тикету!",
+                f"✅ Товар **{item_value}** применён к тикету!",
                 ephemeral=True
             )
             await log_discord(
                 title="🛒 Применён товар в тикете (DC/Инвайты)",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Тикет:** {self.channel.mention}",
+                description=f"> **Пользователь:** {inter.author.mention}\n> **Тикет:** {self.channel.mention}\n> **Товар:** {item_value}",
                 color=0x00aaff,
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
