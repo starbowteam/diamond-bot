@@ -997,7 +997,7 @@ class TicketPanelView(View):
         emoji=PartialEmoji(name="prom1", id=1539646792139014234)
     )
     async def promo(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        text = "🎟️ Промокоды и акции, публикуются либо в <#1462070136856117258>, либо акция дня по Diamond Coin - <#1469698608390606898>"
+        text = "🎟️ Промокоды и акции, публикуются либо в <#1462070136856117258>, либо акция дня по Diamond Coin - <#1469698608390606898>!"
         await inter.response.send_message(text, ephemeral=True)
         await log_discord(
             title="🎟️ Просмотр промокодов",
