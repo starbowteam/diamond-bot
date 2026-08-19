@@ -1,19 +1,3 @@
-# -*- coding: utf-8 -*-
-import os
-import sys
-import json
-import asyncio
-import time
-import re
-import io
-import math
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
-import disnake
-from disnake.ext import commands
-from disnake.ui import Modal, TextInput, View, Button, Select
-from disnake import PartialEmoji, ui, ButtonStyle, Embed, SelectOption
-
 # ============================================================
 # Импорты из core.utils
 # ============================================================
@@ -43,6 +27,11 @@ from modules.dc import (
     load_shop_catalog,
     sync_dc_to_json, get_dc_cache_all
 )
+
+# ============================================================
+# Импорт из modules.actions (добавлено)
+# ============================================================
+from modules.actions import load_action_embed
 
 # ============================================================
 # Загружаем промокоды в память
