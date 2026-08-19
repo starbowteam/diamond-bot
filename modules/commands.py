@@ -1,3 +1,20 @@
+# -*- coding: utf-8 -*-
+import os
+import sys
+import json
+import asyncio
+import time
+import re
+import io
+import math
+import disnake  # <-- добавлено
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List  # <-- добавлен List
+
+from disnake.ext import commands
+from disnake.ui import Modal, TextInput, View, Button, Select
+from disnake import PartialEmoji, ui, ButtonStyle, Embed, SelectOption
+
 # ============================================================
 # Импорты из core.utils
 # ============================================================
