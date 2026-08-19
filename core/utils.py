@@ -44,21 +44,23 @@ CONFIG = {
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
     "LOG_CHANNEL_ID": 1462418981825810535,
     "LOG_CHANNEL_ID_PANEL": 1462418981825810535,
+    "LOG_TICKET_CHANNEL_ID": 1539654348949164062,  # Новый канал для логов тикетов
     "MODERATION_LOG_CHANNEL": 1531731027272269895,
     "DC_PANEL_CHANNEL": 1531731804828991611,
-    "COINS_CATEGORY_ID": 1491827388391358504,
-    "COINS_INFO_TEMPLATE_PATH": os.path.join(ADD_DIR, "info-coins.json"),
+    "TOP_CHANNEL_ID": 1532278656519635104,
     "ACTIONS_CHANNEL_ID": 1469698608390606898,
     "ANALYTICS_CHANNEL_ID": 1536947571082403840,
     "MANAGER_ROLE_ID": 1127428607606796290,
     "EMBED_IMAGE_URL": "https://media.discordapp.net/attachments/1527006158282555412/1527007499192893561/image.png?ex=6a60584e&is=6a5f06ce&hm=1b0ba12a8c8d57f41c57bc03a6998178f6cfb6b83db5837d448d1ab495c46830&=&format=webp&quality=lossless&width=1766&height=686",
     "PANEL_CHANNEL_ID": 1462136361711829053,
     "TICKET_CATEGORY_ID": 1462419587835363614,
+    "COINS_CATEGORY_ID": 1491827388391358504,
     "PAID_CATEGORY_ID": 1470779295650549885,
     "TARGET_REVIEWER_ID": 796293832751972352,
     "REVIEW_COUNT_CHANNEL": 1462074763437543435,
     "TICKET_COOLDOWN_SECONDS": 5,
     "INFO_TEMPLATE_PATH": os.path.join(ADD_DIR, "info-o-zakaze.json"),
+    "COINS_INFO_TEMPLATE_PATH": os.path.join(ADD_DIR, "info-coins.json"),
     "PK_FILE_PATH": os.path.join(ADD_DIR, "pk.json"),
     "GUILD_ID": "1127428607606796288",
     "VOICE_CHANNEL_ID": 1464699044751478815,
@@ -77,7 +79,7 @@ CONFIG = {
     },
     "DC_RECALC_IGNORE": [796293832751972352, 1168943921171288135],
     "FIXED_PKA_ROLE_ID": 1208442176321626162,
-    "MAX_DAILY_MESSAGES": 30,   # Изменено с 20 на 30
+    "MAX_DAILY_MESSAGES": 30,
     "MAX_DAILY_VOICE": 15,
     "VOICE_RATE": 3,
     "MESSAGE_RATE": 1,
@@ -224,15 +226,19 @@ def has_ticket_manage_roles(author):
     return any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in author.roles)
 
 # ============================================================
-# Логирование в Discord
+# Логирование в Discord (с поддержкой канала для тикетов)
 # ============================================================
-async def log_discord(title: str, description: str, color: int = 0x00ff00, panel: bool = False, fields: list = None):
+async def log_discord(title: str, description: str, color: int = 0x00ff00, panel: bool = False, fields: list = None, channel_id: int = None):
     try:
         from core.bot import bot
     except ImportError:
         return
     try:
-        ch_id = CONFIG["LOG_CHANNEL_ID_PANEL"] if panel else CONFIG["LOG_CHANNEL_ID"]
+        # Если передан конкретный channel_id, используем его
+        if channel_id:
+            ch_id = channel_id
+        else:
+            ch_id = CONFIG["LOG_CHANNEL_ID_PANEL"] if panel else CONFIG["LOG_CHANNEL_ID"]
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if not guild:
             logger.warning("log_discord: guild not found")
