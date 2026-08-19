@@ -44,7 +44,7 @@ CONFIG = {
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
     "LOG_CHANNEL_ID": 1462418981825810535,
     "LOG_CHANNEL_ID_PANEL": 1462418981825810535,
-    "LOG_TICKET_CHANNEL_ID": 1539654348949164062,  # Новый канал для логов тикетов
+    "LOG_TICKET_CHANNEL_ID": 1539654348949164062,
     "MODERATION_LOG_CHANNEL": 1531731027272269895,
     "DC_PANEL_CHANNEL": 1531731804828991611,
     "TOP_CHANNEL_ID": 1532278656519635104,
@@ -86,6 +86,12 @@ CONFIG = {
     "MESSAGE_BATCH": 10,
     "MIN_MESSAGE_LENGTH": 3,
     "SHOP_CATALOG_PATH": os.path.join(CATALOG_DIR, "shop_catalog.json"),
+    # Роли для тикетов
+    "TICKET_ROLES": {
+        "real_created": 1539668621981257809,
+        "real_paid": 1539668675530072175,
+        "coins_created": 1539669323185131570,
+    }
 }
 
 FILES = {
@@ -234,7 +240,6 @@ async def log_discord(title: str, description: str, color: int = 0x00ff00, panel
     except ImportError:
         return
     try:
-        # Если передан конкретный channel_id, используем его
         if channel_id:
             ch_id = channel_id
         else:
