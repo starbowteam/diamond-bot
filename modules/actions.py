@@ -21,14 +21,8 @@ from modules.dc import (
 
 ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 
-# Категории (три пункта)
+# Категории (теперь только две: Premium и Акционный товар)
 CATEGORIES = [
-    {
-        "label": "・Халявные товары",
-        "description": "Халява ・Бесплатные товары",
-        "emoji": "<:hpp:1536788440761245726>",
-        "file": "menu_happy.json"
-    },
     {
         "label": "・Premium",
         "description": "Премиум ・Дополнения",
