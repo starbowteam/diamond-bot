@@ -632,7 +632,7 @@ class TicketButtonsPaid(View):
 # КНОПКИ ДЛЯ ТИКЕТОВ С DC/ИНВАЙТАМИ (исправлены)
 # ============================================================
 class CoinsTicketButtons(View):
-    """Кнопки для тикетов с DC/Инвайтами (закрыть, политика, товары)"""
+    """Кнопки для тикетов с DC/Инвайтами (закрыть, политика, купленное)"""
     def __init__(self, channel, user_id):
         super().__init__(timeout=None)
         self.channel = channel
@@ -641,7 +641,7 @@ class CoinsTicketButtons(View):
         self.order_embed_index = 1
 
     @disnake.ui.button(
-        label="Закрытьㅤㅤ",
+        label="ㅤЗакрытьㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:close",
         emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -660,7 +660,7 @@ class CoinsTicketButtons(View):
         )
 
     @disnake.ui.button(
-        label="Политикаㅤㅤ",
+        label="ㅤПолитикаㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:policy",
         emoji=PartialEmoji(name="Politic", id=1539657020695650384),
@@ -687,20 +687,23 @@ class CoinsTicketButtons(View):
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
     @disnake.ui.button(
-        label="Товарыㅤㅤ",
+        label="ㅤКупленноеㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:items",
         emoji=PartialEmoji(name="prize", id=1539657202170859561),
         row=0
     )
     async def items(self, button, inter: disnake.MessageInteraction):
+        # Проверка: только создатель тикета может нажать
         if inter.author.id != self.user_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
+        # Получаем неиспользованные покупки пользователя
         purchases = await get_user_purchases(self.user_id, only_unused=True)
         if not purchases:
             return await inter.response.send_message("❌ У вас нет неиспользованных товаров для этого тикета.", ephemeral=True)
 
+        # Загружаем эмбед из add/invet.json (если есть)
         invet_path = os.path.join(ADD_DIR, "invet.json")
         if os.path.exists(invet_path):
             try:
@@ -725,6 +728,7 @@ class CoinsTicketButtons(View):
                 )
             ]
 
+        # Создаём View с кнопками товаров (только названия, без категории)
         view = View(timeout=300)
         for idx, p in enumerate(purchases):
             label = p['value']
