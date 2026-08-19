@@ -2049,6 +2049,48 @@ class PromoRemoveSelectView(View):
 # ============================================================
 # BuySelectView, show_profile, recalc_reviews
 # ============================================================
+class BuySelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="Реальные деньги",
+                description="Оплата в рублях, USDT и т.д.",
+                emoji="<:realmomne:1539649281575620618>",
+                value="real"
+            ),
+            disnake.SelectOption(
+                label="Инвайты / Diamond Coins",
+                description="Бонусная валюта сервера",
+                emoji="<:coins:1539649259245408340>",
+                value="coins"
+            )
+        ]
+        super().__init__(
+            placeholder="Выберите способ оплаты...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="buy_type_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="🛒 Выбор типа покупки",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+        value = inter.data.values[0]
+        if value == "real":
+            await inter.response.send_modal(BuyTicketModal())
+        elif value == "coins":
+            await inter.response.send_modal(CoinsTicketModal())
+
+class BuyTypeView(disnake.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(BuySelect())
+
 class BuySelectView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -2309,7 +2351,6 @@ async def recalc_reviews(inter):
         description=f"> **Админ:** {inter.author.mention}\n> **Записей:** `{len(counts)}`\n> **Ролей обновлено:** `{updated}`",
         color=0x00aaff
     )
-
 # ============================================================
 # ОТПРАВКА ПАНЕЛИ ТИКЕТОВ (в канал 1462136361711829053)
 # ============================================================
