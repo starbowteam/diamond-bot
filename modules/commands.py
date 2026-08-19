@@ -618,7 +618,7 @@ class ConfirmCloseView(View):
         )
 
 # ============================================================
-# ПАНЕЛЬ ТИКЕТОВ (кнопки) – изменена кнопка "Оплата" → "Каталог"
+# ПАНЕЛЬ ТИКЕТОВ (кнопки) – обновлены эмодзи и метод каталога
 # ============================================================
 class TicketPanelView(View):
     def __init__(self):
@@ -628,7 +628,7 @@ class TicketPanelView(View):
         label="ㅤㅤКупитьㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="panel:buy",
-        emoji=PartialEmoji(name="image_20260110_0014062", id=1459219275934863402)
+        emoji=PartialEmoji(name="bbuy", id=1539643798626508964)   # новый эмодзи
     )
     async def buy(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         await inter.response.send_modal(BuyTicketModal())
@@ -642,7 +642,7 @@ class TicketPanelView(View):
         label="ㅤПромокодыㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="panel:promo",
-        emoji=PartialEmoji(name="image_20260110_001407", id=1459219251775799511)
+        emoji=PartialEmoji(name="proros", id=1539643768808931368)   # новый эмодзи
     )
     async def promo(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         text = "🎟️ Промокоды публикуются в <#1462070136856117258>, следи и забирай свою скидку!"
@@ -653,12 +653,11 @@ class TicketPanelView(View):
             color=0x00ff00
         )
 
-    # ===== НОВАЯ КНОПКА "Каталог" (вместо "Оплата") =====
     @disnake.ui.button(
         label="ㅤКаталогㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="panel:catalog",
-        emoji=PartialEmoji(name="image_20260110_001406", id=1459219370495709374)
+        emoji=PartialEmoji(name="ccaal", id=1539643738400366653)   # новый эмодзи
     )
     async def catalog(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         # Логирование в канал 1530453871581855744
@@ -675,21 +674,19 @@ class TicketPanelView(View):
         except Exception as e:
             logger.error(f"Ошибка логирования каталога: {e}")
 
-        # Отправляем эфемерное сообщение с эмбедом и селект-меню
-        embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
-        embed2 = disnake.Embed(
+        # Отправляем ОДИН embed (как в JSON)
+        embed = disnake.Embed(
+            color=6776679,
             title="Выбор для покупки в каталоге товаров",
-            description="Ниже, представлены цены, на интересующие вас категории, ознакомьтесь.",
-            color=6776679
+            description="Ниже, представлены цены, на интересующие вас категории, ознакомьтесь."
         )
-        view = CatalogView()  # новый View с селектом
-        await inter.response.send_message(embeds=[embed1, embed2], view=view, ephemeral=True)
+        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
+        view = CatalogView()
+        await inter.response.send_message(embed=embed, view=view, ephemeral=True)
 
 # ============================================================
 # КАТАЛОГ (селект-меню) – используется только в кнопке "Каталог"
 # ============================================================
-# Список категорий (взят из старого MENU_OPTIONS)
 CATALOG_OPTIONS = [
     {"label": "・BuyAll", "description": "Покупка всего ・Всё в одном месте",
      "emoji": "<:buyall:1489833017047253032> ", "json_path": os.path.join(CATALOG_DIR, "menu_buyall.json")},
@@ -1981,7 +1978,7 @@ async def recalc_reviews(inter):
     )
 
 # ============================================================
-# Отправка панели тикетов в канал 1462136361711829053
+# ОТПРАВКА ПАНЕЛИ ТИКЕТОВ (в канал 1462136361711829053)
 # ============================================================
 TICKET_PANEL_CHANNEL_ID = 1462136361711829053
 
@@ -2004,7 +2001,8 @@ async def send_ticket_panel():
                 pass
             break
 
-    # Отправляем панель с кнопками
+    # Загружаем эмбед из catalog/menu_embed.json (если есть)
+    embed_path = os.path.join(CATALOG_DIR, "menu_embed.json")
     embed = disnake.Embed(
         title="🛒 Панель покупок",
         description="> Нажмите **Купить**, чтобы создать тикет для заказа.\n"
@@ -2013,13 +2011,23 @@ async def send_ticket_panel():
         color=6776679
     )
     embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
+
+    if os.path.exists(embed_path):
+        try:
+            with open(embed_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("embeds") and len(data["embeds"]) > 0:
+                embed = disnake.Embed.from_dict(data["embeds"][0])
+        except Exception as e:
+            logger.error(f"Ошибка загрузки menu_embed.json: {e}")
+
     await channel.send(embed=embed, view=TicketPanelView())
     await log_discord(
         title="🛒 Панель тикетов отправлена",
         description=f"> Сообщение отправлено в {channel.mention}",
         color=0x00ff00
     )
-    
+
 # ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ (кнопки)
 # ============================================================
