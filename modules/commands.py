@@ -63,9 +63,8 @@ async def get_user_ticket_channels(guild: disnake.Guild, user_id: int, category_
         return []
     tickets = []
     for channel in category.text_channels:
-        # Проверяем, есть ли у пользователя доступ к каналу
         perms = channel.permissions_for(guild.get_member(user_id))
-        if perms.view_channel and channel.name != "доска" and channel.name != "правила":  # простая фильтрация
+        if perms.view_channel and channel.name != "доска" and channel.name != "правила":
             tickets.append(channel)
     return tickets
 
@@ -94,7 +93,7 @@ async def remove_ticket_role(member: disnake.Member, role_id: int):
             logger.error(f"Не удалось снять роль {role_id}: {e}")
 
 async def handle_ticket_roles_on_close(channel: disnake.TextChannel, user_id: int):
-    """При закрытии тикета проверяем, есть ли у пользователя другие тикеты в той же категории, и если нет – снимаем роль."""
+    """При закрытии тикета проверяет, есть ли у пользователя другие тикеты в той же категории, и если нет – снимает роль."""
     guild = channel.guild
     member = guild.get_member(user_id)
     if not member:
@@ -104,14 +103,10 @@ async def handle_ticket_roles_on_close(channel: disnake.TextChannel, user_id: in
     if not category:
         return
 
-    # Определяем, какая это категория и какие роли нужно снять
     if category.id == CONFIG["TICKET_CATEGORY_ID"]:
-        # Проверяем, есть ли другие тикеты в этой категории
         other_tickets = await get_user_ticket_channels(guild, user_id, CONFIG["TICKET_CATEGORY_ID"])
-        # Исключаем закрываемый канал
         other_tickets = [ch for ch in other_tickets if ch.id != channel.id]
         if not other_tickets:
-            # Снимаем обе роли (создан и оплачен)
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_paid"])
     elif category.id == CONFIG["COINS_CATEGORY_ID"]:
@@ -120,14 +115,10 @@ async def handle_ticket_roles_on_close(channel: disnake.TextChannel, user_id: in
         if not other_tickets:
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["coins_created"])
     elif category.id == CONFIG["PAID_CATEGORY_ID"]:
-        # Это оплаченные тикеты, они принадлежат к реальным деньгам, проверим в TICKET_CATEGORY_ID (оригинальной)
-        # Но мы их перемещаем, так что при закрытии нужно снять и real_paid
-        # Также проверим, есть ли у пользователя другие тикеты в PAID_CATEGORY
         other_paid = await get_user_ticket_channels(guild, user_id, CONFIG["PAID_CATEGORY_ID"])
         other_paid = [ch for ch in other_paid if ch.id != channel.id]
         if not other_paid:
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_paid"])
-        # Также если нет других тикетов в TICKET_CATEGORY, снимем real_created
         other_real = await get_user_ticket_channels(guild, user_id, CONFIG["TICKET_CATEGORY_ID"])
         if not other_real:
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
@@ -263,7 +254,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ (МОДАЛКИ) с добавлением выдачи ролей
+# ТИКЕТЫ (МОДАЛКИ) с выдачей ролей
 # ============================================================
 class BuyTicketModal(Modal):
     """Модалка для реальных денег"""
@@ -303,7 +294,7 @@ class BuyTicketModal(Modal):
             return await inter.response.send_message("❌ Категория не найдена", ephemeral=True)
 
         safe_item = item.lower().replace(" ", "-")[:80]
-        channel_name = f"{safe_item}"
+        channel_name = f"{safe_item}-{inter.author.id}"  # добавляем ID для отслеживания
         overwrites = {
             guild.default_role: disnake.PermissionOverwrite(view_channel=False),
             inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
@@ -381,7 +372,7 @@ class CoinsTicketModal(Modal):
             return await inter.response.send_message("❌ Категория не найдена", ephemeral=True)
 
         safe_item = item.lower().replace(" ", "-")[:80]
-        channel_name = f"{safe_item}"
+        channel_name = f"{safe_item}-{inter.author.id}"
         overwrites = {
             guild.default_role: disnake.PermissionOverwrite(view_channel=False),
             inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
@@ -881,44 +872,42 @@ class ConfirmCloseView(View):
     async def confirm(self, button, inter: disnake.MessageInteraction):
         if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
-        
-        # Получаем создателя тикета (по первому сообщению или по правам)
-        # Проще всего взять автора взаимодействия, но это может быть менеджер. Нужно найти владельца.
-        # Будем искать по каналу: обычно первый участник с правами – автор.
-        # Можно также хранить user_id в названии канала, но мы будем искать по переопределению прав.
-        # В нашем случае мы можем проверить, кто имеет доступ к каналу, кроме ролей.
-        # Но проще взять автора взаимодействия, если он менеджер, то роль уже снимется при закрытии, если у пользователя нет других тикетов.
-        # Однако автор взаимодействия – менеджер, а не создатель. Нужно найти создателя по правам.
-        # Мы реализуем через поиск участника, который не имеет ролей менеджера и имеет доступ.
-        # Но у нас есть user_id в CoinsTicketButtons, а для TicketButtons нам нужно определить.
-        # Проще всего: при создании тикета мы сохраняем user_id в канал (например, в название или в БД).
-        # Но чтобы не усложнять, будем удалять роль у пользователя, который вызвал закрытие, если он создатель.
-        # Но менеджер тоже может закрыть. Лучше проверять всех, у кого есть доступ, и снимать роли, если у них нет других тикетов.
-        # Мы реализуем универсальное решение: при закрытии тикета мы проверяем всех участников, у которых есть доступ к каналу.
-        # Но это сложно. Вместо этого воспользуемся уже готовой функцией handle_ticket_roles_on_close, которая принимает user_id.
-        # В качестве user_id передадим автора взаимодействия, если он менеджер – то у него может не быть роли, но мы снимем её у создателя.
-        # Но лучше хранить создателя в атрибуте канала (например, в названии канала добавить ID).
-        # Так как у нас есть только channel и inter, мы можем получить создателя из прав: обычно только создатель имеет доступ, а менеджеры добавляются позже.
-        # Я предлагаю упростить: снимать роли со всех пользователей, у которых есть доступ к каналу, кроме ботов и ролей.
-        # Это сложно. Лучше использовать метод: при создании тикета мы в название добавляем ID создателя.
-        # Так как название канала формируется из товара, можно добавить user_id.
-        # Но я изменю название канала, чтобы добавить ID создателя.
-        # Изменим в BuyTicketModal и CoinsTicketModal:
-        # channel_name = f"{safe_item}-{inter.author.id}"
-        # Тогда при закрытии мы сможем извлечь user_id из названия канала.
-        # Давайте так и сделаем.
-        # Я внесу правки в модалки.
 
-        # Пока используем fallback: снимаем роли у автора взаимодействия, если он имеет право на закрытие, но это не идеально.
-        # Однако мы можем переписать ConfirmCloseView, чтобы он принимал user_id при создании.
-        # Но проще всего изменить название канала и извлекать ID оттуда.
-        # Я внесу изменения в модалки.
-        pass
+        # Небольшая задержка, чтобы Discord успел обработать
+        await inter.response.send_message("Тикет удаляется...", ephemeral=True)
+        await asyncio.sleep(2)
+
+        try:
+            # Находим создателя тикета по названию канала (в конце ID)
+            channel_name = self.channel.name
+            user_id = None
+            if "-" in channel_name:
+                parts = channel_name.split("-")
+                if parts[-1].isdigit():
+                    user_id = int(parts[-1])
+            if user_id:
+                await handle_ticket_roles_on_close(self.channel, user_id)
+
+            await self.channel.delete()
+            await log_discord(
+                title="🗑️ Тикет закрыт",
+                description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {self.channel.name}",
+                color=0xff6600,
+                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при закрытии тикета: {e}")
+            # Если не удалось удалить, пробуем ещё раз с большей задержкой
+            try:
+                await asyncio.sleep(3)
+                await self.channel.delete()
+            except Exception as e2:
+                logger.error(f"Повторная ошибка при закрытии тикета: {e2}")
 
 # ============================================================
-# ВЫБОР ТИПА ПОКУПКИ (селект при нажатии "Купить")
+# НОВЫЙ ВЫБОР ТИПА КАТАЛОГА (для кнопки "Каталог" в панели тикетов)
 # ============================================================
-class BuySelect(disnake.ui.StringSelect):
+class CatalogTypeSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
             disnake.SelectOption(
@@ -928,40 +917,52 @@ class BuySelect(disnake.ui.StringSelect):
                 value="real"
             ),
             disnake.SelectOption(
-                label="Инвайты / Diamond Coins",
-                description="Бонусная валюта сервера",
+                label="Diamond Coin-ы",
+                description="Внутренняя валюта сервера",
                 emoji="<:coins:1539649259245408340>",
                 value="coins"
+            ),
+            disnake.SelectOption(
+                label="Товары за Инвайты",
+                description="Бесплатные товары за приглашения",
+                emoji="<:hpp:1536788440761245726>",
+                value="invites"
             )
         ]
         super().__init__(
-            placeholder="Выберите способ оплаты...",
+            placeholder="Выберите тип товаров...",
             min_values=1,
             max_values=1,
             options=options,
-            custom_id="buy_type_select"
+            custom_id="catalog_type_select"
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
-        await log_discord(
-            title="🛒 Выбор типа покупки",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
-            color=0x00aaff,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
         value = inter.data.values[0]
         if value == "real":
-            await inter.response.send_modal(BuyTicketModal())
+            # Старый каталог (реальные деньги)
+            embed = disnake.Embed(
+                color=6776679,
+                title="Выбор для покупки в каталоге товаров",
+                description="Ниже, представлены цены, на интересующие вас категории, ознакомьтесь."
+            )
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
+            await inter.response.send_message(embed=embed, view=CatalogView(), ephemeral=True)
         elif value == "coins":
-            await inter.response.send_modal(CoinsTicketModal())
+            # Магазин за DC (то, что было в справочнике "Покупка")
+            await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
+        elif value == "invites":
+            # Халявные товары (menu_happy.json)
+            embeds = load_action_embed("menu_happy.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
 
-class BuyTypeView(disnake.ui.View):
+class CatalogTypeView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(BuySelect())
+        self.add_item(CatalogTypeSelect())
 
 # ============================================================
-# ПАНЕЛЬ ТИКЕТОВ (кнопки) – обновлена кнопка "Купить"
+# ПАНЕЛЬ ТИКЕТОВ (кнопки)
 # ============================================================
 class TicketPanelView(View):
     def __init__(self):
@@ -1006,30 +1007,18 @@ class TicketPanelView(View):
         emoji=PartialEmoji(name="catal", id=1539646769053306980)
     )
     async def catalog(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        try:
-            log_chan = inter.bot.get_channel(1530453871581855744)
-            if log_chan:
-                embed_log = disnake.Embed(
-                    title="📂 Открыт каталог",
-                    description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {inter.channel.mention}",
-                    color=0x00aaff,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                await log_chan.send(embed=embed_log)
-        except Exception as e:
-            logger.error(f"Ошибка логирования каталога: {e}")
-
+        # Новый эмбед для каталога
         embed = disnake.Embed(
-            color=6776679,
-            title="Выбор для покупки в каталоге товаров",
-            description="Ниже, представлены цены, на интересующие вас категории, ознакомьтесь."
+            title="Выбор категории товаров",
+            description="В чем представлен ваш товар? Выберите метод ниже.",
+            color=6776679
         )
-        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
-        view = CatalogView()
+        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a8679e3&is=6a852863&hm=59892e8783bfb24b381e2a76e3689f727bef8f1e3aea9595dd3d130b587dede4&")
+        view = CatalogTypeView()
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
 
 # ============================================================
-# КАТАЛОГ (селект-меню) – используется только в кнопке "Каталог"
+# КАТАЛОГ (для реальных денег) – оставляем как было
 # ============================================================
 CATALOG_OPTIONS = [
     {"label": "・BuyAll", "description": "Покупка всего ・Всё в одном месте",
@@ -1104,7 +1093,7 @@ class CatalogView(disnake.ui.View):
         self.add_item(CatalogSelect())
 
 # ============================================================
-# ПАНЕЛЬ "СПРАВОЧНИК" (бывший Домик)
+# ПАНЕЛЬ "СПРАВОЧНИК" (убрана Покупка)
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
 
@@ -1129,12 +1118,7 @@ class HomeSelect(disnake.ui.StringSelect):
                 emoji="<:site:1538768985602916352>",
                 value="eco"
             ),
-            disnake.SelectOption(
-                label="・Покупка",
-                description="Магазин ・Всё за Diamond Coins",
-                emoji="<:home:1538395735907901460>",
-                value="buy"
-            ),
+            # Опция "Покупка" УДАЛЕНА
             disnake.SelectOption(
                 label="・Получение валюты",
                 description="Как получить? ・Справочник",
@@ -1183,8 +1167,6 @@ class HomeSelect(disnake.ui.StringSelect):
         elif value == "eco":
             embeds = load_embed_from_file("eco.json")
             await inter.response.send_message(embeds=embeds, ephemeral=True)
-        elif value == "buy":
-            await inter.response.send_message("Выберите категорию товара:", ephemeral=True, view=BuySelectView())
         elif value == "earn":
             embed = disnake.Embed(
                 title="💎 Как заработать Diamond Coins?",
