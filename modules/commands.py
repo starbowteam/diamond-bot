@@ -617,6 +617,9 @@ class ConfirmCloseView(View):
             color=0xff6600
         )
 
+# ============================================================
+# ПАНЕЛЬ ТИКЕТОВ (кнопки) – изменена кнопка "Оплата" → "Каталог"
+# ============================================================
 class TicketPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -650,25 +653,44 @@ class TicketPanelView(View):
             color=0x00ff00
         )
 
+    # ===== НОВАЯ КНОПКА "Каталог" (вместо "Оплата") =====
     @disnake.ui.button(
-        label="ㅤОплатаㅤ",
+        label="ㅤКаталогㅤ",
         style=disnake.ButtonStyle.gray,
-        custom_id="panel:payinfo",
+        custom_id="panel:catalog",
         emoji=PartialEmoji(name="image_20260110_001406", id=1459219370495709374)
     )
-    async def payinfo(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await inter.response.send_message("💳 Доступна оплата валютами: RUB | KZT | UAH | USD | USDT | TON", ephemeral=True)
-        await log_discord(
-            title="💳 Просмотр информации об оплате",
-            description=f"> **Пользователь:** {inter.author.mention}",
-            color=0x00ff00
+    async def catalog(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        # Логирование в канал 1530453871581855744
+        try:
+            log_chan = inter.bot.get_channel(1530453871581855744)
+            if log_chan:
+                embed_log = disnake.Embed(
+                    title="📂 Открыт каталог",
+                    description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {inter.channel.mention}",
+                    color=0x00aaff,
+                    timestamp=datetime.now(timezone.utc)
+                )
+                await log_chan.send(embed=embed_log)
+        except Exception as e:
+            logger.error(f"Ошибка логирования каталога: {e}")
+
+        # Отправляем эфемерное сообщение с эмбедом и селект-меню
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
+        embed2 = disnake.Embed(
+            title="Выбор для покупки в каталоге товаров",
+            description="Ниже, представлены цены, на интересующие вас категории, ознакомьтесь.",
+            color=6776679
         )
+        view = CatalogView()  # новый View с селектом
+        await inter.response.send_message(embeds=[embed1, embed2], view=view, ephemeral=True)
 
 # ============================================================
-# МЕНЮ (catalog) – без изменений
+# КАТАЛОГ (селект-меню) – используется только в кнопке "Каталог"
 # ============================================================
-MENU_CHANNEL_ID = 1462140026073776280
-MENU_OPTIONS = [
+# Список категорий (взят из старого MENU_OPTIONS)
+CATALOG_OPTIONS = [
     {"label": "・BuyAll", "description": "Покупка всего ・Всё в одном месте",
      "emoji": "<:buyall:1489833017047253032> ", "json_path": os.path.join(CATALOG_DIR, "menu_buyall.json")},
     {"label": "・Discord", "description": "Покупка Nitro и Boosts ・Статус и величие",
@@ -693,7 +715,7 @@ MENU_OPTIONS = [
      "emoji": "<:Bot:1465771816080380109>", "json_path": os.path.join(CATALOG_DIR, "menu_bot.json")},
 ]
 
-class MenuSelect(disnake.ui.StringSelect):
+class CatalogSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
             disnake.SelectOption(
@@ -701,14 +723,14 @@ class MenuSelect(disnake.ui.StringSelect):
                 description=item["description"],
                 emoji=item["emoji"],
                 value=item["json_path"]
-            ) for item in MENU_OPTIONS
+            ) for item in CATALOG_OPTIONS
         ]
         super().__init__(
             placeholder="Выберите категорию...",
             min_values=1,
             max_values=1,
             options=options,
-            custom_id="menu_select"
+            custom_id="catalog_select"
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
@@ -727,50 +749,20 @@ class MenuSelect(disnake.ui.StringSelect):
             ))
             await inter.response.send_message(embeds=embeds, view=view, ephemeral=True)
             await log_discord(
-                title="📂 Выбор категории меню",
+                title="📂 Выбор категории (Каталог)",
                 description=f"> **Пользователь:** {inter.author.mention}\n> **Категория:** `{json_path}`",
                 color=0x00aaff
             )
         except Exception as e:
-            logger.exception("MenuSelect callback error: %s", e)
+            logger.exception("CatalogSelect callback error: %s", e)
 
-class MenuView(disnake.ui.View):
+class CatalogView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(MenuSelect())
-
-async def send_menu_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(MENU_CHANNEL_ID)
-    if not channel:
-        channel = await bot.fetch_channel(MENU_CHANNEL_ID)
-    if not channel:
-        logger.warning("Menu panel channel not found")
-        return
-    existing_msg = None
-    async for m in channel.history(limit=50):
-        if m.author == bot.user and m.components:
-            existing_msg = m
-            break
-    if existing_msg:
-        return
-    embed_path = os.path.join(CATALOG_DIR, "menu_embed.json")
-    embed = disnake.Embed(title="Меню выбора", description="Выберите категорию", color=0x0499D2)
-    if os.path.exists(embed_path):
-        with open(embed_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            embed = disnake.Embed.from_dict(data["embeds"][0])
-    msg = await channel.send(embed=embed, view=MenuView())
-    bot.add_view(MenuView())
-    await log_discord(
-        title="📋 Меню отправлено",
-        description="> Панель меню была отправлена в канал.",
-        color=0x00ff00
-    )
+        self.add_item(CatalogSelect())
 
 # ============================================================
-# ПАНЕЛЬ "СПРАВОЧНИК" (бывший Домик)
+# ПАНЕЛЬ "СПРАВОЧНИК" (бывший Домик) – без изменений
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
 
