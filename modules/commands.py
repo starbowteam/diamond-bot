@@ -1122,6 +1122,12 @@ class HomeSelect(disnake.ui.StringSelect):
                 value="eco"
             ),
             disnake.SelectOption(
+                label="・Роли покупателей",
+                description="Достоинства・Разделение прав",
+                emoji="<:roles:1540046665984249878>",
+                value="roles"
+            ),
+            disnake.SelectOption(
                 label="・Доска",
                 description="Знай о важном・Информация",
                 emoji="<:banne1:1538551829246513312>",
@@ -1148,6 +1154,9 @@ class HomeSelect(disnake.ui.StringSelect):
             await inter.response.send_message(embeds=embeds, ephemeral=True)
         elif value == "eco":
             embeds = load_embed_from_file("eco.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "roles":
+            embeds = load_embed_from_file("role.json")
             await inter.response.send_message(embeds=embeds, ephemeral=True)
         elif value == "board":
             embeds = load_board_embed()
@@ -1178,7 +1187,7 @@ async def send_home_panel():
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1538771484778958898/image.png?ex=6a83e41e&is=6a82929e&hm=78e0190f6955969d2c2f630b4e9d560557c5c08d4f0c5caf8b32fbfd520332ab&")
     embed2 = disnake.Embed(
         title="Справочник посетителя Diamond",
-        description="Справочник посетителя Diamond, в нем можно ознакомиться о нас, нашей экосистемой, узнать о важном, способе получения валюты сервера и многом другом!",
+        description="Справочник посетителя Diamond, в нем можно ознакомиться о нас, нашей экосистемой, узнать о важном, способе получения валюты сервера, достоинствах ролей покупателя и многом другом!",
         color=6776679
     )
     embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
