@@ -135,7 +135,7 @@ db.execute("PRAGMA synchronous=NORMAL")
 
 cur = db.cursor()
 
-# Таблицы
+# Таблицы (добавлена ticket_owners)
 cur.executescript("""
 CREATE TABLE IF NOT EXISTS invites_snapshot (
     invite_code TEXT PRIMARY KEY,
@@ -176,6 +176,11 @@ CREATE TABLE IF NOT EXISTS dc_cache (
 CREATE TABLE IF NOT EXISTS promo_codes (
     code TEXT PRIMARY KEY,
     value TEXT
+);
+CREATE TABLE IF NOT EXISTS ticket_owners (
+    channel_id INTEGER PRIMARY KEY,
+    user_id    INTEGER,
+    category_id INTEGER
 );
 """)
 db.commit()
@@ -338,7 +343,6 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
         pka_role_id = role_ids["pka"]
         current_role_ids = [r.id for r in member.roles]
         all_buyer_roles = list(role_ids.values())
-        # Убираем все роли покупателя (кроме club и pka)
         to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in [club_role_id, pka_role_id]]
         to_add = []
         if club_role_id not in current_role_ids:
@@ -354,7 +358,7 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
             role = guild.get_role(rid)
             if role:
                 await member.add_roles(role)
-        return  # Выходим, не выполняем обычную логику
+        return
 
     # Обычная логика для всех остальных
     role_ids = CONFIG["ROLE_IDS"]
@@ -399,6 +403,30 @@ async def sync_invites(guild: disnake.Guild):
         cur.execute("REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)",
                     (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
     db.commit()
+
+# ============================================================
+# Функции для работы с владельцами тикетов (таблица ticket_owners)
+# ============================================================
+def add_ticket_owner(channel_id: int, user_id: int, category_id: int):
+    cur.execute("INSERT OR REPLACE INTO ticket_owners (channel_id, user_id, category_id) VALUES (?, ?, ?)",
+                (channel_id, user_id, category_id))
+    db.commit()
+
+def remove_ticket_owner(channel_id: int):
+    cur.execute("DELETE FROM ticket_owners WHERE channel_id = ?", (channel_id,))
+    db.commit()
+
+def get_ticket_owner(channel_id: int) -> Optional[int]:
+    row = cur.execute("SELECT user_id FROM ticket_owners WHERE channel_id = ?", (channel_id,)).fetchone()
+    return row["user_id"] if row else None
+
+def get_user_ticket_channels_ids(user_id: int, category_id: int) -> List[int]:
+    rows = cur.execute("SELECT channel_id FROM ticket_owners WHERE user_id = ? AND category_id = ?", (user_id, category_id)).fetchall()
+    return [row["channel_id"] for row in rows]
+
+def get_user_tickets_count_in_category(user_id: int, category_id: int) -> int:
+    row = cur.execute("SELECT COUNT(*) FROM ticket_owners WHERE user_id = ? AND category_id = ?", (user_id, category_id)).fetchone()
+    return row[0] if row else 0
 
 # ============================================================
 # Промокоды и курсы (загружаются при старте)
