@@ -2480,3 +2480,4 @@ def setup_commands(bot):
     bot.add_slash_command(admin_panel)
     bot.add_slash_command(promocodes)
     bot.add_slash_command(say)
+    bot.add_slash_command(gw_dc)
