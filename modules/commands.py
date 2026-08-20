@@ -1045,7 +1045,7 @@ CATALOG_OPTIONS = [
      "emoji": "<:SuperCell:1465768886484996260>", "json_path": os.path.join(CATALOG_DIR, "menu_supersell.json")},
     {"label": "・Spotify", "description": "Подписка на музыку ・Громкость и красочность",
      "emoji": "<:Spotify:1465770796411785330>", "json_path": os.path.join(CATALOG_DIR, "menu_spotify.json")},
-    {"label": "・Дизайн", "description": "Отличный дизайн ・Выбор для лучших",
+    {"label": "・Дизайн и Монтаж", "description": "Отличный дизайн и монтаж ・Выбор для лучших",
      "emoji": "<:Design:1465771436580012106>", "json_path": os.path.join(CATALOG_DIR, "menu_design.json")},
     {"label": "・Бот для Дискорда", "description": "Рабочий и легкий ・Плавность и скорость",
      "emoji": "<:Bot:1465771816080380109>", "json_path": os.path.join(CATALOG_DIR, "menu_bot.json")},
