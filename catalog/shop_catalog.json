@@ -3,12 +3,12 @@
     "label": "🛒 Скидки",
     "description": "Скидки на заказы в магазине",
     "items": {
-      "3": {"name": "3% скидка", "price": 30, "description": "Скидка 3% на любой заказ"},
-      "5": {"name": "5% скидка", "price": 60, "description": "Скидка 5% на любой заказ"},
-      "7": {"name": "7% скидка", "price": 90, "description": "Скидка 7% на любой заказ"},
-      "10": {"name": "10% скидка", "price": 140, "description": "Скидка 10% на любой заказ"},
-      "15": {"name": "15% скидка", "price": 200, "description": "Скидка 15% на любой заказ"},
-      "20": {"name": "20% скидка", "price": 300, "description": "Скидка 20% на любой заказ"}
+      "3": {"name": "3% скидка", "price": 45, "description": "Скидка 3% на любой заказ"},
+      "5": {"name": "5% скидка", "price": 75, "description": "Скидка 5% на любой заказ"},
+      "7": {"name": "7% скидка", "price": 105, "description": "Скидка 7% на любой заказ"},
+      "10": {"name": "10% скидка", "price": 155, "description": "Скидка 10% на любой заказ"},
+      "15": {"name": "15% скидка", "price": 215, "description": "Скидка 15% на любой заказ"},
+      "20": {"name": "20% скидка", "price": 315, "description": "Скидка 20% на любой заказ"}
     }
   },
   "design": {
@@ -17,12 +17,7 @@
     "items": {
       "avatar": {"name": "Аватарка", "price": 40, "description": "Уникальная аватарка"},
       "banner": {"name": "Баннер", "price": 80, "description": "Баннер для профиля"},
-      "logo": {"name": "Логотип", "price": 120, "description": "Логотип для бренда"},
-      "cover": {"name": "Обложка для видео", "price": 100, "description": "Обложка для YouTube/стримов"},
-      "header": {"name": "Шапка для сервера", "price": 150, "description": "Шапка для Discord-сервера"},
-      "ticket_design": {"name": "Оформление тикета", "price": 180, "description": "Кастомное оформление тикета"},
-      "stickers": {"name": "Стикер-пак", "price": 200, "description": "Набор стикеров"},
-      "full_design": {"name": "Полный дизайн-пакет", "price": 350, "description": "Аватарка + баннер + логотип + оформление"}
+      "logo": {"name": "Логотип", "price": 120, "description": "Логотип для бренда"}
     }
   },
   "ads": {
@@ -31,51 +26,20 @@
     "items": {
       "ad_post": {"name": "Пост в канале", "price": 60, "description": "Рекламный пост в канале"},
       "ad_pin": {"name": "Закреп на 24ч", "price": 80, "description": "Закреп сообщения на 24 часа"},
-      "ad_news": {"name": "Упоминание в новостях", "price": 100, "description": "Упоминание в новостной ленте"},
-      "ad_tg": {"name": "Реклама в ТГ-канале", "price": 150, "description": "Пост в Telegram-канале"},
-      "ad_standard": {"name": "Рекламный пакет «Стандарт»", "price": 200, "description": "Пост + закреп на 24ч"},
-      "ad_premium": {"name": "Рекламный пакет «Премиум»", "price": 350, "description": "Пост + закреп + упоминание в новостях"}
+      "ad_news": {"name": "Упоминание в новостях", "price": 100, "description": "Упоминание в новостной ленте"}
     }
   },
   "roles": {
     "label": "🎭 Особые роли",
     "description": "Временные и постоянные роли",
     "items": {
-      "role_active": {"name": "Роль «Активный»", "price": 30, "description": "Постоянная роль «Активный»", "role_id": 1533140263789395998},
-      "role_helper": {"name": "Роль «Помощник»", "price": 50, "description": "Роль «Помощник» (навсегда)", "role_id": 1536948551265812551},
-      "role_vip": {"name": "VIP (30 дней)", "price": 80, "description": "VIP-роль на 30 дней", "role_id": 1533549996790513685},
-      "role_mega": {"name": "Роль «Мега-активный»", "price": 120, "description": "Роль «Мега-активный»", "role_id": 1536948737514151976},
-      "role_legend": {"name": "Роль «Легенда»", "price": 180, "description": "Легендарная роль", "role_id": 1535638212557541438},
-      "role_newbie": {"name": "Роль «Новичок месяца»", "price": 20, "description": "Роль для новичков", "role_id": 1536948841394212934}
-    }
-  },
-  "boosts": {
-    "label": "⚡ Бусты",
-    "description": "Ускорение процессов",
-    "items": {
-      "boost_ticket": {"name": "Приоритетный тикет", "price": 60, "description": "Приоритетная обработка тикета"},
-      "boost_review": {"name": "Ускоренная проверка отзыва", "price": 40, "description": "Быстрая проверка отзыва"},
-      "boost_discounts": {"name": "Ранний доступ к скидкам", "price": 30, "description": "Доступ к скидкам раньше других"}
-    }
-  },
-  "packs": {
-    "label": "🎁 Наборы",
-    "description": "Комбо-паки со скидкой",
-    "items": {
-      "pack_start": {"name": "Стартовый набор", "price": 100, "description": "Скидка 5% + аватарка"},
-      "pack_designer": {"name": "Набор дизайнера", "price": 180, "description": "Аватарка + баннер + логотип"},
-      "pack_ad": {"name": "Набор рекламщика", "price": 200, "description": "Пост + закреп"},
-      "pack_premium": {"name": "Премиум-набор", "price": 400, "description": "Скидка 10% + VIP-роль + баннер"}
-    }
-  },
-  "custom": {
-    "label": "👑 Кастом",
-    "description": "Индивидуальные услуги",
-    "items": {
-      "custom_role": {"name": "Кастомная роль", "price": 50, "description": "Создание индивидуальной роли"},
-      "custom_emoji": {"name": "Уникальный эмодзи", "price": 80, "description": "Создание эмодзи"},
-      "custom_banner": {"name": "Персонализированный баннер", "price": 120, "description": "Баннер с вашим дизайном"},
-      "custom_project": {"name": "Индивидуальный дизайн-проект", "price": 250, "description": "Полный проект под ключ"}
+      "role_active": {"name": "Роль «Активный»", "price": 25, "description": "Постоянная роль «Активный»", "role_id": 1533140263789395998},
+      "role_helper": {"name": "Роль «Помощник»", "price": 30, "description": "Роль «Помощник» (навсегда)", "role_id": 1536948551265812551},
+      "role_vip": {"name": "Роль «VIP»", "price": 40, "description": "VIP-роль на 30 дней", "role_id": 1533549996790513685},
+      "role_mega": {"name": "Роль «Мега-активный»", "price": 55, "description": "Роль «Мега-активный»", "role_id": 1536948737514151976},
+      "role_legend": {"name": "Роль «Легенда»", "price": 65, "description": "Легендарная роль", "role_id": 1535638212557541438},
+      "role_newbie": {"name": "Роль «Новичок месяца»", "price": 70, "description": "Роль для новичков", "role_id": 1536948841394212934},
+      "custom_role": {"name": "Кастомная роль", "price": 90, "description": "Создание индивидуальной роли (выдача вручную)"}
     }
   }
 }
