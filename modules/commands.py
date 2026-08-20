@@ -1859,6 +1859,77 @@ async def admin_panel(inter: disnake.ApplicationCommandInteraction):
     await inter.send(embeds=embeds, ephemeral=True, view=AdminView())
 
 # ============================================================
+# КОМАНДА /gw_dc – выдача DC победителям розыгрыша из файла
+# ============================================================
+@commands.slash_command(
+    name="gw_dc",
+    description="Выдать DC победителям розыгрыша из файла (админ)"
+)
+async def gw_dc(
+    ctx,
+    amount: int = commands.Param(description="Количество DC для каждого победителя"),
+    file: disnake.Attachment = commands.Param(description="Текстовый файл с ID победителей (по одному на строку)")
+):
+    if not has_admin_command_roles(ctx.author):
+        return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
+
+    if amount <= 0:
+        return await ctx.send("❌ Количество DC должно быть больше 0.", ephemeral=True)
+
+    if not file.filename.endswith('.txt'):
+        return await ctx.send("❌ Файл должен быть в формате .txt", ephemeral=True)
+
+    try:
+        content = await file.read()
+        text = content.decode('utf-8')
+        lines = text.strip().splitlines()
+        user_ids = []
+        for line in lines:
+            line = line.strip()
+            if line.isdigit():
+                user_ids.append(int(line))
+            else:
+                await ctx.send(f"⚠️ Строка '{line}' не является ID, пропущена.", ephemeral=True)
+
+        if not user_ids:
+            return await ctx.send("❌ В файле не найдено ни одного корректного ID.", ephemeral=True)
+
+        success_count = 0
+        fail_count = 0
+        for uid in user_ids:
+            try:
+                await add_dc(uid, amount, f"Выигрыш в розыгрыше ({amount} DC)")
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Ошибка начисления {amount} DC пользователю {uid}: {e}")
+                fail_count += 1
+
+        await ctx.send(
+            f"✅ Розыгрыш завершён!\n"
+            f"👥 Всего участников: {len(user_ids)}\n"
+            f"✅ Успешно начислено: {success_count}\n"
+            f"❌ Ошибок: {fail_count}\n"
+            f"💎 Всего выдано: {success_count * amount} DC",
+            ephemeral=True
+        )
+
+        await log_discord(
+            title="🎁 Выдача DC победителям розыгрыша",
+            description=(
+                f"> **Админ:** {ctx.author.mention}\n"
+                f"> **Количество:** {amount} DC на человека\n"
+                f"> **Участников:** {len(user_ids)}\n"
+                f"> **Всего выдано:** {success_count * amount} DC"
+            ),
+            color=0xffaa00,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
+    except Exception as e:
+        logger.exception(f"Ошибка в команде gw_dc: {e}")
+        await ctx.send(f"❌ Произошла ошибка: {e}", ephemeral=True)
+        
+# ============================================================
 # МОДАЛКИ ДЛЯ DC-ПАНЕЛИ (без изменений)
 # ============================================================
 class GiveDcModal(Modal):
