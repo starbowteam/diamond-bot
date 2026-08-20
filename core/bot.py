@@ -122,7 +122,8 @@ async def on_ready():
         # Импортируем только нужные классы и функции
         from modules.commands import (
             TicketPanelView, TicketButtons, TicketButtonsPaid,
-            send_home_panel, send_tarology_panel, send_ticket_panel
+            send_home_panel, send_tarology_panel, send_ticket_panel,
+            send_profile_panel
         )
         # Добавляем View для постоянной работы кнопок (даже после перезапуска)
         bot.add_view(TicketPanelView())
@@ -134,7 +135,9 @@ async def on_ready():
         bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
-        bot.loop.create_task(send_ticket_panel())   # Новая задача – отправка панели тикетов
+        bot.loop.create_task(send_ticket_panel()) 
+        bot.loop.create_task(send_profile_panel())
+        # Новая задача – отправка панели тикетов
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
