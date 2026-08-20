@@ -86,14 +86,9 @@ async def remove_ticket_role(member: disnake.Member, role_id: int):
         except Exception as e:
             logger.error(f"Не удалось снять роль {role_id}: {e}")
 
-async def handle_ticket_roles_on_close(channel: disnake.TextChannel):
+async def handle_ticket_roles_on_close(channel: disnake.TextChannel, user_id: int):
     """При закрытии тикета проверяет, есть ли у владельца другие тикеты в этой категории, и если нет – снимает роль."""
     guild = channel.guild
-    # Получаем владельца из БД
-    user_id = get_ticket_owner(channel.id)
-    if not user_id:
-        logger.warning(f"Не найден владелец для канала {channel.id}")
-        return
     member = guild.get_member(user_id)
     if not member:
         return
@@ -104,8 +99,8 @@ async def handle_ticket_roles_on_close(channel: disnake.TextChannel):
 
     category_id = category.id
     # Считаем количество активных тикетов у пользователя в этой категории (исключая текущий канал)
-    count = get_user_tickets_count_in_category(user_id, category_id)
     # Так как канал ещё не удалён, он учитывается в БД, поэтому если count == 1, то других тикетов нет
+    count = get_user_tickets_count_in_category(user_id, category_id)
     if count <= 1:
         # Снимаем соответствующую роль
         if category_id == CONFIG["TICKET_CATEGORY_ID"] or category_id == CONFIG["PAID_CATEGORY_ID"]:
@@ -117,11 +112,22 @@ async def handle_ticket_roles_on_close(channel: disnake.TextChannel):
 async def clear_ticket_owner(channel: disnake.TextChannel):
     """Удаляет запись о владельце из БД и снимает роли при необходимости."""
     user_id = get_ticket_owner(channel.id)
-    if user_id:
-        # Удаляем запись из БД
-        remove_ticket_owner(channel.id)
-        # Проверяем, нужно ли снять роли (если других тикетов в этой категории нет)
-        await handle_ticket_roles_on_close(channel)
+    if not user_id:
+        # Попытка найти владельца по первому сообщению с упоминанием
+        try:
+            async for msg in channel.history(limit=5, oldest_first=True):
+                if msg.mentions:
+                    user_id = msg.mentions[0].id
+                    break
+        except Exception as e:
+            logger.error(f"Ошибка при поиске владельца по сообщению: {e}")
+        if not user_id:
+            logger.warning(f"Не найден владелец для канала {channel.id}")
+            return
+    # Удаляем запись из БД
+    remove_ticket_owner(channel.id)
+    # Проверяем, нужно ли снять роли (если других тикетов в этой категории нет)
+    await handle_ticket_roles_on_close(channel, user_id)
 
 # ============================================================
 # Функция загрузки "Доски" (board.json из ADD_DIR)
