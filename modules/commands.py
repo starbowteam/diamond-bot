@@ -1070,26 +1070,24 @@ class CatalogSelect(disnake.ui.StringSelect):
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
-        json_path = self.values[0]
-        try:
-            if not os.path.exists(json_path):
-                return await inter.response.send_message("Файл с embed не найден.", ephemeral=True)
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
-            view = disnake.ui.View(timeout=None)
-            view.add_item(disnake.ui.Button(
-                label="Перейти в канал покупки",
-                style=disnake.ButtonStyle.link,
-                url="https://discord.com/channels/1127428607606796288/1462136361711829053"
-            ))
-            await inter.response.send_message(embeds=embeds, view=view, ephemeral=True)
-            await log_discord(
-                title="📂 Выбор категории (Каталог)",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Категория:** `{json_path}`",
-                color=0x00aaff,
-                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-            )
+    json_path = self.values[0]
+    try:
+        if not os.path.exists(json_path):
+            return await inter.response.send_message("Файл с embed не найден.", ephemeral=True)
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
+        # Кнопка убрана
+        await inter.response.send_message(embeds=embeds, ephemeral=True)
+        await log_discord(
+            title="📂 Выбор категории (Каталог)",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Категория:** `{json_path}`",
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+        
+    except Exception as e:
+        logger.exception("CatalogSelect callback error: %s", e)
         except Exception as e:
             logger.exception("CatalogSelect callback error: %s", e)
 
