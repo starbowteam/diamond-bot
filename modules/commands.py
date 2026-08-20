@@ -7,9 +7,9 @@ import time
 import re
 import io
 import math
-import disnake  # <-- добавлено
+import disnake
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List  # <-- добавлен List
+from typing import Optional, Dict, Any, List
 
 from disnake.ext import commands
 from disnake.ui import Modal, TextInput, View, Button, Select
@@ -30,7 +30,9 @@ from core.utils import (
     update_user_roles,
     get_roles_for_count,
     get_dc_cache, save_dc_cache,
-    get_promo_codes, add_promo_code, remove_promo_code, clear_promo_codes
+    get_promo_codes, add_promo_code, remove_promo_code, clear_promo_codes,
+    add_ticket_owner, remove_ticket_owner, get_ticket_owner,
+    get_user_tickets_count_in_category, get_user_ticket_channels_ids
 )
 
 # ============================================================
@@ -46,7 +48,7 @@ from modules.dc import (
 )
 
 # ============================================================
-# Импорт из modules.actions (добавлено)
+# Импорт из modules.actions
 # ============================================================
 from modules.actions import load_action_embed
 
@@ -60,22 +62,9 @@ def reload_promo_cache():
     promo_codes = get_promo_codes()
 
 # ============================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РОЛЕЙ ТИКЕТОВ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РОЛЕЙ ТИКЕТОВ (используют БД)
 # ============================================================
-async def get_user_ticket_channels(guild: disnake.Guild, user_id: int, category_id: int) -> List[disnake.TextChannel]:
-    """Возвращает список текстовых каналов (тикетов) пользователя в указанной категории."""
-    category = guild.get_channel(category_id)
-    if not category or not isinstance(category, disnake.CategoryChannel):
-        return []
-    tickets = []
-    for channel in category.text_channels:
-        perms = channel.permissions_for(guild.get_member(user_id))
-        if perms.view_channel and channel.name != "доска" and channel.name != "правила":
-            tickets.append(channel)
-    return tickets
-
 async def assign_ticket_role(member: disnake.Member, role_id: int):
-    """Выдаёт роль, если её нет."""
     if role_id is None:
         return
     role = member.guild.get_role(role_id)
@@ -87,7 +76,6 @@ async def assign_ticket_role(member: disnake.Member, role_id: int):
             logger.error(f"Не удалось выдать роль {role_id}: {e}")
 
 async def remove_ticket_role(member: disnake.Member, role_id: int):
-    """Снимает роль, если она есть."""
     if role_id is None:
         return
     role = member.guild.get_role(role_id)
@@ -98,9 +86,14 @@ async def remove_ticket_role(member: disnake.Member, role_id: int):
         except Exception as e:
             logger.error(f"Не удалось снять роль {role_id}: {e}")
 
-async def handle_ticket_roles_on_close(channel: disnake.TextChannel, user_id: int):
-    """При закрытии тикета проверяет, есть ли у пользователя другие тикеты в той же категории, и если нет – снимает роль."""
+async def handle_ticket_roles_on_close(channel: disnake.TextChannel):
+    """При закрытии тикета проверяет, есть ли у владельца другие тикеты в этой категории, и если нет – снимает роль."""
     guild = channel.guild
+    # Получаем владельца из БД
+    user_id = get_ticket_owner(channel.id)
+    if not user_id:
+        logger.warning(f"Не найден владелец для канала {channel.id}")
+        return
     member = guild.get_member(user_id)
     if not member:
         return
@@ -109,25 +102,26 @@ async def handle_ticket_roles_on_close(channel: disnake.TextChannel, user_id: in
     if not category:
         return
 
-    if category.id == CONFIG["TICKET_CATEGORY_ID"]:
-        other_tickets = await get_user_ticket_channels(guild, user_id, CONFIG["TICKET_CATEGORY_ID"])
-        other_tickets = [ch for ch in other_tickets if ch.id != channel.id]
-        if not other_tickets:
+    category_id = category.id
+    # Считаем количество активных тикетов у пользователя в этой категории (исключая текущий канал)
+    count = get_user_tickets_count_in_category(user_id, category_id)
+    # Так как канал ещё не удалён, он учитывается в БД, поэтому если count == 1, то других тикетов нет
+    if count <= 1:
+        # Снимаем соответствующую роль
+        if category_id == CONFIG["TICKET_CATEGORY_ID"] or category_id == CONFIG["PAID_CATEGORY_ID"]:
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_paid"])
-    elif category.id == CONFIG["COINS_CATEGORY_ID"]:
-        other_tickets = await get_user_ticket_channels(guild, user_id, CONFIG["COINS_CATEGORY_ID"])
-        other_tickets = [ch for ch in other_tickets if ch.id != channel.id]
-        if not other_tickets:
+        elif category_id == CONFIG["COINS_CATEGORY_ID"]:
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["coins_created"])
-    elif category.id == CONFIG["PAID_CATEGORY_ID"]:
-        other_paid = await get_user_ticket_channels(guild, user_id, CONFIG["PAID_CATEGORY_ID"])
-        other_paid = [ch for ch in other_paid if ch.id != channel.id]
-        if not other_paid:
-            await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_paid"])
-        other_real = await get_user_ticket_channels(guild, user_id, CONFIG["TICKET_CATEGORY_ID"])
-        if not other_real:
-            await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
+
+async def clear_ticket_owner(channel: disnake.TextChannel):
+    """Удаляет запись о владельце из БД и снимает роли при необходимости."""
+    user_id = get_ticket_owner(channel.id)
+    if user_id:
+        # Удаляем запись из БД
+        remove_ticket_owner(channel.id)
+        # Проверяем, нужно ли снять роли (если других тикетов в этой категории нет)
+        await handle_ticket_roles_on_close(channel)
 
 # ============================================================
 # Функция загрузки "Доски" (board.json из ADD_DIR)
@@ -182,7 +176,7 @@ def load_embed_from_file(filename: str) -> list[Embed]:
         )]
 
 # ============================================================
-# Класс для модерации отзывов
+# Класс для модерации отзывов (без изменений)
 # ============================================================
 class ReviewModerationView(View):
     def __init__(self, user_id: int, content: str, msg_id: int, channel_id: int):
@@ -260,7 +254,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ (МОДАЛКИ) с выдачей ролей
+# ТИКЕТЫ (МОДАЛКИ) – с записью владельца в БД и без ID в названии
 # ============================================================
 class BuyTicketModal(Modal):
     """Модалка для реальных денег"""
@@ -300,7 +294,7 @@ class BuyTicketModal(Modal):
             return await inter.response.send_message("❌ Категория не найдена", ephemeral=True)
 
         safe_item = item.lower().replace(" ", "-")[:80]
-        channel_name = f"{safe_item}-{inter.author.id}"  # добавляем ID для отслеживания
+        channel_name = f"{safe_item}"  # без ID пользователя
         overwrites = {
             guild.default_role: disnake.PermissionOverwrite(view_channel=False),
             inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
@@ -337,6 +331,9 @@ class BuyTicketModal(Modal):
             view=view
         )
         await inter.response.send_message(f"✅ Тикет создан: {ticket_channel.mention}", ephemeral=True)
+
+        # Записываем владельца в БД
+        add_ticket_owner(ticket_channel.id, inter.author.id, cat.id)
 
         # Выдаём роль создателя тикета (реальные деньги)
         member = inter.author
@@ -378,7 +375,7 @@ class CoinsTicketModal(Modal):
             return await inter.response.send_message("❌ Категория не найдена", ephemeral=True)
 
         safe_item = item.lower().replace(" ", "-")[:80]
-        channel_name = f"{safe_item}-{inter.author.id}"
+        channel_name = f"{safe_item}"  # без ID пользователя
         overwrites = {
             guild.default_role: disnake.PermissionOverwrite(view_channel=False),
             inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
@@ -417,6 +414,9 @@ class CoinsTicketModal(Modal):
 
         await inter.response.send_message(f"✅ Тикет создан: {ticket_channel.mention}", ephemeral=True)
 
+        # Записываем владельца в БД
+        add_ticket_owner(ticket_channel.id, inter.author.id, cat.id)
+
         # Выдаём роль создателя тикета (DC/инвайты)
         member = inter.author
         await assign_ticket_role(member, CONFIG["TICKET_ROLES"]["coins_created"])
@@ -431,10 +431,9 @@ class CoinsTicketModal(Modal):
             ))
 
 # ============================================================
-# КНОПКИ ДЛЯ ТИКЕТОВ
+# КНОПКИ ДЛЯ ТИКЕТОВ (без изменений, но используют обновлённые функции)
 # ============================================================
 class TicketButtons(View):
-    """Кнопки для тикетов с реальными деньгами"""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -610,7 +609,6 @@ class TicketButtons(View):
         )
 
 class TicketButtonsPaid(View):
-    """Кнопки для оплаченных тикетов"""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -864,6 +862,9 @@ class CoinsTicketButtons(View):
             )
         return callback
 
+# ============================================================
+# ПОДТВЕРЖДЕНИЕ ЗАКРЫТИЯ – с удалением записи из БД
+# ============================================================
 class ConfirmCloseView(View):
     def __init__(self, channel):
         super().__init__(timeout=60)
@@ -879,21 +880,13 @@ class ConfirmCloseView(View):
         if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
 
-        # Небольшая задержка, чтобы Discord успел обработать
         await inter.response.send_message("Тикет удаляется...", ephemeral=True)
         await asyncio.sleep(2)
 
         try:
-            # Находим создателя тикета по названию канала (в конце ID)
-            channel_name = self.channel.name
-            user_id = None
-            if "-" in channel_name:
-                parts = channel_name.split("-")
-                if parts[-1].isdigit():
-                    user_id = int(parts[-1])
-            if user_id:
-                await handle_ticket_roles_on_close(self.channel, user_id)
-
+            # Удаляем запись из БД и снимаем роли (если других тикетов нет)
+            await clear_ticket_owner(self.channel)
+            # Удаляем канал
             await self.channel.delete()
             await log_discord(
                 title="🗑️ Тикет закрыт",
@@ -903,13 +896,13 @@ class ConfirmCloseView(View):
             )
         except Exception as e:
             logger.error(f"Ошибка при закрытии тикета: {e}")
-            # Если не удалось удалить, пробуем ещё раз с большей задержкой
             try:
                 await asyncio.sleep(3)
                 await self.channel.delete()
             except Exception as e2:
                 logger.error(f"Повторная ошибка при закрытии тикета: {e2}")
 
+# ============================================================
 # ============================================================
 # НОВЫЙ ВЫБОР ТИПА КАТАЛОГА (для кнопки "Каталог" в панели тикетов)
 # ============================================================
