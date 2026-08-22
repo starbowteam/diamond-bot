@@ -526,10 +526,7 @@ class SelectView(View):
         self.add_item(TicketActionSelect(channel))
 
 # ============================================================
-# ОСНОВНОЙ VIEW С КНОПКАМИ (для тикетов)
-# ============================================================
-# ============================================================
-# ОСНОВНОЙ VIEW С КНОПКАМИ (для тикетов) – исправлено
+# ОСНОВНОЙ VIEW С КНОПКАМИ (для тикетов) – с увеличенными отступами
 # ============================================================
 class TicketView(View):
     def __init__(self, channel, user_id):
@@ -539,7 +536,7 @@ class TicketView(View):
 
         # Кнопка Закрыть
         btn_close = Button(
-            label="ㅤЗакрытьㅤ",
+            label="ㅤㅤЗакрытьㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:close",
             emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -550,7 +547,7 @@ class TicketView(View):
 
         # Кнопка Оплатить
         btn_pay = Button(
-            label="ㅤОплатитьㅤ",
+            label="ㅤㅤОплатитьㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:pay",
             emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
@@ -561,7 +558,7 @@ class TicketView(View):
 
         # Кнопка Скидки
         btn_discounts = Button(
-            label="ㅤСкидкиㅤ",
+            label="ㅤㅤСкидкиㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:discounts",
             emoji=PartialEmoji(name="skidka", id=1540819242625146961),
@@ -746,7 +743,7 @@ class TicketPaidView(View):
         super().__init__(timeout=None)
         # Кнопка Закрыть (активна)
         btn_close = Button(
-            label="ㅤЗакрытьㅤ",
+            label="ㅤㅤЗакрытьㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket_paid:close",
             emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -757,7 +754,7 @@ class TicketPaidView(View):
 
         # Кнопка Оплатить (disabled)
         btn_pay = Button(
-            label="ㅤОплатитьㅤ",
+            label="ㅤㅤОплатитьㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket_paid:pay_done",
             emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
@@ -768,7 +765,7 @@ class TicketPaidView(View):
 
         # Кнопка Скидки (disabled)
         btn_discounts = Button(
-            label="ㅤСкидкиㅤ",
+            label="ㅤㅤСкидкиㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket_paid:discounts_done",
             emoji=PartialEmoji(name="skidka", id=1540819242625146961),
