@@ -243,7 +243,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ (МОДАЛКИ) – BuyTicketModal использует обновлённый View
+# ТИКЕТЫ (МОДАЛКИ)
 # ============================================================
 class BuyTicketModal(Modal):
     def __init__(self):
@@ -311,7 +311,6 @@ class BuyTicketModal(Modal):
         current_time = int(time.time())
         embed_order_info.description = f"Статус - Не оплачен\nОжидайте <@&1154757071330365490> для подтверждения.\nВремя: <t:{current_time}:F>"
 
-        # Новый View с селектом и кнопками
         view = TicketView(ticket_channel, inter.author.id)
 
         await ticket_channel.send(
@@ -416,7 +415,7 @@ class CoinsTicketModal(Modal):
             ))
 
 # ============================================================
-# КНОПКИ И СЕЛЕКТ ДЛЯ ТИКЕТОВ (РЕАЛЬНЫЕ ДЕНЬГИ)
+# КНОПКИ И СЕЛЕКТ ДЛЯ ТИКЕТОВ (РЕАЛЬНЫЕ ДЕНЬГИ) – ИСПРАВЛЕНО
 # ============================================================
 class TicketActionSelect(disnake.ui.StringSelect):
     def __init__(self, channel):
@@ -514,46 +513,47 @@ class TicketView(View):
         super().__init__(timeout=None)
         self.channel = channel
         self.user_id = user_id
-        # Добавляем селект на row=0
+        # Селект на row 0
         self.add_item(TicketActionSelect(channel))
-        # Кнопки на row=1
+        # Кнопки на row 1 (3 кнопки – влазят в 5)
         self.add_item(self.close_button())
         self.add_item(self.pay_button())
         self.add_item(self.discounts_button())
 
     def close_button(self):
-        return Button(
+        btn = Button(
             label="ㅤЗакрытьㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:close",
             emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
             row=1
         )
+        btn.callback = self.close_callback
+        return btn
 
     def pay_button(self):
-        return Button(
+        btn = Button(
             label="ㅤОплатитьㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:pay",
             emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
             row=1
         )
+        btn.callback = self.pay_callback
+        return btn
 
     def discounts_button(self):
-        return Button(
+        btn = Button(
             label="ㅤСкидкиㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:discounts",
             emoji=PartialEmoji(name="skidka", id=1540819242625146961),
             row=1
         )
+        btn.callback = self.discounts_callback
+        return btn
 
-    async def interaction_check(self, inter: disnake.MessageInteraction) -> bool:
-        # Обработка кнопок отдельно в каллбеках
-        return True
-
-    @disnake.ui.button(label="Закрыть", style=ButtonStyle.gray, custom_id="ticket:close", emoji=PartialEmoji(name="OffTicket", id=1539657125716824185), row=1)
-    async def close(self, button: Button, inter: disnake.MessageInteraction):
+    async def close_callback(self, inter: disnake.MessageInteraction):
         if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
         confirm = ConfirmCloseView(inter.channel)
@@ -565,15 +565,13 @@ class TicketView(View):
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-    @disnake.ui.button(label="Оплатить", style=ButtonStyle.gray, custom_id="ticket:pay", emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496), row=1)
-    async def pay(self, button: Button, inter: disnake.MessageInteraction):
+    async def pay_callback(self, inter: disnake.MessageInteraction):
         if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на подтверждение оплаты.", ephemeral=True)
 
         msg = inter.message
-        # Ищем сообщение с заказом (первое сообщение бота в канале)
+        # Ищем сообщение с заказом
         if not msg.embeds or len(msg.embeds) < 2:
-            # Попробуем найти сообщение с эмбедами в истории
             async for m in self.channel.history(limit=50):
                 if m.author == inter.bot.user and m.embeds and len(m.embeds) >= 2:
                     msg = m
@@ -644,9 +642,7 @@ class TicketView(View):
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-    @disnake.ui.button(label="Скидки", style=ButtonStyle.gray, custom_id="ticket:discounts", emoji=PartialEmoji(name="skidka", id=1540819242625146961), row=1)
-    async def discounts(self, button: Button, inter: disnake.MessageInteraction):
-        # Проверка: только создатель тикета
+    async def discounts_callback(self, inter: disnake.MessageInteraction):
         owner_id = get_ticket_owner(inter.channel.id)
         if not owner_id or inter.author.id != owner_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
@@ -661,7 +657,6 @@ class TicketView(View):
         await inter.response.send_message(embeds=slid_embeds, ephemeral=True)
 
 class TicketPaidView(View):
-    """View для оплаченных тикетов – только кнопка закрыть"""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -752,7 +747,6 @@ class CoinsTicketButtons(View):
         if inter.author.id != self.user_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
-        # Получаем покупки, исключая скидки (тип "discounts")
         all_purchases = await get_user_purchases(self.user_id, only_unused=True)
         purchases = [p for p in all_purchases if p.get('type') != 'discounts']
 
@@ -2837,7 +2831,6 @@ async def send_ticket_panel():
 async def handle_interaction(inter: disnake.MessageInteraction):
     if inter.data.get("custom_id") == "menu:buy_ticket":
         await inter.response.send_modal(BuyTicketModal())
-
 # ============================================================
 # НАСТРОЙКА МОДУЛЯ (для main.py)
 # ============================================================
@@ -2847,3 +2840,6 @@ def setup_commands(bot):
     bot.add_slash_command(promocodes)
     bot.add_slash_command(say)
     bot.add_slash_command(gw_dc)
+
+
+
