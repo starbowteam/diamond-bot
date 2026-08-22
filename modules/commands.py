@@ -533,7 +533,6 @@ class TicketView(View):
         self.channel = channel
         self.user_id = user_id
 
-        # Кнопка Закрыть – 1 пробел
         btn_close = Button(
             label="ㅤЗакрытьㅤ",
             style=ButtonStyle.gray,
@@ -544,7 +543,6 @@ class TicketView(View):
         btn_close.callback = self.close_callback
         self.add_item(btn_close)
 
-        # Кнопка Оплатить – 1 пробел
         btn_pay = Button(
             label="ㅤОплатитьㅤ",
             style=ButtonStyle.gray,
@@ -555,7 +553,6 @@ class TicketView(View):
         btn_pay.callback = self.pay_callback
         self.add_item(btn_pay)
 
-        # Кнопка Скидки – 2 пробела (не трогаем)
         btn_discounts = Button(
             label="ㅤㅤСкидкиㅤㅤ",
             style=ButtonStyle.gray,
@@ -659,6 +656,20 @@ class TicketView(View):
         if not owner_id or inter.author.id != owner_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
+        # Проверяем, не применена ли уже скидка
+        discount_applied = False
+        async for msg in self.channel.history(limit=50):
+            if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
+                embed = msg.embeds[1]
+                for field in embed.fields:
+                    if "промокод" in field.name.lower():
+                        if field.value.strip("`\n ") not in ["Не введён", "Не активирован"]:
+                            discount_applied = True
+                        break
+                break
+        if discount_applied:
+            return await inter.response.send_message("❌ К данному заказу уже применена скидка.", ephemeral=True)
+
         all_purchases = await get_user_purchases(inter.author.id, only_unused=True)
         discounts = [p for p in all_purchases if p.get('type') == 'discounts']
 
@@ -695,6 +706,21 @@ class TicketView(View):
 
             if discount_index >= len(discounts):
                 return await inter.response.send_message("❌ Скидка уже применена.", ephemeral=True)
+
+            # Повторная проверка на уже применённую скидку (на случай, если меню было открыто до применения)
+            discount_applied = False
+            async for msg in self.channel.history(limit=50):
+                if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
+                    embed = msg.embeds[1]
+                    for field in embed.fields:
+                        if "промокод" in field.name.lower():
+                            if field.value.strip("`\n ") not in ["Не введён", "Не активирован"]:
+                                discount_applied = True
+                            break
+                    break
+            if discount_applied:
+                return await inter.response.send_message("❌ К данному заказу уже применена скидка.", ephemeral=True)
+
             item_value = discounts[discount_index]['value']
 
             full_purchases = await get_user_purchases(inter.author.id, only_unused=False)
@@ -712,6 +738,7 @@ class TicketView(View):
             if not success:
                 return await inter.response.send_message("❌ Ошибка применения скидки.", ephemeral=True)
 
+            # Обновляем поле "Промокод" в заказе
             async for msg in self.channel.history(limit=50):
                 if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
                     embed_dict = msg.embeds[1].to_dict()
@@ -2681,10 +2708,35 @@ class BuySelectView(View):
         price = item["price"]
         if balance < price:
             return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.")
+
+        # ============================================================
+        # ПРОВЕРКА ДЛЯ РОЛЕЙ (кроме кастомных)
+        # ============================================================
+        if category == "roles" and item.get("role_id"):
+            role_id = item["role_id"]
+            role = inter.guild.get_role(role_id)
+            if role:
+                # Проверяем, есть ли уже у пользователя эта роль
+                if role in inter.author.roles:
+                    return await inter.edit_original_response(
+                        content=f"❌ У вас уже есть роль **{role.name}**. Вы не можете купить её повторно."
+                    )
+                # Проверяем, не куплена ли уже эта роль (в инвентаре есть неиспользованная)
+                purchases = await get_user_purchases(user_id, only_unused=True)
+                for p in purchases:
+                    if p.get('type') == 'roles' and p.get('value') == item['name']:
+                        return await inter.edit_original_response(
+                            content=f"❌ Вы уже купили роль **{item['name']}**, но она ещё не выдана. Обратитесь к администратору."
+                        )
+            else:
+                return await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
+
         success = await remove_dc(user_id, price, f"Покупка: {item['name']}")
         if not success:
             return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуйте позже.")
+
         await add_purchase(user_id, category, item["name"])
+
         if category == "roles" and item.get("role_id"):
             role = inter.guild.get_role(item["role_id"])
             if role:
@@ -2715,6 +2767,7 @@ class BuySelectView(View):
                             f"💎 {price} DC возвращены на баланс."
                 )
                 return
+
         await inter.edit_original_response(
             content=f"✅ Вы купили **{item['name']}** за **{price} DC**!\n"
                     f"📦 Товар будет выдан в ближайшее время.\n"
