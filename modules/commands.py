@@ -325,7 +325,7 @@ class BuyTicketModal(Modal):
         # Отдельное сообщение с селект-меню (реквизиты/политика)
         select_embed = disnake.Embed(
             title="Что именно нужно посмотреть?",
-            description="Выберите, что вы хотите увидеть, политику магазина, либо реквизиты? \n\nЕсли вы персонал, вам доступна кнопка оплатить.",
+            description="Ниже, выбор - просмотр политики по заказу, либо - просмотр реквизитов для оплаты  \n\nВыберите нужный пункт.",
             color=6776679
         )
         select_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8b1723&is=6a89c5a3&hm=84444a514a08c282e27d51013698ba7b5e82c75a45ae4a004c56b3e58a9acd12&")
@@ -870,7 +870,7 @@ class CoinsTicketButtons(View):
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
     @disnake.ui.button(
-        label="Покупкиㅤ",
+        label="ㅤㅤКупленноеㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:items",
         emoji=PartialEmoji(name="prize", id=1539657202170859561),
@@ -993,7 +993,7 @@ class CoinsTicketButtons(View):
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
         return callback
-
+        
 class ConfirmCloseView(View):
     def __init__(self, channel):
         super().__init__(timeout=60)
