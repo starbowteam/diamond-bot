@@ -870,7 +870,7 @@ class CoinsTicketButtons(View):
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤㅤКупленноеㅤ",
+        label="Покупкиㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="coins_ticket:items",
         emoji=PartialEmoji(name="prize", id=1539657202170859561),
