@@ -121,14 +121,13 @@ async def on_ready():
 
         from modules.commands import (
             TicketPanelView,
-            TicketView, TicketPaidView,
+            TicketPaidView,
             CoinsTicketButtons,
             send_home_panel, send_tarology_panel, send_ticket_panel,
             send_profile_panel
         )
         # Регистрируем постоянные View (для кнопок, которые должны работать всегда)
         bot.add_view(TicketPanelView())
-        bot.add_view(TicketView())  # При создании тикета нужен channel и user_id, поэтому он создаётся динамически; здесь не добавляем
         bot.add_view(TicketPaidView())
         bot.add_view(CoinsTicketButtons())
 
