@@ -119,25 +119,25 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        # Импортируем только нужные классы и функции
         from modules.commands import (
-            TicketPanelView, TicketButtons, TicketButtonsPaid,
+            TicketPanelView,
+            TicketView, TicketPaidView,
+            CoinsTicketButtons,
             send_home_panel, send_tarology_panel, send_ticket_panel,
             send_profile_panel
         )
-        # Добавляем View для постоянной работы кнопок (даже после перезапуска)
+        # Регистрируем постоянные View (для кнопок, которые должны работать всегда)
         bot.add_view(TicketPanelView())
-        bot.add_view(TicketButtons())
-        bot.add_view(TicketButtonsPaid())
+        bot.add_view(TicketView())  # При создании тикета нужен channel и user_id, поэтому он создаётся динамически; здесь не добавляем
+        bot.add_view(TicketPaidView())
+        bot.add_view(CoinsTicketButtons())
 
-        # Запускаем фоновые задачи (отправка панелей)
-        bot.loop.create_task(keep_voice_alive())
-        bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
-        bot.loop.create_task(send_ticket_panel()) 
+        bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
-        # Новая задача – отправка панели тикетов
+        bot.loop.create_task(keep_voice_alive())
+        bot.loop.create_task(send_actions_panel())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
@@ -207,7 +207,7 @@ async def keep_voice_alive():
         await asyncio.sleep(60)
 
 # ============================================================
-# Остальные обработчики событий (без изменений)
+# Обработчики событий (без изменений)
 # ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
