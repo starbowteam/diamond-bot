@@ -524,9 +524,8 @@ class SelectView(View):
     def __init__(self, channel):
         super().__init__(timeout=None)
         self.add_item(TicketActionSelect(channel))
-
 # ============================================================
-# ОСНОВНОЙ VIEW С КНОПКАМИ (для тикетов) – с увеличенными отступами
+# ОСНОВНОЙ VIEW С КНОПКАМИ (для тикетов)
 # ============================================================
 class TicketView(View):
     def __init__(self, channel, user_id):
@@ -534,9 +533,9 @@ class TicketView(View):
         self.channel = channel
         self.user_id = user_id
 
-        # Кнопка Закрыть
+        # Кнопка Закрыть – 1 пробел
         btn_close = Button(
-            label="ㅤㅤЗакрытьㅤㅤ",
+            label="ㅤЗакрытьㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:close",
             emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -545,9 +544,9 @@ class TicketView(View):
         btn_close.callback = self.close_callback
         self.add_item(btn_close)
 
-        # Кнопка Оплатить
+        # Кнопка Оплатить – 1 пробел
         btn_pay = Button(
-            label="ㅤㅤОплатитьㅤㅤ",
+            label="ㅤОплатитьㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket:pay",
             emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
@@ -556,7 +555,7 @@ class TicketView(View):
         btn_pay.callback = self.pay_callback
         self.add_item(btn_pay)
 
-        # Кнопка Скидки
+        # Кнопка Скидки – 2 пробела (не трогаем)
         btn_discounts = Button(
             label="ㅤㅤСкидкиㅤㅤ",
             style=ButtonStyle.gray,
@@ -741,9 +740,9 @@ class TicketView(View):
 class TicketPaidView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        # Кнопка Закрыть (активна)
+        # Кнопка Закрыть – 1 пробел
         btn_close = Button(
-            label="ㅤㅤЗакрытьㅤㅤ",
+            label="ㅤЗакрытьㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket_paid:close",
             emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -752,9 +751,9 @@ class TicketPaidView(View):
         btn_close.callback = self.close_callback
         self.add_item(btn_close)
 
-        # Кнопка Оплатить (disabled)
+        # Кнопка Оплатить (disabled) – 1 пробел
         btn_pay = Button(
-            label="ㅤㅤОплатитьㅤㅤ",
+            label="ㅤОплатитьㅤ",
             style=ButtonStyle.gray,
             custom_id="ticket_paid:pay_done",
             emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
@@ -763,7 +762,7 @@ class TicketPaidView(View):
         )
         self.add_item(btn_pay)
 
-        # Кнопка Скидки (disabled)
+        # Кнопка Скидки (disabled) – 2 пробела (не трогаем)
         btn_discounts = Button(
             label="ㅤㅤСкидкиㅤㅤ",
             style=ButtonStyle.gray,
