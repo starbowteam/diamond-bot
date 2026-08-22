@@ -880,6 +880,16 @@ class CoinsTicketButtons(View):
         if inter.author.id != self.user_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
+        # Проверяем, не применён ли уже товар к этому тикету
+        if self.message and self.message.embeds:
+            embed = self.message.embeds[self.order_embed_index] if len(self.message.embeds) > self.order_embed_index else None
+            if embed:
+                for field in embed.fields:
+                    if "подтверждение наличия" in field.name.lower():
+                        if field.value.strip("`\n ") != "Не активирован":
+                            return await inter.response.send_message("❌ К данному тикету уже применён товар.", ephemeral=True)
+                        break
+
         all_purchases = await get_user_purchases(self.user_id, only_unused=True)
         purchases = [p for p in all_purchases if p.get('type') != 'discounts']
 
@@ -932,6 +942,17 @@ class CoinsTicketButtons(View):
 
             if purchase_index >= len(purchases):
                 return await inter.response.send_message("❌ Товар уже применён.", ephemeral=True)
+
+            # Повторная проверка на уже применённый товар (на случай, если меню было открыто до применения)
+            if self.message and self.message.embeds:
+                embed = self.message.embeds[self.order_embed_index] if len(self.message.embeds) > self.order_embed_index else None
+                if embed:
+                    for field in embed.fields:
+                        if "подтверждение наличия" in field.name.lower():
+                            if field.value.strip("`\n ") != "Не активирован":
+                                return await inter.response.send_message("❌ К данному тикету уже применён товар.", ephemeral=True)
+                            break
+
             item_value = purchases[purchase_index]['value']
 
             full_purchases = await get_user_purchases(self.user_id, only_unused=False)
