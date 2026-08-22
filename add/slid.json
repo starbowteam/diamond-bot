@@ -1,0 +1,16 @@
+{
+  "embeds": [
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1540818094451200171/image.png?ex=6a8b562c&is=6a8a04ac&hm=aeaecffe13a729086efc0e9b44f4840e6b48e0c1fefd470331ad310028cbc188&"
+      }
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8b1723&is=6a89c5a3&hm=84444a514a08c282e27d51013698ba7b5e82c75a45ae4a004c56b3e58a9acd12&"
+      },
+      "title": "Скидки на товары за реальные деньги",
+      "description": "Выберите нужную скидку, которую хотите использовать в тикете!"
+    }
+  ]
+}
