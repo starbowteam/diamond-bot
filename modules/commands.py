@@ -243,7 +243,7 @@ class ReviewModerationView(View):
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
 
 # ============================================================
-# ТИКЕТЫ (МОДАЛКИ) – без изменений
+# ТИКЕТЫ (МОДАЛКИ) – BuyTicketModal использует обновлённый View
 # ============================================================
 class BuyTicketModal(Modal):
     def __init__(self):
@@ -297,7 +297,6 @@ class BuyTicketModal(Modal):
                 overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
-        view = TicketButtons()
 
         with open(CONFIG["INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -312,9 +311,12 @@ class BuyTicketModal(Modal):
         current_time = int(time.time())
         embed_order_info.description = f"Статус - Не оплачен\nОжидайте <@&1154757071330365490> для подтверждения.\nВремя: <t:{current_time}:F>"
 
+        # Новый View с селектом и кнопками
+        view = TicketView(ticket_channel, inter.author.id)
+
         await ticket_channel.send(
             f"> Добрый день, {inter.author.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
-            f"> Помните, по кнопке оформление вы можете посмотреть реквизиты, политику или оплатить — не дожидаясь менеджера.",
+            f"> Помните, по селекту ниже вы можете посмотреть реквизиты или политику, а кнопкой оплатить — подтвердить оплату.",
             embeds=[embeds_list[0], embed_order_info],
             view=view
         )
@@ -414,7 +416,7 @@ class CoinsTicketModal(Modal):
             ))
 
 # ============================================================
-# КНОПКИ ДЛЯ ТИКЕТОВ (РЕАЛЬНЫЕ ДЕНЬГИ) – с ОФОРМЛЕНИЕМ и СКИДКАМИ
+# КНОПКИ И СЕЛЕКТ ДЛЯ ТИКЕТОВ (РЕАЛЬНЫЕ ДЕНЬГИ)
 # ============================================================
 class TicketActionSelect(disnake.ui.StringSelect):
     def __init__(self, channel):
@@ -434,12 +436,6 @@ class TicketActionSelect(disnake.ui.StringSelect):
                     description="Правила и условия магазина",
                     emoji="<:Politic:1539657020695650384>",
                     value="policy"
-                ),
-                disnake.SelectOption(
-                    label="Оплатить",
-                    description="Подтвердить оплату заказа (для персонала)",
-                    emoji="<:Oplacheno:1539657164778512496>",
-                    value="pay"
                 )
             ],
             custom_id="ticket_action_select"
@@ -452,8 +448,6 @@ class TicketActionSelect(disnake.ui.StringSelect):
             await self.send_requisites(inter)
         elif value == "policy":
             await self.send_policy(inter)
-        elif value == "pay":
-            await self.send_pay(inter)
 
     async def send_requisites(self, inter: disnake.MessageInteraction):
         embeds_data = [
@@ -514,23 +508,78 @@ class TicketActionSelect(disnake.ui.StringSelect):
             logger.exception("Ошибка при отправке policy: %s", e)
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
-    async def send_pay(self, inter: disnake.MessageInteraction):
-        # Проверка прав: только персонал с TICKET_MANAGE_ROLES
+class TicketView(View):
+    """Общий View для тикета: селект (реквизиты/политика) + кнопки (закрыть, оплатить, скидки)"""
+    def __init__(self, channel, user_id):
+        super().__init__(timeout=None)
+        self.channel = channel
+        self.user_id = user_id
+        # Добавляем селект на row=0
+        self.add_item(TicketActionSelect(channel))
+        # Кнопки на row=1
+        self.add_item(self.close_button())
+        self.add_item(self.pay_button())
+        self.add_item(self.discounts_button())
+
+    def close_button(self):
+        return Button(
+            label="ㅤЗакрытьㅤ",
+            style=ButtonStyle.gray,
+            custom_id="ticket:close",
+            emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
+            row=1
+        )
+
+    def pay_button(self):
+        return Button(
+            label="ㅤОплатитьㅤ",
+            style=ButtonStyle.gray,
+            custom_id="ticket:pay",
+            emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
+            row=1
+        )
+
+    def discounts_button(self):
+        return Button(
+            label="ㅤСкидкиㅤ",
+            style=ButtonStyle.gray,
+            custom_id="ticket:discounts",
+            emoji=PartialEmoji(name="skidka", id=1540819242625146961),
+            row=1
+        )
+
+    async def interaction_check(self, inter: disnake.MessageInteraction) -> bool:
+        # Обработка кнопок отдельно в каллбеках
+        return True
+
+    @disnake.ui.button(label="Закрыть", style=ButtonStyle.gray, custom_id="ticket:close", emoji=PartialEmoji(name="OffTicket", id=1539657125716824185), row=1)
+    async def close(self, button: Button, inter: disnake.MessageInteraction):
+        if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
+            return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
+        confirm = ConfirmCloseView(inter.channel)
+        await inter.response.send_message("Подтвердите закрытие", view=confirm, ephemeral=True)
+        await log_discord(
+            title="🔒 Запрос на закрытие тикета (реальные деньги)",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {inter.channel.mention}",
+            color=0xffaa00,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
+    @disnake.ui.button(label="Оплатить", style=ButtonStyle.gray, custom_id="ticket:pay", emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496), row=1)
+    async def pay(self, button: Button, inter: disnake.MessageInteraction):
         if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на подтверждение оплаты.", ephemeral=True)
 
         msg = inter.message
-        # Ищем сообщение с заказом (первое сообщение в канале)
-        # Для простоты берём последнее сообщение бота с эмбедами
-        async for m in self.channel.history(limit=50):
-            if m.author == inter.bot.user and m.embeds and len(m.embeds) >= 2:
-                msg = m
-                break
-        if not msg:
-            return await inter.response.send_message("❌ Не найдено сообщение с заказом.", ephemeral=True)
-
+        # Ищем сообщение с заказом (первое сообщение бота в канале)
         if not msg.embeds or len(msg.embeds) < 2:
-            return await inter.response.send_message("❌ Второй embed не найден", ephemeral=True)
+            # Попробуем найти сообщение с эмбедами в истории
+            async for m in self.channel.history(limit=50):
+                if m.author == inter.bot.user and m.embeds and len(m.embeds) >= 2:
+                    msg = m
+                    break
+        if not msg.embeds or len(msg.embeds) < 2:
+            return await inter.response.send_message("❌ Не найдено сообщение с заказом.", ephemeral=True)
 
         desc = msg.embeds[1].description or ""
         if "Статус - Заказ оплачен" in desc:
@@ -556,7 +605,7 @@ class TicketActionSelect(disnake.ui.StringSelect):
             f"> Подтверждено: {inter.author.mention}\n"
             f"> Время: <t:{int(time.time())}:f>"
         )
-        new_view = TicketButtonsPaid()
+        new_view = TicketPaidView()
 
         await msg.edit(
             embeds=[msg.embeds[0], disnake.Embed.from_dict(ed)],
@@ -578,7 +627,6 @@ class TicketActionSelect(disnake.ui.StringSelect):
 
         await inter.response.send_message("✅ Заказ отмечен как оплаченный.", ephemeral=True)
 
-        # Обновляем роли
         member = inter.author
         await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
         await assign_ticket_role(member, CONFIG["TICKET_ROLES"]["real_paid"])
@@ -596,69 +644,14 @@ class TicketActionSelect(disnake.ui.StringSelect):
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-class TicketActionView(disnake.ui.View):
-    def __init__(self, channel):
-        super().__init__(timeout=None)
-        self.add_item(TicketActionSelect(channel))
-
-class TicketButtons(View):
-    """Кнопки для тикетов с реальными деньгами (Закрыть, Оформление, Скидки)"""
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @disnake.ui.button(
-        label="ㅤЗакрытьㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="ticket:close",
-        emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
-        row=0
-    )
-    async def close(self, button, inter: disnake.MessageInteraction):
-        if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
-            return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
-        confirm = ConfirmCloseView(inter.channel)
-        await inter.response.send_message("Подтвердите закрытие", view=confirm, ephemeral=True)
-        await log_discord(
-            title="🔒 Запрос на закрытие тикета (реальные деньги)",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {inter.channel.mention}",
-            color=0xffaa00,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
-
-    @disnake.ui.button(
-        label="ㅤОформлениеㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="ticket:action",
-        emoji=PartialEmoji(name="Politic", id=1539657020695650384),
-        row=0
-    )
-    async def action(self, button, inter: disnake.MessageInteraction):
-        # Отправляем embed с селект-меню
-        embed = disnake.Embed(
-            title="Что именно нужно посмотреть?",
-            description="Выберите, что вы хотите увидеть, политику магазина, либо реквизиты? \n\nЕсли вы персонал, вам доступна кнопка оплатить.",
-            color=6776679
-        )
-        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8b1723&is=6a89c5a3&hm=84444a514a08c282e27d51013698ba7b5e82c75a45ae4a004c56b3e58a9acd12&")
-        view = TicketActionView(inter.channel)
-        await inter.response.send_message(embed=embed, view=view)
-
-    @disnake.ui.button(
-        label="ㅤСкидкиㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="ticket:discounts",
-        emoji=PartialEmoji(name="skidka", id=1540819242625146961),
-        row=0
-    )
-    async def discounts(self, button, inter: disnake.MessageInteraction):
+    @disnake.ui.button(label="Скидки", style=ButtonStyle.gray, custom_id="ticket:discounts", emoji=PartialEmoji(name="skidka", id=1540819242625146961), row=1)
+    async def discounts(self, button: Button, inter: disnake.MessageInteraction):
         # Проверка: только создатель тикета
-        user_id = get_ticket_owner(inter.channel.id)
-        if not user_id or inter.author.id != user_id:
+        owner_id = get_ticket_owner(inter.channel.id)
+        if not owner_id or inter.author.id != owner_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
-        # Загружаем эмбед из add/slid.json
         slid_embeds = load_embed_from_file("slid.json")
-        # Если файл отсутствует – показываем стандартное сообщение
         if not slid_embeds or len(slid_embeds) == 0:
             slid_embeds = [disnake.Embed(
                 title="❌ Файл не найден",
@@ -667,7 +660,8 @@ class TicketButtons(View):
             )]
         await inter.response.send_message(embeds=slid_embeds, ephemeral=True)
 
-class TicketButtonsPaid(View):
+class TicketPaidView(View):
+    """View для оплаченных тикетов – только кнопка закрыть"""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -813,12 +807,7 @@ class CoinsTicketButtons(View):
                 return await inter.response.send_message("❌ Товар уже применён.", ephemeral=True)
             item_value = purchases[purchase_index]['value']
 
-            # Удаляем покупку из общего списка (по индексу, но учитываем, что purchases — это фильтрованный список, а удалять надо из всей БД)
-            # Проще: удаляем по индексу из общего списка, но мы не знаем общего индекса.
-            # Поэтому удаляем по значению и типу (но может быть несколько одинаковых)
-            # Лучше удалить по индексу из полного списка. Получим полный список и найдём соответствующий элемент.
             full_purchases = await get_user_purchases(self.user_id, only_unused=False)
-            # Ищем элемент с таким же значением и типом (не "discounts")
             target = None
             target_index = None
             for i, p in enumerate(full_purchases):
@@ -891,7 +880,6 @@ class ConfirmCloseView(View):
                 await self.channel.delete()
             except Exception as e2:
                 logger.error(f"Повторная ошибка при закрытии тикета: {e2}")
-
 
 # ============================================================
 # ВЫБОР ТИПА ПОКУПКИ (для кнопки "Купить" в панели тикетов)
