@@ -328,36 +328,60 @@ class WorkSelect(disnake.ui.StringSelect):
             embeds = load_embed_from_file("zp.json")
             await inter.response.send_message(embeds=embeds, ephemeral=True)
         elif value == "top":
-            # Получаем топ менеджеров из БД и формируем embed
-            guild = inter.guild
-            sales_role = guild.get_role(1154757071330365490)
-            if not sales_role:
-                return await inter.response.send_message("❌ Роль Sales Manager не найдена.", ephemeral=True)
-            
-            rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
-            stats = {row["user_id"]: row for row in rows}
-            members = [m for m in guild.members if sales_role in m.roles and not m.bot]
-            data = []
-            for m in members:
-                s = stats.get(m.id)
-                closed = s["closed_tickets"] if s else 0
-                total_rating = s["total_rating"] if s else 0
-                ratings_count = s["ratings_count"] if s else 0
-                avg = total_rating / ratings_count if ratings_count else 0
-                data.append((m, closed, avg))
-            data.sort(key=lambda x: (-x[1], -x[2]))
-            
-            lines = []
-            for m, closed, avg in data:
-                lines.append(f"> {m.mention} - **{closed}** закрытых заказов. [Рейтинг: **{avg:.1f}**]")
-            
-            embed = disnake.Embed(
-                title="🏆 Топ Sales Manager",
-                description="\n".join(lines) if lines else "> Пока нет данных.",
-                color=0xffaa00
-            )
-            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
-            await inter.response.send_message(embed=embed, ephemeral=True)
+            await self.send_top(inter)
+
+    async def send_top(self, inter):
+        guild = inter.guild
+        sales_role = guild.get_role(1154757071330365490)
+        if not sales_role:
+            return await inter.response.send_message("❌ Роль Sales Manager не найдена.", ephemeral=True)
+
+        rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
+        stats = {row["user_id"]: row for row in rows}
+        members = [m for m in guild.members if sales_role in m.roles and not m.bot]
+
+        data = []
+        for m in members:
+            s = stats.get(m.id)
+            closed = s["closed_tickets"] if s else 0
+            total_rating = s["total_rating"] if s else 0
+            ratings_count = s["ratings_count"] if s else 0
+            avg = total_rating / ratings_count if ratings_count else 0
+            data.append((m, closed, avg))
+
+        data.sort(key=lambda x: (-x[1], -x[2]))
+
+        # Строим строки для описания
+        lines = []
+        for m, closed, avg in data:
+            lines.append(f"> {m.mention} - **{closed}** закрытых заказов. [Рейтинг: **{avg:.1f}**]")
+
+        best = data[0] if data else None
+        best_mention = best[0].mention if best else "Нет данных"
+
+        # Первый эмбед (большая картинка)
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
+
+        # Второй эмбед (таблица)
+        description = "> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n"
+        if lines:
+            description += "\n".join(lines) + "\n"
+        else:
+            description += "> Пока нет данных.\n"
+
+        embed2 = disnake.Embed(
+            title="Таблиц работников на роли Sales Manager.\n",
+            description=description,
+            color=6776679
+        )
+        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+        if best:
+            embed2.add_field(name="По актуальным данным, работником недели является ",
+                             value=f"<@&1154757071330365490> - {best_mention}, уверенное повышение!",
+                             inline=False)
+
+        await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
 class WorkView(disnake.ui.View):
     def __init__(self):
@@ -403,7 +427,6 @@ async def send_work_panel():
 class ResetStatsView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        # Кнопки добавляются через декораторы
 
     @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
     async def reset(self, button, inter):
@@ -411,7 +434,11 @@ class ResetStatsView(View):
             return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
         reset_manager_stats()
         await send_work_panel()
-        await send_manager_top()  # обновит и лог, и работу
+        await log_discord(
+            title="📊 Статистика сброшена",
+            description=f"> **Админ:** {inter.author.mention}\n> Статистика менеджеров обнулена.",
+            color=0xff6600
+        )
         await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
 
     @disnake.ui.button(label="Списать заказ", style=ButtonStyle.secondary, custom_id="spisat_zakaz")
@@ -456,77 +483,24 @@ class SpisatZakazModal(Modal):
             if success:
                 await inter2.response.send_message("✅ Покупка удалена.", ephemeral=True)
                 await send_work_panel()
-                await send_manager_top()
+                await log_discord(
+                    title="🗑️ Заказ списан",
+                    description=f"> **Админ:** {inter2.author.mention}\n> **Пользователь:** <@{user_id}>\n> **Покупка:** {purchases[idx]['value']}",
+                    color=0xff6600
+                )
             else:
                 await inter2.response.send_message("❌ Ошибка удаления.", ephemeral=True)
         select.callback = select_callback
         await inter.response.send_message("Выберите покупку для удаления:", ephemeral=True, view=view)
 
 # ============================================================
-# ТОП МЕНЕДЖЕРОВ + ЛОГИ
+# ТОП МЕНЕДЖЕРОВ (обновление логов)
 # ============================================================
 async def send_manager_top():
-    """Отправляет/обновляет топ менеджеров в канал 1541809640491458571 (удалён, но оставим для совместимости) и кнопки в лог."""
+    """Обновляет только логи (кнопки сброса/списания), топ смотрит через селект."""
     from core.bot import bot
     await bot.wait_until_ready()
 
-    # Топ в канал 1541809640491458571 (может быть удалён)
-    top_channel = bot.get_channel(1541809640491458571)
-    if top_channel:
-        # Удаляем старое сообщение
-        async for msg in top_channel.history(limit=50):
-            if msg.author == bot.user and msg.embeds:
-                try:
-                    await msg.delete()
-                except:
-                    pass
-                break
-
-        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-        if not guild:
-            return
-
-        sales_manager_role = guild.get_role(1154757071330365490)
-        if not sales_manager_role:
-            return
-
-        members_with_role = [m for m in guild.members if sales_manager_role in m.roles and not m.bot]
-        rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
-        stats = {row["user_id"]: row for row in rows}
-        managers_data = []
-        for member in members_with_role:
-            s = stats.get(member.id)
-            closed = s["closed_tickets"] if s else 0
-            total_rating = s["total_rating"] if s else 0
-            ratings_count = s["ratings_count"] if s else 0
-            avg = total_rating / ratings_count if ratings_count else 0
-            managers_data.append({"member": member, "closed": closed, "avg": avg})
-
-        managers_data.sort(key=lambda x: (-x["closed"], -x["avg"]))
-
-        lines = []
-        for data in managers_data:
-            lines.append(f"> {data['member'].mention} - **{data['closed']}** закрытых заказов. [Рейтинг: **{data['avg']:.1f}**]")
-
-        best = managers_data[0] if managers_data else None
-        best_mention = best["member"].mention if best else "Нет данных"
-
-        embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
-        embed2 = disnake.Embed(
-            title="Таблиц работников на роли Sales Manager.\n",
-            description="> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n" + "\n".join(lines) if lines else "> Пока нет данных.",
-            color=6776679
-        )
-        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
-        if best:
-            embed2.add_field(name="По актуальным данным, работником недели является ",
-                             value=f"<@&1154757071330365490> - {best_mention}, уверенное повышение!",
-                             inline=False)
-
-        await top_channel.send(embeds=[embed1, embed2])
-
-    # ЛОГИ (канал 1462418981825810535) – кнопки сброса и списания
     log_channel = bot.get_channel(1462418981825810535)
     if log_channel:
         async for msg in log_channel.history(limit=50):
@@ -544,11 +518,8 @@ async def send_manager_top():
         embed_log.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
         await log_channel.send(embed=embed_log, view=ResetStatsView())
 
-    # Отправляем панель работы (чтобы обновить)
-    await send_work_panel()
-
     await log_discord(
-        title="📊 Топ менеджеров обновлён",
+        title="📊 Статистика менеджеров обновлена",
         description="> Панель работы и логи обновлены.",
         color=0x00ff00
     )
