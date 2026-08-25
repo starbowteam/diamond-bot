@@ -220,7 +220,20 @@ async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: dis
     """
     guild = channel.guild
 
-    # Права для назначенного менеджера
+    # Шаг 1: Запрещаем писать ВСЕМ ролям из TICKET_MANAGE_ROLES
+    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
+        role = guild.get_role(role_id)
+        if role:
+            overwrite = disnake.PermissionOverwrite(
+                view_channel=True,
+                send_messages=False,          # Не может писать
+                read_message_history=True,    # Может читать
+                add_reactions=False,          # Не может ставить эмодзи
+                create_public_threads=False   # Не может создавать ветки
+            )
+            await channel.set_permissions(role, overwrite=overwrite)
+
+    # Шаг 2: Выдаем права назначенному менеджеру (персональные права)
     manager_overwrites = disnake.PermissionOverwrite(
         view_channel=True,
         send_messages=True,
@@ -232,20 +245,7 @@ async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: dis
     )
     await channel.set_permissions(manager, overwrite=manager_overwrites)
 
-    # Для всех остальных ролей из TICKET_MANAGE_ROLES – только просмотр
-    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
-        role = guild.get_role(role_id)
-        if role and role != manager.top_role:  # Не трогаем роль самого менеджера
-            overwrite = disnake.PermissionOverwrite(
-                view_channel=True,
-                send_messages=False,          # Не может писать
-                read_message_history=True,    # Может читать
-                add_reactions=False,          # Не может ставить эмодзи
-                create_public_threads=False   # Не может создавать ветки
-            )
-            await channel.set_permissions(role, overwrite=overwrite)
-
-    # Убеждаемся, что владелец тикета (клиент) может писать
+    # Шаг 3: Убеждаемся, что владелец тикета (клиент) может писать
     owner_id = get_ticket_owner(channel.id)
     if owner_id:
         owner = guild.get_member(owner_id)
