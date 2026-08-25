@@ -19,7 +19,7 @@ from core.utils import (
     add_ticket_owner, remove_ticket_owner, get_ticket_owner,
     get_user_tickets_count_in_category,
     assign_ticket_manager, get_ticket_manager, clear_ticket_manager,
-    increment_manager_closed, add_manager_rating
+    increment_manager_closed, add_manager_rating, add_closed_order
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
@@ -538,6 +538,7 @@ class TicketRatingView(View):
             manager_id = get_ticket_manager(channel.id)
             if manager_id:
                 increment_manager_closed(manager_id)
+                add_closed_order(manager_id, channel.id)
             await clear_ticket_owner(channel)
             await channel.delete()
             await log_discord(
