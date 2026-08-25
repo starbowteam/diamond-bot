@@ -1294,7 +1294,7 @@ class CatalogView(disnake.ui.View):
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
-        super().__init__(timeout=900.0)
+        super().__init__(timeout=None)
         catalog = load_shop_catalog()
         options = []
         for key, cat in catalog.items():
