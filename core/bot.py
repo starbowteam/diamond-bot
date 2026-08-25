@@ -121,7 +121,6 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        # Импортируем все классы для регистрации View
         from modules.commands_tickets import (
             TicketPanelView,
             TicketPaidView,
@@ -136,11 +135,12 @@ async def on_ready():
         )
         from modules.commands_panels import (
             send_home_panel, send_tarology_panel, send_ticket_panel,
-            send_manager_top, ResetStatsView, HomeView, TarologyView
+            send_manager_top, send_work_panel, ResetStatsView, HomeView, TarologyView,
+            WorkView
         )
         from modules.commands_profile import send_profile_panel, ProfileView
 
-        # Регистрируем ВСЕ постоянные View (чтобы кнопки работали после перезапуска)
+        # Регистрируем ВСЕ постоянные View
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
         bot.add_view(TicketView())
@@ -154,11 +154,13 @@ async def on_ready():
         bot.add_view(HomeView())
         bot.add_view(TarologyView())
         bot.add_view(ProfileView())
+        bot.add_view(WorkView())
 
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
+        bot.loop.create_task(send_work_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_manager_top())
