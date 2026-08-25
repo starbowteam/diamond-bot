@@ -1826,40 +1826,6 @@ async def show_profile(inter: disnake.MessageInteraction, user: disnake.Member):
     await inter.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
-# ФУНКЦИЯ ОТПРАВКИ ПАНЕЛИ ПРОФИЛЬ
-# ============================================================
-async def send_profile_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(PROFILE_CHANNEL_ID)
-    if not channel:
-        channel = await bot.fetch_channel(PROFILE_CHANNEL_ID)
-    if not channel:
-        logger.warning("Profile panel channel not found")
-        return
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            try:
-                await msg.delete()
-            except:
-                pass
-            break
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
-    embed2 = disnake.Embed(
-        title="Твой профиль на сервере Diamond Shop",
-        description="> В данном разделе, ты можешь - увидить свой профиль, свои покупки, возможно - отменить их, и получить возрат, но - 75%! Узнать, как купить что либо за Diamond Coin и многое другое! Не забудь о калькуляторе, и расчете скидок, для своих покупок!",
-        color=6776679
-    )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
-    await channel.send(embeds=[embed1, embed2], view=ProfileView())
-    await log_discord(
-        title="👤 Панель Профиль отправлена",
-        description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00
-    )
-
-# ============================================================
 # ПАНЕЛЬ "EARLY TAROLOGY"
 # ============================================================
 TAROLOGY_CHANNEL_ID = 1536796929873420308
