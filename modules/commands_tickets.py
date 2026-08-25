@@ -831,11 +831,11 @@ class TicketPaidView(View):
         if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
         # Проверяем, что этот менеджер назначен
-        manager_id = get_ticket_manager(self.channel.id)
+        manager_id = get_ticket_manager(inter.channel.id)  # ИСПРАВЛЕНО: inter.channel.id вместо self.channel.id
         if manager_id and inter.author.id != manager_id:
             return await inter.response.send_message("⛔ Этот тикет уже ведёт другой менеджер.", ephemeral=True)
 
-        channel = inter.channel
+        channel = inter.channel  # ИСПРАВЛЕНО: берём из inter
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
@@ -898,7 +898,7 @@ class CoinsTicketButtons(View):
         if manager_id and inter.author.id != manager_id:
             return await inter.response.send_message("⛔ Этот тикет уже ведёт другой менеджер.", ephemeral=True)
 
-        channel = inter.channel
+        channel = self.channel
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
