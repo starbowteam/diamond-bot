@@ -289,16 +289,13 @@ async def send_ticket_panel():
     )
 
 # ============================================================
-# ТОП МЕНЕДЖЕРОВ + КНОПКА СБРОСА
+# ТОП МЕНЕДЖЕРОВ + КНОПКА СБРОСА (ИСПРАВЛЕНО: только одна кнопка)
 # ============================================================
 class ResetStatsView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(Button(
-            label="Сбросить статистику",
-            style=ButtonStyle.danger,
-            custom_id="reset_stats"
-        ))
+        # Только одна кнопка – через декоратор уже не добавляем
+        # (кнопка объявлена в декораторе ниже)
 
     @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
     async def reset(self, button, inter):
