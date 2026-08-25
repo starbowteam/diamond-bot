@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import disnake
 from disnake import ButtonStyle, SelectOption
-from disnake.ui import Button, Select, View
+from disnake.ui import Button, Modal, Select, TextInput, View
 
 from core.utils import (
     CONFIG, ADD_DIR, CATALOG_DIR, logger,
@@ -289,105 +289,244 @@ async def send_ticket_panel():
     )
 
 # ============================================================
-# ТОП МЕНЕДЖЕРОВ + КНОПКА СБРОСА
+# НОВАЯ ПАНЕЛЬ "РАБОТА" (канал 1532435807242289314)
 # ============================================================
-class ResetStatsView(View):
+WORK_CHANNEL_ID = 1532435807242289314
+
+class WorkSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="Зарплата",
+                description="О заработной плате работников",
+                emoji="<:shopf:1541881304981966920>",
+                value="salary"
+            ),
+            disnake.SelectOption(
+                label="Топ Sales Manager",
+                description="Статистика менеджеров продаж",
+                emoji="<:diagram:1541881258873983046>",
+                value="top"
+            )
+        ]
+        super().__init__(
+            placeholder="Выберите раздел...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="work_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="📂 Выбор в панели работы",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
+        value = inter.data.values[0]
+        if value == "salary":
+            embeds = load_embed_from_file("zp.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "top":
+            # Получаем топ менеджеров из БД и формируем embed
+            guild = inter.guild
+            sales_role = guild.get_role(1154757071330365490)
+            if not sales_role:
+                return await inter.response.send_message("❌ Роль Sales Manager не найдена.", ephemeral=True)
+            
+            rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
+            stats = {row["user_id"]: row for row in rows}
+            members = [m for m in guild.members if sales_role in m.roles and not m.bot]
+            data = []
+            for m in members:
+                s = stats.get(m.id)
+                closed = s["closed_tickets"] if s else 0
+                total_rating = s["total_rating"] if s else 0
+                ratings_count = s["ratings_count"] if s else 0
+                avg = total_rating / ratings_count if ratings_count else 0
+                data.append((m, closed, avg))
+            data.sort(key=lambda x: (-x[1], -x[2]))
+            
+            lines = []
+            for m, closed, avg in data:
+                lines.append(f"> {m.mention} - **{closed}** закрытых заказов. [Рейтинг: **{avg:.1f}**]")
+            
+            embed = disnake.Embed(
+                title="🏆 Топ Sales Manager",
+                description="\n".join(lines) if lines else "> Пока нет данных.",
+                color=0xffaa00
+            )
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+            await inter.response.send_message(embed=embed, ephemeral=True)
+
+class WorkView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        # Кнопка добавляется через декоратор
+        self.add_item(WorkSelect())
 
-    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
-    async def reset(self, button, inter):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
-        reset_manager_stats()
-        await send_manager_top()
-        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
-
-async def send_manager_top():
-    """Отправляет/обновляет топ менеджеров в канале 1541809640491458571, и кнопку сброса в канале логов."""
+async def send_work_panel():
     from core.bot import bot
     await bot.wait_until_ready()
-
-    # 1) Топ менеджеров
-    channel = bot.get_channel(1541809640491458571)
+    channel = bot.get_channel(WORK_CHANNEL_ID)
     if not channel:
-        logger.warning("Manager top channel not found")
+        channel = await bot.fetch_channel(WORK_CHANNEL_ID)
+    if not channel:
+        logger.warning("Work panel channel not found")
         return
 
-    # Удаляем старое сообщение
     async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.embeds:
+        if msg.author == bot.user and msg.components:
             try:
                 await msg.delete()
             except:
                 pass
             break
 
-    guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-    if not guild:
-        return
+    embeds = load_embed_from_file("panel_zp.json")
+    if not embeds:
+        embeds = [disnake.Embed(
+            title="❌ Ошибка",
+            description="Не удалось загрузить панель работы.",
+            color=0xff0000
+        )]
 
-    sales_manager_role = guild.get_role(1154757071330365490)
-    if not sales_manager_role:
-        return
-
-    # Все участники с ролью Sales Manager
-    members_with_role = [m for m in guild.members if sales_manager_role in m.roles and not m.bot]
-
-    # Получаем статистику
-    rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
-    stats = {row["user_id"]: row for row in rows}
-
-    managers_data = []
-    for member in members_with_role:
-        s = stats.get(member.id)
-        closed = s["closed_tickets"] if s else 0
-        total_rating = s["total_rating"] if s else 0
-        ratings_count = s["ratings_count"] if s else 0
-        avg = total_rating / ratings_count if ratings_count else 0
-        managers_data.append({
-            "member": member,
-            "closed": closed,
-            "avg": avg
-        })
-
-    # Сортируем по закрытым (убывание), затем по среднему рейтингу
-    managers_data.sort(key=lambda x: (-x["closed"], -x["avg"]))
-
-    # Формируем строки
-    lines = []
-    for data in managers_data:
-        lines.append(f"> {data['member'].mention} - **{data['closed']}** закрытых заказов. [Рейтинг: **{data['avg']:.1f}**]")
-
-    # Лучший менеджер недели
-    best = managers_data[0] if managers_data else None
-    best_mention = best["member"].mention if best else "Нет данных"
-
-    # Embeeds
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
-
-    description = "> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n"
-    if lines:
-        description += "\n".join(lines) + "\n"
-    else:
-        description += "> Пока нет данных.\n"
-
-    embed2 = disnake.Embed(
-        title="Таблиц работников на роли Sales Manager.\n",
-        description=description,
-        color=6776679
+    await channel.send(embeds=embeds, view=WorkView())
+    await log_discord(
+        title="📂 Панель работы отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
     )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
-    if best:
-        embed2.add_field(name="По актуальным данным, работником недели является ",
-                         value=f"<@&1154757071330365490> - {best_mention}, уверенное повышение!",
-                         inline=False)
 
-    await channel.send(embeds=[embed1, embed2])
+# ============================================================
+# ЛОГИРОВАНИЕ И КНОПКИ СБРОСА / СПИСАНИЯ
+# ============================================================
+class ResetStatsView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        # Кнопки добавляются через декораторы
 
-    # 2) Кнопка сброса в канале логов (1462418981825810535)
+    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
+    async def reset(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
+        reset_manager_stats()
+        await send_work_panel()
+        await send_manager_top()  # обновит и лог, и работу
+        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
+
+    @disnake.ui.button(label="Списать заказ", style=ButtonStyle.secondary, custom_id="spisat_zakaz")
+    async def spisat(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на списание.", ephemeral=True)
+        await inter.response.send_modal(SpisatZakazModal())
+
+class SpisatZakazModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="ID пользователя",
+                placeholder="Введите ID пользователя",
+                custom_id="user_id",
+                min_length=1,
+                max_length=30
+            )
+        ]
+        super().__init__(title="Списание заказа", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        user_input = inter.text_values["user_id"].strip()
+        if not user_input.isdigit():
+            return await inter.response.send_message("❌ Введите корректный ID.", ephemeral=True)
+        user_id = int(user_input)
+        purchases = await get_user_purchases(user_id, only_unused=True)
+        if not purchases:
+            return await inter.response.send_message("❌ У пользователя нет неиспользованных покупок.", ephemeral=True)
+        options = []
+        for idx, p in enumerate(purchases):
+            label = f"{p['type']} {p['value']}"
+            if len(label) > 100:
+                label = label[:97] + "..."
+            options.append(SelectOption(label=label, value=str(idx), description=f"Дата: {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}"))
+        select = Select(placeholder="Выберите покупку для удаления...", options=options, custom_id="spisat_select")
+        view = View(timeout=60)
+        view.add_item(select)
+        async def select_callback(inter2: disnake.MessageInteraction):
+            idx = int(inter2.data.values[0])
+            success = await remove_purchase(user_id, idx)
+            if success:
+                await inter2.response.send_message("✅ Покупка удалена.", ephemeral=True)
+                await send_work_panel()
+                await send_manager_top()
+            else:
+                await inter2.response.send_message("❌ Ошибка удаления.", ephemeral=True)
+        select.callback = select_callback
+        await inter.response.send_message("Выберите покупку для удаления:", ephemeral=True, view=view)
+
+# ============================================================
+# ТОП МЕНЕДЖЕРОВ + ЛОГИ
+# ============================================================
+async def send_manager_top():
+    """Отправляет/обновляет топ менеджеров в канал 1541809640491458571 (удалён, но оставим для совместимости) и кнопки в лог."""
+    from core.bot import bot
+    await bot.wait_until_ready()
+
+    # Топ в канал 1541809640491458571 (может быть удалён)
+    top_channel = bot.get_channel(1541809640491458571)
+    if top_channel:
+        # Удаляем старое сообщение
+        async for msg in top_channel.history(limit=50):
+            if msg.author == bot.user and msg.embeds:
+                try:
+                    await msg.delete()
+                except:
+                    pass
+                break
+
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+        if not guild:
+            return
+
+        sales_manager_role = guild.get_role(1154757071330365490)
+        if not sales_manager_role:
+            return
+
+        members_with_role = [m for m in guild.members if sales_manager_role in m.roles and not m.bot]
+        rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
+        stats = {row["user_id"]: row for row in rows}
+        managers_data = []
+        for member in members_with_role:
+            s = stats.get(member.id)
+            closed = s["closed_tickets"] if s else 0
+            total_rating = s["total_rating"] if s else 0
+            ratings_count = s["ratings_count"] if s else 0
+            avg = total_rating / ratings_count if ratings_count else 0
+            managers_data.append({"member": member, "closed": closed, "avg": avg})
+
+        managers_data.sort(key=lambda x: (-x["closed"], -x["avg"]))
+
+        lines = []
+        for data in managers_data:
+            lines.append(f"> {data['member'].mention} - **{data['closed']}** закрытых заказов. [Рейтинг: **{data['avg']:.1f}**]")
+
+        best = managers_data[0] if managers_data else None
+        best_mention = best["member"].mention if best else "Нет данных"
+
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
+        embed2 = disnake.Embed(
+            title="Таблиц работников на роли Sales Manager.\n",
+            description="> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n" + "\n".join(lines) if lines else "> Пока нет данных.",
+            color=6776679
+        )
+        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+        if best:
+            embed2.add_field(name="По актуальным данным, работником недели является ",
+                             value=f"<@&1154757071330365490> - {best_mention}, уверенное повышение!",
+                             inline=False)
+
+        await top_channel.send(embeds=[embed1, embed2])
+
+    # ЛОГИ (канал 1462418981825810535) – кнопки сброса и списания
     log_channel = bot.get_channel(1462418981825810535)
     if log_channel:
         async for msg in log_channel.history(limit=50):
@@ -398,15 +537,18 @@ async def send_manager_top():
                     pass
                 break
         embed_log = disnake.Embed(
-            title="🗑️ Сброс статистики менеджеров",
+            title="🗑️ Управление статистикой менеджеров",
             description="> Нажмите кнопку ниже, чтобы сбросить статистику менеджеров (только для администраторов).",
             color=0xff6600
         )
         embed_log.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
         await log_channel.send(embed=embed_log, view=ResetStatsView())
 
+    # Отправляем панель работы (чтобы обновить)
+    await send_work_panel()
+
     await log_discord(
         title="📊 Топ менеджеров обновлён",
-        description=f"> Канал: {channel.mention}",
+        description="> Панель работы и логи обновлены.",
         color=0x00ff00
     )
