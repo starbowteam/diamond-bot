@@ -14,6 +14,7 @@ from core.utils import (
     load_json
 )
 from modules.commands_profile import load_embed_from_file
+from modules.commands_tickets import TicketPanelView  # <-- ИМПОРТ ДОБАВЛЕН
 
 # ============================================================
 # ПАНЕЛЬ "ДОСКА" (board.json)
@@ -276,7 +277,7 @@ async def send_ticket_panel():
         except Exception as e:
             logger.error(f"Ошибка загрузки menu_embed.json: {e}")
 
-    await channel.send(embed=embed, view=TicketPanelView())
+    await channel.send(embed=embed, view=TicketPanelView())  # теперь работает
     await log_discord(
         title="🛒 Панель тикетов отправлена",
         description=f"> Сообщение отправлено в {channel.mention}",
