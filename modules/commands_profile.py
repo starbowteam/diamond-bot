@@ -14,7 +14,7 @@ from core.utils import (
     load_json, save_json, log_discord,
     get_dc_cache, save_dc_cache,
     get_roles_for_count,
-    load_json
+    clean_embed_for_discohook
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
