@@ -82,6 +82,84 @@ async def clear_ticket_owner(channel: disnake.TextChannel):
         await handle_ticket_roles_on_close(channel)
 
 # ============================================================
+# КЛАСС МОДЕРАЦИИ ОТЗЫВОВ (ДОБАВЛЕН)
+# ============================================================
+class ReviewModerationView(View):
+    def __init__(self, user_id: int, content: str, msg_id: int, channel_id: int):
+        super().__init__(timeout=86400)
+        self.user_id = user_id
+        self.content = content
+        self.msg_id = msg_id
+        self.channel_id = channel_id
+        self.message = None
+
+    async def update_status_and_log(self, inter: disnake.MessageInteraction, status: str, log_title: str, log_color: int):
+        if not has_review_moderation_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав.", ephemeral=True)
+        if self.message and self.message.embeds:
+            embeds = self.message.embeds
+            new_embeds = []
+            for i, embed in enumerate(embeds):
+                if i == 1:
+                    embed_dict = embed.to_dict()
+                    fields = embed_dict.get("fields", [])
+                    for field in fields:
+                        if field.get("name") == "> Статус":
+                            field["value"] = status
+                            break
+                    new_embeds.append(disnake.Embed.from_dict(embed_dict))
+                else:
+                    new_embeds.append(embed)
+            await self.message.edit(embeds=new_embeds, view=None)
+        for child in self.children:
+            child.disabled = True
+        await inter.response.edit_message(view=self)
+        log_chan = self.get_log_channel(inter)
+        if log_chan:
+            await log_chan.send(
+                embed=disnake.Embed(
+                    title=log_title,
+                    description=f"> **Админ:** {inter.author.mention}\n> **Автор отзыва:** <@{self.user_id}>\n> **Ссылка:** [перейти](https://discord.com/channels/{inter.guild_id}/{self.channel_id}/{self.msg_id})",
+                    color=log_color,
+                    timestamp=datetime.now(timezone.utc)
+                )
+            )
+
+    def get_log_channel(self, inter):
+        from core.bot import bot
+        return bot.get_channel(CONFIG["LOG_CHANNEL_ID"])
+
+    @disnake.ui.button(label="✅ Одобрить", style=ButtonStyle.success)
+    async def approve(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_review_moderation_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав для одобрения.", ephemeral=True)
+        await add_dc(self.user_id, 10, "Одобрение отзыва")
+        data = get_dc_cache(self.user_id)
+        data["last_review"] = now_ts()
+        save_dc_cache(self.user_id, data)
+        try:
+            from core.bot import bot
+            user = bot.get_user(self.user_id)
+            if user:
+                await user.send("✅ Ваш отзыв одобрен! Вам начислено **+10 DC**.")
+        except:
+            pass
+        await self.update_status_and_log(inter, "✅ Одобрено", "✅ Отзыв одобрен", 0x00ff00)
+
+    @disnake.ui.button(label="❌ Отклонить", style=ButtonStyle.danger)
+    async def reject(self, button: Button, inter: disnake.MessageInteraction):
+        if not has_review_moderation_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав для отклонения.", ephemeral=True)
+        try:
+            from core.bot import bot
+            user = bot.get_user(self.user_id)
+            if user:
+                await user.send("❌ Ваш отзыв был отклонён администратором.")
+        except:
+            pass
+        await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
+
+# ============================================================
 # МОДАЛКА ПОКУПКИ ЗА РЕАЛЬНЫЕ ДЕНЬГИ
 # ============================================================
 class BuyTicketModal(Modal):
@@ -743,7 +821,7 @@ class TicketView(View):
                 return await inter.response.send_message("❌ Скидка уже применена.", ephemeral=True)
 
             discount_applied = False
-            async for msg in self.channel.history(limit=50):
+            async for msg in channel.history(limit=50):
                 if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
                     embed = msg.embeds[1]
                     for field in embed.fields:
@@ -772,7 +850,7 @@ class TicketView(View):
             if not success:
                 return await inter.response.send_message("❌ Ошибка применения скидки.", ephemeral=True)
 
-            async for msg in self.channel.history(limit=50):
+            async for msg in channel.history(limit=50):
                 if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
                     embed_dict = msg.embeds[1].to_dict()
                     for field in embed_dict.get("fields", []):
@@ -791,7 +869,7 @@ class TicketView(View):
             )
             await log_discord(
                 title="🛒 Применена скидка в тикете",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Тикет:** {self.channel.mention}\n> **Скидка:** {item_value}",
+                description=f"> **Пользователь:** {inter.author.mention}\n> **Тикет:** {channel.mention}\n> **Скидка:** {item_value}",
                 color=0x00aaff,
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
