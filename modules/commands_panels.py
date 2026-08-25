@@ -1,286 +1,603 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import json
+import sqlite3
+import logging
+import functools
+import time
+import re
 from datetime import datetime, timezone
-
+from typing import Optional, Dict, Any, List
+from PIL import Image, ImageDraw, ImageFont
 import disnake
-from disnake import ButtonStyle, SelectOption
-from disnake.ui import Button, Select, View
-
-from core.utils import (
-    CONFIG, ADD_DIR, CATALOG_DIR, logger,
-    log_discord,
-    clean_embed_for_discohook,
-    load_json
-)
-from modules.commands_profile import load_embed_from_file
-from modules.commands_tickets import TicketPanelView  # <-- ИМПОРТ ДОБАВЛЕН
+from disnake.ext import commands
+from disnake import PartialEmoji, ButtonStyle
 
 # ============================================================
-# ПАНЕЛЬ "ДОСКА" (board.json)
+# Базовая директория проекта
 # ============================================================
-def load_board_embed() -> list[disnake.Embed]:
-    board_path = os.path.join(ADD_DIR, "board.json")
-    if not os.path.exists(board_path):
-        return [disnake.Embed(
-            title="📋 Доска объявлений",
-            description="> Здесь будет важная информация. Пока данных нет.",
-            color=6776679
-        )]
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADD_DIR = os.path.join(BASE_DIR, "add")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+CATALOG_DIR = os.path.join(BASE_DIR, "catalog")
+ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(CATALOG_DIR, exist_ok=True)
+os.makedirs(ADD_DIR, exist_ok=True)
+os.makedirs(ACTIONS_DIR, exist_ok=True)
+
+# ============================================================
+# Конфигурация
+# ============================================================
+CONFIG = {
+    "BOT_TOKEN": os.getenv("BOT_TOKEN"),
+    "ADMIN_COMMAND_ROLES": [
+        1127428607606796294,
+        1471844291595731016,
+        1530822331188903966
+    ],
+    "ADMIN_USER_IDS": [1415191217179856967],
+    "REVIEW_MODERATION_ROLES": [1154757071330365490, 1513935883475226796, 1127428607606796294, 1471844291595731016],
+    "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],  # убрали 1513935883475226796
+    "TICKET_MANAGE_ROLES": [1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
+    "LOG_CHANNEL_ID": 1462418981825810535,
+    "LOG_CHANNEL_ID_PANEL": 1462418981825810535,
+    "LOG_TICKET_CHANNEL_ID": 1539654348949164062,
+    "MODERATION_LOG_CHANNEL": 1531731027272269895,
+    "DC_PANEL_CHANNEL": 1531731804828991611,
+    "TOP_CHANNEL_ID": 1532278656519635104,
+    "ACTIONS_CHANNEL_ID": 1469698608390606898,
+    "ANALYTICS_CHANNEL_ID": 1536947571082403840,
+    "MANAGER_ROLE_ID": 1127428607606796290,
+    "EMBED_IMAGE_URL": "https://media.discordapp.net/attachments/1527006158282555412/1527007499192893561/image.png?ex=6a60584e&is=6a5f06ce&hm=1b0ba12a8c8d57f41c57bc03a6998178f6cfb6b83db5837d448d1ab495c46830&=&format=webp&quality=lossless&width=1766&height=686",
+    "PANEL_CHANNEL_ID": 1462136361711829053,
+    "TICKET_CATEGORY_ID": 1462419587835363614,
+    "COINS_CATEGORY_ID": 1491827388391358504,
+    "PAID_CATEGORY_ID": 1470779295650549885,
+    "TARGET_REVIEWER_ID": 796293832751972352,
+    "REVIEW_COUNT_CHANNEL": 1462074763437543435,
+    "TICKET_COOLDOWN_SECONDS": 5,
+    "INFO_TEMPLATE_PATH": os.path.join(ADD_DIR, "info-o-zakaze.json"),
+    "COINS_INFO_TEMPLATE_PATH": os.path.join(ADD_DIR, "info-coins.json"),
+    "PK_FILE_PATH": os.path.join(ADD_DIR, "pk.json"),
+    "GUILD_ID": "1127428607606796288",
+    "VOICE_CHANNEL_ID": 1464699044751478815,
+    "MANAGER_ROLE_ID": 1154757071330365490,
+    "PAID_NOTIFY_CHANNEL_ID": 1462418981825810535,
+    "ROLE_IDS": {
+        "club": 1284697274655576186,
+        "bronze": 1127430321214861395,
+        "silver": 1137721688683970643,
+        "gold": 1184886111722545232,
+        "diamond": 1195799151783461016,
+        "emerald": 1208442450373513277,
+        "amethyst": 1471005335111335957,
+        "legendary": 1208442449425334372,
+        "pka": 1208442176321626162
+    },
+    "DC_RECALC_IGNORE": [796293832751972352, 1168943921171288135],
+    "FIXED_PKA_ROLE_ID": 1208442176321626162,
+    "MAX_DAILY_MESSAGES": 30,
+    "MAX_DAILY_VOICE": 15,
+    "VOICE_RATE": 3,
+    "MESSAGE_RATE": 1,
+    "MESSAGE_BATCH": 10,
+    "MIN_MESSAGE_LENGTH": 3,
+    "SHOP_CATALOG_PATH": os.path.join(CATALOG_DIR, "shop_catalog.json"),
+    # Роли для тикетов
+    "TICKET_ROLES": {
+        "real_created": 1539668621981257809,
+        "real_paid": 1539668675530072175,
+        "coins_created": 1539669323185131570,
+    }
+}
+
+FILES = {
+    "promo": os.path.join(DATA_DIR, "promo_codes.json"),
+    "used_promo": os.path.join(DATA_DIR, "used_promo.json"),
+    "promo_txt": os.path.join(DATA_DIR, "promo_codes.txt"),
+    "rates": os.path.join(DATA_DIR, "rates.json"),
+    "last_review_id": os.path.join(DATA_DIR, "last_review_id.json"),
+    "review_counts": os.path.join(DATA_DIR, "review_counts.json"),
+    "shop_json": os.path.join(CATALOG_DIR, "menu_coins_shop.json"),
+    "dc_data": os.path.join(ADD_DIR, "dc_data.json"),
+}
+
+# ============================================================
+# СПИСОК ИСКЛЮЧЕНИЙ (всегда Покупатель века)
+# ============================================================
+EXEMPT_USERS = [562318422982262793, 1168943921171288135, 796293832751972352]
+
+# ============================================================
+# Logging
+# ============================================================
+LOG_FILE = os.path.join(BASE_DIR, "bot.log")
+logger = logging.getLogger("dmshop")
+logger.setLevel(logging.INFO)
+fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+fh.setLevel(logging.INFO)
+fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+fh.setFormatter(fmt)
+sh = logging.StreamHandler()
+sh.setFormatter(fmt)
+logger.addHandler(fh)
+logger.addHandler(sh)
+
+# ============================================================
+# SQLite БД (основная)
+# ============================================================
+db = sqlite3.connect(os.path.join(DATA_DIR, "diamond.db"), check_same_thread=False, timeout=30)
+db.row_factory = sqlite3.Row
+db.execute("PRAGMA journal_mode=WAL")
+db.execute("PRAGMA synchronous=NORMAL")
+
+cur = db.cursor()
+
+# Таблицы
+cur.executescript("""
+CREATE TABLE IF NOT EXISTS invites_snapshot (
+    invite_code TEXT PRIMARY KEY,
+    guild_id    INTEGER,
+    uses        INTEGER,
+    inviter_id  INTEGER
+);
+CREATE TABLE IF NOT EXISTS invites (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id    INTEGER,
+    inviter_id  INTEGER,
+    member_id   INTEGER,
+    joined_at   INTEGER,
+    is_bot      INTEGER DEFAULT 0,
+    is_fake     INTEGER DEFAULT 0,
+    left_at     INTEGER DEFAULT NULL
+);
+CREATE TABLE IF NOT EXISTS reaction_roles (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id    INTEGER,
+    channel_id  INTEGER,
+    message_id  INTEGER,
+    emoji       TEXT,
+    role_id     INTEGER
+);
+CREATE TABLE IF NOT EXISTS dc_cache (
+    user_id         INTEGER PRIMARY KEY,
+    balance         INTEGER DEFAULT 0,
+    purchases       TEXT,
+    history         TEXT,
+    last_review     INTEGER DEFAULT 0,
+    last_bonus      INTEGER DEFAULT 0,
+    messages_today  INTEGER DEFAULT 0,
+    voice_time_today INTEGER DEFAULT 0,
+    last_reset_date INTEGER DEFAULT 0,
+    last_voice_dc   INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS promo_codes (
+    code TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS ticket_owners (
+    channel_id INTEGER PRIMARY KEY,
+    user_id    INTEGER,
+    category_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS ticket_managers (
+    channel_id INTEGER PRIMARY KEY,
+    manager_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS manager_stats (
+    user_id INTEGER PRIMARY KEY,
+    closed_tickets INTEGER DEFAULT 0,
+    total_rating INTEGER DEFAULT 0,
+    ratings_count INTEGER DEFAULT 0
+);
+""")
+db.commit()
+
+# ============================================================
+# Загрузка JSON
+# ============================================================
+def load_json(path: str, default):
     try:
-        with open(board_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        embeds = []
-        for e in data.get("embeds", []):
-            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
-        return embeds
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
     except Exception as e:
-        logger.error(f"Ошибка загрузки board.json: {e}")
-        return [disnake.Embed(
-            title="❌ Ошибка",
-            description="Не удалось загрузить доску объявлений.",
-            color=0xff0000
-        )]
+        logger.error("Ошибка загрузки JSON %s: %s", path, e)
+    return default
+
+def save_json(path: str, obj):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error("Ошибка сохранения JSON %s: %s", path, e)
 
 # ============================================================
-# ПАНЕЛЬ "СПРАВОЧНИК" (Home)
+# Общие утилиты
 # ============================================================
-HOME_CHANNEL_ID = 1532398684074016870
+def now_ts():
+    return int(datetime.now(timezone.utc).timestamp())
 
-class HomeSelect(disnake.ui.StringSelect):
-    def __init__(self):
-        options = [
-            disnake.SelectOption(
-                label="・Работа в Diamond",
-                description="Карьера・Заработная плата",
-                emoji="<:working:1538767619602120744>",
-                value="work"
-            ),
-            disnake.SelectOption(
-                label="・Экосистема Diamond",
-                description="Наши сайты・Лучшая жизнь",
-                emoji="<:site:1538768985602916352>",
-                value="eco"
-            ),
-            disnake.SelectOption(
-                label="・Роли покупателей",
-                description="Достоинства・Разделение прав",
-                emoji="<:roles:1540046665984249878>",
-                value="roles"
-            ),
-            disnake.SelectOption(
-                label="・Доска",
-                description="Знай о важном・Информация",
-                emoji="<:banne1:1538551829246513312>",
-                value="board"
-            )
-        ]
-        super().__init__(
-            placeholder="Выберите раздел...",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="home_select"
-        )
+def parse_emoji(emoji_str: str):
+    try:
+        return disnake.PartialEmoji.from_str(emoji_str)
+    except Exception:
+        return emoji_str
 
-    async def callback(self, inter: disnake.MessageInteraction):
-        await log_discord(
-            title="📖 Выбор в справочнике",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
-            color=0x00aaff
-        )
-        value = inter.data.values[0]
-        if value == "work":
-            embeds = load_embed_from_file("work.json")
-            await inter.response.send_message(embeds=embeds, ephemeral=True)
-        elif value == "eco":
-            embeds = load_embed_from_file("eco.json")
-            await inter.response.send_message(embeds=embeds, ephemeral=True)
-        elif value == "roles":
-            embeds = load_embed_from_file("role.json")
-            await inter.response.send_message(embeds=embeds, ephemeral=True)
-        elif value == "board":
-            embeds = load_board_embed()
-            await inter.response.send_message(embeds=embeds, ephemeral=True)
+def clean_embed_for_discohook(embed_dict: Dict[str, Any]) -> Dict[str, Any]:
+    e = dict(embed_dict)
+    if "image" in e and isinstance(e["image"], dict) and "url" in e["image"]:
+        e["image"] = {"url": e["image"]["url"]}
+    return e
 
-class HomeView(disnake.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(HomeSelect())
+# ============================================================
+# Проверки ролей
+# ============================================================
+def has_admin_command_roles(author):
+    if any(r.id in CONFIG["ADMIN_COMMAND_ROLES"] for r in author.roles):
+        return True
+    if author.id in CONFIG.get("ADMIN_USER_IDS", []):
+        return True
+    return False
 
-async def send_home_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(HOME_CHANNEL_ID)
-    if not channel:
-        channel = await bot.fetch_channel(HOME_CHANNEL_ID)
-    if not channel:
-        logger.warning("Home panel channel not found")
+def has_review_moderation_roles(author):
+    return any(r.id in CONFIG["REVIEW_MODERATION_ROLES"] for r in author.roles)
+
+def has_ticket_view_roles(author):
+    return any(r.id in CONFIG["TICKET_VIEW_ROLES"] for r in author.roles)
+
+def has_ticket_manage_roles(author):
+    return any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in author.roles)
+
+# ============================================================
+# Логирование в Discord
+# ============================================================
+async def log_discord(title: str, description: str, color: int = 0x00ff00, panel: bool = False, fields: list = None, channel_id: int = None):
+    try:
+        from core.bot import bot
+    except ImportError:
         return
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            try:
-                await msg.delete()
-            except:
-                pass
-            break
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1538771484778958898/image.png?ex=6a83e41e&is=6a82929e&hm=78e0190f6955969d2c2f630b4e9d560557c5c08d4f0c5caf8b32fbfd520332ab&")
-    embed2 = disnake.Embed(
-        title="Справочник посетителя Diamond",
-        description="Справочник посетителя Diamond, в нем можно ознакомиться о нас, нашей экосистемой, узнать о важном, способе получения валюты сервера, достоинствах ролей покупателя и многом другом!",
-        color=6776679
-    )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
-    await channel.send(embeds=[embed1, embed2], view=HomeView())
-    await log_discord(
-        title="📖 Справочник отправлен (обновлён)",
-        description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00
-    )
-
-# ============================================================
-# ПАНЕЛЬ "EARLY TAROLOGY"
-# ============================================================
-TAROLOGY_CHANNEL_ID = 1536796929873420308
-
-class TarologySelect(disnake.ui.StringSelect):
-    def __init__(self):
-        options = [
-            disnake.SelectOption(
-                label="・Контакты для связи",
-                description="Связь для заказа",
-                emoji="<:people:1538395694648529009>",
-                value="contacts"
-            ),
-            disnake.SelectOption(
-                label="・Подробности и акции",
-                description="Узнайте больше, о данной сфере и бонусах",
-                emoji="<:CARDS:1538780592425017454>",
-                value="details"
-            )
-        ]
-        super().__init__(
-            placeholder="Узнать о раскладах",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="tarology_select"
+    try:
+        if channel_id:
+            ch_id = channel_id
+        else:
+            ch_id = CONFIG["LOG_CHANNEL_ID_PANEL"] if panel else CONFIG["LOG_CHANNEL_ID"]
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+        if not guild:
+            logger.warning("log_discord: guild not found")
+            return
+        log_ch = guild.get_channel(ch_id)
+        if not log_ch:
+            logger.warning("log_discord: channel %s not found", ch_id)
+            return
+        embed = disnake.Embed(
+            title=title,
+            description=description,
+            color=color,
+            timestamp=datetime.now(timezone.utc)
         )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        await log_discord(
-            title="🔮 Выбор в Early Tarology",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
-            color=0x00aaff
-        )
-        value = inter.data.values[0]
-        if value == "contacts":
-            embed = disnake.Embed(
-                title="📞 Контакты для связи",
-                description="> Связаться можно в ТГК - https://t.me/earlytarology",
-                color=6776679
-            )
-            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
-            await inter.response.send_message(embed=embed, ephemeral=True)
-        elif value == "details":
-            embed = disnake.Embed(
-                title="🔮 Подробности и акции.",
-                description=(
-                    "> Данный канал создан для того, чтобы помочь вам влиться в сферу заработка с помощью раскладов.\n\n"
-                    "> При покупке расклада (стоимость — 40₽) вы получаете расклад на любую интересующую вас тему с высокой точностью. А при оставлении отзыва в Early Tarology и в Diamond — вы получаете кэшбэк в виде Diamond Coins в размере 20 шт. Таким образом, вы помогаете человеку развиваться в этом деле, узнаёте интересующую вас правду и получаете бонус на основные покупки."
-                ),
-                color=6776679
-            )
-            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
-            await inter.response.send_message(embed=embed, ephemeral=True)
-
-class TarologyView(disnake.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(TarologySelect())
-
-async def send_tarology_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(TAROLOGY_CHANNEL_ID)
-    if not channel:
-        channel = await bot.fetch_channel(TAROLOGY_CHANNEL_ID)
-    if not channel:
-        logger.warning("Tarology panel channel not found")
-        return
-
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            try:
-                await msg.delete()
-            except:
-                pass
-            break
-
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1536977317912518677/image.png?ex=6a834bec&is=6a81fa6c&hm=a2a91a7975af349270ec5d97d17f7814e87de0da7943103eceb10dbbb3725978&=&format=webp&quality=lossless&width=1536&height=597")
-
-    embed2 = disnake.Embed(
-        title="Early Tarology от Diamond Lady",
-        description="> Данный канал, путь в мистику и веру. Расклады неимоверно точные, она приугадала почти все, что произошло в магазине за Пол-Года до событий. Цены низкие, качество высокое. Информация - ниже по категориям.",
-        color=6776679
-    )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
-
-    await channel.send(embeds=[embed1, embed2], view=TarologyView())
-    await log_discord(
-        title="🔮 Панель Early Tarology отправлена",
-        description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00
-    )
+        if fields:
+            for name, value, inline in fields:
+                embed.add_field(name=name, value=value, inline=inline)
+        await log_ch.send(embed=embed)
+    except Exception as e:
+        logger.exception("Ошибка логирования в Discord: %s", e)
 
 # ============================================================
-# ПАНЕЛЬ ТИКЕТОВ (send_ticket_panel)
+# Декоратор для логов команд
 # ============================================================
-TICKET_PANEL_CHANNEL_ID = 1462136361711829053
-
-async def send_ticket_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(TICKET_PANEL_CHANNEL_ID)
-    if not channel:
-        channel = await bot.fetch_channel(TICKET_PANEL_CHANNEL_ID)
-    if not channel:
-        logger.warning("Ticket panel channel not found")
-        return
-
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            try:
-                await msg.delete()
-            except:
-                pass
-            break
-
-    embed_path = os.path.join(CATALOG_DIR, "menu_embed.json")
-    embed = disnake.Embed(
-        title="🛒 Панель покупок",
-        description="> Нажмите **Купить**, чтобы создать тикет для заказа.\n"
-                    "> Нажмите **Промокоды**, чтобы узнать о текущих акциях.\n"
-                    "> Нажмите **Каталог**, чтобы посмотреть ассортимент товаров.",
-        color=6776679
-    )
-    embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
-
-    if os.path.exists(embed_path):
+def log_command(func):
+    @functools.wraps(func)
+    async def wrapper(ctx, *args, **kwargs):
+        if not has_admin_command_roles(ctx.author):
+            await ctx.send("⛔ У вас нет прав на использование этой команды.", ephemeral=True)
+            return
         try:
-            with open(embed_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("embeds") and len(data["embeds"]) > 0:
-                embed = disnake.Embed.from_dict(data["embeds"][0])
+            from core.bot import bot
+            guild = ctx.guild or bot.get_guild(int(CONFIG["GUILD_ID"]))
+            if guild:
+                log_ch = guild.get_channel(CONFIG["LOG_CHANNEL_ID_PANEL"])
+                if log_ch:
+                    embed = disnake.Embed(
+                        title="🔧 Использована команда",
+                        description=f"> **Команда:** `{func.__name__}`\n> **Пользователь:** {ctx.author} (`{ctx.author.id}`)\n> **Канал:** {getattr(ctx.channel, 'mention', 'dm')}",
+                        timestamp=datetime.now(timezone.utc),
+                        color=0x2f3136
+                    )
+                    await log_ch.send(embed=embed)
         except Exception as e:
-            logger.error(f"Ошибка загрузки menu_embed.json: {e}")
+            logger.exception("Ошибка в log_command: %s", e)
+        try:
+            return await func(ctx, *args, **kwargs)
+        except Exception as e:
+            logger.exception("Ошибка выполнения команды %s: %s", func.__name__, e)
+            try:
+                await ctx.send("Произошла ошибка при выполнении команды.", ephemeral=True)
+            except Exception:
+                pass
+    return wrapper
 
-    await channel.send(embed=embed, view=TicketPanelView())  # теперь работает
-    await log_discord(
-        title="🛒 Панель тикетов отправлена",
-        description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00,
-        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-    )
+# ============================================================
+# Система ролей по отзывам
+# ============================================================
+def get_roles_for_count(count: int) -> list[int]:
+    roles = []
+    role_ids = CONFIG["ROLE_IDS"]
+    if count >= 1:
+        roles.append(role_ids["club"])
+    if 1 <= count <= 2:
+        roles.append(role_ids["bronze"])
+    elif 3 <= count <= 4:
+        roles.append(role_ids["silver"])
+    elif 5 <= count <= 8:
+        roles.append(role_ids["gold"])
+    elif 9 <= count <= 12:
+        roles.append(role_ids["diamond"])
+    elif 13 <= count <= 17:
+        roles.append(role_ids["emerald"])
+    elif 18 <= count <= 23:
+        roles.append(role_ids["amethyst"])
+    elif 24 <= count <= 25:
+        roles.append(role_ids["legendary"])
+    elif count >= 26:
+        roles.append(role_ids["pka"])
+    return roles
+
+async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool = False):
+    # Если пользователь в исключениях – выдаём только club и pka
+    if member.id in EXEMPT_USERS:
+        role_ids = CONFIG["ROLE_IDS"]
+        club_role_id = role_ids["club"]
+        pka_role_id = role_ids["pka"]
+        current_role_ids = [r.id for r in member.roles]
+        all_buyer_roles = list(role_ids.values())
+        to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in [club_role_id, pka_role_id]]
+        to_add = []
+        if club_role_id not in current_role_ids:
+            to_add.append(club_role_id)
+        if pka_role_id not in current_role_ids:
+            to_add.append(pka_role_id)
+        guild = member.guild
+        for rid in to_remove:
+            role = guild.get_role(rid)
+            if role:
+                await member.remove_roles(role)
+        for rid in to_add:
+            role = guild.get_role(rid)
+            if role:
+                await member.add_roles(role)
+        return
+
+    # Обычная логика для всех остальных
+    role_ids = CONFIG["ROLE_IDS"]
+    all_buyer_roles = list(role_ids.values())
+    target_role_ids = get_roles_for_count(count)
+    current_role_ids = [r.id for r in member.roles]
+    to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in target_role_ids]
+    if keep_pka and CONFIG["FIXED_PKA_ROLE_ID"] in to_remove:
+        to_remove.remove(CONFIG["FIXED_PKA_ROLE_ID"])
+    to_add = [rid for rid in target_role_ids if rid not in current_role_ids]
+    guild = member.guild
+    for rid in to_remove:
+        role = guild.get_role(rid)
+        if role:
+            await member.remove_roles(role)
+            logger.info(f"Снята роль {role.name} у {member} (отзывов: {count})")
+            await log_discord(
+                title="🔄 Снята роль покупателя",
+                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
+                color=0xff6600
+            )
+    for rid in to_add:
+        role = guild.get_role(rid)
+        if role:
+            await member.add_roles(role)
+            logger.info(f"Выдана роль {role.name} пользователю {member} (отзывов: {count})")
+            await log_discord(
+                title="🔄 Выдана роль покупателя",
+                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
+                color=0x00ff00
+            )
+
+# ============================================================
+# Функции для работы с инвайтами
+# ============================================================
+async def sync_invites(guild: disnake.Guild):
+    try:
+        invites = await guild.invites()
+    except Exception:
+        return
+    for inv in invites:
+        cur.execute("REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)",
+                    (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
+    db.commit()
+
+# ============================================================
+# Функции для работы с владельцами тикетов (таблица ticket_owners)
+# ============================================================
+def add_ticket_owner(channel_id: int, user_id: int, category_id: int):
+    cur.execute("INSERT OR REPLACE INTO ticket_owners (channel_id, user_id, category_id) VALUES (?, ?, ?)",
+                (channel_id, user_id, category_id))
+    db.commit()
+
+def remove_ticket_owner(channel_id: int):
+    cur.execute("DELETE FROM ticket_owners WHERE channel_id = ?", (channel_id,))
+    db.commit()
+
+def get_ticket_owner(channel_id: int) -> Optional[int]:
+    row = cur.execute("SELECT user_id FROM ticket_owners WHERE channel_id = ?", (channel_id,)).fetchone()
+    return row["user_id"] if row else None
+
+def get_user_ticket_channels_ids(user_id: int, category_id: int) -> List[int]:
+    rows = cur.execute("SELECT channel_id FROM ticket_owners WHERE user_id = ? AND category_id = ?", (user_id, category_id)).fetchall()
+    return [row["channel_id"] for row in rows]
+
+def get_user_tickets_count_in_category(user_id: int, category_id: int) -> int:
+    row = cur.execute("SELECT COUNT(*) FROM ticket_owners WHERE user_id = ? AND category_id = ?", (user_id, category_id)).fetchone()
+    return row[0] if row else 0
+
+# ============================================================
+# Функции для работы с менеджерами тикетов
+# ============================================================
+def assign_ticket_manager(channel_id: int, manager_id: int):
+    cur.execute("INSERT OR REPLACE INTO ticket_managers (channel_id, manager_id) VALUES (?, ?)",
+                (channel_id, manager_id))
+    db.commit()
+
+def get_ticket_manager(channel_id: int) -> Optional[int]:
+    row = cur.execute("SELECT manager_id FROM ticket_managers WHERE channel_id = ?", (channel_id,)).fetchone()
+    return row["manager_id"] if row else None
+
+def clear_ticket_manager(channel_id: int):
+    cur.execute("DELETE FROM ticket_managers WHERE channel_id = ?", (channel_id,))
+    db.commit()
+
+def increment_manager_closed(manager_id: int):
+    cur.execute("INSERT INTO manager_stats (user_id, closed_tickets) VALUES (?, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET closed_tickets = closed_tickets + 1",
+                (manager_id,))
+    db.commit()
+
+def add_manager_rating(manager_id: int, rating: int):
+    # rating от 1 до 5
+    cur.execute("INSERT INTO manager_stats (user_id, total_rating, ratings_count) VALUES (?, ?, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET total_rating = total_rating + ?, ratings_count = ratings_count + 1",
+                (manager_id, rating, rating))
+    db.commit()
+
+# ============================================================
+# Промокоды и курсы
+# ============================================================
+promo_codes: Dict[str, str] = {}
+used_promo: Dict[str, list] = {}
+rates: Dict[str, float] = {}
+
+def reload_promo():
+    global promo_codes, used_promo, rates
+    promo_codes = load_json(FILES["promo"], {})
+    used_promo = load_json(FILES["used_promo"], {})
+    rates = load_json(FILES["rates"], {"KZT": 0.14, "UAH": 1.8, "RUB": 1.0, "ROBLOX_RATE": 0.65})
+    try:
+        lines = [f"{k} - {v}" for k, v in promo_codes.items()]
+        with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    except Exception as e:
+        logger.exception("reload_promo: write promo_txt error: %s", e)
+
+reload_promo()
+
+# ============================================================
+# Кеширование DC в SQLite
+# ============================================================
+def init_dc_cache_from_json():
+    data = load_json(FILES["dc_data"], {})
+    for uid_str, user_data in data.items():
+        uid = int(uid_str)
+        cur.execute("""
+            INSERT OR REPLACE INTO dc_cache (
+                user_id, balance, purchases, history,
+                last_review, last_bonus, messages_today,
+                voice_time_today, last_reset_date, last_voice_dc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            uid,
+            user_data.get("balance", 0),
+            json.dumps(user_data.get("purchases", [])),
+            json.dumps(user_data.get("history", [])),
+            user_data.get("last_review", 0),
+            user_data.get("last_bonus", 0),
+            user_data.get("messages_today", 0),
+            user_data.get("voice_time_today", 0),
+            user_data.get("last_reset_date", 0),
+            user_data.get("last_voice_dc", 0)
+        ))
+    db.commit()
+
+def get_dc_cache(user_id: int) -> dict:
+    row = db.execute("SELECT * FROM dc_cache WHERE user_id = ?", (user_id,)).fetchone()
+    if row:
+        return {
+            "balance": row["balance"],
+            "purchases": json.loads(row["purchases"]) if row["purchases"] else [],
+            "history": json.loads(row["history"]) if row["history"] else [],
+            "last_review": row["last_review"],
+            "last_bonus": row["last_bonus"],
+            "messages_today": row["messages_today"],
+            "voice_time_today": row["voice_time_today"],
+            "last_reset_date": row["last_reset_date"],
+            "last_voice_dc": row["last_voice_dc"]
+        }
+    return {
+        "balance": 0,
+        "purchases": [],
+        "history": [],
+        "last_review": 0,
+        "last_bonus": 0,
+        "messages_today": 0,
+        "voice_time_today": 0,
+        "last_reset_date": 0,
+        "last_voice_dc": 0
+    }
+
+def save_dc_cache(user_id: int, data: dict):
+    cur.execute("""
+        INSERT OR REPLACE INTO dc_cache (
+            user_id, balance, purchases, history,
+            last_review, last_bonus, messages_today,
+            voice_time_today, last_reset_date, last_voice_dc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id,
+        data.get("balance", 0),
+        json.dumps(data.get("purchases", [])),
+        json.dumps(data.get("history", [])),
+        data.get("last_review", 0),
+        data.get("last_bonus", 0),
+        data.get("messages_today", 0),
+        data.get("voice_time_today", 0),
+        data.get("last_reset_date", 0),
+        data.get("last_voice_dc", 0)
+    ))
+    db.commit()
+
+def sync_dc_to_json():
+    rows = cur.execute("SELECT * FROM dc_cache").fetchall()
+    data = {}
+    for row in rows:
+        uid = row["user_id"]
+        data[str(uid)] = {
+            "balance": row["balance"],
+            "purchases": json.loads(row["purchases"]) if row["purchases"] else [],
+            "history": json.loads(row["history"]) if row["history"] else [],
+            "last_review": row["last_review"],
+            "last_bonus": row["last_bonus"],
+            "messages_today": row["messages_today"],
+            "voice_time_today": row["voice_time_today"],
+            "last_reset_date": row["last_reset_date"],
+            "last_voice_dc": row["last_voice_dc"]
+        }
+    save_json(FILES["dc_data"], data)
+
+if cur.execute("SELECT COUNT(*) FROM dc_cache").fetchone()[0] == 0:
+    init_dc_cache_from_json()
+
+# ============================================================
+# Промокоды в SQLite
+# ============================================================
+def get_promo_codes() -> dict:
+    rows = cur.execute("SELECT code, value FROM promo_codes").fetchall()
+    return {row["code"]: row["value"] for row in rows}
+
+def add_promo_code(code: str, value: str):
+    cur.execute("INSERT OR REPLACE INTO promo_codes (code, value) VALUES (?, ?)", (code, value))
+    db.commit()
+
+def remove_promo_code(code: str):
+    cur.execute("DELETE FROM promo_codes WHERE code = ?", (code,))
+    db.commit()
+
+def clear_promo_codes():
+    cur.execute("DELETE FROM promo_codes")
+    db.commit()
