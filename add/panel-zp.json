@@ -1,0 +1,22 @@
+{
+  "content": " ",
+  "embeds": [
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1541881692862685234/image.png?ex=6a8f34ba&is=6a8de33a&hm=210372c24a94d6de3d4366f90e1505f5c4c4e91dc5c07cce5a633beb9419298b&"
+      },
+      "color": 6776679,
+      "type": "rich"
+    },
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1532434728056131695/pisk.png?ex=6a8f1d8e&is=6a8dcc0e&hm=2ae99e47c47afa88c941afcfd1c827370f8c0f3ab08c69a00820bd4da8ac78f1&"
+      },
+      "fields": [],
+      "color": 6776679,
+      "type": "rich",
+      "description": "> В данном разделе, можно посмотреть о зарплате, а также - о топе <@&1154757071330365490>. Ознакомьтесь ниже, так как панель меняется часто.",
+      "title": "Рабочая панель "
+    }
+  ]
+}
