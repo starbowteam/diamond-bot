@@ -555,7 +555,15 @@ async def on_message(message: disnake.Message):
             if get_ticket_manager(message.channel.id) is None:
                 if any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
                     assign_ticket_manager(message.channel.id, message.author.id)
-                    await message.channel.send(f"✅ Менеджер {message.author.mention} взял тикет.")
+                    # Красивое сообщение
+                    embed = disnake.Embed(
+                        title="✅ Менеджер назначен",
+                        description=f"> **Менеджер:** {message.author.mention}\n> **Тикет:** {message.channel.mention}",
+                        color=0x00ff00,
+                        timestamp=datetime.now(timezone.utc)
+                    )
+                    embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+                    await message.channel.send(embed=embed)
                     await log_discord(
                         title="📌 Менеджер назначен",
                         description=f"> **Тикет:** {message.channel.mention}\n> **Менеджер:** {message.author.mention}",
