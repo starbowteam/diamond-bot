@@ -40,7 +40,7 @@ CONFIG = {
     ],
     "ADMIN_USER_IDS": [1415191217179856967],
     "REVIEW_MODERATION_ROLES": [1154757071330365490, 1513935883475226796, 1127428607606796294, 1471844291595731016],
-    "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
+    "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],  # убрали 1513935883475226796
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
     "LOG_CHANNEL_ID": 1462418981825810535,
     "LOG_CHANNEL_ID_PANEL": 1462418981825810535,
@@ -135,7 +135,7 @@ db.execute("PRAGMA synchronous=NORMAL")
 
 cur = db.cursor()
 
-# Таблицы (добавлена ticket_owners)
+# Таблицы
 cur.executescript("""
 CREATE TABLE IF NOT EXISTS invites_snapshot (
     invite_code TEXT PRIMARY KEY,
@@ -182,6 +182,16 @@ CREATE TABLE IF NOT EXISTS ticket_owners (
     user_id    INTEGER,
     category_id INTEGER
 );
+CREATE TABLE IF NOT EXISTS ticket_managers (
+    channel_id INTEGER PRIMARY KEY,
+    manager_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS manager_stats (
+    user_id INTEGER PRIMARY KEY,
+    closed_tickets INTEGER DEFAULT 0,
+    total_rating INTEGER DEFAULT 0,
+    ratings_count INTEGER DEFAULT 0
+);
 """)
 db.commit()
 
@@ -223,7 +233,7 @@ def clean_embed_for_discohook(embed_dict: Dict[str, Any]) -> Dict[str, Any]:
     return e
 
 # ============================================================
-# Проверки ролей (с поддержкой пользователей по ID)
+# Проверки ролей
 # ============================================================
 def has_admin_command_roles(author):
     if any(r.id in CONFIG["ADMIN_COMMAND_ROLES"] for r in author.roles):
@@ -242,7 +252,7 @@ def has_ticket_manage_roles(author):
     return any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in author.roles)
 
 # ============================================================
-# Логирование в Discord (с поддержкой канала для тикетов)
+# Логирование в Discord
 # ============================================================
 async def log_discord(title: str, description: str, color: int = 0x00ff00, panel: bool = False, fields: list = None, channel_id: int = None):
     try:
@@ -310,7 +320,7 @@ def log_command(func):
     return wrapper
 
 # ============================================================
-# Система ролей по отзывам (с исключениями)
+# Система ролей по отзывам
 # ============================================================
 def get_roles_for_count(count: int) -> list[int]:
     roles = []
@@ -429,7 +439,36 @@ def get_user_tickets_count_in_category(user_id: int, category_id: int) -> int:
     return row[0] if row else 0
 
 # ============================================================
-# Промокоды и курсы (загружаются при старте)
+# Функции для работы с менеджерами тикетов
+# ============================================================
+def assign_ticket_manager(channel_id: int, manager_id: int):
+    cur.execute("INSERT OR REPLACE INTO ticket_managers (channel_id, manager_id) VALUES (?, ?)",
+                (channel_id, manager_id))
+    db.commit()
+
+def get_ticket_manager(channel_id: int) -> Optional[int]:
+    row = cur.execute("SELECT manager_id FROM ticket_managers WHERE channel_id = ?", (channel_id,)).fetchone()
+    return row["manager_id"] if row else None
+
+def clear_ticket_manager(channel_id: int):
+    cur.execute("DELETE FROM ticket_managers WHERE channel_id = ?", (channel_id,))
+    db.commit()
+
+def increment_manager_closed(manager_id: int):
+    cur.execute("INSERT INTO manager_stats (user_id, closed_tickets) VALUES (?, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET closed_tickets = closed_tickets + 1",
+                (manager_id,))
+    db.commit()
+
+def add_manager_rating(manager_id: int, rating: int):
+    # rating от 1 до 5
+    cur.execute("INSERT INTO manager_stats (user_id, total_rating, ratings_count) VALUES (?, ?, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET total_rating = total_rating + ?, ratings_count = ratings_count + 1",
+                (manager_id, rating, rating))
+    db.commit()
+
+# ============================================================
+# Промокоды и курсы
 # ============================================================
 promo_codes: Dict[str, str] = {}
 used_promo: Dict[str, list] = {}
