@@ -9,13 +9,11 @@ sys.path.insert(0, BASE_DIR)
 
 from core.bot import bot, CONFIG, log_discord
 from core.utils import logger
-from modules.commands import setup_commands
-from modules.dc import setup_dc
+from modules.commands_admin import setup_commands_admin
 
 if __name__ == "__main__":
-    # Регистрируем команды из модулей
-    setup_commands(bot)
-    setup_dc(bot)
+    # Регистрируем команды из модуля админ
+    setup_commands_admin(bot)
 
     if not CONFIG["BOT_TOKEN"]:
         logger.error("BOT_TOKEN не установлен в переменных окружения")
