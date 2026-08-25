@@ -119,12 +119,17 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        from modules.commands import (
+        # Импорты из новых модулей
+        from modules.commands_tickets import (
             TicketPanelView,
             TicketPaidView,
-            send_home_panel, send_tarology_panel, send_ticket_panel,
-            send_profile_panel
+            handle_interaction
         )
+        from modules.commands_panels import (
+            send_home_panel, send_tarology_panel, send_ticket_panel
+        )
+        from modules.commands_profile import send_profile_panel
+
         # Регистрируем постоянные View (для кнопок, которые должны работать всегда)
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
@@ -477,7 +482,8 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
 
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
-    from modules.commands import handle_interaction
+    # Импорт внутри обработчика, чтобы избежать циклических зависимостей
+    from modules.commands_tickets import handle_interaction
     await handle_interaction(inter)
     await handle_flash_interaction(inter)
 
@@ -510,7 +516,7 @@ async def on_message(message: disnake.Message):
                 color=0x00ff00
             )
 
-        from modules.commands import ReviewModerationView
+        from modules.commands_tickets import ReviewModerationView
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1531737026322370872/image.png?ex=6a6a4cc5&is=6a68fb45&hm=e5cf13f52a87fc671b53b8422a3cffa149579ce66d40846ed15a8c9d2ec89d76&")
         embed2 = disnake.Embed(
