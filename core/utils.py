@@ -40,7 +40,7 @@ CONFIG = {
     ],
     "ADMIN_USER_IDS": [1415191217179856967],
     "REVIEW_MODERATION_ROLES": [1154757071330365490, 1513935883475226796, 1127428607606796294, 1471844291595731016],
-    "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],  # убрали 1513935883475226796
+    "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1513935883475226796, 1471844291595731016, 1127428607606796294],
     "LOG_CHANNEL_ID": 1462418981825810535,
     "LOG_CHANNEL_ID_PANEL": 1462418981825810535,
@@ -86,7 +86,6 @@ CONFIG = {
     "MESSAGE_BATCH": 10,
     "MIN_MESSAGE_LENGTH": 3,
     "SHOP_CATALOG_PATH": os.path.join(CATALOG_DIR, "shop_catalog.json"),
-    # Роли для тикетов
     "TICKET_ROLES": {
         "real_created": 1539668621981257809,
         "real_paid": 1539668675530072175,
@@ -126,7 +125,7 @@ logger.addHandler(fh)
 logger.addHandler(sh)
 
 # ============================================================
-# SQLite БД (основная)
+# SQLite БД
 # ============================================================
 db = sqlite3.connect(os.path.join(DATA_DIR, "diamond.db"), check_same_thread=False, timeout=30)
 db.row_factory = sqlite3.Row
@@ -191,6 +190,12 @@ CREATE TABLE IF NOT EXISTS manager_stats (
     closed_tickets INTEGER DEFAULT 0,
     total_rating INTEGER DEFAULT 0,
     ratings_count INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS closed_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    manager_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    closed_at INTEGER NOT NULL
 );
 """)
 db.commit()
@@ -346,7 +351,6 @@ def get_roles_for_count(count: int) -> list[int]:
     return roles
 
 async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool = False):
-    # Если пользователь в исключениях – выдаём только club и pka
     if member.id in EXEMPT_USERS:
         role_ids = CONFIG["ROLE_IDS"]
         club_role_id = role_ids["club"]
@@ -370,7 +374,6 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
                 await member.add_roles(role)
         return
 
-    # Обычная логика для всех остальных
     role_ids = CONFIG["ROLE_IDS"]
     all_buyer_roles = list(role_ids.values())
     target_role_ids = get_roles_for_count(count)
@@ -384,7 +387,6 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
         role = guild.get_role(rid)
         if role:
             await member.remove_roles(role)
-            logger.info(f"Снята роль {role.name} у {member} (отзывов: {count})")
             await log_discord(
                 title="🔄 Снята роль покупателя",
                 description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
@@ -394,7 +396,6 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
         role = guild.get_role(rid)
         if role:
             await member.add_roles(role)
-            logger.info(f"Выдана роль {role.name} пользователю {member} (отзывов: {count})")
             await log_discord(
                 title="🔄 Выдана роль покупателя",
                 description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
@@ -415,7 +416,7 @@ async def sync_invites(guild: disnake.Guild):
     db.commit()
 
 # ============================================================
-# Функции для работы с владельцами тикетов (таблица ticket_owners)
+# Функции для работы с владельцами тикетов
 # ============================================================
 def add_ticket_owner(channel_id: int, user_id: int, category_id: int):
     cur.execute("INSERT OR REPLACE INTO ticket_owners (channel_id, user_id, category_id) VALUES (?, ?, ?)",
@@ -439,7 +440,7 @@ def get_user_tickets_count_in_category(user_id: int, category_id: int) -> int:
     return row[0] if row else 0
 
 # ============================================================
-# Функции для работы с менеджерами тикетов
+# Функции для работы с менеджерами и закрытыми заказами
 # ============================================================
 def assign_ticket_manager(channel_id: int, manager_id: int):
     cur.execute("INSERT OR REPLACE INTO ticket_managers (channel_id, manager_id) VALUES (?, ?)",
@@ -461,10 +462,28 @@ def increment_manager_closed(manager_id: int):
     db.commit()
 
 def add_manager_rating(manager_id: int, rating: int):
-    # rating от 1 до 5
     cur.execute("INSERT INTO manager_stats (user_id, total_rating, ratings_count) VALUES (?, ?, 1) "
                 "ON CONFLICT(user_id) DO UPDATE SET total_rating = total_rating + ?, ratings_count = ratings_count + 1",
                 (manager_id, rating, rating))
+    db.commit()
+
+def reset_manager_stats():
+    cur.execute("DELETE FROM manager_stats")
+    db.commit()
+
+# Новые функции для закрытых заказов
+def add_closed_order(manager_id: int, channel_id: int):
+    cur.execute("INSERT INTO closed_orders (manager_id, channel_id, closed_at) VALUES (?, ?, ?)",
+                (manager_id, channel_id, int(time.time())))
+    db.commit()
+
+def get_closed_orders(manager_id: int) -> List[dict]:
+    rows = cur.execute("SELECT id, channel_id, closed_at FROM closed_orders WHERE manager_id = ? ORDER BY closed_at DESC",
+                       (manager_id,)).fetchall()
+    return [dict(row) for row in rows]
+
+def remove_closed_order(order_id: int):
+    cur.execute("DELETE FROM closed_orders WHERE id = ?", (order_id,))
     db.commit()
 
 # ============================================================
@@ -600,8 +619,4 @@ def remove_promo_code(code: str):
 
 def clear_promo_codes():
     cur.execute("DELETE FROM promo_codes")
-    db.commit()
-
-def reset_manager_stats():
-    cur.execute("DELETE FROM manager_stats")
     db.commit()
