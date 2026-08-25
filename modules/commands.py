@@ -2719,11 +2719,11 @@ class PromoRemoveSelectView(View):
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
 
 # ============================================================
-# ПРОДОЛЖЕНИЕ КАТАЛОГА И ПОКУПОК (исправленное)
+# КАТАЛОГ DC (BuySelectView с возможностью подарка)
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=900.0)
         catalog = load_shop_catalog()
         options = []
         for key, cat in catalog.items():
@@ -2810,7 +2810,7 @@ class BuySelectView(View):
         btn_gift.callback = self.create_buy_callback(inter, category, item_key, item, "gift")
         view.add_item(btn_gift)
 
-        await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+        await inter.edit_original_response(content=None, embed=embed, view=view)
 
     def create_buy_callback(self, original_inter, category, item_key, item, mode):
         async def callback(inter: disnake.MessageInteraction):
@@ -2824,33 +2824,34 @@ class BuySelectView(View):
 
     async def process_buy(self, inter, category, item_key, item, recipient_id=None):
         user_id = inter.author.id if recipient_id is None else recipient_id
-        # Проверка баланса
-        balance = await get_user_balance(inter.author.id)
+        # Проверка баланса у покупателя
         price = item["price"]
+        balance = await get_user_balance(inter.author.id)
         if balance < price:
-            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.")
+            return await inter.response.send_message(f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.", ephemeral=True)
 
         if category == "roles" and item.get("role_id"):
             role_id = item["role_id"]
             role = inter.guild.get_role(role_id)
             if role:
+                # Проверяем у покупателя (отправителя) наличие роли или покупки в инвентаре
                 if role in inter.author.roles:
-                    return await inter.edit_original_response(content=f"❌ У вас уже есть роль **{role.name}**.")
+                    return await inter.response.send_message(f"❌ У вас уже есть роль **{role.name}**.", ephemeral=True)
                 purchases = await get_user_purchases(inter.author.id, only_unused=True)
                 for p in purchases:
                     if p.get('type') == 'roles' and p.get('value') == item['name']:
-                        return await inter.edit_original_response(content=f"❌ Вы уже купили эту роль, но она ещё не выдана.")
+                        return await inter.response.send_message(f"❌ Вы уже купили эту роль, но она ещё не выдана.", ephemeral=True)
             else:
-                return await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
+                return await inter.response.send_message("❌ Роль не найдена на сервере.", ephemeral=True)
 
         success = await remove_dc(inter.author.id, price, f"Покупка: {item['name']}" + (f" (подарок для <@{recipient_id}>)" if recipient_id else ""))
         if not success:
-            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуйте позже.")
+            return await inter.response.send_message("❌ Не удалось списать DC. Попробуйте позже.", ephemeral=True)
 
-        # Добавляем покупку получателю (или себе)
         target_id = recipient_id if recipient_id else inter.author.id
         await add_purchase(target_id, category, item["name"])
 
+        # Если это роль, выдаём сразу
         if category == "roles" and item.get("role_id"):
             role = inter.guild.get_role(item["role_id"])
             if role:
@@ -2858,10 +2859,11 @@ class BuySelectView(View):
                     target_member = inter.guild.get_member(target_id)
                     if target_member:
                         await target_member.add_roles(role)
-                        await inter.edit_original_response(
-                            content=f"✅ Вы купили роль **{item['name']}** за **{price} DC**!\n"
-                                    f"🎭 Роль **{role.name}** выдана {target_member.mention}.\n"
-                                    f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                        await inter.response.send_message(
+                            f"✅ Вы купили роль **{item['name']}** за **{price} DC**!\n"
+                            f"🎭 Роль **{role.name}** выдана {target_member.mention}.\n"
+                            f"📝 Не забудьте оставить отзыв в <#1462074763437543435>.",
+                            ephemeral=True
                         )
                         await log_discord(
                             title="🛒 Покупка роли в магазине DC",
@@ -2871,25 +2873,28 @@ class BuySelectView(View):
                         return
                     else:
                         await add_dc(inter.author.id, price, "Возврат DC (получатель не найден)")
-                        await inter.edit_original_response(content="❌ Получатель не найден на сервере. Средства возвращены.")
+                        await inter.response.send_message("❌ Получатель не найден на сервере. Средства возвращены.", ephemeral=True)
                         return
                 except Exception as e:
                     await add_dc(inter.author.id, price, "Возврат DC (ошибка выдачи роли)")
-                    await inter.edit_original_response(
-                        content=f"❌ Не удалось выдать роль: {e}\n"
-                                f"💎 {price} DC возвращены на баланс."
+                    await inter.response.send_message(
+                        f"❌ Не удалось выдать роль: {e}\n"
+                        f"💎 {price} DC возвращены на баланс.",
+                        ephemeral=True
                     )
                     return
             else:
                 await add_dc(inter.author.id, price, "Возврат DC (роль не найдена)")
-                await inter.edit_original_response(content="❌ Роль не найдена на сервере. Средства возвращены.")
+                await inter.response.send_message("❌ Роль не найдена на сервере. Средства возвращены.", ephemeral=True)
                 return
 
+        # Не-ролевые товары
         if recipient_id:
-            await inter.edit_original_response(
+            await inter.response.send_message(
                 f"✅ Вы купили **{item['name']}** за **{price} DC** и подарили <@{recipient_id}>!\n"
                 f"📦 Товар уже в инвентаре получателя.\n"
-                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>.",
+                ephemeral=True
             )
             await log_discord(
                 title="🎁 Покупка в подарок",
@@ -2898,16 +2903,21 @@ class BuySelectView(View):
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
         else:
-            await inter.edit_original_response(
+            await inter.response.send_message(
                 f"✅ Вы купили **{item['name']}** за **{price} DC**!\n"
                 f"📦 Товар будет выдан в ближайшее время.\n"
-                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>.",
+                ephemeral=True
             )
             await log_discord(
                 title="🛒 Покупка в магазине DC",
                 description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC",
                 color=0x00aaff
             )
+
+    async def back_callback(self, inter: disnake.MessageInteraction):
+        await inter.response.defer(ephemeral=True)
+        await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
 
 class GiftRecipientModal(Modal):
     def __init__(self, original_inter, category, item_key, item):
@@ -2944,11 +2954,7 @@ class GiftRecipientModal(Modal):
         # Возвращаемся к процессу покупки с recipient_id
         buy_view = BuySelectView()
         await buy_view.process_buy(inter, self.category, self.item_key, self.item, recipient_id)
-
-    async def back_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
-
+        
 # ============================================================
 # ОТПРАВКА ПАНЕЛИ ТИКЕТОВ (в канал 1462136361711829053)
 # ============================================================
