@@ -12,7 +12,9 @@ from core.utils import (
     log_discord,
     clean_embed_for_discohook,
     load_json,
-    cur, db
+    cur, db,
+    reset_manager_stats,
+    has_admin_command_roles
 )
 from modules.commands_profile import load_embed_from_file
 from modules.commands_tickets import TicketPanelView
@@ -287,50 +289,126 @@ async def send_ticket_panel():
     )
 
 # ============================================================
-# НОВАЯ ФУНКЦИЯ: ОТПРАВКА ТОПА МЕНЕДЖЕРОВ
+# ТОП МЕНЕДЖЕРОВ + КНОПКА СБРОСА
 # ============================================================
+class ResetStatsView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(Button(
+            label="Сбросить статистику",
+            style=ButtonStyle.danger,
+            custom_id="reset_stats"
+        ))
+
+    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
+    async def reset(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
+        reset_manager_stats()
+        await send_manager_top()
+        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
+
 async def send_manager_top():
-    """Отправляет/обновляет топ менеджеров в канале 1541809640491458571."""
+    """Отправляет/обновляет топ менеджеров в канале 1541809640491458571, и кнопку сброса в канале логов."""
     from core.bot import bot
     await bot.wait_until_ready()
+
+    # 1) Топ менеджеров
     channel = bot.get_channel(1541809640491458571)
     if not channel:
         logger.warning("Manager top channel not found")
         return
 
-    # Удаляем старое сообщение с топом
+    # Удаляем старое сообщение
     async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
+        if msg.author == bot.user and msg.embeds:
             try:
                 await msg.delete()
             except:
                 pass
             break
 
-    # Получаем данные из БД
-    rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats ORDER BY closed_tickets DESC").fetchall()
-    lines = []
-    for row in rows:
-        user_id = row["user_id"]
-        closed = row["closed_tickets"]
-        total_rating = row["total_rating"]
-        ratings_count = row["ratings_count"]
-        avg = total_rating / ratings_count if ratings_count else 0
-        lines.append(f"> <@{user_id}> - **{closed}** закрытых заказов. [Рейтинг: **{avg:.1f}**]")
+    guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+    if not guild:
+        return
 
-    # Формируем embed
+    sales_manager_role = guild.get_role(1154757071330365490)
+    if not sales_manager_role:
+        return
+
+    # Все участники с ролью Sales Manager
+    members_with_role = [m for m in guild.members if sales_manager_role in m.roles and not m.bot]
+
+    # Получаем статистику
+    rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
+    stats = {row["user_id"]: row for row in rows}
+
+    managers_data = []
+    for member in members_with_role:
+        s = stats.get(member.id)
+        closed = s["closed_tickets"] if s else 0
+        total_rating = s["total_rating"] if s else 0
+        ratings_count = s["ratings_count"] if s else 0
+        avg = total_rating / ratings_count if ratings_count else 0
+        managers_data.append({
+            "member": member,
+            "closed": closed,
+            "avg": avg
+        })
+
+    # Сортируем по закрытым (убывание), затем по среднему рейтингу
+    managers_data.sort(key=lambda x: (-x["closed"], -x["avg"]))
+
+    # Формируем строки
+    lines = []
+    for data in managers_data:
+        lines.append(f"> {data['member'].mention} - **{data['closed']}** закрытых заказов. [Рейтинг: **{data['avg']:.1f}**]")
+
+    # Лучший менеджер недели
+    best = managers_data[0] if managers_data else None
+    best_mention = best["member"].mention if best else "Нет данных"
+
+    # Embeeds
     embed1 = disnake.Embed(color=6776679)
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
+
+    description = "> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n"
+    if lines:
+        description += "\n".join(lines) + "\n"
+    else:
+        description += "> Пока нет данных.\n"
+
     embed2 = disnake.Embed(
         title="Таблиц работников на роли Sales Manager.\n",
-        description="> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n" + "\n".join(lines) if lines else "> Пока нет данных.",
+        description=description,
         color=6776679
     )
     embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
-    if lines:
-        embed2.add_field(name="По актуальным данным, работником недели является - @Пинг", value="", inline=False)
+    if best:
+        embed2.add_field(name="По актуальным данным, работником недели является ",
+                         value=f"<@&1154757071330365490> - {best_mention}, уверенное повышение!",
+                         inline=False)
 
     await channel.send(embeds=[embed1, embed2])
+
+    # 2) Кнопка сброса в канале логов (1462418981825810535)
+    log_channel = bot.get_channel(1462418981825810535)
+    if log_channel:
+        async for msg in log_channel.history(limit=50):
+            if msg.author == bot.user and msg.components:
+                try:
+                    await msg.delete()
+                except:
+                    pass
+                break
+        embed_log = disnake.Embed(
+            title="🗑️ Сброс статистики менеджеров",
+            description="> Нажмите кнопку ниже, чтобы сбросить статистику менеджеров (только для администраторов).",
+            color=0xff6600
+        )
+        embed_log.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+        await log_channel.send(embed=embed_log, view=ResetStatsView())
+
     await log_discord(
         title="📊 Топ менеджеров обновлён",
         description=f"> Канал: {channel.mention}",
