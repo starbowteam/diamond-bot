@@ -127,7 +127,8 @@ async def on_ready():
             handle_interaction
         )
         from modules.commands_panels import (
-            send_home_panel, send_tarology_panel, send_ticket_panel
+            send_home_panel, send_tarology_panel, send_ticket_panel,
+            send_manager_top  # <-- ДОБАВЛЕНО
         )
         from modules.commands_profile import send_profile_panel
 
@@ -140,6 +141,7 @@ async def on_ready():
         bot.loop.create_task(send_profile_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
+        bot.loop.create_task(send_manager_top())  # <-- ДОБАВЛЕНО
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
