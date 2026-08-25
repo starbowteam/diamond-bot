@@ -789,7 +789,8 @@ class TicketView(View):
         if not discounts:
             return await inter.response.send_message("❌ У вас нету доступных купленных скидок.", ephemeral=True)
 
-        slid_embeds = load_action_embed("slid.json")
+        from modules.commands_profile import load_embed_from_file
+        slid_embeds = load_embed_from_file("slid.json")
         if not slid_embeds or len(slid_embeds) == 0:
             slid_embeds = [disnake.Embed(
                 title="📦 Ваши скидки",
