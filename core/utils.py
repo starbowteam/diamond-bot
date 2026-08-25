@@ -601,3 +601,7 @@ def remove_promo_code(code: str):
 def clear_promo_codes():
     cur.execute("DELETE FROM promo_codes")
     db.commit()
+
+def reset_manager_stats():
+    cur.execute("DELETE FROM manager_stats")
+    db.commit()
