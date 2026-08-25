@@ -1,708 +1,412 @@
 # -*- coding: utf-8 -*-
 import os
-import sys
-import asyncio
-import time
-import random
-from datetime import datetime, timezone, timedelta
-from typing import List
+import json
+from datetime import datetime, timezone
+
 import disnake
-from disnake.ext import commands, tasks
-from disnake import PartialEmoji, ButtonStyle, ui
+from disnake import ButtonStyle, SelectOption
+from disnake.ui import Button, Select, View
 
 from core.utils import (
-    CONFIG, FILES, logger, db, cur,
-    load_json, save_json, now_ts,
-    update_user_roles, sync_invites,
-    has_admin_command_roles,
+    CONFIG, ADD_DIR, CATALOG_DIR, logger,
     log_discord,
-    BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR,
-    get_dc_cache, save_dc_cache, sync_dc_to_json,
-    assign_ticket_manager, get_ticket_manager, get_ticket_owner, clear_ticket_manager,
-    increment_manager_closed, add_manager_rating,
-    # Не забываем импортировать функции для тикетов
+    clean_embed_for_discohook,
+    load_json,
+    cur, db,
+    reset_manager_stats,
+    has_admin_command_roles
 )
-
-from modules.actions import send_actions_panel, handle_flash_interaction
-from modules.dc import (
-    add_dc, get_user_balance, load_shop_catalog,
-    get_user_dc_data, save_user_dc_data,
-    daily_bonus
-)
-
-intents = disnake.Intents.default()
-intents.members = True
-intents.messages = True
-intents.guilds = True
-intents.message_content = True
-intents.moderation = True
-intents.invites = True
-intents.reactions = True
-intents.voice_states = True
-
-bot = commands.Bot(command_prefix='/', intents=intents)
-
-async def update_review_counter(silent: bool = False):
-    try:
-        text_ch = bot.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
-        if not text_ch:
-            text_ch = await bot.fetch_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
-        if not text_ch:
-            logger.warning("update_review_counter: review channel not found")
-            return
-        count = 1431
-        async for m in text_ch.history(limit=None):
-            count += 1
-        logger.info("Review count: %s", count)
-        await update_server_banner(count, silent)
-    except Exception as e:
-        logger.exception("update_review_counter error: %s", e)
-        if not silent:
-            await log_discord(
-                title="❌ Ошибка обновления счётчика отзывов",
-                description=f"> **Ошибка:** `{str(e)}`",
-                color=0xff0000
-            )
-
-async def update_server_banner(review_count: int, silent: bool = False):
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        base_path = os.path.join(ADD_DIR, "banner.png")
-        output_path = os.path.join(DATA_DIR, "banner_ready.png")
-        font_path = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
-
-        if not os.path.exists(base_path):
-            logger.warning("Banner file not found: %s", base_path)
-            return
-        if not os.path.exists(font_path):
-            logger.warning("Font file not found: %s", font_path)
-            return
-
-        img = Image.open(base_path).convert("RGBA")
-        draw = ImageDraw.Draw(img)
-        font = ImageFont.truetype(font_path, 400)
-        text = str(review_count)
-        draw.text((594, 540), text, font=font, fill=(255, 255, 255), anchor="mm")
-        img.save(output_path)
-
-        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-        if not guild:
-            logger.warning("update_server_banner: guild not found")
-            return
-        with open(output_path, "rb") as f:
-            await guild.edit(banner=f.read())
-        logger.info("Banner updated with %s reviews", review_count)
-        if not silent:
-            await log_discord(
-                title="🖼️ Баннер обновлён",
-                description=f"> **Количество отзывов:** `{review_count}`",
-                color=0x00aaff
-            )
-    except Exception as e:
-        logger.exception("Banner update error: %s", e)
-        if not silent:
-            await log_discord(
-                title="❌ Ошибка обновления баннера",
-                description=f"> **Ошибка:** `{str(e)}`",
-                color=0xff0000
-            )
-
-@tasks.loop(hours=24)
-async def review_counter_task():
-    await bot.wait_until_ready()
-    await update_review_counter(silent=False)
-
-@tasks.loop(hours=24)
-async def daily_bonus_task():
-    await bot.wait_until_ready()
-    await daily_bonus()
+from modules.commands_profile import load_embed_from_file
+from modules.commands_tickets import TicketPanelView
 
 # ============================================================
-# ВОССТАНОВЛЕНИЕ КНОПОК В ТИКЕТАХ ПОСЛЕ ПЕРЕЗАПУСКА
+# ПАНЕЛЬ "ДОСКА" (board.json)
 # ============================================================
-async def restore_ticket_views():
-    """Проходит по всем активным тикетам и восстанавливает View, чтобы кнопки работали после перезапуска."""
-    from modules.commands_tickets import TicketView, TicketPaidView, CoinsTicketButtons
+def load_board_embed() -> list[disnake.Embed]:
+    board_path = os.path.join(ADD_DIR, "board.json")
+    if not os.path.exists(board_path):
+        return [disnake.Embed(
+            title="📋 Доска объявлений",
+            description="> Здесь будет важная информация. Пока данных нет.",
+            color=6776679
+        )]
+    try:
+        with open(board_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds = []
+        for e in data.get("embeds", []):
+            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
+        return embeds
+    except Exception as e:
+        logger.error(f"Ошибка загрузки board.json: {e}")
+        return [disnake.Embed(
+            title="❌ Ошибка",
+            description="Не удалось загрузить доску объявлений.",
+            color=0xff0000
+        )]
+
+# ============================================================
+# ПАНЕЛЬ "СПРАВОЧНИК" (Home)
+# ============================================================
+HOME_CHANNEL_ID = 1532398684074016870
+
+class HomeSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="・Работа в Diamond",
+                description="Карьера・Заработная плата",
+                emoji="<:working:1538767619602120744>",
+                value="work"
+            ),
+            disnake.SelectOption(
+                label="・Экосистема Diamond",
+                description="Наши сайты・Лучшая жизнь",
+                emoji="<:site:1538768985602916352>",
+                value="eco"
+            ),
+            disnake.SelectOption(
+                label="・Роли покупателей",
+                description="Достоинства・Разделение прав",
+                emoji="<:roles:1540046665984249878>",
+                value="roles"
+            ),
+            disnake.SelectOption(
+                label="・Доска",
+                description="Знай о важном・Информация",
+                emoji="<:banne1:1538551829246513312>",
+                value="board"
+            )
+        ]
+        super().__init__(
+            placeholder="Выберите раздел...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="home_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="📖 Выбор в справочнике",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
+        value = inter.data.values[0]
+        if value == "work":
+            embeds = load_embed_from_file("work.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "eco":
+            embeds = load_embed_from_file("eco.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "roles":
+            embeds = load_embed_from_file("role.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "board":
+            embeds = load_board_embed()
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+
+class HomeView(disnake.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(HomeSelect())
+
+async def send_home_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(HOME_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(HOME_CHANNEL_ID)
+    if not channel:
+        logger.warning("Home panel channel not found")
+        return
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1538771484778958898/image.png?ex=6a83e41e&is=6a82929e&hm=78e0190f6955969d2c2f630b4e9d560557c5c08d4f0c5caf8b32fbfd520332ab&")
+    embed2 = disnake.Embed(
+        title="Справочник посетителя Diamond",
+        description="Справочник посетителя Diamond, в нем можно ознакомиться о нас, нашей экосистемой, узнать о важном, способе получения валюты сервера, достоинствах ролей покупателя и многом другом!",
+        color=6776679
+    )
+    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
+    await channel.send(embeds=[embed1, embed2], view=HomeView())
+    await log_discord(
+        title="📖 Справочник отправлен (обновлён)",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+
+# ============================================================
+# ПАНЕЛЬ "EARLY TAROLOGY"
+# ============================================================
+TAROLOGY_CHANNEL_ID = 1536796929873420308
+
+class TarologySelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="・Контакты для связи",
+                description="Связь для заказа",
+                emoji="<:people:1538395694648529009>",
+                value="contacts"
+            ),
+            disnake.SelectOption(
+                label="・Подробности и акции",
+                description="Узнайте больше, о данной сфере и бонусах",
+                emoji="<:CARDS:1538780592425017454>",
+                value="details"
+            )
+        ]
+        super().__init__(
+            placeholder="Узнать о раскладах",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="tarology_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="🔮 Выбор в Early Tarology",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
+        value = inter.data.values[0]
+        if value == "contacts":
+            embed = disnake.Embed(
+                title="📞 Контакты для связи",
+                description="> Связаться можно в ТГК - https://t.me/earlytarology",
+                color=6776679
+            )
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
+            await inter.response.send_message(embed=embed, ephemeral=True)
+        elif value == "details":
+            embed = disnake.Embed(
+                title="🔮 Подробности и акции.",
+                description=(
+                    "> Данный канал создан для того, чтобы помочь вам влиться в сферу заработка с помощью раскладов.\n\n"
+                    "> При покупке расклада (стоимость — 40₽) вы получаете расклад на любую интересующую вас тему с высокой точностью. А при оставлении отзыва в Early Tarology и в Diamond — вы получаете кэшбэк в виде Diamond Coins в размере 20 шт. Таким образом, вы помогаете человеку развиваться в этом деле, узнаёте интересующую вас правду и получаете бонус на основные покупки."
+                ),
+                color=6776679
+            )
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
+            await inter.response.send_message(embed=embed, ephemeral=True)
+
+class TarologyView(disnake.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TarologySelect())
+
+async def send_tarology_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(TAROLOGY_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(TAROLOGY_CHANNEL_ID)
+    if not channel:
+        logger.warning("Tarology panel channel not found")
+        return
+
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
+
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1536977317912518677/image.png?ex=6a834bec&is=6a81fa6c&hm=a2a91a7975af349270ec5d97d17f7814e87de0da7943103eceb10dbbb3725978&=&format=webp&quality=lossless&width=1536&height=597")
+
+    embed2 = disnake.Embed(
+        title="Early Tarology от Diamond Lady",
+        description="> Данный канал, путь в мистику и веру. Расклады неимоверно точные, она приугадала почти все, что произошло в магазине за Пол-Года до событий. Цены низкие, качество высокое. Информация - ниже по категориям.",
+        color=6776679
+    )
+    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
+
+    await channel.send(embeds=[embed1, embed2], view=TarologyView())
+    await log_discord(
+        title="🔮 Панель Early Tarology отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+
+# ============================================================
+# ПАНЕЛЬ ТИКЕТОВ (send_ticket_panel)
+# ============================================================
+TICKET_PANEL_CHANNEL_ID = 1462136361711829053
+
+async def send_ticket_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(TICKET_PANEL_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(TICKET_PANEL_CHANNEL_ID)
+    if not channel:
+        logger.warning("Ticket panel channel not found")
+        return
+
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
+
+    embed_path = os.path.join(CATALOG_DIR, "menu_embed.json")
+    embed = disnake.Embed(
+        title="🛒 Панель покупок",
+        description="> Нажмите **Купить**, чтобы создать тикет для заказа.\n"
+                    "> Нажмите **Промокоды**, чтобы узнать о текущих акциях.\n"
+                    "> Нажмите **Каталог**, чтобы посмотреть ассортимент товаров.",
+        color=6776679
+    )
+    embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
+
+    if os.path.exists(embed_path):
+        try:
+            with open(embed_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("embeds") and len(data["embeds"]) > 0:
+                embed = disnake.Embed.from_dict(data["embeds"][0])
+        except Exception as e:
+            logger.error(f"Ошибка загрузки menu_embed.json: {e}")
+
+    await channel.send(embed=embed, view=TicketPanelView())
+    await log_discord(
+        title="🛒 Панель тикетов отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00,
+        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+    )
+
+# ============================================================
+# ТОП МЕНЕДЖЕРОВ + КНОПКА СБРОСА
+# ============================================================
+class ResetStatsView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        # Кнопка добавляется через декоратор
+
+    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
+    async def reset(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
+        reset_manager_stats()
+        await send_manager_top()
+        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
+
+async def send_manager_top():
+    """Отправляет/обновляет топ менеджеров в канале 1541809640491458571, и кнопку сброса в канале логов."""
+    from core.bot import bot
+    await bot.wait_until_ready()
+
+    # 1) Топ менеджеров
+    channel = bot.get_channel(1541809640491458571)
+    if not channel:
+        logger.warning("Manager top channel not found")
+        return
+
+    # Удаляем старое сообщение
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.embeds:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
 
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
         return
 
-    # Все категории тикетов
-    categories = [
-        guild.get_channel(CONFIG["TICKET_CATEGORY_ID"]),
-        guild.get_channel(CONFIG["PAID_CATEGORY_ID"]),
-        guild.get_channel(CONFIG["COINS_CATEGORY_ID"])
-    ]
-
-    for category in categories:
-        if not category:
-            continue
-        for channel in category.channels:
-            if not isinstance(channel, disnake.TextChannel):
-                continue
-
-            owner_id = get_ticket_owner(channel.id)
-            manager_id = get_ticket_manager(channel.id)
-            if not owner_id:
-                continue
-
-            # Ищем сообщение с кнопками от бота
-            async for msg in channel.history(limit=20):
-                if msg.author == bot.user and msg.components:
-                    # Определяем тип тикета по категории
-                    if category.id == CONFIG["COINS_CATEGORY_ID"]:
-                        view = CoinsTicketButtons(channel, owner_id)
-                    else:
-                        # Проверяем статус по описанию эмбеда
-                        status = "Не оплачен"
-                        if msg.embeds and len(msg.embeds) > 1:
-                            desc = msg.embeds[1].description or ""
-                            if "Статус - Заказ оплачен" in desc:
-                                status = "Оплачен"
-                        if status == "Оплачен":
-                            view = TicketPaidView()
-                        else:
-                            view = TicketView(channel, owner_id)
-
-                    # Привязываем View к боту, чтобы кнопки работали
-                    bot.add_view(view)
-                    break
-
-# ============================================================
-# on_ready
-# ============================================================
-@bot.event
-async def on_ready():
-    try:
-        await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
-
-        from modules.commands_tickets import (
-            TicketPanelView,
-            TicketPaidView,
-            handle_interaction
-        )
-        from modules.commands_panels import (
-            send_home_panel, send_tarology_panel, send_ticket_panel,
-            send_manager_top
-        )
-        from modules.commands_profile import send_profile_panel
-
-        bot.add_view(TicketPanelView())
-        bot.add_view(TicketPaidView())
-
-        bot.loop.create_task(send_home_panel())
-        bot.loop.create_task(send_tarology_panel())
-        bot.loop.create_task(send_ticket_panel())
-        bot.loop.create_task(send_profile_panel())
-        bot.loop.create_task(keep_voice_alive())
-        bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_manager_top())
-        bot.loop.create_task(restore_ticket_views())  # ВОССТАНОВЛЕНИЕ ТИКЕТОВ
-
-        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-        if guild:
-            for member in guild.members:
-                if member.bot:
-                    continue
-                get_user_dc_data(member.id)
-            sync_dc_to_json()
-            logger.info("DC data initialized and synced to SQLite")
-
-            counts = load_json(FILES["review_counts"], {})
-            if counts:
-                for uid_str, count in counts.items():
-                    uid = int(uid_str)
-                    member = guild.get_member(uid)
-                    if member:
-                        await update_user_roles(member, count, keep_pka=True)
-                logger.info(f"Роли обновлены для {len(counts)} пользователей по отзывам")
-            else:
-                logger.info("Нет данных об отзывах для обновления ролей")
-
-        await update_review_counter(silent=False)
-
-        if not review_counter_task.is_running():
-            review_counter_task.start()
-        if not daily_bonus_task.is_running():
-            daily_bonus_task.start()
-
-        logger.info("%s is ready", bot.user)
-        await log_discord(
-            title="✅ Бот запустился",
-            description=f"> **{bot.user}** готов и онлайн.\n> Роли обновлены для {len(counts) if counts else 0} пользователей.",
-            color=0x00ff00
-        )
-    except Exception as e:
-        logger.exception("on_ready error: %s", e)
-        await log_discord(
-            title="❌ Ошибка при запуске",
-            description=f"> **Ошибка:** `{str(e)}`",
-            color=0xff0000
-        )
-
-async def keep_voice_alive():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-            if guild:
-                vc = guild.voice_client
-                if not vc or not vc.is_connected():
-                    try:
-                        voice_channel = guild.get_channel(CONFIG["VOICE_CHANNEL_ID"])
-                        if not voice_channel:
-                            voice_channel = await bot.fetch_channel(CONFIG["VOICE_CHANNEL_ID"])
-                        if voice_channel and isinstance(voice_channel, disnake.VoiceChannel):
-                            await voice_channel.connect()
-                            logger.info("Подключился к голосовому каналу: %s", voice_channel.name)
-                            await log_discord(
-                                title="🔊 Подключение к голосовому каналу",
-                                description=f"> Бот подключился к {voice_channel.mention}",
-                                color=0x00aaff
-                            )
-                    except Exception as e:
-                        logger.debug("keep_voice_alive connect failed: %s", e)
-        except Exception as e:
-            logger.exception("keep_voice_alive loop error: %s", e)
-        await asyncio.sleep(60)
-
-# ============================================================
-# ФУНКЦИЯ ПЕРЕСТРОЙКИ ПРАВ ТИКЕТА
-# ============================================================
-async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
-    """
-    Перестраивает права в тикет-канале:
-    - Менеджер получает права писать, создавать ветки, читать.
-    - Остальные менеджеры (роль) могут только читать.
-    - Клиент сохраняет право писать.
-    """
-    guild = channel.guild
-
-    # Шаг 1: Запрещаем писать ВСЕМ ролям из TICKET_MANAGE_ROLES
-    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
-        role = guild.get_role(role_id)
-        if role:
-            overwrite = disnake.PermissionOverwrite(
-                view_channel=True,
-                send_messages=False,          # Не может писать
-                read_message_history=True,    # Может читать
-                add_reactions=False,          # Не может ставить эмодзи
-                create_public_threads=False   # Не может создавать ветки
-            )
-            await channel.set_permissions(role, overwrite=overwrite)
-
-    # Шаг 2: Выдаем права назначенному менеджеру (персональные права)
-    manager_overwrites = disnake.PermissionOverwrite(
-        view_channel=True,
-        send_messages=True,
-        read_message_history=True,
-        add_reactions=True,
-        create_public_threads=True,
-        embed_links=True,
-        attach_files=True
-    )
-    await channel.set_permissions(manager, overwrite=manager_overwrites)
-
-    # Шаг 3: Убеждаемся, что владелец тикета (клиент) может писать
-    owner_id = get_ticket_owner(channel.id)
-    if owner_id:
-        owner = guild.get_member(owner_id)
-        if owner and owner.id != manager.id:
-            owner_overwrite = disnake.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                add_reactions=True,
-                create_public_threads=True
-            )
-            await channel.set_permissions(owner, overwrite=owner_overwrite)
-
-    await log_discord(
-        title="🔐 Права тикета обновлены",
-        description=f"> **Тикет:** {channel.mention}\n> **Менеджер:** {manager.mention}\n> **Остальные менеджеры** получили доступ только на просмотр.",
-        color=0x00aaff,
-        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-    )
-
-# ============================================================
-# События
-# ============================================================
-@bot.event
-async def on_member_join(member: disnake.Member):
-    await log_discord(
-        title="👤 Участник зашёл",
-        description=f"> **{member.mention}** (`{member}`) присоединился к серверу.\n> ID: `{member.id}`",
-        color=0x00ff00
-    )
-    role = member.guild.get_role(1127428607606796290)
-    if role:
-        try:
-            await member.add_roles(role)
-            await log_discord(
-                title="👤 Автороль выдана",
-                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}",
-                color=0x00aaff
-            )
-        except Exception as e:
-            logger.error(f"Не удалось выдать роль: {e}")
-    guild = member.guild
-    snapshot_before = {row["invite_code"]: row for row in db.execute("SELECT * FROM invites_snapshot WHERE guild_id=?", (guild.id,)).fetchall()}
-    try:
-        invites_now = await guild.invites()
-    except Exception:
+    sales_manager_role = guild.get_role(1154757071330365490)
+    if not sales_manager_role:
         return
-    used_invite = None
-    for inv in invites_now:
-        old = snapshot_before.get(inv.code)
-        if old and inv.uses > old["uses"]:
-            used_invite = inv
-            break
-    for inv in invites_now:
-        db.execute("REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)",
-                    (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
-    if not used_invite or not used_invite.inviter:
-        db.commit()
-        return
-    inviter_id = used_invite.inviter.id
-    is_bot = 1 if member.bot else 0
-    joined_at = now_ts()
-    db.execute("INSERT INTO invites (guild_id, inviter_id, member_id, joined_at, is_bot) VALUES (?, ?, ?, ?, ?)",
-                (guild.id, inviter_id, member.id, joined_at, is_bot))
-    db.commit()
-    await log_discord(
-        title="📨 Использован инвайт",
-        description=f"> **Пользователь:** {member.mention}\n> **Пригласил:** <@{inviter_id}>\n> **Код:** `{used_invite.code}`",
-        color=0x00aaff
-    )
 
-@bot.event
-async def on_member_remove(member: disnake.Member):
-    guild = member.guild
-    await log_discord(
-        title="🚪 Участник вышел",
-        description=f"> **{member.mention}** (`{member}`) покинул сервер.\n> ID: `{member.id}`",
-        color=0xff0000
+    # Все участники с ролью Sales Manager
+    members_with_role = [m for m in guild.members if sales_manager_role in m.roles and not m.bot]
+
+    # Получаем статистику
+    rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
+    stats = {row["user_id"]: row for row in rows}
+
+    managers_data = []
+    for member in members_with_role:
+        s = stats.get(member.id)
+        closed = s["closed_tickets"] if s else 0
+        total_rating = s["total_rating"] if s else 0
+        ratings_count = s["ratings_count"] if s else 0
+        avg = total_rating / ratings_count if ratings_count else 0
+        managers_data.append({
+            "member": member,
+            "closed": closed,
+            "avg": avg
+        })
+
+    # Сортируем по закрытым (убывание), затем по среднему рейтингу
+    managers_data.sort(key=lambda x: (-x["closed"], -x["avg"]))
+
+    # Формируем строки
+    lines = []
+    for data in managers_data:
+        lines.append(f"> {data['member'].mention} - **{data['closed']}** закрытых заказов. [Рейтинг: **{data['avg']:.1f}**]")
+
+    # Лучший менеджер недели
+    best = managers_data[0] if managers_data else None
+    best_mention = best["member"].mention if best else "Нет данных"
+
+    # Embeeds
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
+
+    description = "> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n"
+    if lines:
+        description += "\n".join(lines) + "\n"
+    else:
+        description += "> Пока нет данных.\n"
+
+    embed2 = disnake.Embed(
+        title="Таблиц работников на роли Sales Manager.\n",
+        description=description,
+        color=6776679
     )
-    db.execute("UPDATE invites SET left_at=? WHERE guild_id=? AND member_id=? AND left_at IS NULL",
-                (now_ts(), guild.id, member.id))
-    row = db.execute("SELECT joined_at FROM invites WHERE guild_id=? AND member_id=? ORDER BY joined_at DESC LIMIT 1",
-                      (guild.id, member.id)).fetchone()
-    if row and (now_ts() - row["joined_at"]) < 600:
-        db.execute("UPDATE invites SET is_fake=1 WHERE guild_id=? AND member_id=? AND is_fake=0",
-                    (guild.id, member.id))
-        await log_discord(
-            title="⚠️ Фейковый вход",
-            description=f"> **Пользователь:** {member.mention}\n> Ушёл менее чем через **10 минут** после входа.",
+    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+    if best:
+        embed2.add_field(name="По актуальным данным, работником недели является ",
+                         value=f"<@&1154757071330365490> - {best_mention}, уверенное повышение!",
+                         inline=False)
+
+    await channel.send(embeds=[embed1, embed2])
+
+    # 2) Кнопка сброса в канале логов (1462418981825810535)
+    log_channel = bot.get_channel(1462418981825810535)
+    if log_channel:
+        async for msg in log_channel.history(limit=50):
+            if msg.author == bot.user and msg.components:
+                try:
+                    await msg.delete()
+                except:
+                    pass
+                break
+        embed_log = disnake.Embed(
+            title="🗑️ Сброс статистики менеджеров",
+            description="> Нажмите кнопку ниже, чтобы сбросить статистику менеджеров (только для администраторов).",
             color=0xff6600
         )
-    db.commit()
+        embed_log.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+        await log_channel.send(embed=embed_log, view=ResetStatsView())
 
-@bot.event
-async def on_member_update(before: disnake.Member, after: disnake.Member):
-    if before.display_name != after.display_name:
-        await log_discord(
-            title="✏️ Изменён никнейм",
-            description=f"> **Пользователь:** {before.mention}\n> **Было:** `{before.display_name}`\n> **Стало:** `{after.display_name}`",
-            color=0xffff00
-        )
-    if before.roles != after.roles:
-        added = [r for r in after.roles if r not in before.roles]
-        removed = [r for r in before.roles if r not in after.roles]
-        if added:
-            await log_discord(
-                title="➕ Выдана роль",
-                description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in added)}",
-                color=0x00ff00
-            )
-        if removed:
-            await log_discord(
-                title="➖ Снята роль",
-                description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in removed)}",
-                color=0xff0000
-            )
-    if before.display_avatar.url != after.display_avatar.url:
-        await log_discord(
-            title="🖼️ Изменён аватар",
-            description=f"> **Пользователь:** {after.mention}\n> [Новый аватар]({after.display_avatar.url})",
-            color=0xffff00
-        )
-
-@bot.event
-async def on_message_delete(message: disnake.Message):
-    if message.author.bot:
-        return
-    content = message.content or "[Нет текста]"
-    if len(content) > 1024:
-        content = content[:1021] + "..."
     await log_discord(
-        title="🗑️ Удалено сообщение",
-        description=f"> **Автор:** {message.author.mention} (`{message.author}`)\n> **Канал:** {message.channel.mention}\n> **Содержание:**\n```\n{content}\n```",
-        color=0xff6600
-    )
-
-@bot.event
-async def on_bulk_message_delete(messages: List[disnake.Message]):
-    channel = messages[0].channel if messages else None
-    count = len(messages)
-    await log_discord(
-        title="🗑️ Массовое удаление сообщений",
-        description=f"> **Канал:** {channel.mention if channel else 'неизвестно'}\n> **Количество:** `{count}` сообщений",
-        color=0xff6600
-    )
-
-@bot.event
-async def on_message_edit(before: disnake.Message, after: disnake.Message):
-    if before.author.bot:
-        return
-    if before.content == after.content:
-        return
-    before_content = before.content or "[Нет текста]"
-    after_content = after.content or "[Нет текста]"
-    if len(before_content) > 500:
-        before_content = before_content[:497] + "..."
-    if len(after_content) > 500:
-        after_content = after_content[:497] + "..."
-    await log_discord(
-        title="✏️ Изменено сообщение",
-        description=f"> **Автор:** {before.author.mention} (`{before.author}`)\n> **Канал:** {before.channel.mention}\n> **Было:**\n```\n{before_content}\n```\n> **Стало:**\n```\n{after_content}\n```",
-        color=0xffff00
-    )
-
-@bot.event
-async def on_guild_channel_create(channel: disnake.abc.GuildChannel):
-    await log_discord(
-        title="➕ Создан канал",
-        description=f"> **Название:** {channel.mention} (`{channel.name}`)\n> **Тип:** `{channel.type}`\n> **ID:** `{channel.id}`",
+        title="📊 Топ менеджеров обновлён",
+        description=f"> Канал: {channel.mention}",
         color=0x00ff00
     )
-
-@bot.event
-async def on_guild_channel_delete(channel: disnake.abc.GuildChannel):
-    await log_discord(
-        title="➖ Удалён канал",
-        description=f"> **Название:** `{channel.name}`\n> **Тип:** `{channel.type}`\n> **ID:** `{channel.id}`",
-        color=0xff0000
-    )
-
-@bot.event
-async def on_guild_channel_update(before: disnake.abc.GuildChannel, after: disnake.abc.GuildChannel):
-    if before.name != after.name:
-        await log_discord(
-            title="✏️ Изменён канал",
-            description=f"> **Канал:** {after.mention}\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
-            color=0xffff00
-        )
-
-@bot.event
-async def on_guild_role_create(role: disnake.Role):
-    await log_discord(
-        title="➕ Создана роль",
-        description=f"> **Название:** {role.mention} (`{role.name}`)\n> **Цвет:** `{role.color}`\n> **ID:** `{role.id}`",
-        color=0x00ff00
-    )
-
-@bot.event
-async def on_guild_role_delete(role: disnake.Role):
-    await log_discord(
-        title="➖ Удалена роль",
-        description=f"> **Название:** `{role.name}`\n> **ID:** `{role.id}`",
-        color=0xff0000
-    )
-
-@bot.event
-async def on_guild_role_update(before: disnake.Role, after: disnake.Role):
-    if before.name != after.name:
-        await log_discord(
-            title="✏️ Изменена роль",
-            description=f"> **Роль:** {after.mention}\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
-            color=0xffff00
-        )
-    if before.color != after.color:
-        await log_discord(
-            title="🎨 Изменён цвет роли",
-            description=f"> **Роль:** {after.mention}\n> **Было:** `{before.color}`\n> **Стало:** `{after.color}`",
-            color=0xffff00
-        )
-
-@bot.event
-async def on_invite_create(invite: disnake.Invite):
-    db.execute("REPLACE INTO invites_snapshot VALUES (?, ?, ?, ?)",
-                (invite.code, invite.guild.id, invite.uses, invite.inviter.id if invite.inviter else None))
-    db.commit()
-    await log_discord(
-        title="📨 Создан инвайт",
-        description=f"> **Код:** `{invite.code}`\n> **Создатель:** {invite.inviter.mention if invite.inviter else 'Неизвестно'}\n> **Канал:** {invite.channel.mention if invite.channel else 'Неизвестно'}\n> **Лимит использований:** `{invite.max_uses}`",
-        color=0x00aaff
-    )
-
-@bot.event
-async def on_invite_delete(invite: disnake.Invite):
-    db.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
-    db.commit()
-    await log_discord(
-        title="🗑️ Удалён инвайт",
-        description=f"> **Код:** `{invite.code}`\n> **Канал:** {invite.channel.mention if invite.channel else 'Неизвестно'}",
-        color=0xff6600
-    )
-
-@bot.event
-async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
-    if payload.member is None or payload.member.bot:
-        return
-    guild = bot.get_guild(payload.guild_id)
-    if not guild:
-        return
-    row = db.execute(
-        "SELECT role_id FROM reaction_roles WHERE guild_id=? AND channel_id=? AND message_id=? AND emoji=?",
-        (payload.guild_id, payload.channel_id, payload.message_id, str(payload.emoji))
-    ).fetchone()
-    if row:
-        role = guild.get_role(row["role_id"])
-        if role:
-            try:
-                await payload.member.add_roles(role)
-                await log_discord(
-                    title="✅ Выдана реакционная роль",
-                    description=f"> **Пользователь:** {payload.member.mention}\n> **Роль:** {role.mention}\n> **Реакция:** {payload.emoji}\n> **Сообщение:** <https://discord.com/channels/{payload.guild_id}/{payload.channel_id}/{payload.message_id}>",
-                    color=0x00ff00
-                )
-            except Exception as e:
-                logger.error(f"Не удалось выдать реакционную роль: {e}")
-
-@bot.event
-async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
-    if payload.user_id == bot.user.id:
-        return
-    guild = bot.get_guild(payload.guild_id)
-    if not guild:
-        return
-    row = db.execute(
-        "SELECT role_id FROM reaction_roles WHERE guild_id=? AND channel_id=? AND message_id=? AND emoji=?",
-        (payload.guild_id, payload.channel_id, payload.message_id, str(payload.emoji))
-    ).fetchone()
-    if row:
-        role = guild.get_role(row["role_id"])
-        if role:
-            member = guild.get_member(payload.user_id)
-            if member:
-                try:
-                    await member.remove_roles(role)
-                    await log_discord(
-                        title="❌ Снята реакционная роль",
-                        description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Реакция:** {payload.emoji}\n> **Сообщение:** <https://discord.com/channels/{payload.guild_id}/{payload.channel_id}/{payload.message_id}>",
-                        color=0xff0000
-                    )
-                except Exception as e:
-                    logger.error(f"Не удалось снять реакционную роль: {e}")
-
-@bot.event
-async def on_interaction(inter: disnake.MessageInteraction):
-    from modules.commands_tickets import handle_interaction
-    await handle_interaction(inter)
-    await handle_flash_interaction(inter)
-
-@bot.event
-async def on_message(message: disnake.Message):
-    if message.author.bot:
-        return
-
-    # Автоназначение менеджера при первом сообщении в тикете
-    if message.channel.category:
-        cat_id = message.channel.category.id
-        if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
-            if get_ticket_manager(message.channel.id) is None:
-                if any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
-                    assign_ticket_manager(message.channel.id, message.author.id)
-                    # Красивое сообщение
-                    embed = disnake.Embed(
-                        title="✅ Менеджер назначен",
-                        description=f"> **Менеджер:** {message.author.mention}\n> **Тикет:** {message.channel.mention}",
-                        color=0x00ff00,
-                        timestamp=datetime.now(timezone.utc)
-                    )
-                    embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
-                    await message.channel.send(embed=embed)
-                    await log_discord(
-                        title="📌 Менеджер назначен",
-                        description=f"> **Тикет:** {message.channel.mention}\n> **Менеджер:** {message.author.mention}",
-                        color=0x00aaff,
-                        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-                    )
-                    # Перестраиваем права в канале
-                    await reassign_ticket_permissions(message.channel, message.author)
-
-    from modules.dc import add_message_dc
-    if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
-        if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
-            await add_message_dc(message.author.id)
-
-    if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
-        try:
-            await message.add_reaction("💎")
-        except Exception as e:
-            logger.warning(f"Не удалось поставить реакцию на отзыв: {e}")
-
-        counts = load_json(FILES["review_counts"], {})
-        user_id = str(message.author.id)
-        counts[user_id] = counts.get(user_id, 0) + 1
-        save_json(FILES["review_counts"], counts)
-
-        if isinstance(message.author, disnake.Member):
-            await update_user_roles(message.author, counts[user_id], keep_pka=True)
-            await log_discord(
-                title="🔄 Роли обновлены (отзыв)",
-                description=f"> **Пользователь:** {message.author.mention}\n> **Отзывов стало:** `{counts[user_id]}`",
-                color=0x00ff00
-            )
-
-        from modules.commands_tickets import ReviewModerationView
-        embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1531737026322370872/image.png?ex=6a6a4cc5&is=6a68fb45&hm=e5cf13f52a87fc671b53b8422a3cffa149579ce66d40846ed15a8c9d2ec89d76&")
-        embed2 = disnake.Embed(
-            title="✍️ Новый отзыв на модерацию",
-            description=f">>> Автор: {message.author.mention}\nОтзыв: {message.content}\n\n",
-            color=6776679
-        )
-        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1530795801268453447/pisk.png?ex=6a69832f&is=6a6831af&hm=106c0b5c55c83b94fce2e11af7a4c65ec26d550b6da30575f1fef0981f7dc914&")
-        embed2.add_field(name="> Канал", value="<#1462074763437543435>", inline=True)
-        embed2.add_field(name="> Ссылка на отзыв", value=f"[Перейти]({message.jump_url})", inline=True)
-        embed2.add_field(name="> Статус", value="🕑 На рассмотрении", inline=True)
-
-        view = ReviewModerationView(message.author.id, message.content, message.id, message.channel.id)
-        log_channel = bot.get_channel(CONFIG["MODERATION_LOG_CHANNEL"])
-        if log_channel:
-            sent_msg = await log_channel.send(embeds=[embed1, embed2], view=view)
-            view.message = sent_msg
-
-        try:
-            await message.author.send("📩 Ваш отзыв отправлен на модерацию по начислению Diamond Coins. Ожидайте подтверждения от администратора.")
-        except:
-            pass
-
-        await update_review_counter(silent=False)
-        return
-
-    await bot.process_commands(message)
-
-voice_track = {}
-
-@bot.event
-async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceState, after: disnake.VoiceState):
-    if member.bot:
-        return
-    user_id = member.id
-    if after.channel and (before.channel is None or before.channel != after.channel):
-        voice_track[user_id] = (after.channel.id, int(time.time()))
-    elif before.channel and (after.channel is None or before.channel != after.channel):
-        if user_id in voice_track:
-            channel_id, join_time = voice_track.pop(user_id)
-            duration = int(time.time()) - join_time
-            if duration > 60:
-                from modules.dc import add_voice_dc
-                await add_voice_dc(user_id, duration)
-                await log_discord(
-                    title="🎙️ Выход из голосового канала",
-                    description=f"> **Пользователь:** {member.mention}\n> **Время:** {duration//60} мин.\n> **Начислено:** за голосовую активность",
-                    color=0x00aaff
-                )
