@@ -121,19 +121,39 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
+        # Импортируем все классы для регистрации View
         from modules.commands_tickets import (
             TicketPanelView,
             TicketPaidView,
+            TicketView,
+            CoinsTicketButtons,
+            TicketRatingView,
+            SelectView,
+            CatalogTypeView,
+            CatalogView,
+            BuySelectView,
             handle_interaction
         )
         from modules.commands_panels import (
             send_home_panel, send_tarology_panel, send_ticket_panel,
-            send_manager_top  # <-- ДОБАВЛЕНО
+            send_manager_top, ResetStatsView, HomeView, TarologyView
         )
-        from modules.commands_profile import send_profile_panel
+        from modules.commands_profile import send_profile_panel, ProfileView
 
+        # Регистрируем ВСЕ постоянные View (чтобы кнопки работали после перезапуска)
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
+        bot.add_view(TicketView())
+        bot.add_view(CoinsTicketButtons())
+        bot.add_view(TicketRatingView())
+        bot.add_view(SelectView())
+        bot.add_view(CatalogTypeView())
+        bot.add_view(CatalogView())
+        bot.add_view(BuySelectView())
+        bot.add_view(ResetStatsView())
+        bot.add_view(HomeView())
+        bot.add_view(TarologyView())
+        bot.add_view(ProfileView())
 
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
@@ -141,7 +161,7 @@ async def on_ready():
         bot.loop.create_task(send_profile_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_manager_top())  # <-- ДОБАВЛЕНО
+        bot.loop.create_task(send_manager_top())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if guild:
