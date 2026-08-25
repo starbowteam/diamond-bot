@@ -495,7 +495,7 @@ async def on_message(message: disnake.Message):
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
             if get_ticket_manager(message.channel.id) is None:
                 # Проверяем, является ли автор менеджером (роль 1415191217179856967)
-                if any(r.id == 1415191217179856967 for r in message.author.roles):
+                if any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
                     assign_ticket_manager(message.channel.id, message.author.id)
                     await message.channel.send(f"✅ Менеджер {message.author.mention} взял тикет.")
                     await log_discord(
