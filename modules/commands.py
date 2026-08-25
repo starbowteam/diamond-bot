@@ -1478,32 +1478,30 @@ class TransferRecipientModal(Modal):
         self.author = author
         components = [
             TextInput(
-                label="Упомяните получателя",
-                placeholder="Например, @user",
-                custom_id="recipient",
-                min_length=3,
-                max_length=100
+                label="Введите ID получателя",
+                placeholder="Например, 123456789012345678",
+                custom_id="recipient_id",
+                min_length=1,
+                max_length=30
             )
         ]
         super().__init__(title="Передача подарка", components=components)
 
     async def callback(self, inter: disnake.MessageInteraction):
-        recipient_input = inter.text_values["recipient"].strip()
-        # Извлекаем ID из упоминания
-        match = re.search(r'<@!?(\d+)>', recipient_input)
-        if not match:
-            return await inter.response.send_message("❌ Не удалось определить получателя. Используйте @упоминание.", ephemeral=True)
-        recipient_id = int(match.group(1))
+        recipient_input = inter.text_values["recipient_id"].strip()
+        if not recipient_input.isdigit():
+            return await inter.response.send_message("❌ Введите корректный ID (только цифры).", ephemeral=True)
+        recipient_id = int(recipient_input)
         if recipient_id == inter.author.id:
             return await inter.response.send_message("❌ Вы не можете передать товар самому себе.", ephemeral=True)
         guild = inter.guild
         recipient_member = guild.get_member(recipient_id)
         if not recipient_member:
-            return await inter.response.send_message("❌ Пользователь не найден на сервере.", ephemeral=True)
+            return await inter.response.send_message("❌ Пользователь с таким ID не найден на сервере.", ephemeral=True)
         if recipient_member.bot:
             return await inter.response.send_message("❌ Нельзя передавать товар ботам.", ephemeral=True)
 
-        # Проверяем, не передан ли уже этот товар (на случай, если селект был открыт до передачи)
+        # Проверяем, не передан ли уже этот товар
         purchases = await get_user_purchases(self.author.id, only_unused=False)
         if self.purchase_index >= len(purchases):
             return await inter.response.send_message("❌ Этот товар уже был передан или использован.", ephemeral=True)
@@ -2777,49 +2775,52 @@ class BuySelectView(View):
         if not item:
             return await inter.edit_original_response(content="❌ Товар не найден.")
 
-        # Показываем информационный эмбед с кнопками
+        # Показываем информационный эмбед с селектом выбора способа покупки
         embed = disnake.Embed(
             title="🛒 Информация о товаре:",
             description=(
                 f"> **Название:** {item['name']}\n\n"
                 f"> **Описание:** {item['description']}\n\n"
-                "Как покупаем данный товар, выберите, себе - либо кому то?\n\n"
+                "Как покупаем данный товар, выберите способ ниже:\n\n"
             ),
             color=6776679
         )
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
 
+        select = Select(
+            placeholder="Как купить товар?",
+            min_values=1,
+            max_values=1,
+            options=[
+                SelectOption(
+                    label="Купить себе",
+                    description="Приобрести товар для себя",
+                    emoji="<:people:1538395694648529009>",
+                    value="self"
+                ),
+                SelectOption(
+                    label="Подарить товар",
+                    description="Приобрести товар для другого участника",
+                    emoji="<:gist:1541657784926339153>",
+                    value="gift"
+                )
+            ],
+            custom_id="buy_way_select"
+        )
+        select.callback = self.create_select_callback(inter, category, item_key, item)
         view = View(timeout=300)
-        # Кнопка "Купить себе"
-        btn_self = Button(
-            label="Купить себе",
-            style=ButtonStyle.gray,
-            emoji="<:people:1538395694648529009>",
-            custom_id=f"buy_self_{category}_{item_key}"
-        )
-        btn_self.callback = self.create_buy_callback(inter, category, item_key, item, "self")
-        view.add_item(btn_self)
-
-        # Кнопка "Подарить товар"
-        btn_gift = Button(
-            label="Подарить товар",
-            style=ButtonStyle.gray,
-            emoji="<:gist:1541657784926339153>",
-            custom_id=f"buy_gift_{category}_{item_key}"
-        )
-        btn_gift.callback = self.create_buy_callback(inter, category, item_key, item, "gift")
-        view.add_item(btn_gift)
-
+        view.add_item(select)
         await inter.edit_original_response(content=None, embed=embed, view=view)
 
-    def create_buy_callback(self, original_inter, category, item_key, item, mode):
+    def create_select_callback(self, original_inter, category, item_key, item):
         async def callback(inter: disnake.MessageInteraction):
             if inter.author.id != original_inter.author.id:
                 return await inter.response.send_message("⛔ Это не ваш выбор.", ephemeral=True)
-            if mode == "self":
+            value = inter.data.values[0]
+            if value == "self":
                 await self.process_buy(inter, category, item_key, item, None)
-            elif mode == "gift":
-                await inter.response.send_modal(GiftRecipientModal(original_inter, category, item_key, item))
+            elif value == "gift":
+                await inter.response.send_modal(GiftRecipientModal(self, original_inter, category, item_key, item))
         return callback
 
     async def process_buy(self, inter, category, item_key, item, recipient_id=None):
@@ -2920,40 +2921,38 @@ class BuySelectView(View):
         await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
 
 class GiftRecipientModal(Modal):
-    def __init__(self, original_inter, category, item_key, item):
+    def __init__(self, buy_view, original_inter, category, item_key, item):
+        self.buy_view = buy_view
         self.original_inter = original_inter
         self.category = category
         self.item_key = item_key
         self.item = item
         components = [
             TextInput(
-                label="Упомяните получателя",
-                placeholder="Например, @user",
-                custom_id="recipient",
-                min_length=3,
-                max_length=100
+                label="Введите ID получателя",
+                placeholder="Например, 123456789012345678",
+                custom_id="recipient_id",
+                min_length=1,
+                max_length=30
             )
         ]
         super().__init__(title="Подарок", components=components)
 
     async def callback(self, inter: disnake.MessageInteraction):
-        recipient_input = inter.text_values["recipient"].strip()
-        match = re.search(r'<@!?(\d+)>', recipient_input)
-        if not match:
-            return await inter.response.send_message("❌ Не удалось определить получателя. Используйте @упоминание.", ephemeral=True)
-        recipient_id = int(match.group(1))
+        recipient_input = inter.text_values["recipient_id"].strip()
+        if not recipient_input.isdigit():
+            return await inter.response.send_message("❌ Введите корректный ID (только цифры).", ephemeral=True)
+        recipient_id = int(recipient_input)
         if recipient_id == inter.author.id:
             return await inter.response.send_message("❌ Вы не можете подарить товар самому себе.", ephemeral=True)
         guild = inter.guild
         recipient_member = guild.get_member(recipient_id)
         if not recipient_member:
-            return await inter.response.send_message("❌ Пользователь не найден на сервере.", ephemeral=True)
+            return await inter.response.send_message("❌ Пользователь с таким ID не найден на сервере.", ephemeral=True)
         if recipient_member.bot:
             return await inter.response.send_message("❌ Нельзя дарить товар ботам.", ephemeral=True)
 
-        # Возвращаемся к процессу покупки с recipient_id
-        buy_view = BuySelectView()
-        await buy_view.process_buy(inter, self.category, self.item_key, self.item, recipient_id)
+        await self.buy_view.process_buy(inter, self.category, self.item_key, self.item, recipient_id)
         
 # ============================================================
 # ОТПРАВКА ПАНЕЛИ ТИКЕТОВ (в канал 1462136361711829053)
