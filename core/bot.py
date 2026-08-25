@@ -18,7 +18,8 @@ from core.utils import (
     log_discord,
     BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR,
     get_dc_cache, save_dc_cache, sync_dc_to_json,
-    assign_ticket_manager, get_ticket_manager, get_ticket_owner
+    assign_ticket_manager, get_ticket_manager, get_ticket_owner, clear_ticket_manager,
+    increment_manager_closed, add_manager_rating
 )
 
 from modules.actions import send_actions_panel, handle_flash_interaction
@@ -206,6 +207,64 @@ async def keep_voice_alive():
         except Exception as e:
             logger.exception("keep_voice_alive loop error: %s", e)
         await asyncio.sleep(60)
+
+# ============================================================
+# ФУНКЦИЯ ПЕРЕСТРОЙКИ ПРАВ ТИКЕТА
+# ============================================================
+async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
+    """
+    Перестраивает права в тикет-канале:
+    - Менеджер получает права писать, создавать ветки, читать.
+    - Остальные менеджеры (роль) могут только читать.
+    - Клиент сохраняет право писать.
+    """
+    guild = channel.guild
+
+    # Права для назначенного менеджера
+    manager_overwrites = disnake.PermissionOverwrite(
+        view_channel=True,
+        send_messages=True,
+        read_message_history=True,
+        add_reactions=True,
+        create_public_threads=True,
+        embed_links=True,
+        attach_files=True
+    )
+    await channel.set_permissions(manager, overwrite=manager_overwrites)
+
+    # Для всех остальных ролей из TICKET_MANAGE_ROLES – только просмотр
+    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
+        role = guild.get_role(role_id)
+        if role and role != manager.top_role:  # Не трогаем роль самого менеджера
+            overwrite = disnake.PermissionOverwrite(
+                view_channel=True,
+                send_messages=False,          # Не может писать
+                read_message_history=True,    # Может читать
+                add_reactions=False,          # Не может ставить эмодзи
+                create_public_threads=False   # Не может создавать ветки
+            )
+            await channel.set_permissions(role, overwrite=overwrite)
+
+    # Убеждаемся, что владелец тикета (клиент) может писать
+    owner_id = get_ticket_owner(channel.id)
+    if owner_id:
+        owner = guild.get_member(owner_id)
+        if owner and owner.id != manager.id:
+            owner_overwrite = disnake.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                add_reactions=True,
+                create_public_threads=True
+            )
+            await channel.set_permissions(owner, overwrite=owner_overwrite)
+
+    await log_discord(
+        title="🔐 Права тикета обновлены",
+        description=f"> **Тикет:** {channel.mention}\n> **Менеджер:** {manager.mention}\n> **Остальные менеджеры** получили доступ только на просмотр.",
+        color=0x00aaff,
+        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+    )
 
 # ============================================================
 # События
@@ -494,7 +553,6 @@ async def on_message(message: disnake.Message):
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
             if get_ticket_manager(message.channel.id) is None:
-                # Проверяем, является ли автор менеджером (роль 1415191217179856967)
                 if any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
                     assign_ticket_manager(message.channel.id, message.author.id)
                     await message.channel.send(f"✅ Менеджер {message.author.mention} взял тикет.")
@@ -504,6 +562,8 @@ async def on_message(message: disnake.Message):
                         color=0x00aaff,
                         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
                     )
+                    # Перестраиваем права в канале
+                    await reassign_ticket_permissions(message.channel, message.author)
 
     from modules.dc import add_message_dc
     if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
