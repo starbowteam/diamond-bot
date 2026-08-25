@@ -14,7 +14,9 @@ from core.utils import (
     load_json,
     cur, db,
     reset_manager_stats,
-    has_admin_command_roles
+    has_admin_command_roles,
+    get_closed_orders, remove_closed_order,
+    add_closed_order
 )
 from modules.commands_profile import load_embed_from_file
 from modules.commands_tickets import TicketPanelView
@@ -421,6 +423,31 @@ async def send_work_panel():
         color=0x00ff00
     )
 
+# -*- coding: utf-8 -*-
+import os
+import json
+from datetime import datetime, timezone
+
+import disnake
+from disnake import ButtonStyle, SelectOption
+from disnake.ui import Button, Modal, Select, TextInput, View
+
+from core.utils import (
+    CONFIG, ADD_DIR, CATALOG_DIR, logger,
+    log_discord,
+    clean_embed_for_discohook,
+    load_json,
+    cur, db,
+    reset_manager_stats,
+    has_admin_command_roles,
+    get_closed_orders, remove_closed_order,
+    add_closed_order
+)
+from modules.commands_profile import load_embed_from_file
+from modules.commands_tickets import TicketPanelView
+
+# ... (остальные классы/функции остаются как в предыдущей версии, заменяем только модалку)
+
 # ============================================================
 # ЛОГИРОВАНИЕ И КНОПКИ СБРОСА / СПИСАНИЯ
 # ============================================================
@@ -451,9 +478,9 @@ class SpisatZakazModal(Modal):
     def __init__(self):
         components = [
             TextInput(
-                label="ID пользователя",
-                placeholder="Введите ID пользователя",
-                custom_id="user_id",
+                label="ID менеджера",
+                placeholder="Введите ID менеджера",
+                custom_id="manager_id",
                 min_length=1,
                 max_length=30
             )
@@ -461,37 +488,43 @@ class SpisatZakazModal(Modal):
         super().__init__(title="Списание заказа", components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
-        user_input = inter.text_values["user_id"].strip()
-        if not user_input.isdigit():
-            return await inter.response.send_message("❌ Введите корректный ID.", ephemeral=True)
-        user_id = int(user_input)
-        purchases = await get_user_purchases(user_id, only_unused=True)
-        if not purchases:
-            return await inter.response.send_message("❌ У пользователя нет неиспользованных покупок.", ephemeral=True)
+        manager_input = inter.text_values["manager_id"].strip()
+        if not manager_input.isdigit():
+            return await inter.response.send_message("❌ Введите корректный ID менеджера.", ephemeral=True)
+        manager_id = int(manager_input)
+        orders = get_closed_orders(manager_id)
+        if not orders:
+            return await inter.response.send_message("❌ У этого менеджера нет закрытых заказов.", ephemeral=True)
+
+        # Строим селект с заказами
         options = []
-        for idx, p in enumerate(purchases):
-            label = f"{p['type']} {p['value']}"
+        for order in orders:
+            closed_at = datetime.fromtimestamp(order["closed_at"]).strftime("%d.%m.%Y %H:%M")
+            label = f"Заказ #{order['id']} – {closed_at}"
             if len(label) > 100:
                 label = label[:97] + "..."
-            options.append(SelectOption(label=label, value=str(idx), description=f"Дата: {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}"))
-        select = Select(placeholder="Выберите покупку для удаления...", options=options, custom_id="spisat_select")
+            options.append(SelectOption(label=label, value=str(order["id"]), description=f"Канал: {order['channel_id']}"))
+
+        select = Select(placeholder="Выберите заказ для списания...", options=options, custom_id="spisat_order_select")
         view = View(timeout=60)
         view.add_item(select)
+
         async def select_callback(inter2: disnake.MessageInteraction):
-            idx = int(inter2.data.values[0])
-            success = await remove_purchase(user_id, idx)
-            if success:
-                await inter2.response.send_message("✅ Покупка удалена.", ephemeral=True)
-                await send_work_panel()
-                await log_discord(
-                    title="🗑️ Заказ списан",
-                    description=f"> **Админ:** {inter2.author.mention}\n> **Пользователь:** <@{user_id}>\n> **Покупка:** {purchases[idx]['value']}",
-                    color=0xff6600
-                )
-            else:
-                await inter2.response.send_message("❌ Ошибка удаления.", ephemeral=True)
+            order_id = int(inter2.data.values[0])
+            remove_closed_order(order_id)
+            # Уменьшаем счетчик closed_tickets у менеджера
+            cur.execute("UPDATE manager_stats SET closed_tickets = MAX(closed_tickets - 1, 0) WHERE user_id = ?", (manager_id,))
+            db.commit()
+            await inter2.response.send_message("✅ Заказ списан. Статистика менеджера обновлена.", ephemeral=True)
+            await send_work_panel()
+            await log_discord(
+                title="🗑️ Заказ списан",
+                description=f"> **Админ:** {inter2.author.mention}\n> **Менеджер:** <@{manager_id}>\n> **Заказ:** #{order_id}",
+                color=0xff6600
+            )
+
         select.callback = select_callback
-        await inter.response.send_message("Выберите покупку для удаления:", ephemeral=True, view=view)
+        await inter.response.send_message("Выберите заказ для списания:", ephemeral=True, view=view)
 
 # ============================================================
 # ТОП МЕНЕДЖЕРОВ (обновление логов)
