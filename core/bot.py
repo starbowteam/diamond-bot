@@ -17,7 +17,8 @@ from core.utils import (
     has_admin_command_roles,
     log_discord,
     BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR,
-    get_dc_cache, save_dc_cache, sync_dc_to_json
+    get_dc_cache, save_dc_cache, sync_dc_to_json,
+    assign_ticket_manager, get_ticket_manager, get_ticket_owner
 )
 
 from modules.actions import send_actions_panel, handle_flash_interaction
@@ -119,7 +120,6 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        # Импорты из новых модулей
         from modules.commands_tickets import (
             TicketPanelView,
             TicketPaidView,
@@ -130,10 +130,8 @@ async def on_ready():
         )
         from modules.commands_profile import send_profile_panel
 
-        # Регистрируем постоянные View (для кнопок, которые должны работать всегда)
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
-        # CoinsTicketButtons НЕ ДОБАВЛЯЕМ – он создаётся динамически с channel и user_id
 
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
@@ -210,7 +208,7 @@ async def keep_voice_alive():
         await asyncio.sleep(60)
 
 # ============================================================
-# Обработчики событий (без изменений)
+# События
 # ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
@@ -482,7 +480,6 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
 
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
-    # Импорт внутри обработчика, чтобы избежать циклических зависимостей
     from modules.commands_tickets import handle_interaction
     await handle_interaction(inter)
     await handle_flash_interaction(inter)
@@ -491,6 +488,22 @@ async def on_interaction(inter: disnake.MessageInteraction):
 async def on_message(message: disnake.Message):
     if message.author.bot:
         return
+
+    # Автоназначение менеджера при первом сообщении в тикете
+    if message.channel.category:
+        cat_id = message.channel.category.id
+        if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
+            if get_ticket_manager(message.channel.id) is None:
+                # Проверяем, является ли автор менеджером (роль 1415191217179856967)
+                if any(r.id == 1415191217179856967 for r in message.author.roles):
+                    assign_ticket_manager(message.channel.id, message.author.id)
+                    await message.channel.send(f"✅ Менеджер {message.author.mention} взял тикет.")
+                    await log_discord(
+                        title="📌 Менеджер назначен",
+                        description=f"> **Тикет:** {message.channel.mention}\n> **Менеджер:** {message.author.mention}",
+                        color=0x00aaff,
+                        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+                    )
 
     from modules.dc import add_message_dc
     if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
