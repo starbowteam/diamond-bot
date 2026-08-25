@@ -768,7 +768,6 @@ class TicketView(View):
 class TicketPaidView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        # Кнопка Закрыть – 1 пробел
         btn_close = Button(
             label="ㅤЗакрытьㅤ",
             style=ButtonStyle.gray,
@@ -779,7 +778,6 @@ class TicketPaidView(View):
         btn_close.callback = self.close_callback
         self.add_item(btn_close)
 
-        # Кнопка Оплатить (disabled) – 1 пробел
         btn_pay = Button(
             label="ㅤОплатитьㅤ",
             style=ButtonStyle.gray,
@@ -790,7 +788,6 @@ class TicketPaidView(View):
         )
         self.add_item(btn_pay)
 
-        # Кнопка Скидки (disabled) – 2 пробела (не трогаем)
         btn_discounts = Button(
             label="ㅤㅤСкидкиㅤㅤ",
             style=ButtonStyle.gray,
@@ -812,7 +809,7 @@ class TicketPaidView(View):
             color=0xffaa00,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
-        
+
 # ============================================================
 # КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC/ИНВАЙТЫ (без изменений)
 # ============================================================
@@ -994,7 +991,7 @@ class CoinsTicketButtons(View):
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
         return callback
-        
+
 class ConfirmCloseView(View):
     def __init__(self, channel):
         super().__init__(timeout=60)
@@ -1238,7 +1235,6 @@ class CatalogSelect(disnake.ui.StringSelect):
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
-            # Отправляем новое сообщение с эмбедами и заменяем старое, чтобы не плодить селекты
             await inter.response.send_message(embeds=embeds, ephemeral=True)
             await log_discord(
                 title="📂 Выбор категории (Каталог)",
@@ -1352,7 +1348,7 @@ async def send_home_panel():
     )
 
 # ============================================================
-# НОВАЯ ПАНЕЛЬ "ПРОФИЛЬ" (канал 1540018373503483934) – с передачей подарка
+# НОВАЯ ПАНЕЛЬ "ПРОФИЛЬ" (канал 1540018373503483934)
 # ============================================================
 PROFILE_CHANNEL_ID = 1540018373503483934
 
@@ -1372,6 +1368,12 @@ class ProfileSelect(disnake.ui.StringSelect):
                 value="purchases"
             ),
             disnake.SelectOption(
+                label="・Передать подарок",  # НОВЫЙ ПУНКТ
+                description="Простая передача・радость обоим",
+                emoji="<:transfer:1541653944726716497>",
+                value="transfer"
+            ),
+            disnake.SelectOption(
                 label="・О валюте",
                 description="Трата валюты・Её получение",
                 emoji="<:buy:1538395716920148079>",
@@ -1388,12 +1390,6 @@ class ProfileSelect(disnake.ui.StringSelect):
                 description="Узнай и посчитай・Снижение цены",
                 emoji="<:ckidsk:1538551877665427557>",
                 value="discount"
-            ),
-            disnake.SelectOption(
-                label="・Передать подарок",
-                description="Простая передача・радость обоим",
-                emoji="<:transfer:1541653944726716497>",
-                value="transfer"
             )
         ]
         super().__init__(
@@ -1425,6 +1421,8 @@ class ProfileSelect(disnake.ui.StringSelect):
             embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
             view = PurchaseSelectView(inter.author.id, purchases)
             await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+        elif value == "transfer":
+            await handle_transfer(inter)
         elif value == "currency":
             embeds = load_embed_from_file("vallue.json")
             await inter.response.send_message(embeds=embeds, ephemeral=True)
@@ -1432,8 +1430,6 @@ class ProfileSelect(disnake.ui.StringSelect):
             await inter.response.send_modal(CalcModal())
         elif value == "discount":
             await inter.response.send_modal(DiscountModal())
-        elif value == "transfer":
-            await inter.response.send_modal(TransferModal())
 
 class ProfileView(disnake.ui.View):
     def __init__(self):
@@ -1441,207 +1437,189 @@ class ProfileView(disnake.ui.View):
         self.add_item(ProfileSelect())
 
 # ============================================================
-# ОСНОВНОЙ VIEW С КНОПКАМИ (для тикетов) – исправлен
+# ПЕРЕДАЧА ПОДАРКА (новая функция)
 # ============================================================
-class PurchaseActionView(View):
-    def __init__(self, user_id, category, item_key, item_data):
-        super().__init__(timeout=300)
-        self.user_id = user_id
-        self.category = category
-        self.item_key = item_key
-        self.item_data = item_data
+async def handle_transfer(inter: disnake.MessageInteraction):
+    user_id = inter.author.id
+    purchases = await get_user_purchases(user_id, only_unused=True)
+    if not purchases:
+        return await inter.response.send_message("❌ У вас нет неиспользованных товаров для передачи.", ephemeral=True)
 
-        # Кнопка "Купить себе"
-        btn_self = Button(
-            label="Купить себе",
-            style=ButtonStyle.gray,
-            custom_id=f"buy_self_{user_id}_{item_key}",
-            emoji=PartialEmoji(name="people", id=1538395694648529009)
-        )
-        btn_self.callback = self.buy_self_callback
-        self.add_item(btn_self)
+    # Создаём селект с товарами
+    options = []
+    for idx, p in enumerate(purchases):
+        label = p['value']
+        if len(label) > 100:
+            label = label[:97] + "..."
+        options.append(SelectOption(
+            label=label,
+            description=f"Куплен: {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}",
+            value=str(idx)
+        ))
+    select = Select(placeholder="Выберите товар для передачи...", options=options, custom_id="transfer_select")
+    view = View(timeout=300)
+    view.add_item(select)
 
-        # Кнопка "Подарить товар"
-        btn_gift = Button(
-            label="Подарить товар",
-            style=ButtonStyle.gray,
-            custom_id=f"buy_gift_{user_id}_{item_key}",
-            emoji=PartialEmoji(name="gist", id=1541657784926339153)
-        )
-        btn_gift.callback = self.buy_gift_callback
-        self.add_item(btn_gift)
+    async def select_callback(inter2: disnake.MessageInteraction):
+        if inter2.author.id != user_id:
+            return await inter2.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
+        idx = int(inter2.data.values[0])
+        if idx >= len(purchases):
+            return await inter2.response.send_message("❌ Товар не найден.", ephemeral=True)
+        await inter2.response.send_modal(TransferRecipientModal(idx, purchases, inter2.author))
 
-    async def buy_self_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        await self.perform_purchase(inter, recipient_id=None)
+    select.callback = select_callback
+    await inter.response.send_message("Выберите товар, который хотите передать:", ephemeral=True, view=view)
 
-    async def buy_gift_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        await inter.response.send_modal(GiftModal(self.user_id, self.category, self.item_key, self.item_data))
-
-    async def perform_purchase(self, inter: disnake.MessageInteraction, recipient_id: Optional[int] = None):
-        # Проверка баланса
-        balance = await get_user_balance(self.user_id)
-        price = self.item_data["price"]
-        if balance < price:
-            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.")
-
-        # Проверка на повторную покупку роли
-        if self.category == "roles" and self.item_data.get("role_id"):
-            role_id = self.item_data["role_id"]
-            role = inter.guild.get_role(role_id)
-            if role:
-                if role in inter.author.roles:
-                    return await inter.edit_original_response(
-                        content=f"❌ У вас уже есть роль **{role.name}**. Вы не можете купить её повторно."
-                    )
-                purchases = await get_user_purchases(self.user_id, only_unused=True)
-                for p in purchases:
-                    if p.get('type') == 'roles' and p.get('value') == self.item_data['name']:
-                        return await inter.edit_original_response(
-                            content=f"❌ Вы уже купили роль **{self.item_data['name']}**, но она ещё не выдана. Обратитесь к администратору."
-                        )
-            else:
-                return await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
-
-        # Списание DC
-        success = await remove_dc(self.user_id, price, f"Покупка: {self.item_data['name']}")
-        if not success:
-            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуйте позже.")
-
-        # Если покупка для себя
-        if recipient_id is None:
-            await add_purchase(self.user_id, self.category, self.item_data["name"])
-            # Если это роль – выдаём сразу
-            if self.category == "roles" and self.item_data.get("role_id"):
-                role = inter.guild.get_role(self.item_data["role_id"])
-                if role:
-                    try:
-                        await inter.author.add_roles(role)
-                        await inter.edit_original_response(
-                            content=f"✅ Вы купили роль **{self.item_data['name']}** за **{price} DC**!\n"
-                                    f"🎭 Роль **{role.name}** выдана.\n"
-                                    f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
-                        )
-                        await log_discord(
-                            title="🛒 Покупка роли в магазине DC",
-                            description=f"> **Пользователь:** {inter.author.mention}\n> **Роль:** {self.item_data['name']}\n> **Цена:** {price} DC\n> **Категория:** {self.category}",
-                            color=0x00aaff
-                        )
-                        return
-                    except Exception as e:
-                        await add_dc(self.user_id, price, "Возврат DC (ошибка выдачи роли)")
-                        await inter.edit_original_response(
-                            content=f"❌ Не удалось выдать роль: {e}\n"
-                                    f"💎 {price} DC возвращены на баланс."
-                        )
-                        return
-                else:
-                    await add_dc(self.user_id, price, "Возврат DC (роль не найдена)")
-                    await inter.edit_original_response(
-                        content=f"❌ Роль не найдена на сервере.\n"
-                                f"💎 {price} DC возвращены на баланс."
-                    )
-                    return
-            # Обычный товар
-            await inter.edit_original_response(
-                content=f"✅ Вы купили **{self.item_data['name']}** за **{price} DC**!\n"
-                        f"📦 Товар будет выдан в ближайшее время.\n"
-                        f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
-            )
-            await log_discord(
-                title="🛒 Покупка в магазине DC",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {self.item_data['name']}\n> **Цена:** {price} DC\n> **Категория:** {self.category}",
-                color=0x00aaff
-            )
-        else:
-            # Покупка в подарок
-            await add_purchase(recipient_id, self.category, self.item_data["name"])
-            recipient = inter.guild.get_member(recipient_id)
-            if recipient:
-                try:
-                    await recipient.send(f"🎁 Вам подарили товар **{self.item_data['name']}** от {inter.author.mention}!")
-                except:
-                    pass
-            await inter.edit_original_response(
-                content=f"✅ Вы подарили **{self.item_data['name']}** пользователю <@{recipient_id}> за **{price} DC**!\n"
-                        f"🎁 Подарок отправлен! Получатель получит уведомление."
-            )
-            await log_discord(
-                title="🎁 Подарок в магазине DC",
-                description=f"> **От:** {inter.author.mention}\n> **Кому:** <@{recipient_id}>\n> **Подарок:** {self.item_data['name']}\n> **Цена:** {price} DC",
-                color=0x00aaff,
-                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-            )
-
-class GiftModal(Modal):
-    def __init__(self, sender_id, category, item_key, item_data):
-        self.sender_id = sender_id
-        self.category = category
-        self.item_key = item_key
-        self.item_data = item_data
+class TransferRecipientModal(Modal):
+    def __init__(self, purchase_index, purchases, author):
+        self.purchase_index = purchase_index
+        self.purchases = purchases
+        self.author = author
         components = [
             TextInput(
-                label="Кому подарить",
-                placeholder="@username",
+                label="Упомяните получателя",
+                placeholder="Например, @user",
                 custom_id="recipient",
-                min_length=2,
-                max_length=50
+                min_length=3,
+                max_length=100
             )
         ]
-        super().__init__(title="🎁 Подарить товар", components=components)
+        super().__init__(title="Передача подарка", components=components)
 
-    async def callback(self, inter: disnake.ModalInteraction):
+    async def callback(self, inter: disnake.MessageInteraction):
         recipient_input = inter.text_values["recipient"].strip()
+        # Извлекаем ID из упоминания
         match = re.search(r'<@!?(\d+)>', recipient_input)
         if not match:
-            return await inter.response.send_message("❌ Укажите пользователя через @упоминание, например @username", ephemeral=True)
+            return await inter.response.send_message("❌ Не удалось определить получателя. Используйте @упоминание.", ephemeral=True)
         recipient_id = int(match.group(1))
-        if recipient_id == self.sender_id:
-            return await inter.response.send_message("❌ Нельзя подарить товар самому себе.", ephemeral=True)
+        if recipient_id == inter.author.id:
+            return await inter.response.send_message("❌ Вы не можете передать товар самому себе.", ephemeral=True)
         guild = inter.guild
-        recipient = guild.get_member(recipient_id)
-        if not recipient:
+        recipient_member = guild.get_member(recipient_id)
+        if not recipient_member:
             return await inter.response.send_message("❌ Пользователь не найден на сервере.", ephemeral=True)
+        if recipient_member.bot:
+            return await inter.response.send_message("❌ Нельзя передавать товар ботам.", ephemeral=True)
 
-        # Выполняем покупку с передачей
-        view = PurchaseActionView(self.sender_id, self.category, self.item_key, self.item_data)
-        await view.perform_purchase(inter, recipient_id)
+        # Проверяем, не передан ли уже этот товар (на случай, если селект был открыт до передачи)
+        purchases = await get_user_purchases(self.author.id, only_unused=False)
+        if self.purchase_index >= len(purchases):
+            return await inter.response.send_message("❌ Этот товар уже был передан или использован.", ephemeral=True)
+        p = purchases[self.purchase_index]
+        # Удаляем у отправителя
+        success = await remove_purchase(self.author.id, self.purchase_index)
+        if not success:
+            return await inter.response.send_message("❌ Ошибка удаления товара у отправителя.", ephemeral=True)
+        # Добавляем получателю
+        await add_purchase(recipient_id, p['type'], p['value'])
+        # Логируем
+        await log_discord(
+            title="🎁 Передача подарка",
+            description=(
+                f"> **Отправитель:** {inter.author.mention}\n"
+                f"> **Получатель:** {recipient_member.mention}\n"
+                f"> **Товар:** `{p['value']}`"
+            ),
+            color=0x00ff00,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+        await inter.response.send_message(
+            f"✅ Товар **{p['value']}** успешно передан {recipient_member.mention}!",
+            ephemeral=True
+        )
 
 # ============================================================
-# Переопределяем send_profile_panel, чтобы использовать ProfileView
+# УПРАВЛЕНИЕ ПОКУПКАМИ (селект товаров и возврат)
 # ============================================================
-async def send_profile_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(PROFILE_CHANNEL_ID)
-    if not channel:
-        channel = await bot.fetch_channel(PROFILE_CHANNEL_ID)
-    if not channel:
-        logger.warning("Profile panel channel not found")
-        return
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            try:
-                await msg.delete()
-            except:
-                pass
-            break
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
-    embed2 = disnake.Embed(
-        title="Твой профиль на сервере Diamond Shop",
-        description="> В данном разделе, ты можешь - увидить свой профиль, свои покупки, возможно - отменить их, и получить возрат, но - 75%! Узнать, как купить что либо за Diamond Coin и многое другое! Не забудь о калькуляторе, и расчете скидок, для своих покупок!",
-        color=6776679
+class PurchaseSelectView(View):
+    def __init__(self, user_id, purchases):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.purchases = purchases
+        options = []
+        for idx, p in enumerate(purchases):
+            label = p['value']
+            if len(label) > 100:
+                label = label[:97] + "..."
+            options.append(SelectOption(
+                label=label,
+                description=f"Куплен: {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}",
+                value=str(idx)
+            ))
+        select = Select(placeholder="Выберите товар...", options=options, custom_id="purchase_select")
+        select.callback = self.purchase_select_callback
+        self.add_item(select)
+
+    async def purchase_select_callback(self, inter: disnake.MessageInteraction):
+        if inter.author.id != self.user_id:
+            return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
+        idx = int(inter.data.values[0])
+        if idx >= len(self.purchases):
+            return await inter.response.send_message("❌ Товар не найден.", ephemeral=True)
+        p = self.purchases[idx]
+        catalog = load_shop_catalog()
+        price = None
+        for cat_key, cat_data in catalog.items():
+            for item_key, item_data in cat_data.get("items", {}).items():
+                if item_data.get("name") == p['value']:
+                    price = item_data.get("price")
+                    break
+            if price is not None:
+                break
+        if price is None:
+            price = 0
+        embed = disnake.Embed(
+            title="Информация о покупке!",
+            description=(
+                f"> **Товар:** {p['value']}\n"
+                f"> **Куплен:** {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}\n\n"
+                f"> **Цена:** {price} DC\n\n"
+                "`Вы можете вернуть товар, получить DC обратно, но получите - только 75% Для этого - нажмите на кнопку ниже, в выборном меню.`"
+            ),
+            color=6776679
+        )
+        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
+        view = ReturnItemView(self.user_id, idx, price)
+        await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class ReturnItemView(View):
+    def __init__(self, user_id, purchase_index, price):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.purchase_index = purchase_index
+        self.price = price
+
+    @disnake.ui.button(
+        label="Вернуть товар",
+        style=disnake.ButtonStyle.danger,
+        custom_id="return_item"
     )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
-    await channel.send(embeds=[embed1, embed2], view=ProfileView())
-    await log_discord(
-        title="👤 Панель Профиль отправлена",
-        description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00
-    )
-    
+    async def return_item(self, button: Button, inter: disnake.MessageInteraction):
+        if inter.author.id != self.user_id:
+            return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
+        purchases = await get_user_purchases(self.user_id, only_unused=False)
+        if self.purchase_index >= len(purchases):
+            return await inter.response.send_message("❌ Этот товар уже был возвращён или применён.", ephemeral=True)
+        p = purchases[self.purchase_index]
+        success = await remove_purchase(self.user_id, self.purchase_index)
+        if not success:
+            return await inter.response.send_message("❌ Ошибка при возврате товара.", ephemeral=True)
+        refund = int(self.price * 0.75)
+        await add_dc(self.user_id, refund, f"Возврат товара: {p['value']} (75%)")
+        await inter.response.send_message(
+            f"✅ Товар **{p['value']}** возвращён!\n"
+            f"💎 Вам начислено **{refund} DC** (75% от стоимости).",
+            ephemeral=True
+        )
+        await log_discord(
+            title="🔄 Возврат товара",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {p['value']}\n> **Возвращено:** {refund} DC",
+            color=0xffaa00,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
 # ============================================================
 # МОДАЛКИ ДЛЯ КАЛЬКУЛЯТОРА И РАСЧЁТА СКИДКИ (перенесены в профиль)
 # ============================================================
@@ -1724,7 +1702,7 @@ class DiscountModal(Modal):
         await inter.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
-# ФУНКЦИЯ ПОКАЗА ПРОФИЛЯ (для новой панели)
+# ФУНКЦИЯ ПОКАЗА ПРОФИЛЯ
 # ============================================================
 async def show_profile(inter: disnake.MessageInteraction, user: disnake.Member):
     counts = load_json(FILES["review_counts"], {})
@@ -1826,6 +1804,40 @@ async def show_profile(inter: disnake.MessageInteraction, user: disnake.Member):
     await inter.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
+# ФУНКЦИЯ ОТПРАВКИ ПАНЕЛИ ПРОФИЛЬ
+# ============================================================
+async def send_profile_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(PROFILE_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(PROFILE_CHANNEL_ID)
+    if not channel:
+        logger.warning("Profile panel channel not found")
+        return
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except:
+                pass
+            break
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
+    embed2 = disnake.Embed(
+        title="Твой профиль на сервере Diamond Shop",
+        description="> В данном разделе, ты можешь - увидить свой профиль, свои покупки, возможно - отменить их, и получить возрат, но - 75%! Узнать, как купить что либо за Diamond Coin и многое другое! Не забудь о калькуляторе, и расчете скидок, для своих покупок!",
+        color=6776679
+    )
+    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
+    await channel.send(embeds=[embed1, embed2], view=ProfileView())
+    await log_discord(
+        title="👤 Панель Профиль отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+
+# ============================================================
 # ПАНЕЛЬ "EARLY TAROLOGY"
 # ============================================================
 TAROLOGY_CHANNEL_ID = 1536796929873420308
@@ -1922,7 +1934,7 @@ async def send_tarology_panel():
     )
 
 # ============================================================
-# МОДАЛКИ ДЛЯ КАЛЬКУЛЯТОРА И РАСЧЁТА СКИДКИ
+# МОДАЛКИ ДЛЯ КАЛЬКУЛЯТОРА И РАСЧЁТА СКИДКИ (копия, если нужна)
 # ============================================================
 class CalcModal(Modal):
     def __init__(self):
@@ -2001,251 +2013,6 @@ class DiscountModal(Modal):
         embed.add_field(name="Экономия", value=f"`{savings:.2f} ₽`", inline=True)
         embed.add_field(name="✅ Итоговая цена", value=f"**`{final_price:.2f} ₽`**", inline=False)
         await inter.response.send_message(embed=embed, ephemeral=True)
-
-# ============================================================
-# ИЗМЕНЁННЫЙ МАГАЗИН ЗА DC – с выбором "Купить себе" или "Подарить"
-# ============================================================
-class BuySelectView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        catalog = load_shop_catalog()
-        options = []
-        for key, cat in catalog.items():
-            emoji = cat.get("label", "").split()[0] if " " in cat.get("label", "") else "📦"
-            label = cat.get("label", key)
-            options.append(SelectOption(
-                label=label[:100],
-                description=cat.get("description", "")[:100],
-                value=key,
-                emoji=emoji
-            ))
-        select = Select(placeholder="Выберите категорию товара...", options=options, custom_id="buy_category")
-        select.callback = self.category_callback
-        self.add_item(select)
-
-    async def category_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        category = inter.data.values[0]
-        catalog = load_shop_catalog()
-        items = catalog.get(category, {}).get("items", {})
-        if not items:
-            return await inter.edit_original_response(content="❌ В этой категории пока нет товаров.")
-        options = []
-        for key, item in items.items():
-            label = f"{item['name']} - {item['price']} DC"
-            if len(label) > 100:
-                label = label[:97] + "..."
-            options.append(SelectOption(
-                label=label,
-                description=item.get("description", "")[:100],
-                value=f"{category}_{key}"
-            ))
-        view = View(timeout=None)
-        select2 = Select(placeholder="Выберите товар...", options=options, custom_id="buy_item")
-        select2.callback = self.item_callback
-        view.add_item(select2)
-        back_btn = Button(label="🔙 Назад", style=ButtonStyle.gray, custom_id="buy_back")
-        back_btn.callback = self.back_callback
-        view.add_item(back_btn)
-        await inter.edit_original_response(content="Выберите товар из категории:", view=view)
-
-    async def item_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        value = inter.data.values[0]
-        try:
-            category, item_key = value.split("_", 1)
-        except ValueError:
-            return await inter.edit_original_response(content="❌ Ошибка формата товара.")
-        catalog = load_shop_catalog()
-        item = catalog.get(category, {}).get("items", {}).get(item_key)
-        if not item:
-            return await inter.edit_original_response(content="❌ Товар не найден.")
-
-        # Показываем эмбед с информацией и кнопками
-        embed = disnake.Embed(
-            title="🛒 Информация о товаре:",
-            description=(
-                f"> **Название:** {item['name']}\n\n"
-                f"> **Описание:** {item.get('description', 'Нет описания')}\n\n"
-                "Как покупаем данный товар, выберите, себе - либо кому то?\n\n"
-            ),
-            color=6776679
-        )
-        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
-        view = PurchaseActionView(inter.author.id, category, item_key, item)
-        await inter.edit_original_response(content=None, embed=embed, view=view)
-
-    async def back_callback(self, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
-
-class PurchaseActionView(View):
-    def __init__(self, user_id, category, item_key, item_data):
-        super().__init__(timeout=300)
-        self.user_id = user_id
-        self.category = category
-        self.item_key = item_key
-        self.item_data = item_data
-        self.add_item(Button(
-            label="Купить себе",
-            style=ButtonStyle.gray,
-            custom_id="buy_self",
-            emoji=PartialEmoji(name="people", id=1538395694648529009)
-        ))
-        self.add_item(Button(
-            label="Подарить товар",
-            style=ButtonStyle.gray,
-            custom_id="buy_gift",
-            emoji=PartialEmoji(name="gist", id=1541657784926339153)
-        ))
-
-    async def interaction_check(self, inter: disnake.MessageInteraction) -> bool:
-        # Проверяем, что нажавший – тот же пользователь
-        if inter.author.id != self.user_id:
-            await inter.response.send_message("⛔ Это не ваш выбор.", ephemeral=True)
-            return False
-        return True
-
-    @disnake.ui.button(label="Купить себе", style=ButtonStyle.gray, custom_id="buy_self", emoji=PartialEmoji(name="people", id=1538395694648529009))
-    async def buy_self(self, button: Button, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        # Старая логика покупки
-        await self.perform_purchase(inter, recipient_id=None)
-
-    @disnake.ui.button(label="Подарить товар", style=ButtonStyle.gray, custom_id="buy_gift", emoji=PartialEmoji(name="gist", id=1541657784926339153))
-    async def buy_gift(self, button: Button, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
-        # Открываем модалку с пингом получателя
-        await inter.response.send_modal(GiftModal(self.user_id, self.category, self.item_key, self.item_data))
-
-    async def perform_purchase(self, inter: disnake.MessageInteraction, recipient_id: Optional[int] = None):
-        # Проверка баланса
-        balance = await get_user_balance(self.user_id)
-        price = self.item_data["price"]
-        if balance < price:
-            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.")
-
-        # Проверка на повторную покупку роли
-        if self.category == "roles" and self.item_data.get("role_id"):
-            role_id = self.item_data["role_id"]
-            role = inter.guild.get_role(role_id)
-            if role:
-                if role in inter.author.roles:
-                    return await inter.edit_original_response(
-                        content=f"❌ У вас уже есть роль **{role.name}**. Вы не можете купить её повторно."
-                    )
-                purchases = await get_user_purchases(self.user_id, only_unused=True)
-                for p in purchases:
-                    if p.get('type') == 'roles' and p.get('value') == self.item_data['name']:
-                        return await inter.edit_original_response(
-                            content=f"❌ Вы уже купили роль **{self.item_data['name']}**, но она ещё не выдана. Обратитесь к администратору."
-                        )
-            else:
-                return await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
-
-        # Списание DC
-        success = await remove_dc(self.user_id, price, f"Покупка: {self.item_data['name']}")
-        if not success:
-            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуйте позже.")
-
-        # Если покупка для себя
-        if recipient_id is None:
-            await add_purchase(self.user_id, self.category, self.item_data["name"])
-            # Если это роль – выдаём сразу
-            if self.category == "roles" and self.item_data.get("role_id"):
-                role = inter.guild.get_role(self.item_data["role_id"])
-                if role:
-                    try:
-                        await inter.author.add_roles(role)
-                        await inter.edit_original_response(
-                            content=f"✅ Вы купили роль **{self.item_data['name']}** за **{price} DC**!\n"
-                                    f"🎭 Роль **{role.name}** выдана.\n"
-                                    f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
-                        )
-                        await log_discord(
-                            title="🛒 Покупка роли в магазине DC",
-                            description=f"> **Пользователь:** {inter.author.mention}\n> **Роль:** {self.item_data['name']}\n> **Цена:** {price} DC\n> **Категория:** {self.category}",
-                            color=0x00aaff
-                        )
-                        return
-                    except Exception as e:
-                        await add_dc(self.user_id, price, "Возврат DC (ошибка выдачи роли)")
-                        await inter.edit_original_response(
-                            content=f"❌ Не удалось выдать роль: {e}\n"
-                                    f"💎 {price} DC возвращены на баланс."
-                        )
-                        return
-                else:
-                    await add_dc(self.user_id, price, "Возврат DC (роль не найдена)")
-                    await inter.edit_original_response(
-                        content=f"❌ Роль не найдена на сервере.\n"
-                                f"💎 {price} DC возвращены на баланс."
-                    )
-                    return
-            # Обычный товар
-            await inter.edit_original_response(
-                content=f"✅ Вы купили **{self.item_data['name']}** за **{price} DC**!\n"
-                        f"📦 Товар будет выдан в ближайшее время.\n"
-                        f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
-            )
-            await log_discord(
-                title="🛒 Покупка в магазине DC",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {self.item_data['name']}\n> **Цена:** {price} DC\n> **Категория:** {self.category}",
-                color=0x00aaff
-            )
-        else:
-            # Покупка в подарок
-            await add_purchase(recipient_id, self.category, self.item_data["name"])
-            recipient = inter.guild.get_member(recipient_id)
-            if recipient:
-                try:
-                    await recipient.send(f"🎁 Вам подарили товар **{self.item_data['name']}** от {inter.author.mention}!")
-                except:
-                    pass
-            await inter.edit_original_response(
-                content=f"✅ Вы подарили **{self.item_data['name']}** пользователю <@{recipient_id}> за **{price} DC**!\n"
-                        f"🎁 Подарок отправлен! Получатель получит уведомление."
-            )
-            await log_discord(
-                title="🎁 Подарок в магазине DC",
-                description=f"> **От:** {inter.author.mention}\n> **Кому:** <@{recipient_id}>\n> **Подарок:** {self.item_data['name']}\n> **Цена:** {price} DC",
-                color=0x00aaff,
-                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-            )
-
-class GiftModal(Modal):
-    def __init__(self, sender_id, category, item_key, item_data):
-        self.sender_id = sender_id
-        self.category = category
-        self.item_key = item_key
-        self.item_data = item_data
-        components = [
-            TextInput(
-                label="Кому подарить",
-                placeholder="@username",
-                custom_id="recipient",
-                min_length=2,
-                max_length=50
-            )
-        ]
-        super().__init__(title="🎁 Подарить товар", components=components)
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        recipient_input = inter.text_values["recipient"].strip()
-        match = re.search(r'<@!?(\d+)>', recipient_input)
-        if not match:
-            return await inter.response.send_message("❌ Укажите пользователя через @упоминание, например @username", ephemeral=True)
-        recipient_id = int(match.group(1))
-        if recipient_id == self.sender_id:
-            return await inter.response.send_message("❌ Нельзя подарить товар самому себе.", ephemeral=True)
-        guild = inter.guild
-        recipient = guild.get_member(recipient_id)
-        if not recipient:
-            return await inter.response.send_message("❌ Пользователь не найден на сервере.", ephemeral=True)
-
-        # Выполняем покупку с передачей
-        view = PurchaseActionView(self.sender_id, self.category, self.item_key, self.item_data)
-        await view.perform_purchase(inter, recipient_id)
 
 # ============================================================
 # ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – с зарплатой и авансом
@@ -2769,7 +2536,7 @@ async def gw_dc(
     except Exception as e:
         logger.exception(f"Ошибка в команде gw_dc: {e}")
         await ctx.send(f"❌ Произошла ошибка: {e}", ephemeral=True)
-        
+
 # ============================================================
 # МОДАЛКИ ДЛЯ DC-ПАНЕЛИ (без изменений)
 # ============================================================
@@ -2952,94 +2719,235 @@ class PromoRemoveSelectView(View):
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
 
 # ============================================================
-# УПРАВЛЕНИЕ ПОКУПКАМИ (селект товаров и возврат) – без изменений
+# ПРОДОЛЖЕНИЕ КАТАЛОГА И ПОКУПОК (исправленное)
 # ============================================================
-class PurchaseSelectView(View):
-    def __init__(self, user_id, purchases):
-        super().__init__(timeout=300)
-        self.user_id = user_id
-        self.purchases = purchases
+class BuySelectView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        catalog = load_shop_catalog()
         options = []
-        for idx, p in enumerate(purchases):
-            label = p['value']
+        for key, cat in catalog.items():
+            emoji = cat.get("label", "").split()[0] if " " in cat.get("label", "") else "📦"
+            label = cat.get("label", key)
+            options.append(SelectOption(
+                label=label[:100],
+                description=cat.get("description", "")[:100],
+                value=key,
+                emoji=emoji
+            ))
+        select = Select(placeholder="Выберите категорию товара...", options=options, custom_id="buy_category")
+        select.callback = self.category_callback
+        self.add_item(select)
+
+    async def category_callback(self, inter: disnake.MessageInteraction):
+        await inter.response.defer(ephemeral=True)
+        category = inter.data.values[0]
+        catalog = load_shop_catalog()
+        items = catalog.get(category, {}).get("items", {})
+        if not items:
+            return await inter.edit_original_response(content="❌ В этой категории пока нет товаров.")
+        options = []
+        for key, item in items.items():
+            label = f"{item['name']} - {item['price']} DC"
             if len(label) > 100:
                 label = label[:97] + "..."
             options.append(SelectOption(
                 label=label,
-                description=f"Куплен: {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}",
-                value=str(idx)
+                description=item.get("description", "")[:100],
+                value=f"{category}_{key}"
             ))
-        select = Select(placeholder="Выберите товар...", options=options, custom_id="purchase_select")
-        select.callback = self.purchase_select_callback
-        self.add_item(select)
+        view = View(timeout=None)
+        select2 = Select(placeholder="Выберите товар...", options=options, custom_id="buy_item")
+        select2.callback = self.item_callback
+        view.add_item(select2)
+        back_btn = Button(label="🔙 Назад", style=ButtonStyle.gray, custom_id="buy_back")
+        back_btn.callback = self.back_callback
+        view.add_item(back_btn)
+        await inter.edit_original_response(content="Выберите товар из категории:", view=view)
 
-    async def purchase_select_callback(self, inter: disnake.MessageInteraction):
-        if inter.author.id != self.user_id:
-            return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
-        idx = int(inter.data.values[0])
-        if idx >= len(self.purchases):
-            return await inter.response.send_message("❌ Товар не найден.", ephemeral=True)
-        p = self.purchases[idx]
+    async def item_callback(self, inter: disnake.MessageInteraction):
+        await inter.response.defer(ephemeral=True)
+        value = inter.data.values[0]
+        try:
+            category, item_key = value.split("_", 1)
+        except ValueError:
+            return await inter.edit_original_response(content="❌ Ошибка формата товара.")
         catalog = load_shop_catalog()
-        price = None
-        for cat_key, cat_data in catalog.items():
-            for item_key, item_data in cat_data.get("items", {}).items():
-                if item_data.get("name") == p['value']:
-                    price = item_data.get("price")
-                    break
-            if price is not None:
-                break
-        if price is None:
-            price = 0
+        item = catalog.get(category, {}).get("items", {}).get(item_key)
+        if not item:
+            return await inter.edit_original_response(content="❌ Товар не найден.")
+
+        # Показываем информационный эмбед с кнопками
         embed = disnake.Embed(
-            title="Информация о покупке!",
+            title="🛒 Информация о товаре:",
             description=(
-                f"> **Товар:** {p['value']}\n"
-                f"> **Куплен:** {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}\n\n"
-                f"> **Цена:** {price} DC\n\n"
-                "`Вы можете вернуть товар, получить DC обратно, но получите - только 75% Для этого - нажмите на кнопку ниже, в выборном меню.`"
+                f"> **Название:** {item['name']}\n\n"
+                f"> **Описание:** {item['description']}\n\n"
+                "Как покупаем данный товар, выберите, себе - либо кому то?\n\n"
             ),
             color=6776679
         )
-        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
-        view = ReturnItemView(self.user_id, idx, price)
+        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+
+        view = View(timeout=300)
+        # Кнопка "Купить себе"
+        btn_self = Button(
+            label="Купить себе",
+            style=ButtonStyle.gray,
+            emoji="<:people:1538395694648529009>",
+            custom_id=f"buy_self_{category}_{item_key}"
+        )
+        btn_self.callback = self.create_buy_callback(inter, category, item_key, item, "self")
+        view.add_item(btn_self)
+
+        # Кнопка "Подарить товар"
+        btn_gift = Button(
+            label="Подарить товар",
+            style=ButtonStyle.gray,
+            emoji="<:gist:1541657784926339153>",
+            custom_id=f"buy_gift_{category}_{item_key}"
+        )
+        btn_gift.callback = self.create_buy_callback(inter, category, item_key, item, "gift")
+        view.add_item(btn_gift)
+
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
 
-class ReturnItemView(View):
-    def __init__(self, user_id, purchase_index, price):
-        super().__init__(timeout=300)
-        self.user_id = user_id
-        self.purchase_index = purchase_index
-        self.price = price
+    def create_buy_callback(self, original_inter, category, item_key, item, mode):
+        async def callback(inter: disnake.MessageInteraction):
+            if inter.author.id != original_inter.author.id:
+                return await inter.response.send_message("⛔ Это не ваш выбор.", ephemeral=True)
+            if mode == "self":
+                await self.process_buy(inter, category, item_key, item, None)
+            elif mode == "gift":
+                await inter.response.send_modal(GiftRecipientModal(original_inter, category, item_key, item))
+        return callback
 
-    @disnake.ui.button(
-        label="Вернуть товар",
-        style=disnake.ButtonStyle.danger,
-        custom_id="return_item"
-    )
-    async def return_item(self, button: Button, inter: disnake.MessageInteraction):
-        if inter.author.id != self.user_id:
-            return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
-        purchases = await get_user_purchases(self.user_id, only_unused=False)
-        if self.purchase_index >= len(purchases):
-            return await inter.response.send_message("❌ Этот товар уже был возвращён или применён.", ephemeral=True)
-        p = purchases[self.purchase_index]
-        success = await remove_purchase(self.user_id, self.purchase_index)
+    async def process_buy(self, inter, category, item_key, item, recipient_id=None):
+        user_id = inter.author.id if recipient_id is None else recipient_id
+        # Проверка баланса
+        balance = await get_user_balance(inter.author.id)
+        price = item["price"]
+        if balance < price:
+            return await inter.edit_original_response(content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.")
+
+        if category == "roles" and item.get("role_id"):
+            role_id = item["role_id"]
+            role = inter.guild.get_role(role_id)
+            if role:
+                if role in inter.author.roles:
+                    return await inter.edit_original_response(content=f"❌ У вас уже есть роль **{role.name}**.")
+                purchases = await get_user_purchases(inter.author.id, only_unused=True)
+                for p in purchases:
+                    if p.get('type') == 'roles' and p.get('value') == item['name']:
+                        return await inter.edit_original_response(content=f"❌ Вы уже купили эту роль, но она ещё не выдана.")
+            else:
+                return await inter.edit_original_response(content="❌ Роль не найдена на сервере.")
+
+        success = await remove_dc(inter.author.id, price, f"Покупка: {item['name']}" + (f" (подарок для <@{recipient_id}>)" if recipient_id else ""))
         if not success:
-            return await inter.response.send_message("❌ Ошибка при возврате товара.", ephemeral=True)
-        refund = int(self.price * 0.75)
-        await add_dc(self.user_id, refund, f"Возврат товара: {p['value']} (75%)")
-        await inter.response.send_message(
-            f"✅ Товар **{p['value']}** возвращён!\n"
-            f"💎 Вам начислено **{refund} DC** (75% от стоимости).",
-            ephemeral=True
-        )
-        await log_discord(
-            title="🔄 Возврат товара",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {p['value']}\n> **Возвращено:** {refund} DC",
-            color=0xffaa00,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
+            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуйте позже.")
+
+        # Добавляем покупку получателю (или себе)
+        target_id = recipient_id if recipient_id else inter.author.id
+        await add_purchase(target_id, category, item["name"])
+
+        if category == "roles" and item.get("role_id"):
+            role = inter.guild.get_role(item["role_id"])
+            if role:
+                try:
+                    target_member = inter.guild.get_member(target_id)
+                    if target_member:
+                        await target_member.add_roles(role)
+                        await inter.edit_original_response(
+                            content=f"✅ Вы купили роль **{item['name']}** за **{price} DC**!\n"
+                                    f"🎭 Роль **{role.name}** выдана {target_member.mention}.\n"
+                                    f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                        )
+                        await log_discord(
+                            title="🛒 Покупка роли в магазине DC",
+                            description=f"> **Покупатель:** {inter.author.mention}\n> **Получатель:** {target_member.mention}\n> **Роль:** {item['name']}\n> **Цена:** {price} DC",
+                            color=0x00aaff
+                        )
+                        return
+                    else:
+                        await add_dc(inter.author.id, price, "Возврат DC (получатель не найден)")
+                        await inter.edit_original_response(content="❌ Получатель не найден на сервере. Средства возвращены.")
+                        return
+                except Exception as e:
+                    await add_dc(inter.author.id, price, "Возврат DC (ошибка выдачи роли)")
+                    await inter.edit_original_response(
+                        content=f"❌ Не удалось выдать роль: {e}\n"
+                                f"💎 {price} DC возвращены на баланс."
+                    )
+                    return
+            else:
+                await add_dc(inter.author.id, price, "Возврат DC (роль не найдена)")
+                await inter.edit_original_response(content="❌ Роль не найдена на сервере. Средства возвращены.")
+                return
+
+        if recipient_id:
+            await inter.edit_original_response(
+                f"✅ Вы купили **{item['name']}** за **{price} DC** и подарили <@{recipient_id}>!\n"
+                f"📦 Товар уже в инвентаре получателя.\n"
+                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+            )
+            await log_discord(
+                title="🎁 Покупка в подарок",
+                description=f"> **Покупатель:** {inter.author.mention}\n> **Получатель:** <@{recipient_id}>\n> **Товар:** {item['name']}\n> **Цена:** {price} DC",
+                color=0xffaa00,
+                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            )
+        else:
+            await inter.edit_original_response(
+                f"✅ Вы купили **{item['name']}** за **{price} DC**!\n"
+                f"📦 Товар будет выдан в ближайшее время.\n"
+                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+            )
+            await log_discord(
+                title="🛒 Покупка в магазине DC",
+                description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item['name']}\n> **Цена:** {price} DC",
+                color=0x00aaff
+            )
+
+class GiftRecipientModal(Modal):
+    def __init__(self, original_inter, category, item_key, item):
+        self.original_inter = original_inter
+        self.category = category
+        self.item_key = item_key
+        self.item = item
+        components = [
+            TextInput(
+                label="Упомяните получателя",
+                placeholder="Например, @user",
+                custom_id="recipient",
+                min_length=3,
+                max_length=100
+            )
+        ]
+        super().__init__(title="Подарок", components=components)
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        recipient_input = inter.text_values["recipient"].strip()
+        match = re.search(r'<@!?(\d+)>', recipient_input)
+        if not match:
+            return await inter.response.send_message("❌ Не удалось определить получателя. Используйте @упоминание.", ephemeral=True)
+        recipient_id = int(match.group(1))
+        if recipient_id == inter.author.id:
+            return await inter.response.send_message("❌ Вы не можете подарить товар самому себе.", ephemeral=True)
+        guild = inter.guild
+        recipient_member = guild.get_member(recipient_id)
+        if not recipient_member:
+            return await inter.response.send_message("❌ Пользователь не найден на сервере.", ephemeral=True)
+        if recipient_member.bot:
+            return await inter.response.send_message("❌ Нельзя дарить товар ботам.", ephemeral=True)
+
+        # Возвращаемся к процессу покупки с recipient_id
+        buy_view = BuySelectView()
+        await buy_view.process_buy(inter, self.category, self.item_key, self.item, recipient_id)
+
+    async def back_callback(self, inter: disnake.MessageInteraction):
+        await inter.response.defer(ephemeral=True)
+        await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
 
 # ============================================================
 # ОТПРАВКА ПАНЕЛИ ТИКЕТОВ (в канал 1462136361711829053)
