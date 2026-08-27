@@ -19,7 +19,8 @@ from core.utils import (
     add_ticket_owner, remove_ticket_owner, get_ticket_owner,
     get_user_tickets_count_in_category,
     assign_ticket_manager, get_ticket_manager, clear_ticket_manager,
-    increment_manager_closed, add_manager_rating, add_closed_order
+    increment_manager_closed, add_manager_rating,
+    add_closed_order
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
@@ -82,7 +83,7 @@ async def clear_ticket_owner(channel: disnake.TextChannel):
         await handle_ticket_roles_on_close(channel)
 
 # ============================================================
-# КЛАСС МОДЕРАЦИИ ОТЗЫВОВ (ДОБАВЛЕН)
+# КЛАСС МОДЕРАЦИИ ОТЗЫВОВ
 # ============================================================
 class ReviewModerationView(View):
     def __init__(self, user_id: int, content: str, msg_id: int, channel_id: int):
@@ -516,6 +517,7 @@ class TicketRatingView(View):
     async def rate_callback(self, inter: disnake.MessageInteraction):
         channel = inter.channel
         user_id = get_ticket_owner(channel.id)
+        # Только владелец или админ могут оценивать? Оценку может ставить только клиент, поэтому оставляем владельца
         if user_id and inter.author.id != user_id:
             return await inter.response.send_message("⛔ Оценивать может только владелец тикета.", ephemeral=True)
         manager_id = get_ticket_manager(channel.id)
@@ -526,8 +528,9 @@ class TicketRatingView(View):
     async def close_callback(self, inter: disnake.MessageInteraction):
         channel = inter.channel
         user_id = get_ticket_owner(channel.id)
-        if user_id and inter.author.id != user_id:
-            return await inter.response.send_message("⛔ Закрывать заказ может только владелец тикета.", ephemeral=True)
+        # Админ может закрыть тикет, даже если не владелец
+        if user_id and inter.author.id != user_id and not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Закрывать заказ может только владелец тикета или админ.", ephemeral=True)
         await self.close_ticket(inter)
 
     async def close_ticket(self, inter: disnake.MessageInteraction):
@@ -629,11 +632,12 @@ class TicketView(View):
         self.add_item(btn_discounts)
 
     async def close_callback(self, inter: disnake.MessageInteraction):
-        if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
+        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
         channel = inter.channel
         manager_id = get_ticket_manager(channel.id)
-        if manager_id and inter.author.id != manager_id:
+        # Админ может игнорировать ограничение другого менеджера
+        if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Этот тикет уже ведёт другой менеджер.", ephemeral=True)
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
@@ -683,11 +687,11 @@ class TicketView(View):
         )
 
     async def pay_callback(self, inter: disnake.MessageInteraction):
-        if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
+        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на подтверждение оплаты.", ephemeral=True)
         channel = inter.channel
         manager_id = get_ticket_manager(channel.id)
-        if manager_id and inter.author.id != manager_id:
+        if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Этот тикет уже ведёт другой менеджер.", ephemeral=True)
 
         msg = inter.message
@@ -790,8 +794,7 @@ class TicketView(View):
         if not discounts:
             return await inter.response.send_message("❌ У вас нету доступных купленных скидок.", ephemeral=True)
 
-        from modules.commands_profile import load_embed_from_file
-        slid_embeds = load_embed_from_file("slid.json")
+        slid_embeds = load_action_embed("slid.json")
         if not slid_embeds or len(slid_embeds) == 0:
             slid_embeds = [disnake.Embed(
                 title="📦 Ваши скидки",
@@ -911,11 +914,11 @@ class TicketPaidView(View):
         self.add_item(btn_discounts)
 
     async def close_callback(self, inter: disnake.MessageInteraction):
-        if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
+        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
         channel = inter.channel
         manager_id = get_ticket_manager(channel.id)
-        if manager_id and inter.author.id != manager_id:
+        if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Этот тикет уже ведёт другой менеджер.", ephemeral=True)
 
         owner_id = get_ticket_owner(channel.id)
@@ -971,11 +974,11 @@ class CoinsTicketButtons(View):
         row=0
     )
     async def close(self, button, inter: disnake.MessageInteraction):
-        if not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
+        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
         channel = inter.channel
         manager_id = get_ticket_manager(channel.id)
-        if manager_id and inter.author.id != manager_id:
+        if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Этот тикет уже ведёт другой менеджер.", ephemeral=True)
 
         owner_id = get_ticket_owner(channel.id)
@@ -1296,7 +1299,7 @@ class CatalogView(disnake.ui.View):
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=None)  # ИСПРАВЛЕНО: None вместо 900
         catalog = load_shop_catalog()
         options = []
         for key, cat in catalog.items():
