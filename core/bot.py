@@ -19,7 +19,8 @@ from core.utils import (
     BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR,
     get_dc_cache, save_dc_cache, sync_dc_to_json,
     assign_ticket_manager, get_ticket_manager, get_ticket_owner, clear_ticket_manager,
-    increment_manager_closed, add_manager_rating
+    increment_manager_closed, add_manager_rating,
+    add_closed_order
 )
 
 from modules.actions import send_actions_panel, handle_flash_interaction
@@ -577,7 +578,8 @@ async def on_message(message: disnake.Message):
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
             if get_ticket_manager(message.channel.id) is None:
-                if any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
+                # НЕ назначаем админа менеджером!
+                if not has_admin_command_roles(message.author) and any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
                     assign_ticket_manager(message.channel.id, message.author.id)
                     # Красивое сообщение
                     embed = disnake.Embed(
