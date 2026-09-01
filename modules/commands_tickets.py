@@ -490,7 +490,7 @@ class QuestionTicketView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="ㅤЗакрытьㅤ",
+        label=" Закрыть ",
         style=disnake.ButtonStyle.gray,
         custom_id="question:close",
         emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
@@ -516,7 +516,7 @@ class QuestionTicketView(View):
         )
 
     @disnake.ui.button(
-        label="ㅤКак правильно задать вопрос?ㅤ",
+        label=" Как правильно задать вопрос? ",
         style=disnake.ButtonStyle.gray,
         custom_id="question:howto",
         emoji=PartialEmoji(name="pravil", id=1544388874497687622),
