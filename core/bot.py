@@ -157,7 +157,7 @@ async def on_ready():
         bot.add_view(TarologyView())
         bot.add_view(ProfileView())
         bot.add_view(WorkView())
-        bot.add_view(QuestionTicketView())  # ДОБАВЛЕНО
+        bot.add_view(QuestionTicketView())
 
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
@@ -575,12 +575,13 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
-    # Автоназначение менеджера при первом сообщении в тикете
+    # Автоназначение менеджера при первом сообщении в тикете (ИСПРАВЛЕНО)
     if message.channel.category:
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
             if get_ticket_manager(message.channel.id) is None:
-                if not has_admin_command_roles(message.author) and any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
+                owner_id = get_ticket_owner(message.channel.id)
+                if message.author.id != owner_id and any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
                     assign_ticket_manager(message.channel.id, message.author.id)
                     # Красивое сообщение
                     embed = disnake.Embed(
