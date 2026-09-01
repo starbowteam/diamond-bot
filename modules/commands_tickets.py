@@ -515,7 +515,7 @@ class QuestionTicketView(View):
             color=6776679
         )
         embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a979d63&is=6a964be3&hm=6b425dcaba72f3d56d43c943a7a02f5a4d6627fbfa68330b6a0a1905992e9705&")
-        embed2.add_field(name="", value="")  # Пустое поле для баланса
+        embed2.add_field(name="", value="")
 
         await inter.response.send_message(embeds=[embed1, embed2])
         await log_discord(
@@ -526,7 +526,7 @@ class QuestionTicketView(View):
         )
 
     @disnake.ui.button(
-        label="ㅤㅤㅤЗакрытьㅤㅤㅤ",
+        label="ㅤㅤЗакрытьㅤㅤ",
         style=disnake.ButtonStyle.gray,
         custom_id="question:close",
         emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
