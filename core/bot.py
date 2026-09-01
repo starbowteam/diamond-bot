@@ -132,6 +132,7 @@ async def on_ready():
             CatalogTypeView,
             CatalogView,
             BuySelectView,
+            QuestionTicketView,
             handle_interaction
         )
         from modules.commands_panels import (
@@ -156,6 +157,7 @@ async def on_ready():
         bot.add_view(TarologyView())
         bot.add_view(ProfileView())
         bot.add_view(WorkView())
+        bot.add_view(QuestionTicketView())  # ДОБАВЛЕНО
 
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
@@ -578,7 +580,6 @@ async def on_message(message: disnake.Message):
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
             if get_ticket_manager(message.channel.id) is None:
-                # НЕ назначаем админа менеджером!
                 if not has_admin_command_roles(message.author) and any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
                     assign_ticket_manager(message.channel.id, message.author.id)
                     # Красивое сообщение
