@@ -173,13 +173,14 @@ class BuyTicketModal(Modal):
         super().__init__(title="Создание тикета на покупку", components=components, custom_id="buy_ticket_modal")
 
     async def callback(self, inter: disnake.ModalInteraction):
+        await inter.response.defer(ephemeral=True)  # ДОБАВЛЕНО
         from core.bot import bot
         uid = inter.author.id
         now = time.time()
         last = getattr(bot, "_user_ticket_cooldowns", {})
         if uid in last and now - last[uid] < CONFIG["TICKET_COOLDOWN_SECONDS"]:
             remaining = int(CONFIG["TICKET_COOLDOWN_SECONDS"] - (now - last[uid]))
-            return await inter.response.send_message(f"⏳ Подождите {remaining} сек.", ephemeral=True)
+            return await inter.edit_original_response(content=f"⏳ Подождите {remaining} сек.")
         last[uid] = now
         bot._user_ticket_cooldowns = last
 
@@ -198,7 +199,7 @@ class BuyTicketModal(Modal):
         guild = inter.guild
         cat = guild.get_channel(CONFIG["TICKET_CATEGORY_ID"])
         if not cat:
-            return await inter.response.send_message("❌ Категория не найдена", ephemeral=True)
+            return await inter.edit_original_response(content="❌ Категория не найдена")
 
         safe_item = item.lower().replace(" ", "-")[:80]
         channel_name = f"{safe_item}"
@@ -247,7 +248,7 @@ class BuyTicketModal(Modal):
         select_view = SelectView()
         await ticket_channel.send(embed=select_embed, view=select_view)
 
-        await inter.response.send_message(f"✅ Тикет создан: {ticket_channel.mention}", ephemeral=True)
+        await inter.edit_original_response(content=f"✅ Тикет создан: {ticket_channel.mention}")
 
         add_ticket_owner(ticket_channel.id, inter.author.id, cat.id)
 
@@ -274,13 +275,14 @@ class CoinsTicketModal(Modal):
         super().__init__(title="Создание тикета на покупку (DC/Инвайты)", components=components, custom_id="coins_ticket_modal")
 
     async def callback(self, inter: disnake.ModalInteraction):
+        await inter.response.defer(ephemeral=True)  # ДОБАВЛЕНО
         from core.bot import bot
         uid = inter.author.id
         now = time.time()
         last = getattr(bot, "_user_ticket_cooldowns", {})
         if uid in last and now - last[uid] < CONFIG["TICKET_COOLDOWN_SECONDS"]:
             remaining = int(CONFIG["TICKET_COOLDOWN_SECONDS"] - (now - last[uid]))
-            return await inter.response.send_message(f"⏳ Подождите {remaining} сек.", ephemeral=True)
+            return await inter.edit_original_response(content=f"⏳ Подождите {remaining} сек.")
         last[uid] = now
         bot._user_ticket_cooldowns = last
 
@@ -289,7 +291,7 @@ class CoinsTicketModal(Modal):
         guild = inter.guild
         cat = guild.get_channel(CONFIG["COINS_CATEGORY_ID"])
         if not cat:
-            return await inter.response.send_message("❌ Категория не найдена", ephemeral=True)
+            return await inter.edit_original_response(content="❌ Категория не найдена")
 
         safe_item = item.lower().replace(" ", "-")[:80]
         channel_name = f"{safe_item}"
@@ -329,7 +331,7 @@ class CoinsTicketModal(Modal):
         view.message = sent_msg
         view.order_embed_index = 1
 
-        await inter.response.send_message(f"✅ Тикет создан: {ticket_channel.mention}", ephemeral=True)
+        await inter.edit_original_response(content=f"✅ Тикет создан: {ticket_channel.mention}")
 
         add_ticket_owner(ticket_channel.id, inter.author.id, cat.id)
 
@@ -389,6 +391,120 @@ class BuyTypeView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(BuySelect())
+
+# ============================================================
+# МОДАЛКА ВОПРОСА
+# ============================================================
+class QuestionModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Что за вопрос вы хотите задать?",
+                placeholder="Например: Как давно вы занимаетесь магазином?",
+                custom_id="question",
+                min_length=3,
+                max_length=500
+            )
+        ]
+        super().__init__(title="Задать вопрос", components=components, custom_id="question_modal")
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        await inter.response.defer(ephemeral=True)
+        question = inter.text_values["question"]
+        guild = inter.guild
+
+        # Категория для вопросов
+        cat = guild.get_channel(1544363672128987196)
+        if not cat:
+            return await inter.edit_original_response(content="❌ Категория для вопросов не найдена.")
+
+        # Имя канала = никнейм пользователя (без пробелов)
+        channel_name = inter.author.display_name.lower().replace(" ", "-")[:80]
+        if not channel_name:
+            channel_name = f"question-{inter.author.id}"
+
+        # Права доступа
+        overwrites = {
+            guild.default_role: disnake.PermissionOverwrite(view_channel=False),
+            inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+        }
+
+        # Роль, у которой есть доступ
+        support_role = guild.get_role(1423360115335106570)
+        if support_role:
+            overwrites[support_role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+
+        # Админы тоже могут видеть (опционально)
+        admin_role = guild.get_role(1127428607606796294)
+        if admin_role:
+            overwrites[admin_role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+
+        # Создаём канал
+        ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
+
+        # Собираем эмбеды
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1064857845838925865/1544369476475158629/image.png?ex=6a9841a8&is=6a96f028&hm=e2f80206537e8c87820b03cccdb39f120cdc1452055767b4e122f455b3f66e1b&")
+
+        current_time = int(time.time())
+        embed2 = disnake.Embed(
+            title="Что за вопрос был задан:",
+            description=f"> Время: <t:{current_time}:f>\n> Ответ на вопрос от персонала.",
+            color=6776679
+        )
+        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a979d63&is=6a964be3&hm=6b425dcaba72f3d56d43c943a7a02f5a4d6627fbfa68330b6a0a1905992e9705&")
+        embed2.add_field(name="> Суть вопроса", value=f"```{question}```")
+
+        # Отправляем сообщение в канал с кнопкой закрытия
+        view = QuestionTicketView(ticket_channel)
+        await ticket_channel.send(embeds=[embed1, embed2], view=view)
+
+        # Уведомляем пользователя
+        await inter.edit_original_response(content=f"✅ Ваш вопрос создан: {ticket_channel.mention}")
+
+        # Логируем
+        await log_discord(
+            title="❓ Новый вопрос",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {ticket_channel.mention}\n> **Вопрос:** {question}",
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
+# ============================================================
+# ВИД ДЛЯ КАНАЛА ВОПРОСА
+# ============================================================
+class QuestionTicketView(View):
+    def __init__(self, channel):
+        super().__init__(timeout=None)
+        self.channel = channel
+
+    @disnake.ui.button(
+        label="ㅤЗакрытьㅤ",
+        style=disnake.ButtonStyle.gray,
+        custom_id="question:close",
+        emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
+        row=0
+    )
+    async def close(self, button: Button, inter: disnake.MessageInteraction):
+        # Проверяем права: автор вопроса или роль поддержки или админ
+        if inter.author.id != inter.channel.guild.get_role(1423360115335106570) and not has_admin_command_roles(inter.author):
+            # Если у автора нет прав, проверяем что он владелец канала? По условию закрывает кто угодно с доступом.
+            # Разрешаем всем, у кого есть доступ (роль поддержки или админ)
+            if not any(r.id == 1423360115335106570 for r in inter.author.roles) and not has_admin_command_roles(inter.author):
+                return await inter.response.send_message("⛔ У вас нет прав на закрытие.", ephemeral=True)
+
+        await inter.response.send_message("Канал закрывается...", ephemeral=True)
+        await asyncio.sleep(1)
+        try:
+            await self.channel.delete()
+        except:
+            pass
+        await log_discord(
+            title="❓ Вопрос закрыт",
+            description=f"> **Канал:** {self.channel.name}\n> **Закрыл:** {inter.author.mention}",
+            color=0xff6600,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
 
 # ============================================================
 # СЕЛЕКТ-МЕНЮ ДЛЯ ТИКЕТОВ
@@ -517,7 +633,6 @@ class TicketRatingView(View):
     async def rate_callback(self, inter: disnake.MessageInteraction):
         channel = inter.channel
         user_id = get_ticket_owner(channel.id)
-        # Только владелец или админ могут оценивать? Оценку может ставить только клиент, поэтому оставляем владельца
         if user_id and inter.author.id != user_id:
             return await inter.response.send_message("⛔ Оценивать может только владелец тикета.", ephemeral=True)
         manager_id = get_ticket_manager(channel.id)
@@ -528,7 +643,6 @@ class TicketRatingView(View):
     async def close_callback(self, inter: disnake.MessageInteraction):
         channel = inter.channel
         user_id = get_ticket_owner(channel.id)
-        # Админ может закрыть тикет, даже если не владелец
         if user_id and inter.author.id != user_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Закрывать заказ может только владелец тикета или админ.", ephemeral=True)
         await self.close_ticket(inter)
@@ -636,7 +750,6 @@ class TicketView(View):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие тикетов.", ephemeral=True)
         channel = inter.channel
         manager_id = get_ticket_manager(channel.id)
-        # Админ может игнорировать ограничение другого менеджера
         if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Этот тикет уже ведёт другой менеджер.", ephemeral=True)
         owner_id = get_ticket_owner(channel.id)
@@ -1299,7 +1412,7 @@ class CatalogView(disnake.ui.View):
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
-        super().__init__(timeout=None)  # ИСПРАВЛЕНО: None вместо 900
+        super().__init__(timeout=None)  # исправлено
         catalog = load_shop_catalog()
         options = []
         for key, cat in catalog.items():
@@ -1543,8 +1656,8 @@ class TicketPanelView(View):
     async def buy(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         embed = disnake.Embed(
             color=6776679,
-            title="Выбор категории оплаты товара",
-            description="В чем представлен ваш товар? Выберите метод ниже."
+            title="Выбор категории по оплате",
+            description="В какой валюте вы хотите купить товар? Если у вас есть вопрос, вы можете его задать по кнопке ниже."
         )
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
         view = BuyTypeView()
@@ -1581,6 +1694,16 @@ class TicketPanelView(View):
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a8679e3&is=6a852863&hm=59892e8783bfb24b381e2a76e3689f727bef8f1e3aea9595dd3d130b587dede4&")
         view = CatalogTypeView()
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @disnake.ui.button(
+        label="ㅤЗадать вопросㅤ",
+        style=disnake.ButtonStyle.gray,
+        custom_id="panel:question",
+        emoji=PartialEmoji(name="questi", id=1544371841118773328)
+    )
+    async def question(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        # Открываем модалку вопроса
+        await inter.response.send_modal(QuestionModal())
 
 # ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ
