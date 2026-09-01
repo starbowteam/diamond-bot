@@ -456,7 +456,7 @@ class QuestionModal(Modal):
         embed2.add_field(name="> Суть вопроса", value=f"```{question}```")
 
         # Отправляем сообщение в канал с кнопкой закрытия
-        view = QuestionTicketView(ticket_channel)
+        view = QuestionTicketView()
         await ticket_channel.send(embeds=[embed1, embed2], view=view)
 
         # Уведомляем пользователя
@@ -471,12 +471,11 @@ class QuestionModal(Modal):
         )
 
 # ============================================================
-# ВИД ДЛЯ КАНАЛА ВОПРОСА
+# ВИД ДЛЯ КАНАЛА ВОПРОСА (ИСПРАВЛЕН)
 # ============================================================
 class QuestionTicketView(View):
-    def __init__(self, channel):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.channel = channel
 
     @disnake.ui.button(
         label="ㅤЗакрытьㅤ",
@@ -487,21 +486,20 @@ class QuestionTicketView(View):
     )
     async def close(self, button: Button, inter: disnake.MessageInteraction):
         # Проверяем права: автор вопроса или роль поддержки или админ
-        if inter.author.id != inter.channel.guild.get_role(1423360115335106570) and not has_admin_command_roles(inter.author):
-            # Если у автора нет прав, проверяем что он владелец канала? По условию закрывает кто угодно с доступом.
-            # Разрешаем всем, у кого есть доступ (роль поддержки или админ)
-            if not any(r.id == 1423360115335106570 for r in inter.author.roles) and not has_admin_command_roles(inter.author):
-                return await inter.response.send_message("⛔ У вас нет прав на закрытие.", ephemeral=True)
+        # Разрешаем всем, у кого есть доступ (роль поддержки или админ)
+        if not any(r.id == 1423360115335106570 for r in inter.author.roles) and not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на закрытие.", ephemeral=True)
 
         await inter.response.send_message("Канал закрывается...", ephemeral=True)
         await asyncio.sleep(1)
+        channel = inter.channel
         try:
-            await self.channel.delete()
+            await channel.delete()
         except:
             pass
         await log_discord(
             title="❓ Вопрос закрыт",
-            description=f"> **Канал:** {self.channel.name}\n> **Закрыл:** {inter.author.mention}",
+            description=f"> **Канал:** {channel.name}\n> **Закрыл:** {inter.author.mention}",
             color=0xff6600,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
