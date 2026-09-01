@@ -348,7 +348,7 @@ class CoinsTicketModal(Modal):
             ))
 
 # ============================================================
-# ВЫБОР ТИПА ПОКУПКИ
+# ВЫБОР ТИПА ПОКУПКИ (СЕЛЕКТ-МЕНЮ)
 # ============================================================
 class BuySelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -364,10 +364,16 @@ class BuySelect(disnake.ui.StringSelect):
                 description="Бонусная валюта сервера",
                 emoji="<:coins:1539649259245408340>",
                 value="coins"
+            ),
+            disnake.SelectOption(
+                label="Задать вопрос",
+                description="Узнать о нужном товаре",
+                emoji="<:questi:1544371841118773328>",
+                value="question"
             )
         ]
         super().__init__(
-            placeholder="Выберите способ оплаты...",
+            placeholder="Выберите способ оплаты или задайте вопрос...",
             min_values=1,
             max_values=1,
             options=options,
@@ -386,6 +392,8 @@ class BuySelect(disnake.ui.StringSelect):
             await inter.response.send_modal(BuyTicketModal())
         elif value == "coins":
             await inter.response.send_modal(CoinsTicketModal())
+        elif value == "question":
+            await inter.response.send_modal(QuestionModal())
 
 class BuyTypeView(disnake.ui.View):
     def __init__(self):
@@ -457,7 +465,11 @@ class QuestionModal(Modal):
 
         # Отправляем сообщение в канал с кнопкой закрытия
         view = QuestionTicketView()
-        await ticket_channel.send(embeds=[embed1, embed2], view=view)
+        await ticket_channel.send(
+            content=f"<@&1423360115335106570> - задан вопрос, постарайтесь ответить!",
+            embeds=[embed1, embed2],
+            view=view
+        )
 
         # Уведомляем пользователя
         await inter.edit_original_response(content=f"✅ Ваш вопрос создан: {ticket_channel.mention}")
@@ -471,7 +483,7 @@ class QuestionModal(Modal):
         )
 
 # ============================================================
-# ВИД ДЛЯ КАНАЛА ВОПРОСА (ИСПРАВЛЕН)
+# ВИД ДЛЯ КАНАЛА ВОПРОСА
 # ============================================================
 class QuestionTicketView(View):
     def __init__(self):
@@ -485,8 +497,7 @@ class QuestionTicketView(View):
         row=0
     )
     async def close(self, button: Button, inter: disnake.MessageInteraction):
-        # Проверяем права: автор вопроса или роль поддержки или админ
-        # Разрешаем всем, у кого есть доступ (роль поддержки или админ)
+        # Разрешаем закрыть автору вопроса, роли поддержки или админу
         if not any(r.id == 1423360115335106570 for r in inter.author.roles) and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие.", ephemeral=True)
 
@@ -1655,7 +1666,7 @@ class TicketPanelView(View):
         embed = disnake.Embed(
             color=6776679,
             title="Выбор категории по оплате",
-            description="В какой валюте вы хотите купить товар? Если у вас есть вопрос, вы можете его задать по кнопке ниже."
+            description="В какой валюте вы хотите купить товар? Если у вас есть вопрос, вы можете его задать, выбрав соответствующий пункт ниже."
         )
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8679e3&is=6a852863&hm=2846271def3b36c9d96bb56818b8f3cf22e071ef66a90ab4da459e40de563255&")
         view = BuyTypeView()
@@ -1692,16 +1703,6 @@ class TicketPanelView(View):
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a8679e3&is=6a852863&hm=59892e8783bfb24b381e2a76e3689f727bef8f1e3aea9595dd3d130b587dede4&")
         view = CatalogTypeView()
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    @disnake.ui.button(
-        label="ㅤЗадать вопросㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="panel:question",
-        emoji=PartialEmoji(name="questi", id=1544371841118773328)
-    )
-    async def question(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        # Открываем модалку вопроса
-        await inter.response.send_modal(QuestionModal())
 
 # ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ
