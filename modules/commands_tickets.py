@@ -515,6 +515,43 @@ class QuestionTicketView(View):
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
+    @disnake.ui.button(
+        label="ㅤКак правильно задать вопрос?ㅤ",
+        style=disnake.ButtonStyle.gray,
+        custom_id="question:howto",
+        emoji=PartialEmoji(name="pravil", id=1544388874497687622),
+        row=1
+    )
+    async def howto(self, button: Button, inter: disnake.MessageInteraction):
+        # Создаём эмбед с инструкцией
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1544387485684203682/image.png?ex=6a98526d&is=6a9700ed&hm=e6eb0b7ec153c23c7d63cb3fe64a405c56dee64cc9edbe9792cd69bfe7e4fe3b&")
+
+        embed2 = disnake.Embed(
+            title="Как правильно задать вопрос?",
+            description=(
+                "> Чтобы правильно задать вопрос, нужно сформулировать его чётко, кратко и без скрытых подсказок, указав суть проблемы и ожидаемый результат.\n\n"
+                "> Основные правила сильного вопроса\n\n"
+                "`Определите цель: `Поймите, какая информация вам нужна.\n"
+                "`Говорите просто: `Избегайте сложных терминов и длинных конструкций.\n"
+                "`Избегайте наводок:` Не подталкивайте собеседника к нужному вам ответу.\n"
+                "`Используйте открытые вопросы:` Начинайте со слов «что», «как» и тд. чтобы получить развёрнутый ответ.\n"
+                "`Добавляйте контекст:` Если это технический вопрос или обращение на форум, опишите проблему, что вы уже сделали и какой результат ожидали."
+            ),
+            color=6776679
+        )
+        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a979d63&is=6a964be3&hm=6b425dcaba72f3d56d43c943a7a02f5a4d6627fbfa68330b6a0a1905992e9705&")
+        embed2.add_field(name="", value="")  # Пустое поле для баланса
+
+        # Отправляем в канал (не эфемерно)
+        await inter.response.send_message(embeds=[embed1, embed2])
+        await log_discord(
+            title="📖 Просмотр инструкции по вопросам",
+            description=f"> **Канал:** {inter.channel.mention}\n> **Пользователь:** {inter.author.mention}",
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+        
 # ============================================================
 # СЕЛЕКТ-МЕНЮ ДЛЯ ТИКЕТОВ
 # ============================================================
