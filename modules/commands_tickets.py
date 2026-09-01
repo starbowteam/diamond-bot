@@ -520,7 +520,7 @@ class QuestionTicketView(View):
         style=disnake.ButtonStyle.gray,
         custom_id="question:howto",
         emoji=PartialEmoji(name="pravil", id=1544388874497687622),
-        row=1
+        row=0
     )
     async def howto(self, button: Button, inter: disnake.MessageInteraction):
         # Создаём эмбед с инструкцией
