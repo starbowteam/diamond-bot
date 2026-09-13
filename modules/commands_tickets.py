@@ -234,14 +234,14 @@ class BuyTicketModal(Modal):
         view = TicketView()
         await ticket_channel.send(
             f"> Добрый день, {inter.author.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
-            f"> Помните, по селекту ниже вы можете посмотреть реквизиты или политику, а кнопкой оплатить — подтвердить оплату.",
+            f"> В селекте ниже, можете ознакомиться с политикой, а менеджер - после уточнения заказа, создаст вам счет.",
             embeds=[embeds_list[0], embed_order_info],
             view=view
         )
 
         select_embed = disnake.Embed(
             title="Что именно нужно посмотреть?",
-            description="Ниже, выбор - просмотр политики по заказу, либо - просмотр реквизитов для оплаты  \n\nВыберите нужный пункт.",
+            description="Ниже, выбор - просмотр политики по заказу, либо - создать счет  \n\nВыберите нужный пункт.",
             color=6776679
         )
         select_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8b1723&is=6a89c5a3&hm=84444a514a08c282e27d51013698ba7b5e82c75a45ae4a004c56b3e58a9acd12&")
@@ -562,7 +562,7 @@ class TicketActionSelect(disnake.ui.StringSelect):
             max_values=1,
             options=[
                 disnake.SelectOption(
-                    label="Реквизиты",
+                    label="Счет на оплату",
                     description="Сгенерировать счёт на оплату",
                     emoji="<:Rekvi:1539656975091105892>",
                     value="requisites"
