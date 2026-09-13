@@ -628,11 +628,11 @@ class InvoiceModal(Modal):
                 max_length=10
             ),
             TextInput(
-                label="Скидка (₽), если была (необязательно)",
-                placeholder="Например: 50",
+                label="Скидка в %, если была (необязательно)",
+                placeholder="Например: 10",
                 custom_id="discount",
                 required=False,
-                max_length=10
+                max_length=3
             )
         ]
         super().__init__(title="Создание счёта", components=components, custom_id="invoice_modal")
@@ -640,6 +640,7 @@ class InvoiceModal(Modal):
     async def callback(self, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
 
+        import asyncio
         from modules.receipt import generate_receipt_png, generate_receipt_id
 
         amount_str = inter.text_values["amount"].strip()
@@ -651,31 +652,28 @@ class InvoiceModal(Modal):
         if amount <= 0:
             return await inter.edit_original_response(content="❌ Сумма должна быть больше 0.")
 
-        discount = 0
+        discount_percent = 0
         if discount_str:
             if not discount_str.isdigit():
                 return await inter.edit_original_response(content="❌ Скидка должна быть числом.")
-            discount = int(discount_str)
-            if discount < 0:
-                return await inter.edit_original_response(content="❌ Скидка не может быть отрицательной.")
-            if discount >= amount:
-                return await inter.edit_original_response(content="❌ Скидка не может быть больше или равна сумме.")
+            discount_percent = int(discount_str)
+            if discount_percent < 0 or discount_percent > 100:
+                return await inter.edit_original_response(content="❌ Скидка должна быть от 0 до 100%.")
 
-        # Менеджер = тот, кто ведёт тикет
         manager_id = get_ticket_manager(inter.channel.id)
         manager = inter.guild.get_member(manager_id) if manager_id else None
         manager_name = str(manager) if manager else "—"
-
-        # Товар = название тикета
         ticket_name = inter.channel.name
 
-        # Генерируем картинку в памяти
         order_id = generate_receipt_id()
-        buf = generate_receipt_png(
+
+        # Генерация в отдельном потоке — не блокируем event loop
+        buf = await asyncio.to_thread(
+            generate_receipt_png,
             manager_name=manager_name,
             ticket_name=ticket_name,
             amount=amount,
-            discount=discount,
+            discount_percent=discount_percent,
             order_id=order_id
         )
 
@@ -701,8 +699,8 @@ class InvoiceModal(Modal):
                 f"> **Менеджер:** {inter.author.mention}\n"
                 f"> **Канал:** {inter.channel.mention}\n"
                 f"> **Сумма:** {amount} ₽\n"
-                + (f"> **Скидка:** {discount} ₽\n" if discount > 0 else "")
-                + f"> **Итого:** {amount - discount} ₽"
+                + (f"> **Скидка:** {discount_percent}%\n" if discount_percent > 0 else "")
+                + f"> **Итого:** {amount - int(amount * discount_percent / 100)} ₽"
             ),
             color=0x00aaff,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
