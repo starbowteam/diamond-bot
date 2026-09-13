@@ -31,6 +31,15 @@ def _text_size(draw: ImageDraw.ImageDraw, text: str, font) -> tuple:
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
+def _draw_centered(draw, box, text, font, fill):
+    """Рисует текст, центрированный внутри прямоугольника box=(x1,y1,x2,y2)."""
+    x1, y1, x2, y2 = box
+    tw, th = _text_size(draw, text, font)
+    cx = x1 + (x2 - x1 - tw) // 2
+    cy = y1 + (y2 - y1 - th) // 2
+    draw.text((cx, cy), text, font=font, fill=fill)
+
+
 def generate_receipt_png(
     manager_name: str,
     ticket_name: str,
@@ -38,10 +47,6 @@ def generate_receipt_png(
     discount_percent: int = 0,
     order_id: Optional[str] = None,
 ) -> io.BytesIO:
-    """
-    Генерирует PNG-счёт через Pillow.
-    Высокая вертикальная картинка, всё аккуратно разнесено.
-    """
     if order_id is None:
         order_id = f"D-{int(time.time())}-{random.randint(100, 999)}"
 
@@ -50,8 +55,9 @@ def generate_receipt_png(
     discount_rub = int(amount * discount_percent / 100)
     total = max(amount - discount_rub, 0)
 
-    # Габариты: выше, чтобы всё влезло
-    W, H = 900, 1400
+    # Большая широкая картинка
+    W, H = 1400, 1700
+
     BG = (14, 14, 16)
     CARD = (26, 26, 31)
     BORDER = (103, 103, 103)
@@ -64,100 +70,100 @@ def generate_receipt_png(
     draw = ImageDraw.Draw(img)
 
     # Декор
-    draw.ellipse((W - 300, -180, W + 200, 300), fill=(20, 20, 24))
-    draw.ellipse((W - 240, -120, W + 140, 240), fill=(24, 24, 28))
-    draw.ellipse((-250, H - 300, 250, H + 200), fill=(18, 22, 20))
+    draw.ellipse((W - 500, -250, W + 300, 500), fill=(20, 20, 24))
+    draw.ellipse((W - 400, -150, W + 200, 400), fill=(24, 24, 28))
+    draw.ellipse((-350, H - 450, 350, H + 250), fill=(18, 22, 20))
 
     # Внешняя карточка
-    M = 24
+    M = 40
     draw.rounded_rectangle(
         (M, M, W - M, H - M),
-        radius=28, fill=CARD, outline=BORDER, width=2
+        radius=40, fill=CARD, outline=BORDER, width=3
     )
 
-    PAD = 70  # левый/правый отступ
-    y = 90
+    PAD = 110
+    y = 140
 
     # --- Шапка ---
-    # Лого
-    draw.rounded_rectangle((PAD, y, PAD + 64, y + 64), radius=16, fill=(70, 70, 75))
-    draw.text((PAD + 16, y + 16), "◆", font=_get_font(32), fill=(230, 230, 230))
+    logo_size = 110
+    draw.rounded_rectangle((PAD, y, PAD + logo_size, y + logo_size), radius=24, fill=(70, 70, 75))
+    _draw_centered(draw, (PAD, y, PAD + logo_size, y + logo_size), "◆", _get_font(56), (230, 230, 230))
 
-    draw.text((PAD + 84, y + 4), "DIAMOND", font=_get_font(32), fill=TEXT)
-    draw.text((PAD + 84, y + 44), "SHOP & ECOSYSTEM", font=_get_font(13), fill=MUTED)
+    draw.text((PAD + logo_size + 30, y + 10), "DIAMOND", font=_get_font(56), fill=TEXT)
+    draw.text((PAD + logo_size + 30, y + 78), "SHOP & ECOSYSTEM", font=_get_font(22), fill=MUTED)
 
     # Бейдж "СЧЁТ"
-    badge_w, badge_h = 120, 44
+    badge_w, badge_h = 200, 70
     bx = W - PAD - badge_w
-    draw.rounded_rectangle((bx, y + 10, bx + badge_w, y + 10 + badge_h), radius=12, fill=(80, 80, 85))
-    draw.text((bx + 22, y + 20), "СЧЁТ", font=_get_font(18), fill=TEXT)
+    by = y + 20
+    draw.rounded_rectangle((bx, by, bx + badge_w, by + badge_h), radius=18, fill=(80, 80, 85))
+    _draw_centered(draw, (bx, by, bx + badge_w, by + badge_h), "СЧЁТ", _get_font(28), TEXT)
 
     # Разделитель
-    y += 100
-    draw.line((PAD, y, W - PAD, y), fill=LINE, width=1)
+    y += logo_size + 70
+    draw.line((PAD, y, W - PAD, y), fill=LINE, width=2)
 
     # --- Заголовок ---
-    y += 40
-    draw.text((PAD, y), "Счёт на оплату", font=_get_font(42), fill=TEXT)
-    y += 62
-    draw.text((PAD, y), f"Заказ №{order_id} от {date_str}", font=_get_font(16), fill=MUTED)
-
-    # --- Менеджер / Заказ (две карточки) ---
     y += 60
-    card_h = 110
-    gap = 24
+    draw.text((PAD, y), "Счёт на оплату", font=_get_font(72), fill=TEXT)
+    y += 100
+    draw.text((PAD, y), f"Заказ №{order_id} от {date_str}", font=_get_font(26), fill=MUTED)
+
+    # --- Менеджер / Заказ ---
+    y += 80
+    card_h = 180
+    gap = 40
     card_w = (W - PAD * 2 - gap) // 2
 
-    # Менеджер
-    draw.rounded_rectangle((PAD, y, PAD + card_w, y + card_h), radius=16, fill=(20, 20, 25), outline=(42, 42, 47))
-    draw.text((PAD + 24, y + 20), "МЕНЕДЖЕР", font=_get_font(13), fill=MUTED)
-    draw.text((PAD + 24, y + 52), manager_name[:24], font=_get_font(22), fill=TEXT)
+    draw.rounded_rectangle((PAD, y, PAD + card_w, y + card_h), radius=24, fill=(20, 20, 25), outline=(42, 42, 47), width=2)
+    draw.text((PAD + 40, y + 34), "МЕНЕДЖЕР", font=_get_font(22), fill=MUTED)
+    draw.text((PAD + 40, y + 82), manager_name[:26], font=_get_font(38), fill=TEXT)
 
-    # Заказ
     cx = PAD + card_w + gap
-    draw.rounded_rectangle((cx, y, cx + card_w, y + card_h), radius=16, fill=(20, 20, 25), outline=(42, 42, 47))
-    draw.text((cx + 24, y + 20), "ЗАКАЗ", font=_get_font(13), fill=MUTED)
-    draw.text((cx + 24, y + 52), ticket_name[:24], font=_get_font(22), fill=TEXT)
+    draw.rounded_rectangle((cx, y, cx + card_w, y + card_h), radius=24, fill=(20, 20, 25), outline=(42, 42, 47), width=2)
+    draw.text((cx + 40, y + 34), "ЗАКАЗ", font=_get_font(22), fill=MUTED)
+    draw.text((cx + 40, y + 82), ticket_name[:26], font=_get_font(38), fill=TEXT)
 
     # --- Таблица ---
-    y += card_h + 60
-    draw.text((PAD, y), "ТОВАР / УСЛУГА", font=_get_font(13), fill=MUTED)
-    draw.text((W - PAD - 120, y), "СУММА", font=_get_font(13), fill=MUTED)
-    y += 32
-    draw.line((PAD, y, W - PAD, y), fill=LINE, width=1)
+    y += card_h + 90
+    draw.text((PAD, y), "ТОВАР / УСЛУГА", font=_get_font(22), fill=MUTED)
+    right_label = "СУММА"
+    rw, _ = _text_size(draw, right_label, _get_font(22))
+    draw.text((W - PAD - rw, y), right_label, font=_get_font(22), fill=MUTED)
+    y += 50
+    draw.line((PAD, y, W - PAD, y), fill=LINE, width=2)
 
-    y += 26
-    draw.text((PAD, y), ticket_name[:46], font=_get_font(20), fill=TEXT)
-    amount_text = f"{amount} ₽"
-    aw, _ = _text_size(draw, amount_text, _get_font(20))
-    draw.text((W - PAD - aw, y), amount_text, font=_get_font(20), fill=TEXT)
-    y += 56
-    draw.line((PAD, y, W - PAD, y), fill=LINE, width=1)
+    y += 40
+    draw.text((PAD, y), ticket_name[:48], font=_get_font(34), fill=TEXT)
+    amount_text = f"{amount} Р"
+    aw, _ = _text_size(draw, amount_text, _get_font(34))
+    draw.text((W - PAD - aw, y), amount_text, font=_get_font(34), fill=TEXT)
+    y += 80
+    draw.line((PAD, y, W - PAD, y), fill=LINE, width=2)
 
-    # Скидка
     if discount_percent > 0:
-        y += 26
-        draw.text((PAD, y), f"Скидка ({discount_percent}%)", font=_get_font(20), fill=GREEN)
-        disc_text = f"−{discount_rub} ₽"
-        dw, _ = _text_size(draw, disc_text, _get_font(20))
-        draw.text((W - PAD - dw, y), disc_text, font=_get_font(20), fill=GREEN)
-        y += 56
-        draw.line((PAD, y, W - PAD, y), fill=LINE, width=1)
+        y += 40
+        draw.text((PAD, y), f"Скидка ({discount_percent}%)", font=_get_font(34), fill=GREEN)
+        disc_text = f"−{discount_rub} Р"
+        dw, _ = _text_size(draw, disc_text, _get_font(34))
+        draw.text((W - PAD - dw, y), disc_text, font=_get_font(34), fill=GREEN)
+        y += 80
+        draw.line((PAD, y, W - PAD, y), fill=LINE, width=2)
 
     # --- Итого ---
-    y += 60
-    total_h = 140
-    draw.rounded_rectangle((PAD, y, W - PAD, y + total_h), radius=18, fill=(20, 20, 25), outline=(42, 42, 47))
-    draw.text((PAD + 32, y + 40), "ИТОГО К ОПЛАТЕ", font=_get_font(18), fill=MUTED)
-    total_text = f"{total} ₽"
-    tw, _ = _text_size(draw, total_text, _get_font(52))
-    draw.text((W - PAD - 32 - tw, y + 40), total_text, font=_get_font(52), fill=TEXT)
+    y += 80
+    total_h = 200
+    draw.rounded_rectangle((PAD, y, W - PAD, y + total_h), radius=24, fill=(20, 20, 25), outline=(42, 42, 47), width=2)
+    draw.text((PAD + 50, y + 60), "ИТОГО К ОПЛАТЕ", font=_get_font(30), fill=MUTED)
+    total_text = f"{total} Р"
+    tw, _ = _text_size(draw, total_text, _get_font(90))
+    draw.text((W - PAD - 50 - tw, y + 50), total_text, font=_get_font(90), fill=TEXT)
 
-    # --- Реквизиты (отдельный большой блок) ---
-    y += total_h + 60
-    req_h = 300
-    draw.rounded_rectangle((PAD, y, W - PAD, y + req_h), radius=18, fill=(20, 20, 25), outline=(42, 42, 47))
-    draw.text((PAD + 32, y + 30), "РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ", font=_get_font(18), fill=TEXT)
+    # --- Реквизиты ---
+    y += total_h + 80
+    req_h = 400
+    draw.rounded_rectangle((PAD, y, W - PAD, y + req_h), radius=24, fill=(20, 20, 25), outline=(42, 42, 47), width=2)
+    draw.text((PAD + 50, y + 40), "РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ", font=_get_font(30), fill=TEXT)
 
     req_lines = [
         ("Т-Банк", "2200 7020 8029 9345"),
@@ -165,27 +171,18 @@ def generate_receipt_png(
         ("ОзонБанк", "2204 3204 4881 5151"),
         ("СБП", "+7 983 694 76 41 (Виктор А.)"),
     ]
-    ly = y + 80
+    ly = y + 120
     for key, val in req_lines:
-        draw.text((PAD + 32, ly), key, font=_get_font(17), fill=MUTED)
-        vw, _ = _text_size(draw, val, _get_font(17))
-        draw.text((W - PAD - 32 - vw, ly), val, font=_get_font(17), fill=TEXT)
-        ly += 48
+        draw.text((PAD + 50, ly), key, font=_get_font(28), fill=MUTED)
+        vw, _ = _text_size(draw, val, _get_font(28))
+        draw.text((W - PAD - 50 - vw, ly), val, font=_get_font(28), fill=TEXT)
+        ly += 70
         if ly < y + req_h - 20:
-            draw.line((PAD + 32, ly - 14, W - PAD - 32, ly - 14), fill=(35, 35, 40), width=1)
+            draw.line((PAD + 50, ly - 20, W - PAD - 50, ly - 20), fill=(35, 35, 40), width=2)
 
-    # --- Футер: только штамп DIAMOND, без ООО/ИНН ---
-    y += req_h + 60
-    stamp_w, stamp_h = 180, 70
-    draw.rounded_rectangle(
-        (W - PAD - stamp_w, y, W - PAD, y + stamp_h),
-        radius=14, outline=BORDER, width=2
-    )
-    draw.text((W - PAD - stamp_w + 32, y + 24), "DIAMOND", font=_get_font(22), fill=MUTED)
-
-    # Маленькая подпись под штампом
-    draw.text((PAD, y + 20), "Оплата подтверждается менеджером.", font=_get_font(13), fill=MUTED)
-    draw.text((PAD, y + 42), "После оплаты чек — в тикет.", font=_get_font(13), fill=MUTED)
+    # --- Футер: только DIAMOND без рамки ---
+    y += req_h + 80
+    draw.text((PAD, y), "DIAMOND", font=_get_font(28), fill=MUTED)
 
     # Сохраняем
     buf = io.BytesIO()
