@@ -206,3 +206,7 @@ def generate_receipt_png(
     buf.seek(0)
     logger.info(f"Счёт сгенерирован: {order_id}")
     return buf
+
+    def generate_receipt_id() -> str:
+    return f"D-{int(time.time())}-{random.randint(100, 999)}"
+
