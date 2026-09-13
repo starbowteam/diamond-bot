@@ -17,7 +17,6 @@ FONT_FA_REGULAR = os.path.join(ADD_DIR, "fa-regular-400.ttf")
 _FONT_CACHE = {}
 _FA_CACHE = {}
 
-# FA codepoints
 ICON_CART        = 0xf07a
 ICON_USER_TIE    = 0xf508
 ICON_BOX         = 0xf466
@@ -52,7 +51,6 @@ def _get_fa_icon_font(size: int, solid: bool = True):
 
 
 def _draw_icon(draw, cx, cy, code, size, color, solid=True):
-    """Рисует иконку FA по центру (cx, cy)."""
     font = _get_fa_icon_font(size, solid)
     if font is None:
         return False
@@ -81,7 +79,7 @@ def generate_receipt_png(
     discount_percent: int = 0,
     order_id: Optional[str] = None,
 ) -> io.BytesIO:
-    """1800×1200 (3:2). Высокое разрешение — Discord не шакалит."""
+    """1800×1200 (3:2). Реквизиты растянуты, шрифт крупнее, низ прижат к нижнему краю."""
     if order_id is None:
         order_id = f"D-{int(time.time())}-{random.randint(100, 999)}"
 
@@ -92,7 +90,6 @@ def generate_receipt_png(
     discount_rub = int(amount * discount_percent / 100)
     total = max(amount - discount_rub, 0)
 
-    # ---- 1800×1200 (3:2) ----
     W, H = 1800, 1200
     M = 22
     PAD = 60
@@ -116,15 +113,13 @@ def generate_receipt_png(
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    # Мягкий фон
     draw.ellipse((W - 570, -270, W + 120, 420), fill=(16, 16, 20))
     draw.ellipse((-210, H - 390, 330, H + 150), fill=(14, 22, 18))
 
-    # Внешняя карточка
     draw.rounded_rectangle((M, M, W - M, H - M), radius=33, fill=CARD_BOT, outline=BORDER, width=3)
     draw.rounded_rectangle((M + 1, M + 1, W - M - 1, H // 2), radius=33, fill=CARD_TOP)
 
-    # ============ 1. ШАПКА ============
+    # 1. ШАПКА
     y = M + 45
     logo_box = 81
     draw.rounded_rectangle((PAD, y, PAD + logo_box, y + logo_box), radius=21, fill=LOGO_BG)
@@ -136,7 +131,6 @@ def generate_receipt_png(
     lbl_font = _get_font(20)
     num_font = _get_font(22)
     date_font = _get_font(20)
-
     lbl_text = "Заказ "
     num_text = f"№{order_id}"
     lw, _ = _text_size(draw, lbl_text, lbl_font)
@@ -149,11 +143,10 @@ def generate_receipt_png(
 
     y += logo_box + 30
 
-    # ============ 2. ГЕРОЙ ============
+    # 2. ГЕРОЙ
     cx = W // 2
     _draw_centered(draw, cx, y, "ИТОГО К ОПЛАТЕ", _get_font(21), MUTED)
     y += 39
-
     total_text = f"{total} Р"
     font_size = 108
     tw, _ = _text_size(draw, total_text, _get_font(font_size))
@@ -176,7 +169,7 @@ def generate_receipt_png(
         draw.text((bx + pad_bx, y + pad_by), badge_text, font=bf, fill=GREEN)
         y += badge_h
 
-    # ============ 3. РАЗДЕЛИТЕЛЬ ============
+    # 3. РАЗДЕЛИТЕЛЬ
     y += 33
     cx_ = W // 2
     line_color = (58, 58, 63)
@@ -185,19 +178,17 @@ def generate_receipt_png(
     _draw_icon(draw, cx_, y, ICON_CART, 22, (74, 74, 79), solid=True)
     y += 27
 
-    # ============ 4. МЕНЕДЖЕР / ЗАКАЗ ============
+    # 4. МЕНЕДЖЕР / ЗАКАЗ
     meta_h = 99
     gap_x = 21
     card_w = (W - PAD * 2 - gap_x) // 2
 
-    # Менеджер — зелёная
     draw.rounded_rectangle((PAD, y, PAD + card_w, y + meta_h),
                            radius=21, fill=GREEN_BG, outline=GREEN, width=3)
     _draw_icon(draw, PAD + 39, y + meta_h // 2, ICON_USER_TIE, 24, GREEN, solid=True)
     draw.text((PAD + 69, y + 18), "МЕНЕДЖЕР", font=_get_font(15), fill=GREEN)
     draw.text((PAD + 69, y + 48), manager_name[:24], font=_get_font(28), fill=TEXT)
 
-    # Заказ — серая
     cx2 = PAD + card_w + gap_x
     draw.rounded_rectangle((cx2, y, cx2 + card_w, y + meta_h),
                            radius=21, fill=INNER, outline=BORDER, width=3)
@@ -207,7 +198,7 @@ def generate_receipt_png(
 
     y += meta_h + 21
 
-    # ============ 5. ТАБЛИЦА ============
+    # 5. ТАБЛИЦА
     items_top = y
     rows = 1 + (1 if discount_percent > 0 else 0) + 1
     items_h = 45 + rows * 39 + 18
@@ -248,11 +239,12 @@ def generate_receipt_png(
 
     y = items_top + items_h + 18
 
-    # ============ 6. РЕКВИЗИТЫ ============
-    bottom_area_h = 120
-    content_bottom = H - M - 45
+    # 6. РЕКВИЗИТЫ — от y до нижней линии, где будет нижний блок
+    # Нижний блок фиксированной высоты ~110
+    bottom_block_h = 110
+    content_bottom = H - M - 30  # нижний край контента
     req_top = y
-    req_h = content_bottom - req_top - bottom_area_h
+    req_h = content_bottom - req_top - bottom_block_h
 
     draw.rounded_rectangle((PAD, req_top, W - PAD, req_top + req_h),
                            radius=21, fill=INNER, outline=INNER_BORDER, width=2)
@@ -267,6 +259,7 @@ def generate_receipt_png(
         ("СБП", "+7 983 694 76 41"),
     ]
 
+    # Заголовок занимает ~75px от req_top
     inner_top = req_top + 75
     inner_bottom = req_top + req_h - 22
     available = inner_bottom - inner_top
@@ -276,8 +269,9 @@ def generate_receipt_png(
     inner_side = 36
     col_w = (W - PAD * 2 - inner_side * 2 - col_gap) // 2
 
-    k_font = _get_font(15)
-    v_font = _get_font(24)
+    # Шрифты реквизитов — крупнее
+    k_font = _get_font(17)
+    v_font = _get_font(28)
 
     for i, (key, val) in enumerate(req_data):
         col = i % 2
@@ -290,15 +284,14 @@ def generate_receipt_png(
             sep_y = inner_top + row_h
             draw.line((PAD + inner_side, sep_y, W - PAD - inner_side, sep_y), fill=DASH, width=2)
 
-        draw.text((item_x, row_y_center - 30), key.upper(), font=k_font, fill=MUTED)
+        draw.text((item_x, row_y_center - 32), key.upper(), font=k_font, fill=MUTED)
         vw, _ = _text_size(draw, val, v_font)
         draw.text((item_x + col_w - vw, row_y_center - 6), val, font=v_font, fill=TEXT)
 
-    y = req_top + req_h + 21
-
-    # ============ 7. НИЗ ============
+    # 7. НИЗ — прижат к низу
+    y = req_top + req_h + 25
     draw.line((PAD, y, W - PAD, y), fill=LINE, width=2)
-    y += 21
+    y += 24
 
     _draw_icon(draw, PAD + 15, y + 15, ICON_CLOCK, 24, MUTED, solid=False)
     dfont = _get_font(18)
