@@ -563,7 +563,7 @@ class TicketActionSelect(disnake.ui.StringSelect):
             options=[
                 disnake.SelectOption(
                     label="Реквизиты",
-                    description="Просмотреть реквизиты для оплаты",
+                    description="Сгенерировать счёт на оплату",
                     emoji="<:Rekvi:1539656975091105892>",
                     value="requisites"
                 ),
@@ -580,48 +580,14 @@ class TicketActionSelect(disnake.ui.StringSelect):
     async def callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0]
         if value == "requisites":
-            await self.send_requisites(inter)
+            # Только для менеджеров с ролью 1154757071330365490
+            if not any(r.id == 1154757071330365490 for r in inter.author.roles):
+                return await inter.response.send_message(
+                    "⛔ Кнопка доступна только менеджерам.", ephemeral=True
+                )
+            await inter.response.send_modal(InvoiceModal())
         elif value == "policy":
             await self.send_policy(inter)
-
-    async def send_requisites(self, inter: disnake.MessageInteraction):
-        embeds_data = [
-            {
-                "type": "rich",
-                "title": "Реквизиты к заказу ",
-                "description": "\n> Выберите удобный вам способ оплаты → оплатите → подтвердите кнопкой \"Оплатить\" в меню оформления. После - ожидайте <@796293832751972352>. При наличии промокода - напишите его в лот заказа, его проверят, и назначат скидку.",
-                "color": 6776679,
-                "fields": [
-                    {"name": "> Т-БАНК", "value": "```2200 7020 8029 9345```", "inline": True},
-                    {"name": "> АльфаБанк", "value": "```2200 1545 6426 7465```", "inline": True},
-                    {"name": "> ОзонБанк", "value": "```2204 3204 4881 5151 ``` ", "inline": True},
-                    {"name": "> Система Быстрых Платежей [ СБП ] ", "value": "```+7 983 694 76 41 Получатель - Виктор А```", "inline": False},
-                    {"name": "> \nПо оплате по KTZ | UAH | USD | TON | USDT", "value": "```Ожидать ответа продавца для удтверждения реквизитов```", "inline": False},
-                    {"name": "Помните - всё проверяется, обмануть - не получится.", "value": ""}
-                ],
-                "image": {
-                    "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530795801268453447/pisk.png?ex=6a69832f&is=6a6831af&hm=106c0b5c55c83b94fce2e11af7a4c65ec26d550b6da30575f1fef0981f7dc914&"
-                }
-            },
-            {
-                "type": "rich",
-                "title": "Быстрая оплата по QR-Коду на OZON-Банк.",
-                "color": 6776679,
-                "fields": [],
-                "image": {
-                    "url": "https://media.discordapp.net/attachments/1527006158282555412/1527179418726826044/image.png?ex=6a59b82b&is=6a5866ab&hm=7c18b8d4df703ae4a509c7855b9d3ead331bf16597547ca9184ef543395cfcc9&=&format=webp&quality=lossless&width=1870&height=727"
-                },
-                "description": "> В данном QR-Коде, заранее выставлена оплата на Ozon-Банк. Вам достаточно выбрать с какого банка перевести, и сумму перевода."
-            }
-        ]
-        embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in embeds_data]
-        await inter.response.send_message(embeds=embeds)
-        await log_discord(
-            title="📄 Просмотр реквизитов",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {inter.channel.mention}",
-            color=0x00ff00,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
 
     async def send_policy(self, inter: disnake.MessageInteraction):
         policy_path = os.path.join(CATALOG_DIR, "menu_policy.json")
@@ -641,12 +607,106 @@ class TicketActionSelect(disnake.ui.StringSelect):
             )
         except Exception as e:
             logger.exception("Ошибка при отправке policy: %s", e)
-            await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
+            await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True))
 
 class SelectView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketActionSelect())
+
+# ============================================================
+# МОДАЛКА СОЗДАНИЯ СЧЁТА (только для менеджеров)
+# ============================================================
+class InvoiceModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Введите сумму для счёта",
+                placeholder="Например: 445",
+                custom_id="amount",
+                min_length=1,
+                max_length=10
+            ),
+            TextInput(
+                label="Скидка (₽), если была (необязательно)",
+                placeholder="Например: 50",
+                custom_id="discount",
+                required=False,
+                max_length=10
+            )
+        ]
+        super().__init__(title="Создание счёта", components=components, custom_id="invoice_modal")
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await inter.response.defer(ephemeral=True)
+
+        from modules.receipt import generate_receipt_png, generate_receipt_id
+
+        amount_str = inter.text_values["amount"].strip()
+        discount_str = inter.text_values.get("discount", "").strip()
+
+        if not amount_str.isdigit():
+            return await inter.edit_original_response(content="❌ Сумма должна быть числом.")
+        amount = int(amount_str)
+        if amount <= 0:
+            return await inter.edit_original_response(content="❌ Сумма должна быть больше 0.")
+
+        discount = 0
+        if discount_str:
+            if not discount_str.isdigit():
+                return await inter.edit_original_response(content="❌ Скидка должна быть числом.")
+            discount = int(discount_str)
+            if discount < 0:
+                return await inter.edit_original_response(content="❌ Скидка не может быть отрицательной.")
+            if discount >= amount:
+                return await inter.edit_original_response(content="❌ Скидка не может быть больше или равна сумме.")
+
+        # Менеджер = тот, кто ведёт тикет
+        manager_id = get_ticket_manager(inter.channel.id)
+        manager = inter.guild.get_member(manager_id) if manager_id else None
+        manager_name = str(manager) if manager else "—"
+
+        # Товар = название тикета
+        ticket_name = inter.channel.name
+
+        # Генерируем картинку в памяти
+        order_id = generate_receipt_id()
+        buf = generate_receipt_png(
+            manager_name=manager_name,
+            ticket_name=ticket_name,
+            amount=amount,
+            discount=discount,
+            order_id=order_id
+        )
+
+        file = disnake.File(buf, filename=f"receipt_{order_id}.png")
+
+        embed = disnake.Embed(
+            title="🧾 Счёт на оплату",
+            description=(
+                f"> **Заказ:** `{ticket_name}`\n"
+                f"> **Менеджер:** {manager.mention if manager else '—'}\n\n"
+                f"> Оплатите по реквизитам на изображении и отправьте чек в тикет."
+            ),
+            color=6776679
+        )
+        embed.set_image(url=f"attachment://receipt_{order_id}.png")
+
+        await inter.channel.send(embed=embed, file=file)
+        await inter.edit_original_response(content="✅ Счёт отправлен в тикет.")
+
+        await log_discord(
+            title="🧾 Создан счёт",
+            description=(
+                f"> **Менеджер:** {inter.author.mention}\n"
+                f"> **Канал:** {inter.channel.mention}\n"
+                f"> **Сумма:** {amount} ₽\n"
+                + (f"> **Скидка:** {discount} ₽\n" if discount > 0 else "")
+                + f"> **Итого:** {amount - discount} ₽"
+            ),
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
 
 # ============================================================
 # КНОПКА ЗАКРЫТИЯ / ОЦЕНКИ
