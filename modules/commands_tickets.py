@@ -167,13 +167,12 @@ class BuyTicketModal(Modal):
     def __init__(self):
         components = [
             TextInput(label="Товар", placeholder="Введите название товара", custom_id="item_name", min_length=4, max_length=50),
-            TextInput(label="Способ оплаты", placeholder="Т-Банк, СПБ и т.д.", custom_id="payment_method", min_length=3, max_length=50),
             TextInput(label="Промокод (необязательно)", placeholder="Введите промокод, если есть", custom_id="promo_code", required=False, max_length=50)
         ]
         super().__init__(title="Создание тикета на покупку", components=components, custom_id="buy_ticket_modal")
 
     async def callback(self, inter: disnake.ModalInteraction):
-        await inter.response.defer(ephemeral=True)  # ДОБАВЛЕНО
+        await inter.response.defer(ephemeral=True)
         from core.bot import bot
         uid = inter.author.id
         now = time.time()
@@ -185,7 +184,6 @@ class BuyTicketModal(Modal):
         bot._user_ticket_cooldowns = last
 
         item = inter.text_values.get("item_name", "—")
-        pay = inter.text_values.get("payment_method", "—")
         promo = inter.text_values.get("promo_code", "").strip().upper()
         promo_display = "Не введён"
         if promo:
@@ -225,7 +223,6 @@ class BuyTicketModal(Modal):
         embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=0x7c3131)
         embed_order_info.clear_fields()
         embed_order_info.add_field(name="> Позиция:", value=f"```{item}```", inline=True)
-        embed_order_info.add_field(name="> Способ оплаты:", value=f"```{pay}```", inline=True)
         embed_order_info.add_field(name="> Промокод:", value=f"```{promo_display}```", inline=True)
 
         current_time = int(time.time())
@@ -259,7 +256,7 @@ class BuyTicketModal(Modal):
         if log_ch:
             await log_ch.send(embed=disnake.Embed(
                 title="📩 Тикет создан (реальные деньги)",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {ticket_channel.mention}\n> **Товар:** `{item}`\n> **Оплата:** `{pay}`\n> **Промокод:** `{promo_display}`",
+                description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {ticket_channel.mention}\n> **Товар:** `{item}`\n> **Промокод:** `{promo_display}`",
                 timestamp=datetime.now(timezone.utc),
                 color=0x00ff00
             ))
@@ -922,16 +919,14 @@ class TicketView(View):
 
         order_embed = msg.embeds[1]
         item_name = "—"
-        payment_method = "—"
         promo_value = "—"
         for field in order_embed.fields:
             fn = field.name.lower()
             if "позиция" in fn:
                 item_name = field.value.strip("`\n ")
-            elif "оплаты" in fn:
-                payment_method = field.value.strip("`\n ")
             elif "промокод" in fn:
                 promo_value = field.value.strip("`\n ")
+                
 
         ed = order_embed.to_dict()
         ed["color"] = 0x676767
@@ -957,7 +952,7 @@ class TicketView(View):
         manager_ping = manager_role.mention if manager_role else "@менеджер"
         embed = disnake.Embed(
             title="💚 Заказ оплачен",
-            description=f"> **Подтвердил:** {inter.author.mention}\n> **Товар:** `{item_name}`\n> **Оплата:** `{payment_method}`\n> **Промокод:** `{promo_value}`",
+            description=f"> **Подтвердил:** {inter.author.mention}\n> **Товар:** `{item_name}`\n> **Промокод:** `{promo_value}`",
             color=0x2ecc71
         )
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
@@ -974,7 +969,6 @@ class TicketView(View):
             description=(
                 f"> **Канал:** {channel.mention}\n"
                 f"> **Товар:** `{item_name}`\n"
-                f"> **Оплата:** `{payment_method}`\n"
                 f"> **Промокод:** `{promo_value}`\n"
                 f"> **Подтвердил:** {inter.author.mention}"
             ),
