@@ -31,8 +31,7 @@ def _text_size(draw, text, font) -> tuple:
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
-def _draw_centered_text(draw, cx, y, text, font, fill):
-    """Рисует текст с центрированием по X."""
+def _draw_centered(draw, cx, y, text, font, fill):
     tw, _ = _text_size(draw, text, font)
     draw.text((cx - tw // 2, y), text, font=font, fill=fill)
     return tw
@@ -70,7 +69,10 @@ def generate_receipt_png(
     discount_percent: int = 0,
     order_id: Optional[str] = None,
 ) -> io.BytesIO:
-    """Генерирует PNG-счёт 1200×800 (3:2) — не обрезается в Discord-эмбеде."""
+    """
+    1200x800, пропорции 3:2.
+    Блоки распределены с равным отступом сверху донизу (space-between).
+    """
     if order_id is None:
         order_id = f"D-{int(time.time())}-{random.randint(100, 999)}"
 
@@ -91,7 +93,6 @@ def generate_receipt_png(
     GREEN_BG = (22, 44, 30)
     LOGO_BG = (74, 74, 79)
     DIAMOND_GRAY = (200, 200, 200)
-    LINE = (51, 51, 51)
 
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
@@ -104,9 +105,29 @@ def generate_receipt_png(
     )
 
     PAD = 45
-    y = 35
 
-    # ======== ШАПКА: ЛОГО + ДАТА ========
+    # ================= Вычисляем высоту каждого блока =================
+    # Top (лого + дата): 60px
+    H_TOP = 60
+    # Hero (ИТОГО + сумма [+ скидка]): 30 + 88 + (бейдж ~40)
+    H_HERO_BASE = 30 + 88
+    H_BADGE = 38 if discount_percent > 0 else 0
+    H_HERO = H_HERO_BASE + H_BADGE
+    # Meta (менеджер/заказ): 70px
+    H_META = 70
+    # Req (реквизиты): 18 + 12 + 14 + 2*22 = ~120px
+    H_REQ = 140
+
+    total_blocks = H_TOP + H_HERO + H_META + H_REQ
+    # Свободное место — распределяем на 3 промежутка (space-between)
+    free_space = (H - M * 2) - total_blocks - 80  # 80 = верхний + нижний внутренний отступ
+    if free_space < 0:
+        free_space = 0
+    gap = free_space // 3
+
+    y = M + 40  # верхний внутренний отступ
+
+    # ===================== 1. TOP =====================
     logo_box = 60
     draw.rounded_rectangle((PAD, y, PAD + logo_box, y + logo_box), radius=14, fill=LOGO_BG)
     _draw_diamond_logo(
@@ -138,25 +159,23 @@ def generate_receipt_png(
     dw, _ = _text_size(draw, date_str, date_font)
     draw.text((W - PAD - dw, y + 34), date_str, font=date_font, fill=MUTED)
 
-    # ======== ГЕРОЙ: ИТОГО ПО ЦЕНТРУ ========
-    y = 120
+    y += H_TOP + gap
+
+    # ===================== 2. HERO (по центру) =====================
     cx = W // 2
 
-    # "ИТОГО К ОПЛАТЕ" по центру
-    _draw_centered_text(draw, cx, y, "ИТОГО К ОПЛАТЕ", _get_font(16), MUTED)
+    _draw_centered(draw, cx, y, "ИТОГО К ОПЛАТЕ", _get_font(16), MUTED)
     y += 30
 
-    # Огромная сумма — подбираем размер, чтобы влезала
     total_text = f"{total} Р"
     font_size = 88
     tw, _ = _text_size(draw, total_text, _get_font(font_size))
     while tw > W - PAD * 2 - 100 and font_size > 40:
         font_size -= 4
         tw, _ = _text_size(draw, total_text, _get_font(font_size))
-    _draw_centered_text(draw, cx, y, total_text, _get_font(font_size), TEXT)
-    y += font_size + 10
+    _draw_centered(draw, cx, y, total_text, _get_font(font_size), TEXT)
+    y += font_size + 8
 
-    # Бейдж скидки (только если есть)
     if discount_percent > 0:
         badge_text = f"Скидка {discount_percent}%  ·  −{discount_rub} Р"
         bf = _get_font(15)
@@ -164,26 +183,22 @@ def generate_receipt_png(
         pad_bx, pad_by = 22, 9
         badge_w = bw + pad_bx * 2
         badge_h = bh + pad_by * 2
-        badge_x1 = cx - badge_w // 2
-        badge_y1 = y
+        bx = cx - badge_w // 2
         draw.rounded_rectangle(
-            (badge_x1, badge_y1, badge_x1 + badge_w, badge_y1 + badge_h),
-            radius=10, fill=GREEN_BG, outline=(46, 204, 113), width=1
+            (bx, y, bx + badge_w, y + badge_h),
+            radius=10, fill=GREEN_BG, outline=GREEN, width=1
         )
-        draw.text((badge_x1 + pad_bx, badge_y1 + pad_by), badge_text, font=bf, fill=GREEN)
-        y += badge_h + 12
+        draw.text((bx + pad_bx, y + pad_by), badge_text, font=bf, fill=GREEN)
+        y += badge_h
 
-    # ======== РАЗДЕЛИТЕЛЬ ========
-    y += 4
-    draw.line((PAD, y, W - PAD, y), fill=LINE, width=1)
-    y += 18
+    y += gap
 
-    # ======== МЕНЕДЖЕР / ЗАКАЗ ========
+    # ===================== 3. META =====================
     meta_h = 70
-    gap = 16
-    card_w = (W - PAD * 2 - gap) // 2
+    gap_x = 16
+    card_w = (W - PAD * 2 - gap_x) // 2
 
-    # Менеджер — зелёная рамка
+    # Менеджер — зелёная
     draw.rounded_rectangle(
         (PAD, y, PAD + card_w, y + meta_h),
         radius=14, fill=GREEN_BG, outline=GREEN, width=2
@@ -191,19 +206,22 @@ def generate_receipt_png(
     draw.text((PAD + 20, y + 12), "МЕНЕДЖЕР", font=_get_font(11), fill=GREEN)
     draw.text((PAD + 20, y + 32), manager_name[:24], font=_get_font(20), fill=TEXT)
 
-    # Заказ — серая рамка
-    cx2 = PAD + card_w + gap
+    # Заказ — серая
+    cx2 = PAD + card_w + gap_x
     draw.rounded_rectangle(
         (cx2, y, cx2 + card_w, y + meta_h),
-        radius=14, fill=(20, 20, 26), outline=BORDER, width=2
+        radius=14, fill=INNER, outline=BORDER, width=2
     )
     draw.text((cx2 + 20, y + 12), "ЗАКАЗ", font=_get_font(11), fill=MUTED)
     draw.text((cx2 + 20, y + 32), ticket_name[:24], font=_get_font(20), fill=TEXT)
 
-    y += meta_h + 18
+    y += meta_h + gap
 
-    # ======== РЕКВИЗИТЫ (влезает точно) ========
-    req_h = H - y - 35
+    # ===================== 4. REQ (компактный) =====================
+    req_h = H - M - 40 - y
+    if req_h < 120:
+        req_h = 120
+
     draw.rounded_rectangle(
         (PAD, y, W - PAD, y + req_h),
         radius=16, fill=INNER, outline=INNER_BORDER, width=1
@@ -218,9 +236,9 @@ def generate_receipt_png(
         ("СБП", "+7 983 694 76 41"),
     ]
 
-    col_w = (W - PAD * 2 - 52 - 30) // 2  # между колонками 30px
-    row_h = 42
-    start_y = y + 46
+    col_w = (W - PAD * 2 - 52 - 30) // 2
+    row_h = 44
+    start_y = y + 48
 
     for i, (key, val) in enumerate(req_data):
         col = i % 2
