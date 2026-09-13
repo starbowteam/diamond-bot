@@ -607,7 +607,7 @@ class TicketActionSelect(disnake.ui.StringSelect):
             )
         except Exception as e:
             logger.exception("Ошибка при отправке policy: %s", e)
-            await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True))
+            await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
 class SelectView(disnake.ui.View):
     def __init__(self):
