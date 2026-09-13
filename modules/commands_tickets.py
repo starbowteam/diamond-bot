@@ -667,6 +667,7 @@ class InvoiceModal(Modal):
 
         order_id = generate_receipt_id()
 
+        # Генерация в отдельном потоке — не блокируем loop
         buf = await asyncio.to_thread(
             generate_receipt_png,
             manager_name=manager_name,
@@ -676,10 +677,14 @@ class InvoiceModal(Modal):
             order_id=order_id
         )
 
+        total = amount - int(amount * discount_percent / 100)
+
         file = disnake.File(buf, filename=f"receipt_{order_id}.png")
 
-        # Только картинка, никакого текста в эмбеде
-        embed = disnake.Embed(color=6776679)
+        embed = disnake.Embed(
+            title=f"Счёт для оплаты создан: к оплате {total} Р",
+            color=6776679
+        )
         embed.set_image(url=f"attachment://receipt_{order_id}.png")
 
         await inter.channel.send(embed=embed, file=file)
@@ -690,9 +695,9 @@ class InvoiceModal(Modal):
             description=(
                 f"> **Менеджер:** {inter.author.mention}\n"
                 f"> **Канал:** {inter.channel.mention}\n"
-                f"> **Сумма:** {amount} ₽\n"
+                f"> **Сумма:** {amount} Р\n"
                 + (f"> **Скидка:** {discount_percent}%\n" if discount_percent > 0 else "")
-                + f"> **Итого:** {amount - int(amount * discount_percent / 100)} ₽"
+                + f"> **Итого:** {total} Р"
             ),
             color=0x00aaff,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
