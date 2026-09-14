@@ -151,22 +151,44 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             "amount": h.get("amount", 0),
         })
 
-    # Кастомные роли — роли пользователя ниже по иерархии чем 1127428607606796290
+    # ---- Роли пользователя (кастомные + покупательские, всё кроме @everyone и managed) ----
     custom_roles = []
     try:
         guild = inter.guild
+
+        # Служебные роли бота, которые не показываем в списке кастомных
+        excluded = set()
+        for rid in CONFIG.get("ROLE_IDS", {}).values():
+            excluded.add(rid)
+        # Дополнительные служебные роли (менеджеры, админы, поддержка)
+        excluded.update({
+            1127428607606796290,   # MANAGER
+            1154757071330365490,   # Sales Manager
+            1471844291595731016,
+            1471190371181789234,
+            1457964854441672806,
+            1423360115335106570,
+            1539523399611580476,
+        })
+
+        # Верхняя граница: не показываем роли выше или равные менеджеру
         limit_role = guild.get_role(1127428607606796290)
-        limit_pos = limit_role.position if limit_role else 0
-        for r in user.roles:
-            if r.is_default():
+        max_pos = limit_role.position if limit_role else 9999
+
+        for r in sorted(user.roles, key=lambda x: -x.position):
+            if r.is_default():       # @everyone
                 continue
-            if r.position < limit_pos:
-                custom_roles.append({
-                    "name": r.name,
-                    "pos": f"#{r.position}",
-                    "color": r.color.to_rgb() if r.color.value else (136, 136, 136),
-                })
-        custom_roles.sort(key=lambda x: x["name"])
+            if r.managed:            # роли ботов/интеграций
+                continue
+            if r.id in excluded:     # служебные
+                continue
+            if r.position >= max_pos:
+                continue
+            custom_roles.append({
+                "name": r.name,
+                "pos": f"#{r.position}",
+                "color": r.color.to_rgb() if r.color.value else (136, 136, 136),
+            })
     except Exception as e:
         logger.warning(f"Custom roles error: {e}")
 
@@ -204,8 +226,12 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
         custom_roles=custom_roles,
     )
 
-    file = disnake.File(buf, filename=f"profile_{user.id}.png")
-    await inter.response.send_message(file=file, ephemeral=True)
+    # ---- Отправка в эмбеде с цветом #676767 ----
+    filename = f"profile_{user.id}.png"
+    file = disnake.File(buf, filename=filename)
+    embed = disnake.Embed(color=6776679)  # 0x676767
+    embed.set_image(url=f"attachment://{filename}")
+    await inter.response.send_message(embed=embed, file=file, ephemeral=True)
 
     await log_discord(
         title="📇 Карточка профиля",
@@ -529,7 +555,7 @@ class ProfileSelect(disnake.ui.StringSelect):
         )
         value = inter.data.values[0]
         if value == "profile":
-            # НОВОЕ: отправляем карточку-картинку
+            # Отправляем карточку-картинку
             await show_profile_card(inter, inter.author)
         elif value == "purchases":
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
