@@ -57,7 +57,6 @@ def load_embed_from_file(filename: str) -> list[disnake.Embed]:
 # ОПРЕДЕЛЕНИЕ РОЛИ ПО КОЛИЧЕСТВУ ОТЗЫВОВ
 # ============================================================
 def _get_role_info_by_count(count: int):
-    """Возвращает (role_key, next_name, progress_pct, progress_text)."""
     thresholds = [
         (0,  "none",      "Клуб",                       0,   "Напишите первый отзыв"),
         (1,  "bronze",    "Silver Buyer",               20,  "Осталось 2 отзыва"),
@@ -82,20 +81,17 @@ def _get_role_info_by_count(count: int):
 # ГЕНЕРАЦИЯ И ОТПРАВКА КАРТОЧКИ
 # ============================================================
 async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
-    """Отправляет карточку профиля в виде PNG."""
     from modules.profile_card import (
         generate_profile_card,
         IC_CART, IC_USER_TIE, IC_BOX_OPEN, IC_GEM, IC_STAR, IC_FIRE, IC_TROPHY,
         IC_PERCENT, IC_GIFT, IC_LOCK, IC_IMAGE, IC_BOLT, IC_MEDAL,
     )
 
-    # --- Данные пользователя ---
     counts = load_json(FILES["review_counts"], {})
     review_count = counts.get(str(user.id), 0)
 
     role_key, next_name, progress_pct, progress_text = _get_role_info_by_count(review_count)
 
-    # Баланс и история
     dc = get_dc_cache(user.id)
     balance = dc.get("balance", 0)
     history_raw = dc.get("history", []) or []
@@ -107,7 +103,6 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     earned_month = sum(h.get("amount", 0) for h in history_raw if h.get("amount", 0) > 0 and h.get("date", 0) >= month_ago)
     spent_month = sum(abs(h.get("amount", 0)) for h in history_raw if h.get("amount", 0) < 0 and h.get("date", 0) >= month_ago)
 
-    # Инвентарь (неиспользованные покупки)
     try:
         purchases = await get_user_purchases(user.id, only_unused=True)
     except Exception:
@@ -136,13 +131,13 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             icon = IC_GEM
             accent = (20, 155, 208)
         inventory.append({
+            "_ptype": ptype,
             "icon": icon,
             "name": name,
             "qty": f"куплено {datetime.fromtimestamp(p.get('date', 0)).strftime('%d.%m.%Y')}",
             "accent": accent,
         })
 
-    # История — последние 6
     history = []
     for h in reversed(history_raw[-6:]):
         date_str = datetime.fromtimestamp(h.get("date", 0)).strftime("%d.%m.%Y")
@@ -151,19 +146,16 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             "amount": h.get("amount", 0),
         })
 
-    # ---- Роли пользователя (кастомные + покупательские) ----
     custom_roles = []
     try:
         guild = inter.guild
 
-        # Служебные роли бота, которые не показываем в списке кастомных
         excluded = set()
         for rid in CONFIG.get("ROLE_IDS", {}).values():
             excluded.add(rid)
-        # Дополнительные служебные роли (менеджеры, админы, поддержка)
         excluded.update({
-            1127428607606796290,   # MANAGER
-            1154757071330365490,   # Sales Manager
+            1127428607606796290,
+            1154757071330365490,
             1471844291595731016,
             1471190371181789234,
             1457964854441672806,
@@ -171,21 +163,20 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             1539523399611580476,
         })
 
-        # Верхняя граница: не показываем роли выше или равные менеджеру
         limit_role = guild.get_role(1127428607606796290)
         max_pos = limit_role.position if limit_role else 9999
 
         for r in sorted(user.roles, key=lambda x: -x.position):
-            if r.is_default():       # @everyone
+            if r.is_default():
                 continue
-            if r.managed:            # роли ботов/интеграций
+            if r.managed:
                 continue
-            if r.id in excluded:     # служебные
+            if r.id in excluded:
                 continue
             if r.position >= max_pos:
                 continue
             custom_roles.append({
-                "id": r.id,          # <-- используется для стабильной FA-иконки
+                "id": r.id,
                 "name": r.name,
                 "pos": f"#{r.position}",
                 "color": r.color.to_rgb() if r.color.value else (136, 136, 136),
@@ -193,46 +184,50 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     except Exception as e:
         logger.warning(f"Custom roles error: {e}")
 
-    # Аватар
     avatar_bytes = None
     try:
         avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
     except Exception as e:
         logger.warning(f"Avatar fetch error: {e}")
 
-    # Стрик
     streak = 0
     if dc.get("last_bonus", 0) >= now_ts - 86400:
         streak = 1
 
-    # --- Генерация (в отдельном потоке) ---
-    buf = await asyncio.to_thread(
-        generate_profile_card,
-        user_name=user.display_name,
-        user_id=user.id,
-        avatar_bytes=avatar_bytes,
-        role_key=role_key,
-        reviews=review_count,
-        next_role_name=next_name,
-        progress_pct=progress_pct,
-        progress_text=progress_text,
-        balance=balance,
-        total_earned=total_earned,
-        earned_month=earned_month,
-        spent_month=spent_month,
-        purchases_count=len(purchases),
-        streak=streak,
-        inventory=inventory,
-        history=history,
-        custom_roles=custom_roles,
-    )
+    await inter.response.defer(ephemeral=True)
 
-    # ---- Отправка в эмбеде с цветом #676767 ----
+    try:
+        buf = await generate_profile_card(
+            user_name=user.display_name,
+            user_id=user.id,
+            avatar_bytes=avatar_bytes,
+            role_key=role_key,
+            reviews=review_count,
+            next_role_name=next_name,
+            progress_pct=progress_pct,
+            progress_text=progress_text,
+            balance=balance,
+            total_earned=total_earned,
+            earned_month=earned_month,
+            spent_month=spent_month,
+            purchases_count=len(purchases),
+            streak=streak,
+            inventory=inventory,
+            history=history,
+            custom_roles=custom_roles,
+        )
+    except Exception as e:
+        logger.exception(f"Ошибка рендера карточки профиля: {e}")
+        await inter.edit_original_response(
+            content=f"❌ Не удалось сгенерировать карточку. Попробуйте позже.\n`{str(e)[:200]}`"
+        )
+        return
+
     filename = f"profile_{user.id}.png"
     file = disnake.File(buf, filename=filename)
     embed = disnake.Embed(color=6776679)
     embed.set_image(url=f"attachment://{filename}")
-    await inter.response.send_message(embed=embed, file=file, ephemeral=True)
+    await inter.edit_original_response(embed=embed, file=file)
 
     await log_discord(
         title="📇 Карточка профиля",
@@ -243,7 +238,7 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
 
 
 # ============================================================
-# УПРАВЛЕНИЕ ПОКУПКАМИ (селект товаров и возврат)
+# УПРАВЛЕНИЕ ПОКУПКАМИ
 # ============================================================
 class PurchaseSelectView(View):
     def __init__(self, user_id, purchases):
