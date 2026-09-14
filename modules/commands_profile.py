@@ -81,111 +81,112 @@ def _get_role_info_by_count(count: int):
 # ГЕНЕРАЦИЯ И ОТПРАВКА КАРТОЧКИ
 # ============================================================
 async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
-    from modules.profile_card import generate_profile_card
-
-    counts = load_json(FILES["review_counts"], {})
-    review_count = counts.get(str(user.id), 0)
-
-    role_key, next_name, progress_pct, progress_text = _get_role_info_by_count(review_count)
-
-    dc = get_dc_cache(user.id)
-    balance = dc.get("balance", 0)
-    history_raw = dc.get("history", []) or []
-
-    now_ts = int(time.time())
-    month_ago = now_ts - 30 * 86400
-
-    total_earned = sum(h.get("amount", 0) for h in history_raw if h.get("amount", 0) > 0)
-    earned_month = sum(h.get("amount", 0) for h in history_raw if h.get("amount", 0) > 0 and h.get("date", 0) >= month_ago)
-    spent_month = sum(abs(h.get("amount", 0)) for h in history_raw if h.get("amount", 0) < 0 and h.get("date", 0) >= month_ago)
-
-    try:
-        purchases = await get_user_purchases(user.id, only_unused=True)
-    except Exception:
-        purchases = []
-
-    inventory = []
-    for p in purchases[:3]:
-        ptype = p.get("type", "")
-        name = p.get("value", "")[:16]
-        if ptype == "roles":
-            accent = (20, 155, 208)
-        elif ptype == "discounts":
-            accent = (46, 204, 113)
-        elif ptype in ("design", "design_avatar", "design_banner"):
-            accent = (247, 201, 145)
-        elif ptype in ("ads",):
-            accent = (255, 107, 107)
-        elif ptype in ("custom",):
-            accent = (216, 142, 223)
-        else:
-            accent = (20, 155, 208)
-        inventory.append({
-            "_ptype": ptype,
-            "name": name,
-            "qty": f"куплено {datetime.fromtimestamp(p.get('date', 0)).strftime('%d.%m.%Y')}",
-            "accent": accent,
-        })
-
-    history = []
-    for h in reversed(history_raw[-6:]):
-        date_str = datetime.fromtimestamp(h.get("date", 0)).strftime("%d.%m.%Y")
-        history.append({
-            "date": date_str,
-            "amount": h.get("amount", 0),
-        })
-
-    custom_roles = []
-    try:
-        guild = inter.guild
-
-        excluded = set()
-        for rid in CONFIG.get("ROLE_IDS", {}).values():
-            excluded.add(rid)
-        excluded.update({
-            1127428607606796290,
-            1154757071330365490,
-            1471844291595731016,
-            1471190371181789234,
-            1457964854441672806,
-            1423360115335106570,
-            1539523399611580476,
-        })
-
-        limit_role = guild.get_role(1127428607606796290)
-        max_pos = limit_role.position if limit_role else 9999
-
-        for r in sorted(user.roles, key=lambda x: -x.position):
-            if r.is_default():
-                continue
-            if r.managed:
-                continue
-            if r.id in excluded:
-                continue
-            if r.position >= max_pos:
-                continue
-            custom_roles.append({
-                "id": r.id,
-                "name": r.name,
-                "pos": f"#{r.position}",
-                "color": r.color.to_rgb() if r.color.value else (136, 136, 136),
-            })
-    except Exception as e:
-        logger.warning(f"Custom roles error: {e}")
-
-    avatar_bytes = None
-    try:
-        avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
-    except Exception as e:
-        logger.warning(f"Avatar fetch error: {e}")
-
-    streak = 0
-    if dc.get("last_bonus", 0) >= now_ts - 86400:
-        streak = 1
-
+    # ⚡ САМОЕ ПЕРВОЕ ДЕЙСТВИЕ — defer, чтобы не словить 3-секундный таймаут
     await inter.response.defer(ephemeral=True)
 
+    from modules.profile_card import generate_profile_card
+
     try:
+        counts = load_json(FILES["review_counts"], {})
+        review_count = counts.get(str(user.id), 0)
+
+        role_key, next_name, progress_pct, progress_text = _get_role_info_by_count(review_count)
+
+        dc = get_dc_cache(user.id)
+        balance = dc.get("balance", 0)
+        history_raw = dc.get("history", []) or []
+
+        now_ts = int(time.time())
+        month_ago = now_ts - 30 * 86400
+
+        total_earned = sum(h.get("amount", 0) for h in history_raw if h.get("amount", 0) > 0)
+        earned_month = sum(h.get("amount", 0) for h in history_raw if h.get("amount", 0) > 0 and h.get("date", 0) >= month_ago)
+        spent_month = sum(abs(h.get("amount", 0)) for h in history_raw if h.get("amount", 0) < 0 and h.get("date", 0) >= month_ago)
+
+        try:
+            purchases = await get_user_purchases(user.id, only_unused=True)
+        except Exception:
+            purchases = []
+
+        inventory = []
+        for p in purchases[:3]:
+            ptype = p.get("type", "")
+            name = p.get("value", "")[:16]
+            if ptype == "roles":
+                accent = (20, 155, 208)
+            elif ptype == "discounts":
+                accent = (46, 204, 113)
+            elif ptype in ("design", "design_avatar", "design_banner"):
+                accent = (247, 201, 145)
+            elif ptype in ("ads",):
+                accent = (255, 107, 107)
+            elif ptype in ("custom",):
+                accent = (216, 142, 223)
+            else:
+                accent = (20, 155, 208)
+            inventory.append({
+                "_ptype": ptype,
+                "name": name,
+                "qty": f"куплено {datetime.fromtimestamp(p.get('date', 0)).strftime('%d.%m.%Y')}",
+                "accent": accent,
+            })
+
+        history = []
+        for h in reversed(history_raw[-6:]):
+            date_str = datetime.fromtimestamp(h.get("date", 0)).strftime("%d.%m.%Y")
+            history.append({
+                "date": date_str,
+                "amount": h.get("amount", 0),
+            })
+
+        custom_roles = []
+        try:
+            guild = inter.guild
+
+            excluded = set()
+            for rid in CONFIG.get("ROLE_IDS", {}).values():
+                excluded.add(rid)
+            excluded.update({
+                1127428607606796290,
+                1154757071330365490,
+                1471844291595731016,
+                1471190371181789234,
+                1457964854441672806,
+                1423360115335106570,
+                1539523399611580476,
+            })
+
+            limit_role = guild.get_role(1127428607606796290)
+            max_pos = limit_role.position if limit_role else 9999
+
+            for r in sorted(user.roles, key=lambda x: -x.position):
+                if r.is_default():
+                    continue
+                if r.managed:
+                    continue
+                if r.id in excluded:
+                    continue
+                if r.position >= max_pos:
+                    continue
+                custom_roles.append({
+                    "id": r.id,
+                    "name": r.name,
+                    "pos": f"#{r.position}",
+                    "color": r.color.to_rgb() if r.color.value else (136, 136, 136),
+                })
+        except Exception as e:
+            logger.warning(f"Custom roles error: {e}")
+
+        avatar_bytes = None
+        try:
+            avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
+        except Exception as e:
+            logger.warning(f"Avatar fetch error: {e}")
+
+        streak = 0
+        if dc.get("last_bonus", 0) >= now_ts - 86400:
+            streak = 1
+
         buf = await generate_profile_card(
             user_name=user.display_name,
             user_id=user.id,
@@ -205,25 +206,28 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             history=history,
             custom_roles=custom_roles,
         )
+
+        filename = f"profile_{user.id}.png"
+        file = disnake.File(buf, filename=filename)
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{filename}")
+        await inter.edit_original_response(embed=embed, file=file)
+
+        asyncio.create_task(log_discord(
+            title="📇 Карточка профиля",
+            description=f"> **Пользователь:** {inter.author.mention}",
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        ))
+
     except Exception as e:
         logger.exception(f"Ошибка рендера карточки профиля: {e}")
-        await inter.edit_original_response(
-            content=f"❌ Не удалось сгенерировать карточку. Попробуйте позже.\n`{str(e)[:200]}`"
-        )
-        return
-
-    filename = f"profile_{user.id}.png"
-    file = disnake.File(buf, filename=filename)
-    embed = disnake.Embed(color=6776679)
-    embed.set_image(url=f"attachment://{filename}")
-    await inter.edit_original_response(embed=embed, file=file)
-
-    await log_discord(
-        title="📇 Карточка профиля",
-        description=f"> **Пользователь:** {inter.author.mention}",
-        color=0x00aaff,
-        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-    )
+        try:
+            await inter.edit_original_response(
+                content=f"❌ Не удалось сгенерировать карточку. Попробуйте позже.\n`{str(e)[:200]}`"
+            )
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -533,18 +537,21 @@ class ProfileSelect(disnake.ui.StringSelect):
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
-        await log_discord(
+        # логируем НЕ блокируя — иначе можно словить 3-секундный таймаут
+        asyncio.create_task(log_discord(
             title="👤 Выбор в панели профиля",
             description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
             color=0x00aaff
-        )
+        ))
+
         value = inter.data.values[0]
         if value == "profile":
             await show_profile_card(inter, inter.author)
         elif value == "purchases":
+            await inter.response.defer(ephemeral=True)
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
             if not purchases:
-                return await inter.response.send_message("❌ У вас нет неиспользованных покупок.", ephemeral=True)
+                return await inter.edit_original_response(content="❌ У вас нет неиспользованных покупок.")
             embed = disnake.Embed(
                 title="О какой покупке ты хочешь узнать?",
                 description="> Выбери нужный товар ниже.",
@@ -552,12 +559,14 @@ class ProfileSelect(disnake.ui.StringSelect):
             )
             embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
             view = PurchaseSelectView(inter.author.id, purchases)
-            await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+            await inter.edit_original_response(embed=embed, view=view)
         elif value == "transfer":
+            await inter.response.defer(ephemeral=True)
             await handle_transfer(inter)
         elif value == "currency":
+            await inter.response.defer(ephemeral=True)
             embeds = load_embed_from_file("vallue.json")
-            await inter.response.send_message(embeds=embeds, ephemeral=True)
+            await inter.edit_original_response(embeds=embeds)
         elif value == "calc":
             await inter.response.send_modal(CalcModal())
         elif value == "discount":
