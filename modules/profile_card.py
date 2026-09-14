@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Рендер карточки профиля через htmlcsstoimage.com — 1 в 1 как HTML в браузере."""
+"""Рендер карточки профиля через htmlcsstoimage.com — 1 в 1 как HTML в браузере.
+Шрифт Proxima Nova Extra Bold встраивается в HTML через base64."""
 
 import io
 import os
@@ -13,6 +14,7 @@ import aiohttp
 from core.utils import ADD_DIR, logger
 
 TEMPLATE_PATH = os.path.join(ADD_DIR, "profile_template.html")
+FONT_PATH     = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
 
 # ============================================================
 # API КЛЮЧИ HTMLCSSTOIMAGE
@@ -21,10 +23,29 @@ HCTI_USER_ID = "01M2FJ7BRZVNDREJ2KGRATD127"
 HCTI_API_KEY = "h1-afotTIvPTxWvnvKAw1iTfA10-b698a91b"
 
 # ============================================================
-# КЕШ (10 минут на юзера, чтобы не жрать лимит API)
+# КЕШ (10 минут)
 # ============================================================
 _RENDER_CACHE = {}
 _CACHE_TTL = 600
+
+# ============================================================
+# ШРИФТ В BASE64 (читается один раз при импорте модуля)
+# ============================================================
+_FONT_B64 = None
+
+
+def _load_font_b64() -> str:
+    global _FONT_B64
+    if _FONT_B64 is not None:
+        return _FONT_B64
+    try:
+        with open(FONT_PATH, "rb") as f:
+            _FONT_B64 = base64.b64encode(f.read()).decode("ascii")
+        logger.info(f"Шрифт Proxima Nova загружен в base64, размер={len(_FONT_B64)} символов")
+    except Exception as e:
+        logger.error(f"Не удалось прочитать шрифт {FONT_PATH}: {e}")
+        _FONT_B64 = ""
+    return _FONT_B64
 
 
 # ---- Стили ролей ----
@@ -183,8 +204,12 @@ def _build_html(
         )
     history_html = "".join(hist_parts)
 
+    # ---- шрифт ----
+    font_b64 = _load_font_b64()
+
     # ---- подстановки ----
     repl = {
+        "FONT_FACE_B64_PLACEHOLDER": font_b64,
         "ROLE_GLOW_PLACEHOLDER": st["glow"],
         "ROLE_GRADIENT_PLACEHOLDER": st["gradient"],
         "ROLE_BORDER_PLACEHOLDER": st["border"],
@@ -231,7 +256,7 @@ async def _render_via_api(html: str) -> bytes:
         "Content-Type": "application/json",
     }
 
-    timeout = aiohttp.ClientTimeout(total=40)
+    timeout = aiohttp.ClientTimeout(total=60)
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post("https://hcti.io/v1/image", json=payload, headers=headers) as resp:
