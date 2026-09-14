@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1800px; height: 1200px; overflow: hidden;
+    margin: 0; padding: 0;
+  }
+  body {
+    font-family: 'Segoe UI', Roboto, 'DejaVu Sans', sans-serif;
+    background: #0a0a0c; color: #fff;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  .profile {
+    width: 100%; height: 100%;
+    background: linear-gradient(135deg, #1a1a1f 0%, #0e0e10 60%, #14141a 100%);
+    border: 3px solid #4a4a4f; border-radius: 27px;
+    padding: 21px 27px;
+    display: flex; flex-direction: column;
+    position: relative; overflow: hidden;
+  }
+  .profile::before {
+    content: ''; position: absolute;
+    top: -270px; right: -180px; width: 630px; height: 630px;
+    background: radial-gradient(circle, ROLE_GLOW_PLACEHOLDER 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .profile::after {
+    content: ''; position: absolute;
+    bottom: -270px; left: -180px; width: 570px; height: 570px;
+    background: radial-gradient(circle, rgba(46,204,113,0.06) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    position: relative; z-index: 2; margin-bottom: 18px;
+    flex-shrink: 0;
+  }
+  .logo-block { display: flex; align-items: center; gap: 21px; }
+  .logo-icon {
+    width: 78px; height: 78px;
+    background: linear-gradient(135deg, #4a4a4f, #2a2a2f);
+    border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 33px; color: #e0e0e0;
+  }
+  .logo-text { font-size: 36px; font-weight: 800; letter-spacing: 6px; line-height: 1; }
+  .logo-sub { font-size: 15px; color: #888; letter-spacing: 4.5px; margin-top: 4px; }
+  .header-right { text-align: right; }
+  .header-right .lbl { font-size: 16px; color: #888; letter-spacing: 3.75px; text-transform: uppercase; }
+  .header-right .val { font-size: 27px; font-weight: 700; color: #fff; margin-top: 3px; }
+
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 15px;
+    flex: 1; position: relative; z-index: 2; min-height: 0;
+  }
+
+  .left {
+    background: #14141a; border: 2px solid #2a2a2f;
+    border-radius: 24px; padding: 18px 24px;
+    display: flex; flex-direction: column;
+    position: relative; overflow: hidden;
+    gap: 15px;
+    min-height: 0;
+  }
+  .left::before {
+    content: ''; position: absolute;
+    top: 0; left: 0; right: 0; height: 6px;
+    background: ROLE_GRADIENT_PLACEHOLDER;
+  }
+
+  .profile-top {
+    display: flex; align-items: center; gap: 21px;
+    padding-top: 12px; padding-bottom: 15px;
+    border-bottom: 2px solid #222;
+    flex-shrink: 0;
+  }
+  .avatar-wrap { position: relative; flex-shrink: 0; }
+  .avatar {
+    width: 144px; height: 144px; border-radius: 50%;
+    border: 5px solid ROLE_BORDER_PLACEHOLDER;
+    object-fit: cover;
+    box-shadow: 0 0 42px ROLE_GLOW_PLACEHOLDER;
+    display: block;
+  }
+  .online-dot {
+    position: absolute; bottom: 4px; right: 4px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #2ecc71; border: 5px solid #14141a;
+    box-shadow: 0 0 18px rgba(46,204,113,0.6);
+  }
+  .profile-info { min-width: 0; flex: 1; }
+  .username {
+    font-size: 39px; font-weight: 800; color: #fff; line-height: 1.1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .user-tag { font-size: 21px; color: #888; margin-top: 4px; }
+  .role-badge {
+    display: inline-block; margin-top: 10px;
+    padding: 8px 21px; border-radius: 14px;
+    font-size: 20px; font-weight: 800; letter-spacing: 2.7px;
+    text-transform: uppercase;
+    background: ROLE_BG_PLACEHOLDER;
+    color: ROLE_COLOR_PLACEHOLDER;
+    border: 2px solid ROLE_BORDER_PLACEHOLDER;
+  }
+
+  .progress-block { flex-shrink: 0; }
+  .progress-top {
+    display: flex; justify-content: space-between;
+    font-size: 21px; color: #888;
+    margin-bottom: 9px; font-weight: 600;
+  }
+  .progress-top .val { color: #fff; font-weight: 800; }
+  .progress-track {
+    width: 100%; height: 26px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 60px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .progress-fill {
+    height: 100%; width: PROGRESS_PCT_PLACEHOLDER%; border-radius: 60px;
+    background: ROLE_GRADIENT_PLACEHOLDER;
+    box-shadow: 0 0 22px ROLE_GLOW_PLACEHOLDER;
+  }
+  .progress-hint {
+    font-size: 21px; color: #bbb; margin-top: 8px;
+    display: flex; align-items: center; gap: 9px; font-weight: 600;
+  }
+
+  .custom-roles {
+    display: flex; flex-direction: column;
+    gap: 10px; flex: 1; min-height: 0;
+  }
+  .section-label {
+    font-size: 21px; color: #888; letter-spacing: 3.75px;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+    justify-content: space-between; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .section-label .count { color: #149bd0; font-weight: 800; }
+  .roles-list {
+    display: flex; flex-direction: column;
+    gap: 9px; overflow: hidden; flex: 1; min-height: 0;
+  }
+
+  .role-item {
+    display: flex; align-items: center; gap: 18px;
+    background: #0f0f14; border: 2px solid #2a2a2f;
+    border-radius: 15px; padding: 12px 21px;
+    position: relative; overflow: hidden; flex-shrink: 0;
+  }
+  .role-item::before {
+    content: ''; position: absolute;
+    left: 0; top: 0; bottom: 0; width: 6px;
+    background: var(--role-item-color, #149bd0);
+  }
+  .role-item .dot {
+    width: 15px; height: 15px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .role-item .name {
+    font-size: 24px; font-weight: 700; color: #fff;
+    flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .role-item .pos { font-size: 23px; color: #888; font-weight: 700; }
+
+  .empty-roles {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 15px;
+    background: #0f0f14; border: 2px dashed #222;
+    border-radius: 18px; padding: 30px 21px;
+    min-height: 0;
+  }
+  .empty-roles .empty-icon { font-size: 72px; color: #2a2a2f; line-height: 1; }
+  .empty-roles .empty-text {
+    font-size: 24px; color: #3a3a42; font-weight: 700;
+    letter-spacing: 3px; text-transform: uppercase; text-align: center;
+  }
+  .empty-roles .empty-sub {
+    font-size: 20px; color: #2a2a32; font-weight: 600;
+    text-align: center;
+  }
+
+  .ms-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 12px; flex-shrink: 0;
+  }
+  .ms-item {
+    background: #0f0f14; border: 2px solid #2a2a2f;
+    border-radius: 18px; padding: 18px 24px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .ms-item .lbl {
+    font-size: 18px; color: #888; text-transform: uppercase;
+    display: flex; align-items: center; gap: 9px;
+    font-weight: 700; margin-bottom: 8px;
+  }
+  .ms-item .val { font-size: 42px; font-weight: 800; color: #fff; line-height: 1; }
+  .ms-item .val.green { color: #2ecc71; }
+  .ms-item .val.blue { color: #149bd0; }
+
+  .right { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+  .personal-dc {
+    background: linear-gradient(135deg, #14141a, #0f0f14);
+    border: 2px solid #2a2a2f; border-radius: 24px;
+    padding: 18px 24px;
+    position: relative; overflow: hidden;
+    flex: 1; display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .personal-dc::before {
+    content: ''; position: absolute;
+    top: 0; left: 0; right: 0; height: 6px;
+    background: linear-gradient(90deg, #f7c991, #ae7911, #f7c991);
+  }
+  .top-title {
+    font-size: 21px; color: #888; letter-spacing: 3.75px;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+    justify-content: space-between; font-weight: 700;
+    margin-bottom: 14px; flex-shrink: 0;
+  }
+  .top-title .sub { color: #f7c991; font-weight: 800; letter-spacing: 0; font-size: 21px; }
+  .personal-list {
+    display: flex; flex-direction: column;
+    gap: 9px; flex: 1; min-height: 0;
+  }
+  .p-item {
+    display: flex; align-items: center; gap: 18px;
+    padding: 12px 21px;
+    background: #0f0f14;
+    border: 2px solid #1a1a1f;
+    border-radius: 18px;
+    flex: 1;
+  }
+  .p-item .p-icon {
+    width: 54px; height: 54px; border-radius: 15px;
+    background: rgba(247,201,145,0.1);
+    border: 2px solid rgba(247,201,145,0.25);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; color: #f7c991; flex-shrink: 0;
+  }
+  .p-item .p-lbl { flex: 1; font-size: 24px; color: #aaa; font-weight: 600; }
+  .p-item .p-val { font-size: 32px; font-weight: 800; color: #f7c991; }
+  .p-item .p-val .unit { font-size: 20px; color: #888; margin-left: 4px; }
+  .p-item.top {
+    background: linear-gradient(135deg, rgba(247,201,145,0.08), #0f0f14);
+    border-color: rgba(247,201,145,0.25);
+  }
+  .p-item.top .p-icon { background: linear-gradient(135deg, #f7c991, #ae7911); color: #000; }
+  .p-item.top .p-lbl { color: #fff; }
+  .p-item.top .p-val { color: #fff; font-size: 36px; }
+
+  .inventory {
+    background: #14141a; border: 2px solid #2a2a2f;
+    border-radius: 24px; padding: 17px 24px;
+    flex-shrink: 0;
+  }
+  .inv-header {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 12px;
+  }
+  .inv-title {
+    font-size: 21px; color: #888; letter-spacing: 3.75px;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px; font-weight: 700;
+  }
+  .inv-more { font-size: 21px; color: #2ecc71; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+  .inv-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .inv-item {
+    background: #0f0f14; border: 2px solid #2a2a2f;
+    border-radius: 17px; padding: 15px 21px;
+    display: flex; align-items: center; gap: 20px;
+    position: relative; overflow: hidden;
+  }
+  .inv-item.filled {
+    border-color: rgba(46,204,113,0.25);
+    background: linear-gradient(135deg, #0f0f14, rgba(46,204,113,0.04));
+  }
+  .inv-item.empty { border-color: #1a1a1f; opacity: 0.4; }
+  .inv-item .inv-icon {
+    width: 66px; height: 66px; border-radius: 17px;
+    background: rgba(255,255,255,0.04);
+    border: 2px solid rgba(255,255,255,0.06);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px; flex-shrink: 0;
+  }
+  .inv-item .inv-body { flex: 1; min-width: 0; }
+  .inv-item .inv-name {
+    font-size: 24px; font-weight: 700; color: #fff;
+    line-height: 1.15;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .inv-item.empty .inv-name { color: #555; }
+  .inv-item .inv-qty { font-size: 20px; color: #888; margin-top: 5px; font-weight: 700; }
+
+  .history {
+    background: #14141a; border: 2px solid #2a2a2f;
+    border-radius: 24px; padding: 17px 24px;
+    flex-shrink: 0;
+  }
+  .history-title {
+    font-size: 21px; color: #888; letter-spacing: 3.75px;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; margin-bottom: 12px;
+  }
+  .history-list { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 33px; }
+  .history-item {
+    display: flex; justify-content: space-between;
+    align-items: center; font-size: 24px;
+    padding: 6px 0;
+    border-bottom: 1px dashed #1a1a1f;
+  }
+  .history-item:nth-last-child(-n+2) { border-bottom: none; }
+  .history-item .date { color: #888; font-size: 22px; font-weight: 600; }
+  .history-item .amount { font-weight: 800; font-size: 24px; }
+  .history-item .amount.plus { color: #2ecc71; }
+  .history-item .amount.minus { color: #ff6b6b; }
+</style>
+</head>
+<body>
+
+<div class="profile">
+  <div class="header">
+    <div class="logo-block">
+      <div class="logo-icon"><i class="fa-solid fa-people-group"></i></div>
+      <div>
+        <div class="logo-text">DIAMOND</div>
+        <div class="logo-sub">SHOP &amp; ECOSYSTEM</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="lbl">Профиль покупателя</div>
+      <div class="val">ROLE_HEADER_PLACEHOLDER</div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="left">
+      <div class="profile-top">
+        <div class="avatar-wrap">
+          <img class="avatar" src="AVATAR_URL_PLACEHOLDER" alt="avatar">
+          <div class="online-dot"></div>
+        </div>
+        <div class="profile-info">
+          <div class="username">USERNAME_PLACEHOLDER</div>
+          <div class="user-tag">ID: USER_ID_PLACEHOLDER</div>
+          <div class="role-badge">ROLE_BADGE_PLACEHOLDER</div>
+        </div>
+      </div>
+
+      <div class="progress-block">
+        <div class="progress-top">
+          <span>До NEXT_ROLE_PLACEHOLDER</span>
+          <span class="val">PROGRESS_PCT_PLACEHOLDER%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill"></div>
+        </div>
+        <div class="progress-hint">
+          <i class="fa-solid fa-arrow-up"></i> PROGRESS_TEXT_PLACEHOLDER
+        </div>
+      </div>
+
+      <div class="custom-roles">
+        <div class="section-label">
+          <span><i class="fa-solid fa-palette"></i> Кастомные роли</span>
+          <span class="count">ROLES_COUNT_PLACEHOLDER</span>
+        </div>
+        ROLES_HTML_PLACEHOLDER
+      </div>
+
+      <div class="ms-grid">
+        <div class="ms-item">
+          <span class="lbl"><i class="fa-solid fa-thumbs-up"></i> Отзывы</span>
+          <span class="val blue">REVIEWS_PLACEHOLDER</span>
+        </div>
+        <div class="ms-item">
+          <span class="lbl"><i class="fa-solid fa-check"></i> Покупки</span>
+          <span class="val green">PURCHASES_COUNT_PLACEHOLDER</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="personal-dc">
+        <div class="top-title">
+          <span><i class="fa-solid fa-chart-line"></i> Статистика DC</span>
+          <span class="sub">@USERNAME_PLACEHOLDER</span>
+        </div>
+        <div class="personal-list">
+          <div class="p-item top">
+            <div class="p-icon"><i class="fa-solid fa-crown"></i></div>
+            <div class="p-lbl">Заработано за всё время</div>
+            <div class="p-val">TOTAL_EARNED_PLACEHOLDER<span class="unit">DC</span></div>
+          </div>
+          <div class="p-item">
+            <div class="p-icon"><i class="fa-solid fa-gem"></i></div>
+            <div class="p-lbl">Текущий баланс</div>
+            <div class="p-val">BALANCE_PLACEHOLDER<span class="unit">DC</span></div>
+          </div>
+          <div class="p-item">
+            <div class="p-icon"><i class="fa-solid fa-arrow-trend-up"></i></div>
+            <div class="p-lbl">Заработано за месяц</div>
+            <div class="p-val">EARNED_MONTH_PLACEHOLDER<span class="unit">DC</span></div>
+          </div>
+          <div class="p-item">
+            <div class="p-icon"><i class="fa-solid fa-cart-shopping"></i></div>
+            <div class="p-lbl">Потрачено за месяц</div>
+            <div class="p-val">SPENT_MONTH_PLACEHOLDER<span class="unit">DC</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inventory">
+        <div class="inv-header">
+          <div class="inv-title"><i class="fa-solid fa-box-open"></i> Инвентарь</div>
+          <div class="inv-more">INV_MORE_PLACEHOLDER</div>
+        </div>
+        <div class="inv-row">
+          INV_ITEMS_PLACEHOLDER
+        </div>
+      </div>
+
+      <div class="history">
+        <div class="history-title"><i class="fa-solid fa-clock-rotate-left"></i> Последние операции</div>
+        <div class="history-list">
+          HISTORY_PLACEHOLDER
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
