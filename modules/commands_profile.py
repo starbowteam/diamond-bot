@@ -151,19 +151,17 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             "amount": h.get("amount", 0),
         })
 
-    # ---- Роли пользователя (кастомные + покупательские, всё кроме @everyone и managed) ----
+    # ---- Роли пользователя (кастомные + покупательские) ----
     custom_roles = []
     try:
         guild = inter.guild
 
-        # Служебные роли бота, которые не показываем в списке кастомных
         excluded = set()
         for rid in CONFIG.get("ROLE_IDS", {}).values():
             excluded.add(rid)
-        # Дополнительные служебные роли (менеджеры, админы, поддержка)
         excluded.update({
-            1127428607606796290,   # MANAGER
-            1154757071330365490,   # Sales Manager
+            1127428607606796290,
+            1154757071330365490,
             1471844291595731016,
             1471190371181789234,
             1457964854441672806,
@@ -171,16 +169,15 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             1539523399611580476,
         })
 
-        # Верхняя граница: не показываем роли выше или равные менеджеру
         limit_role = guild.get_role(1127428607606796290)
         max_pos = limit_role.position if limit_role else 9999
 
         for r in sorted(user.roles, key=lambda x: -x.position):
-            if r.is_default():       # @everyone
+            if r.is_default():
                 continue
-            if r.managed:            # роли ботов/интеграций
+            if r.managed:
                 continue
-            if r.id in excluded:     # служебные
+            if r.id in excluded:
                 continue
             if r.position >= max_pos:
                 continue
@@ -199,12 +196,12 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     except Exception as e:
         logger.warning(f"Avatar fetch error: {e}")
 
-    # Стрик — просто last_bonus
+    # Стрик
     streak = 0
     if dc.get("last_bonus", 0) >= now_ts - 86400:
         streak = 1
 
-    # --- Генерация (в отдельном потоке) ---
+    # --- Генерация ---
     buf = await asyncio.to_thread(
         generate_profile_card,
         user_name=user.display_name,
@@ -229,7 +226,7 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     # ---- Отправка в эмбеде с цветом #676767 ----
     filename = f"profile_{user.id}.png"
     file = disnake.File(buf, filename=filename)
-    embed = disnake.Embed(color=6776679)  # 0x676767
+    embed = disnake.Embed(color=6776679)
     embed.set_image(url=f"attachment://{filename}")
     await inter.response.send_message(embed=embed, file=file, ephemeral=True)
 
@@ -242,7 +239,7 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
 
 
 # ============================================================
-# УПРАВЛЕНИЕ ПОКУПКАМИ (селект товаров и возврат)
+# УПРАВЛЕНИЕ ПОКУПКАМИ
 # ============================================================
 class PurchaseSelectView(View):
     def __init__(self, user_id, purchases):
@@ -555,7 +552,6 @@ class ProfileSelect(disnake.ui.StringSelect):
         )
         value = inter.data.values[0]
         if value == "profile":
-            # Отправляем карточку-картинку
             await show_profile_card(inter, inter.author)
         elif value == "purchases":
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
