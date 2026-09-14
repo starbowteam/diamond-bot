@@ -156,12 +156,14 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     try:
         guild = inter.guild
 
+        # Служебные роли бота, которые не показываем в списке кастомных
         excluded = set()
         for rid in CONFIG.get("ROLE_IDS", {}).values():
             excluded.add(rid)
+        # Дополнительные служебные роли (менеджеры, админы, поддержка)
         excluded.update({
-            1127428607606796290,
-            1154757071330365490,
+            1127428607606796290,   # MANAGER
+            1154757071330365490,   # Sales Manager
             1471844291595731016,
             1471190371181789234,
             1457964854441672806,
@@ -169,19 +171,21 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             1539523399611580476,
         })
 
+        # Верхняя граница: не показываем роли выше или равные менеджеру
         limit_role = guild.get_role(1127428607606796290)
         max_pos = limit_role.position if limit_role else 9999
 
         for r in sorted(user.roles, key=lambda x: -x.position):
-            if r.is_default():
+            if r.is_default():       # @everyone
                 continue
-            if r.managed:
+            if r.managed:            # роли ботов/интеграций
                 continue
-            if r.id in excluded:
+            if r.id in excluded:     # служебные
                 continue
             if r.position >= max_pos:
                 continue
             custom_roles.append({
+                "id": r.id,          # <-- используется для стабильной FA-иконки
                 "name": r.name,
                 "pos": f"#{r.position}",
                 "color": r.color.to_rgb() if r.color.value else (136, 136, 136),
@@ -201,7 +205,7 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     if dc.get("last_bonus", 0) >= now_ts - 86400:
         streak = 1
 
-    # --- Генерация ---
+    # --- Генерация (в отдельном потоке) ---
     buf = await asyncio.to_thread(
         generate_profile_card,
         user_name=user.display_name,
@@ -239,7 +243,7 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
 
 
 # ============================================================
-# УПРАВЛЕНИЕ ПОКУПКАМИ
+# УПРАВЛЕНИЕ ПОКУПКАМИ (селект товаров и возврат)
 # ============================================================
 class PurchaseSelectView(View):
     def __init__(self, user_id, purchases):
