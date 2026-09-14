@@ -81,11 +81,7 @@ def _get_role_info_by_count(count: int):
 # ГЕНЕРАЦИЯ И ОТПРАВКА КАРТОЧКИ
 # ============================================================
 async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
-    from modules.profile_card import (
-        generate_profile_card,
-        IC_CART, IC_USER_TIE, IC_BOX_OPEN, IC_GEM, IC_STAR, IC_FIRE, IC_TROPHY,
-        IC_PERCENT, IC_GIFT, IC_LOCK, IC_IMAGE, IC_BOLT, IC_MEDAL,
-    )
+    from modules.profile_card import generate_profile_card
 
     counts = load_json(FILES["review_counts"], {})
     review_count = counts.get(str(user.id), 0)
@@ -113,26 +109,19 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
         ptype = p.get("type", "")
         name = p.get("value", "")[:16]
         if ptype == "roles":
-            icon = IC_USER_TIE
             accent = (20, 155, 208)
         elif ptype == "discounts":
-            icon = IC_PERCENT
             accent = (46, 204, 113)
         elif ptype in ("design", "design_avatar", "design_banner"):
-            icon = IC_IMAGE
             accent = (247, 201, 145)
         elif ptype in ("ads",):
-            icon = IC_BOLT
             accent = (255, 107, 107)
         elif ptype in ("custom",):
-            icon = IC_GIFT
             accent = (216, 142, 223)
         else:
-            icon = IC_GEM
             accent = (20, 155, 208)
         inventory.append({
             "_ptype": ptype,
-            "icon": icon,
             "name": name,
             "qty": f"куплено {datetime.fromtimestamp(p.get('date', 0)).strftime('%d.%m.%Y')}",
             "accent": accent,
