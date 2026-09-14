@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Генерация карточки профиля 1800x1200 в стиле HTML-макета Diamond Shop."""
+"""Карточка профиля 1800x1200 — точная копия HTML-макета Diamond Shop."""
+
 import io
 import os
 import re
+import random
 from typing import Optional, List, Dict, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -16,7 +18,7 @@ FONT_FA_REG   = os.path.join(ADD_DIR, "fa-regular-400.ttf")
 _FONT_CACHE = {}
 _FA_CACHE   = {}
 
-# ---- FontAwesome коды (совместимы с FA 5/6) ----
+# ================== FontAwesome коды ==================
 IC_USERS        = 0xf0c0
 IC_GEM          = 0xf3a5
 IC_TROPHY       = 0xf091
@@ -41,24 +43,80 @@ IC_LOCK         = 0xf023
 IC_MEDAL        = 0xf5a2
 IC_IMAGE        = 0xf03e
 IC_BOLT         = 0xf0e7
+IC_ARROW_TREND  = 0xf201
 
-# ---- Палитра ----
+# Пул иконок для рандомной FA-иконки кастомных ролей
+ROLE_ICON_POOL = [
+    0xf005,  # star
+    0xf004,  # heart
+    0xf521,  # crown
+    0xf3a5,  # gem
+    0xf0e7,  # bolt
+    0xf06d,  # fire
+    0xf135,  # rocket
+    0xf544,  # robot
+    0xf1b0,  # paw
+    0xf6d5,  # dragon
+    0xf6be,  # cat
+    0xf4ba,  # dove
+    0xf52e,  # frog
+    0xf4fb,  # user-astronaut
+    0xf504,  # user-ninja
+    0xf21b,  # user-secret
+    0xf6e8,  # hat-wizard
+    0xf0d0,  # magic
+    0xf810,  # ice-cream
+    0xf805,  # hamburger
+    0xf4e3,  # wine-glass
+    0xf0e9,  # umbrella
+    0xf13d,  # anchor
+    0xf072,  # plane
+    0xf1e2,  # bomb
+    0xf52d,  # feather
+    0xf54c,  # skull
+    0xf186,  # moon
+    0xf185,  # sun
+    0xf2dc,  # snowflake
+    0xf06c,  # leaf
+    0xf132,  # shield
+    0xf6e2,  # ghost
+    0xf1b9,  # car
+    0xf21c,  # motorcycle
+    0xf206,  # bicycle
+    0xf439,  # chess
+    0xf43f,  # chess-king
+    0xf445,  # chess-queen
+    0xf578,  # fish
+    0xf6f0,  # horse
+]
+
+
+def _pick_role_icon(role_id: int) -> int:
+    """Стабильный рандом: одна и та же роль → одна и та же иконка."""
+    return random.Random(int(role_id) & 0xFFFFFFFF).choice(ROLE_ICON_POOL)
+
+
+# ================== Палитра ==================
 BG_DARK          = (10, 10, 12)
-CONTAINER_BG     = (14, 14, 18)
-CONTAINER_BORDER = (58, 58, 63)
-CARD_BG          = (20, 20, 26)
-CARD_BORDER      = (42, 42, 47)
+PROFILE_BORDER   = (74, 74, 79)
+LEFT_BG          = (20, 20, 26)
+LEFT_BORDER      = (42, 42, 47)
+CARD_LINE        = (34, 34, 34)
 INNER_BG         = (15, 15, 20)
 INNER_BORDER     = (26, 26, 31)
+INNER_BORDER_2   = (42, 42, 47)
 TEXT_WHITE       = (255, 255, 255)
 TEXT_MUTED       = (136, 136, 136)
 TEXT_HINT        = (187, 187, 187)
+TEXT_SOFT        = (170, 170, 170)
 GREEN            = (46, 204, 113)
 GOLD             = (247, 201, 145)
 GOLD_DARK        = (174, 121, 17)
 BLUE_ACCENT      = (20, 155, 208)
 PURPLE           = (216, 142, 223)
 RED_NEG          = (255, 107, 107)
+EMPTY_TEXT       = (58, 58, 66)
+EMPTY_SUB        = (42, 42, 50)
 
 ROLE_STYLES = {
     "none":      {"name": "НЕТ РОЛИ",        "grad": [(136,136,136),(85,85,85)],    "color": (136,136,136)},
@@ -88,7 +146,7 @@ def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub('', text).strip()
 
 
-# ---------- Утилиты ----------
+# ================== Утилиты ==================
 def _font(size: int):
     if size in _FONT_CACHE:
         return _FONT_CACHE[size]
@@ -126,6 +184,8 @@ def _icon(draw, cx, cy, code, size, color, regular=False):
 
 
 def _tw(draw, text, font):
+    if not text:
+        return 0, 0
     bb = draw.textbbox((0, 0), text, font=font)
     return bb[2] - bb[0], bb[3] - bb[1]
 
@@ -137,20 +197,43 @@ def _blend(c1, c2, t):
             int(c1[2]*(1-t) + c2[2]*t))
 
 
+def _diag_gradient_3stop(W: int, H: int,
+                          c_a, c_b, c_c,
+                          stop1: float = 0.0,
+                          stop2: float = 0.6,
+                          stop3: float = 1.0) -> Image.Image:
+    """Диагональный 135° градиент (как linear-gradient(135deg, ...))."""
+    SW, SH = 120, 80
+    small = Image.new('RGB', (SW, SH))
+    spx = small.load()
+    denom = (SW + SH - 2) if (SW + SH - 2) > 0 else 1
+    for y in range(SH):
+        for x in range(SW):
+            t = (x + y) / denom
+            if t <= stop2:
+                tt = (t - stop1) / max(stop2 - stop1, 1e-6)
+                c = _blend(c_a, c_b, tt)
+            else:
+                tt = (t - stop2) / max(stop3 - stop2, 1e-6)
+                c = _blend(c_b, c_c, tt)
+            spx[x, y] = c
+    return small.resize((W, H), Image.BILINEAR)
+
+
 def _linear_gradient(width: int, height: int, c1, c2, horizontal=True) -> Image.Image:
     if width <= 0 or height <= 0:
         return Image.new('RGB', (max(width, 1), max(height, 1)), c1)
     if horizontal:
-        grad = Image.new('RGB', (width, 1))
+        grad = Image.new('RGB', (max(width, 1), 1))
         px = grad.load()
-        for x in range(width):
+        for x in range(max(width, 1)):
             t = x / max(width - 1, 1)
             px[x, 0] = _blend(c1, c2, t)
         return grad.resize((width, height), Image.NEAREST)
     else:
-        grad = Image.new('RGB', (1, height))
+        grad = Image.new('RGB', (1, max(height, 1)))
         px = grad.load()
-        for y in range(height):
+        for y in range(max(height, 1)):
             t = y / max(height - 1, 1)
             px[0, y] = _blend(c1, c2, t)
         return grad.resize((width, height), Image.NEAREST)
@@ -178,7 +261,7 @@ def _radial_glow(base: Image.Image, cx: int, cy: int, radius: int,
     small = max(radius * 2 // scale, 8)
     overlay = Image.new('RGBA', (small, small), (0, 0, 0, 0))
     od = ImageDraw.Draw(overlay)
-    steps = 30
+    steps = 24
     c = small // 2
     for i in range(steps):
         r = int(c * (1 - i / steps))
@@ -218,6 +301,31 @@ def _paste_avatar(base, avatar, x, y, size, border_color, border_w=5):
     d.ellipse((x, y, x + size - 1, y + size - 1), outline=border_color, width=border_w)
 
 
+def _dashed_rect(draw, box, radius, color, width=1, dash=10, gap=8):
+    """Пунктирный rounded-rect — рисует по краям, без радиусов (упрощённо)."""
+    x1, y1, x2, y2 = box
+    # верх
+    x = x1
+    while x < x2:
+        draw.line([(x, y1), (min(x + dash, x2), y1)], fill=color, width=width)
+        x += dash + gap
+    # низ
+    x = x1
+    while x < x2:
+        draw.line([(x, y2), (min(x + dash, x2), y2)], fill=color, width=width)
+        x += dash + gap
+    # лево
+    y = y1
+    while y < y2:
+        draw.line([(x1, y), (x1, min(y + dash, y2))], fill=color, width=width)
+        y += dash + gap
+    # право
+    y = y1
+    while y < y2:
+        draw.line([(x2, y), (x2, min(y + dash, y2))], fill=color, width=width)
+        y += dash + gap
+
+
 # ============================================================
 # ОСНОВНАЯ ГЕНЕРАЦИЯ
 # ============================================================
@@ -240,359 +348,460 @@ def generate_profile_card(
     history: List[Dict],
     custom_roles: List[Dict],
 ) -> io.BytesIO:
+
     W, H = 1800, 1200
     style = ROLE_STYLES.get(role_key, ROLE_STYLES["none"])
     role_color = style["color"]
     grad_c1, grad_c2 = style["grad"]
 
-    # ---- Фон ----
-    bg = Image.new("RGBA", (W, H), (*BG_DARK, 255))
-    _radial_glow(bg, W - 320, 180, 520, role_color, max_alpha=48)
-    _radial_glow(bg, 260, H - 200, 420, (46, 204, 113), max_alpha=22)
+    # ============ ФОН 135° ============
+    bg = _diag_gradient_3stop(W, H, (26, 26, 31), (14, 14, 16), (20, 20, 26), 0.0, 0.6, 1.0)
+    bg = bg.convert("RGBA")
+
+    # Внешний радиальный glow (role-glow)
+    _radial_glow(bg, int(W * 0.83), int(H * 0.20), 630, role_color, max_alpha=45)
+    _radial_glow(bg, int(W * 0.18), int(H * 0.83), 570, (46, 204, 113), max_alpha=20)
 
     draw = ImageDraw.Draw(bg)
 
-    # ---- Контейнер ----
-    M = 14
-    draw.rounded_rectangle((M, M, W-M, H-M), radius=27,
-                           fill=CONTAINER_BG + (255,),
-                           outline=CONTAINER_BORDER + (255,), width=3)
+    # ============ КОНТЕЙНЕР PROFILE (весь кадр) ============
+    M = 8
+    PROF_R = 27
+    PROF_BORDER = 3
+    PROF_PAD_X = 27
+    PROF_PAD_Y = 21
 
-    # ---- HEADER ----
-    HP = 38
-    logo_box = 78
-    draw.rounded_rectangle((HP, HP, HP + logo_box, HP + logo_box),
-                           radius=18, fill=(74, 74, 79, 255))
-    _icon(draw, HP + logo_box // 2, HP + logo_box // 2 + 2, IC_USERS, 42, (224, 224, 224))
-    draw.text((HP + logo_box + 22, HP + 6), "DIAMOND", font=_font(40), fill=TEXT_WHITE)
-    draw.text((HP + logo_box + 24, HP + 54), "SHOP & ECOSYSTEM", font=_font(16), fill=TEXT_MUTED)
+    draw.rounded_rectangle(
+        (M, M, W - M, H - M),
+        radius=PROF_R,
+        outline=PROFILE_BORDER + (255,),
+        width=PROF_BORDER
+    )
+    draw = ImageDraw.Draw(bg)
 
-    # Правая часть header
-    lbl = "ПРОФИЛЬ ПОКУПАТЕЛЯ"
-    lw, _ = _tw(draw, lbl, _font(18))
-    draw.text((W - HP - lw, HP + 14), lbl, font=_font(18), fill=TEXT_MUTED)
-    rv = style["name"]
-    rvw, _ = _tw(draw, rv, _font(26))
-    draw.text((W - HP - rvw, HP + 44), rv, font=_font(26), fill=TEXT_WHITE)
+    # Внутренняя область
+    PX1 = M + PROF_BORDER + PROF_PAD_X
+    PY1 = M + PROF_BORDER + PROF_PAD_Y
+    PX2 = W - M - PROF_BORDER - PROF_PAD_X
+    PY2 = H - M - PROF_BORDER - PROF_PAD_Y
 
-    # ---- MAIN GRID ----
-    MAIN_Y1 = HP + logo_box + 20
-    MAIN_Y2 = H - HP
-    MAIN_X1 = HP
-    MAIN_X2 = W - HP
-    MAIN_W  = MAIN_X2 - MAIN_X1
+    # ============ HEADER ============
+    HP = 0
+    # logo-icon 78×78
+    LOGO_S = 78
+    logo_x = PX1
+    logo_y = PY1
+    draw.rounded_rectangle(
+        (logo_x, logo_y, logo_x + LOGO_S, logo_y + LOGO_S),
+        radius=18, fill=(74, 74, 79, 255)
+    )
+    _icon(draw, logo_x + LOGO_S // 2, logo_y + LOGO_S // 2 + 2, IC_USERS, 42, (224, 224, 224))
 
-    GAP = 16
-    LEFT_W  = int((MAIN_W - GAP) * 0.40)
+    # logo-text
+    lt_x = logo_x + LOGO_S + 21
+    draw.text((lt_x, logo_y + 6), "DIAMOND", font=_font(40), fill=TEXT_WHITE)
+    draw.text((lt_x, logo_y + 56), "SHOP & ECOSYSTEM", font=_font(16), fill=TEXT_MUTED)
+
+    # Правый блок
+    lbl_txt = "ПРОФИЛЬ ПОКУПАТЕЛЯ"
+    lbl_w, _ = _tw(draw, lbl_txt, _font(18))
+    draw.text((PX2 - lbl_w, logo_y + 14), lbl_txt, font=_font(18), fill=TEXT_MUTED)
+    role_name_top = style["name"]
+    rv_w, _ = _tw(draw, role_name_top, _font(26))
+    draw.text((PX2 - rv_w, logo_y + 44), role_name_top, font=_font(26), fill=TEXT_WHITE)
+
+    # ============ MAIN GRID ============
+    MAIN_Y1 = logo_y + LOGO_S + 18
+    MAIN_Y2 = PY2
+    MAIN_X1 = PX1
+    MAIN_X2 = PX2
+
+    MAIN_W = MAIN_X2 - MAIN_X1
+    GAP = 15
+    # ratio 1 : 1.5
+    unit = (MAIN_W - GAP) / 2.5
+    LEFT_W = int(unit)
     RIGHT_W = MAIN_W - GAP - LEFT_W
 
-    LEFT_X1  = MAIN_X1
-    LEFT_X2  = LEFT_X1 + LEFT_W
+    LEFT_X1 = MAIN_X1
+    LEFT_X2 = LEFT_X1 + LEFT_W
     RIGHT_X1 = LEFT_X2 + GAP
     RIGHT_X2 = MAIN_X2
 
-    # ============ LEFT COLUMN ============
-    draw.rounded_rectangle((LEFT_X1, MAIN_Y1, LEFT_X2, MAIN_Y2), radius=24,
-                           fill=CARD_BG + (255,), outline=CARD_BORDER + (255,), width=2)
-    _paste_gradient_rect(bg, (LEFT_X1 + 3, MAIN_Y1 + 3, LEFT_X2 - 3, MAIN_Y1 + 10),
-                         3, grad_c1, grad_c2)
+    # =====================================================
+    # LEFT COLUMN
+    # =====================================================
+    L_R = 24
+    L_BORDER = 2
+    L_PAD_X = 24
+    L_PAD_Y = 18
+    L_GAP = 15
+
+    draw.rounded_rectangle(
+        (LEFT_X1, MAIN_Y1, LEFT_X2, MAIN_Y2), radius=L_R,
+        fill=LEFT_BG + (255,), outline=LEFT_BORDER + (255,), width=L_BORDER
+    )
+    # Верхняя градиентная полоса (role-gradient)
+    _paste_gradient_rect(bg,
+        (LEFT_X1 + L_BORDER, MAIN_Y1 + L_BORDER,
+         LEFT_X2 - L_BORDER, MAIN_Y1 + L_BORDER + 6),
+        3, grad_c1, grad_c2)
     draw = ImageDraw.Draw(bg)
 
-    LP = 26
-    LX1 = LEFT_X1 + LP
-    LX2 = LEFT_X2 - LP
-    LY  = MAIN_Y1 + 22
+    LX1 = LEFT_X1 + L_PAD_X
+    LX2 = LEFT_X2 - L_PAD_X
+    LY = MAIN_Y1 + L_PAD_Y
 
-    # --- Profile Top ---
+    # ---- profile-top ----
     AV_SIZE = 144
-    _paste_avatar(bg, _avatar_circle(avatar_bytes, AV_SIZE), LX1, LY, AV_SIZE,
+    _paste_avatar(bg, _avatar_circle(avatar_bytes, AV_SIZE), LX1, LY + 12, AV_SIZE,
                   role_color, border_w=5)
 
-    # Online dot
+    # online dot
     dot = 30
     dx_ = LX1 + AV_SIZE - dot + 8
-    dy_ = LY + AV_SIZE - dot + 8
-    draw.ellipse((dx_, dy_, dx_ + dot, dy_ + dot), fill=GREEN + (255,),
-                 outline=INNER_BG + (255,), width=5)
+    dy_ = LY + 12 + AV_SIZE - dot + 8
+    draw.ellipse((dx_, dy_, dx_ + dot, dy_ + dot),
+                 fill=GREEN + (255,), outline=LEFT_BG + (255,), width=5)
 
-    # Инфо справа
-    IX = LX1 + AV_SIZE + 24
-    u_name = user_name[:22]
-    draw.text((IX, LY + 6), u_name, font=_font(40), fill=TEXT_WHITE)
-    draw.text((IX, LY + 60), f"ID: {user_id}", font=_font(21), fill=TEXT_MUTED)
+    # Инфо справа от аватара
+    IX = LX1 + AV_SIZE + 21
+    # username
+    draw.text((IX, LY + 18), user_name[:22], font=_font(39), fill=TEXT_WHITE)
+    # user-tag
+    draw.text((IX, LY + 74), f"ID: {user_id}", font=_font(21), fill=TEXT_MUTED)
 
-    # Badge
+    # role-badge
     badge_text = style["name"]
     bw, bh = _tw(draw, badge_text, _font(20))
     bx1 = IX
-    by1 = LY + 106
+    by1 = LY + 118
     by2 = by1 + 42
-    bx2 = bx1 + bw + 40
-    badge_bg = (*_blend(role_color, INNER_BG, 0.85), 255)
-    draw.rounded_rectangle((bx1, by1, bx2, by2), radius=12,
+    bx2 = bx1 + bw + 42
+    badge_bg = (*_blend(role_color, LEFT_BG, 0.85), 255)
+    draw.rounded_rectangle((bx1, by1, bx2, by2), radius=14,
                            fill=badge_bg, outline=role_color + (255,), width=2)
-    draw.text((bx1 + 20, by1 + 10), badge_text, font=_font(20), fill=role_color)
+    draw.text((bx1 + 21, by1 + 10), badge_text, font=_font(20), fill=role_color)
 
-    LY = MAIN_Y1 + 22 + AV_SIZE + 22
+    # Разделитель под profile-top
+    DIV_Y = LY + 12 + AV_SIZE + 15
+    draw.line((LX1, DIV_Y, LX2, DIV_Y), fill=CARD_LINE + (255,), width=2)
 
-    # --- Progress ---
-    draw.text((LX1, LY), f"До {next_role_name}", font=_font(20), fill=TEXT_MUTED)
+    LY = DIV_Y + L_GAP
+
+    # ---- progress block ----
+    draw.text((LX1, LY), f"До {next_role_name}", font=_font(21), fill=TEXT_MUTED)
     pct_str = f"{progress_pct}%"
-    pw, _ = _tw(draw, pct_str, _font(20))
-    draw.text((LX2 - pw, LY), pct_str, font=_font(20), fill=TEXT_WHITE)
+    pw, _ = _tw(draw, pct_str, _font(21))
+    draw.text((LX2 - pw, LY), pct_str, font=_font(21), fill=TEXT_WHITE)
 
-    PT_Y = LY + 34
-    PT_H = 24
-    draw.rounded_rectangle((LX1, PT_Y, LX2, PT_Y + PT_H), radius=12,
-                           fill=(22, 22, 26, 255), outline=INNER_BORDER + (255,), width=1)
-
+    PT_Y = LY + 32
+    PT_H = 26
+    # track
+    draw.rounded_rectangle((LX1, PT_Y, LX2, PT_Y + PT_H), radius=13,
+                           fill=(22, 22, 26, 255),
+                           outline=(255, 255, 255, 20), width=2)
     if progress_pct > 0:
-        fill_w = int((LX2 - LX1 - 4) * progress_pct / 100)
-        fill_w = max(fill_w, 4)
-        _paste_gradient_rect(bg, (LX1 + 2, PT_Y + 2, LX1 + 2 + fill_w, PT_Y + PT_H - 2),
-                             10, grad_c1, grad_c2)
+        fill_w = int((LX2 - LX1 - 6) * progress_pct / 100)
+        fill_w = max(fill_w, 6)
+        _paste_gradient_rect(bg,
+            (LX1 + 3, PT_Y + 3, LX1 + 3 + fill_w, PT_Y + PT_H - 3),
+            11, grad_c1, grad_c2)
         draw = ImageDraw.Draw(bg)
 
-    _icon(draw, LX1 + 12, PT_Y + PT_H + 22, IC_ARROW_UP, 20, TEXT_MUTED)
-    draw.text((LX1 + 32, PT_Y + PT_H + 10), progress_text, font=_font(20), fill=TEXT_HINT)
+    # hint
+    _icon(draw, LX1 + 12, PT_Y + PT_H + 24, IC_ARROW_UP, 20, TEXT_MUTED)
+    draw.text((LX1 + 34, PT_Y + PT_H + 12), progress_text, font=_font(21), fill=TEXT_HINT)
 
-    LY = PT_Y + PT_H + 44
+    LY = PT_Y + PT_H + 46
 
-    # --- Custom Roles ---
-    _icon(draw, LX1 + 12, LY + 10, IC_PALETTE, 20, TEXT_MUTED)
-    draw.text((LX1 + 32, LY), "КАСТОМНЫЕ РОЛИ", font=_font(18), fill=TEXT_MUTED)
+    # ---- section-label: КАСТОМНЫЕ РОЛИ ----
+    _icon(draw, LX1 + 12, LY + 12, IC_PALETTE, 20, TEXT_MUTED)
+    draw.text((LX1 + 34, LY), "КАСТОМНЫЕ РОЛИ", font=_font(21), fill=TEXT_MUTED)
     count_str = str(len(custom_roles))
-    cw, _ = _tw(draw, count_str, _font(20))
-    draw.text((LX2 - cw, LY - 2), count_str, font=_font(20), fill=BLUE_ACCENT)
+    cw, _ = _tw(draw, count_str, _font(21))
+    draw.text((LX2 - cw, LY), count_str, font=_font(21), fill=BLUE_ACCENT)
 
-    LY += 34
+    LY += 32
 
-    # Резерв под мини-статы снизу
+    # ---- ms-grid резерв (2 карточки снизу) ----
     MS_H = 108
-    MS_Y1 = MAIN_Y2 - 22 - MS_H
-    ROLES_BOTTOM = MS_Y1 - 18
+    MS_Y1 = MAIN_Y2 - L_PAD_Y - MS_H
+    ROLES_BOTTOM = MS_Y1 - L_GAP
 
+    # ---- custom roles list ----
     if custom_roles:
         row_h = 58
-        row_gap = 8
-        max_rows = max((ROLES_BOTTOM - LY) // (row_h + row_gap), 1)
+        row_gap = 9
+        avail_h = ROLES_BOTTOM - LY
+        max_rows = max(avail_h // (row_h + row_gap), 1)
         shown = custom_roles[:max_rows]
+
         for i, r in enumerate(shown):
             ry1 = LY + i * (row_h + row_gap)
             ry2 = ry1 + row_h
             rc = r.get("color", (20, 155, 208))
-            draw.rounded_rectangle((LX1, ry1, LX2, ry2), radius=12,
+            draw.rounded_rectangle((LX1, ry1, LX2, ry2), radius=15,
                                    fill=INNER_BG + (255,),
-                                   outline=INNER_BORDER + (255,), width=1)
-            draw.rectangle((LX1 + 1, ry1 + 4, LX1 + 5, ry2 - 4), fill=rc)
-            dot_y = ry1 + row_h // 2
-            draw.ellipse((LX1 + 20, dot_y - 8, LX1 + 36, dot_y + 8), fill=rc)
-            rname = _strip_emoji(r.get("name", ""))[:32] or "—"
-            draw.text((LX1 + 52, ry1 + row_h // 2 - 12), rname, font=_font(23), fill=TEXT_WHITE)
+                                   outline=LEFT_BORDER + (255,), width=2)
+            # цветная полоса слева (::before)
+            draw.rectangle((LX1 + 2, ry1 + 4, LX1 + 8, ry2 - 4), fill=rc)
+
+            # FA-иконка (рандомная, стабильная)
+            role_id = r.get("id", 0)
+            icon_code = _pick_role_icon(role_id)
+            icon_box_size = 30
+            ibx = LX1 + 22
+            iby = ry1 + row_h // 2 - icon_box_size // 2
+            draw.rounded_rectangle(
+                (ibx, iby, ibx + icon_box_size, iby + icon_box_size),
+                radius=6, fill=(26, 26, 32, 255)
+            )
+            _icon(draw, ibx + icon_box_size // 2, iby + icon_box_size // 2 + 1,
+                  icon_code, 20, rc)
+
+            # name
+            rname = _strip_emoji(r.get("name", ""))[:26] or "—"
+            draw.text((ibx + icon_box_size + 14, ry1 + row_h // 2 - 12),
+                      rname, font=_font(24), fill=TEXT_WHITE)
+
+            # pos
             pos_str = r.get("pos", "")
             if pos_str:
-                pw2, _ = _tw(draw, pos_str, _font(21))
-                draw.text((LX2 - 16 - pw2, ry1 + row_h // 2 - 11),
-                          pos_str, font=_font(21), fill=TEXT_MUTED)
+                pw2, _ = _tw(draw, pos_str, _font(23))
+                draw.text((LX2 - 18 - pw2, ry1 + row_h // 2 - 12),
+                          pos_str, font=_font(23), fill=TEXT_MUTED)
     else:
         eh = ROLES_BOTTOM - LY
-        if eh > 60:
-            draw.rounded_rectangle((LX1, LY, LX2, LY + eh), radius=16,
-                                   fill=INNER_BG + (255,),
-                                   outline=(34, 34, 34, 255), width=2)
+        if eh > 80:
+            _dashed_rect(draw, (LX1, LY, LX2, LY + eh), 18,
+                         (34, 34, 34, 255), width=2, dash=14, gap=10)
             ecx = (LX1 + LX2) // 2
-            ecy = LY + eh // 2 - 20
-            _icon(draw, ecx, ecy, IC_USER_SLASH, 68, (42, 42, 47))
+            ecy = LY + eh // 2 - 30
+            _icon(draw, ecx, ecy, IC_USER_SLASH, 72, (42, 42, 47))
             et = "НЕТУ КАСТОМНЫХ РОЛЕЙ"
-            etw, _ = _tw(draw, et, _font(23))
-            draw.text((ecx - etw // 2, ecy + 50), et, font=_font(23), fill=(58, 58, 66))
-            sub = "Приобретите в магазине, чтобы они появились здесь"
-            stw, _ = _tw(draw, sub, _font(17))
-            draw.text((ecx - stw // 2, ecy + 82), sub, font=_font(17), fill=(42, 42, 50))
+            etw, _ = _tw(draw, et, _font(24))
+            draw.text((ecx - etw // 2, ecy + 52), et, font=_font(24), fill=EMPTY_TEXT)
+            sub = "Приобретите в магазине"
+            stw, _ = _tw(draw, sub, _font(20))
+            draw.text((ecx - stw // 2, ecy + 88), sub, font=_font(20), fill=EMPTY_SUB)
 
-    # --- Mini stats (2 шт.) ---
-    gap = 12
-    card_w = (LX2 - LX1 - gap) // 2
+    # ---- ms-grid (2 карточки) ----
+    ms_gap = 12
+    ms_w = (LX2 - LX1 - ms_gap) // 2
 
-    c1x1 = LX1
-    c1x2 = c1x1 + card_w
-    draw.rounded_rectangle((c1x1, MS_Y1, c1x2, MS_Y1 + MS_H), radius=14,
-                           fill=INNER_BG + (255,), outline=INNER_BORDER + (255,), width=1)
-    _icon(draw, c1x1 + 22, MS_Y1 + 32, IC_THUMBS_UP, 20, TEXT_MUTED)
-    draw.text((c1x1 + 42, MS_Y1 + 22), "ОТЗЫВЫ", font=_font(16), fill=TEXT_MUTED)
-    draw.text((c1x1 + 22, MS_Y1 + 52), str(reviews), font=_font(44), fill=BLUE_ACCENT)
+    # Отзывы
+    mx1 = LX1
+    mx2 = mx1 + ms_w
+    draw.rounded_rectangle((mx1, MS_Y1, mx2, MS_Y1 + MS_H), radius=18,
+                           fill=INNER_BG + (255,),
+                           outline=LEFT_BORDER + (255,), width=2)
+    _icon(draw, mx1 + 24, MS_Y1 + 36, IC_THUMBS_UP, 22, TEXT_MUTED)
+    draw.text((mx1 + 50, MS_Y1 + 24), "ОТЗЫВЫ", font=_font(18), fill=TEXT_MUTED)
+    draw.text((mx1 + 24, MS_Y1 + 54), str(reviews), font=_font(42), fill=BLUE_ACCENT)
 
-    c2x1 = c1x2 + gap
-    c2x2 = LX2
-    draw.rounded_rectangle((c2x1, MS_Y1, c2x2, MS_Y1 + MS_H), radius=14,
-                           fill=INNER_BG + (255,), outline=INNER_BORDER + (255,), width=1)
-    _icon(draw, c2x1 + 22, MS_Y1 + 32, IC_CHECK, 20, TEXT_MUTED)
-    draw.text((c2x1 + 42, MS_Y1 + 22), "ПОКУПКИ", font=_font(16), fill=TEXT_MUTED)
-    draw.text((c2x1 + 22, MS_Y1 + 52), str(purchases_count), font=_font(44), fill=GREEN)
+    # Покупки
+    mx1 = mx2 + ms_gap
+    mx2 = LX2
+    draw.rounded_rectangle((mx1, MS_Y1, mx2, MS_Y1 + MS_H), radius=18,
+                           fill=INNER_BG + (255,),
+                           outline=LEFT_BORDER + (255,), width=2)
+    _icon(draw, mx1 + 24, MS_Y1 + 36, IC_CHECK, 22, TEXT_MUTED)
+    draw.text((mx1 + 50, MS_Y1 + 24), "ПОКУПКИ", font=_font(18), fill=TEXT_MUTED)
+    draw.text((mx1 + 24, MS_Y1 + 54), str(purchases_count), font=_font(42), fill=GREEN)
 
-    # ============ RIGHT COLUMN ============
-    RP = 24
-    RX1 = RIGHT_X1 + RP
-    RX2 = RIGHT_X2 - RP
-    RY  = MAIN_Y1 + 22
+    # =====================================================
+    # RIGHT COLUMN
+    # =====================================================
+    R_PAD_X = 24
+    R_PAD_Y = 18
+    RX1 = RIGHT_X1 + R_PAD_X
+    RX2 = RIGHT_X2 - R_PAD_X
+    RY = MAIN_Y1 + R_PAD_Y
 
-    # --- Stats row (4 карточки) ---
-    sw_gap = 12
-    sw = (RX2 - RX1 - 3 * sw_gap) // 4
-    SH = 108
+    # ---- Рассчитываем высоты ----
+    # inventory: title + 3 ячейки
+    INV_ROW_H = 96
+    INV_H = 17 + 33 + INV_ROW_H + 17   # ~163
+    # history: title + 3 строки
+    HIST_ROW_H = 36
+    HIST_H = 17 + 33 + HIST_ROW_H * 3 + 17  # ~175
+    GAP_R = 12
 
-    stats_data = [
-        ("БАЛАНС",   f"{balance}",       "DC",  GREEN,   IC_GEM),
-        ("ВСЕГО",    f"{total_earned}",  "",    GOLD,    IC_TROPHY),
-        ("ОТЗЫВОВ",  f"{reviews}",       "",    GOLD,    IC_STAR),
-        ("СТРИК",    f"{streak}",        "дн",  PURPLE,  IC_FIRE),
-    ]
-    for i, (lbl, val, unit, accent, code) in enumerate(stats_data):
-        sx1 = RX1 + i * (sw + sw_gap)
-        sx2 = sx1 + sw
-        draw.rounded_rectangle((sx1, RY, sx2, RY + SH), radius=16,
-                               fill=CARD_BG + (255,),
-                               outline=CARD_BORDER + (255,), width=1)
-        draw.rectangle((sx1 + 4, RY + 4, sx2 - 4, RY + 7), fill=accent)
-        _icon(draw, sx1 + 22, RY + 30, code, 20, TEXT_MUTED)
-        draw.text((sx1 + 44, RY + 20), lbl, font=_font(14), fill=TEXT_MUTED)
-        vfont = _font(38)
-        draw.text((sx1 + 22, RY + 54), val, font=vfont, fill=TEXT_WHITE)
-        if unit:
-            vw, _ = _tw(draw, val, vfont)
-            draw.text((sx1 + 22 + vw + 6, RY + 70), unit, font=_font(18), fill=TEXT_MUTED)
+    TOTAL_INNER_H = MAIN_Y2 - R_PAD_Y - RY
+    PDC_H = TOTAL_INNER_H - INV_H - HIST_H - 2 * GAP_R
 
-    RY += SH + 14
-
-    # --- Personal DC ---
-    INV_H = 240
-    HIST_H = 230
-    GAP_R = 14
-    PDC_H = MAIN_Y2 - 22 - RY - INV_H - HIST_H - 2 * GAP_R
-
-    draw.rounded_rectangle((RX1, RY, RX2, RY + PDC_H), radius=20,
-                           fill=INNER_BG + (255,), outline=INNER_BORDER + (255,), width=1)
-    _paste_gradient_rect(bg, (RX1 + 3, RY + 3, RX2 - 3, RY + 9), 3, GOLD, GOLD_DARK)
+    # ---------- personal-dc ----------
+    # градиент 135° от #14141a к #0f0f14
+    pdc_bg = _diag_gradient_3stop(RX2 - RX1, PDC_H,
+                                   (20, 20, 26), (15, 15, 20), (20, 20, 26),
+                                   0.0, 0.55, 1.0)
+    pdc_bg = pdc_bg.convert("RGBA")
+    # маска rounded
+    pdc_mask = Image.new('L', (RX2 - RX1, PDC_H), 0)
+    ImageDraw.Draw(pdc_mask).rounded_rectangle(
+        (0, 0, RX2 - RX1 - 1, PDC_H - 1), radius=24, fill=255)
+    bg.paste(pdc_bg, (RX1, RY), pdc_mask)
+    draw = ImageDraw.Draw(bg)
+    # обводка
+    draw.rounded_rectangle((RX1, RY, RX2, RY + PDC_H), radius=24,
+                           outline=LEFT_BORDER + (255,), width=2)
+    # gold-top полоса
+    _paste_gradient_rect(bg, (RX1 + 3, RY + 3, RX2 - 3, RY + 9),
+                         3, GOLD, GOLD_DARK)
     draw = ImageDraw.Draw(bg)
 
-    PX = RX1 + 26
-    PX_R = RX2 - 26
-    PH_Y = RY + 22
-    _icon(draw, PX + 12, PH_Y + 11, IC_CHART, 20, TEXT_MUTED)
-    draw.text((PX + 34, PH_Y), "СТАТИСТИКА DC", font=_font(18), fill=TEXT_MUTED)
-    uname_str = f"@{user_name}"
-    uw, _ = _tw(draw, uname_str, _font(18))
-    draw.text((PX_R - uw, PH_Y), uname_str, font=_font(18), fill=GOLD)
+    # top-title
+    px_l = RX1 + 24
+    px_r = RX2 - 24
+    ph_y = RY + 18
+    _icon(draw, px_l + 12, ph_y + 12, IC_CHART, 22, TEXT_MUTED)
+    draw.text((px_l + 36, ph_y), "СТАТИСТИКА DC", font=_font(21), fill=TEXT_MUTED)
+    sub_str = f"@{user_name}"
+    sw_, _ = _tw(draw, sub_str, _font(21))
+    draw.text((px_r - sw_, ph_y), sub_str, font=_font(21), fill=GOLD)
 
-    rows_y1 = PH_Y + 46
+    # 4 строки
+    rows_y1 = ph_y + 40
     rows_y2 = RY + PDC_H - 20
     rh = (rows_y2 - rows_y1) // 4
     row_data = [
         ("Заработано за всё время", f"{total_earned}", "DC", IC_CROWN, True),
         ("Текущий баланс",         f"{balance}",      "DC", IC_GEM,   False),
-        ("Заработано за месяц",    f"{earned_month}", "DC", IC_ARROW_UP, False),
+        ("Заработано за месяц",    f"{earned_month}", "DC", IC_ARROW_TREND, False),
         ("Потрачено за месяц",     f"{spent_month}",  "DC", IC_CART,  False),
     ]
     for i, (lbl, val, unit, code, is_top) in enumerate(row_data):
-        ry_1 = rows_y1 + i * rh
-        ry_2 = ry_1 + rh - 8
-        row_bg = (24, 22, 18, 255) if is_top else INNER_BG + (255,)
-        row_br = (95, 78, 35, 255) if is_top else INNER_BORDER + (255,)
-        draw.rounded_rectangle((PX, ry_1, PX_R, ry_2), radius=14,
-                               fill=row_bg, outline=row_br, width=1)
+        ry_1 = rows_y1 + i * (rh + 9)
+        ry_2 = ry_1 + rh
+        if is_top:
+            row_bg = (26, 24, 20, 255)
+            row_br = (95, 78, 35, 255)
+        else:
+            row_bg = INNER_BG + (255,)
+            row_br = INNER_BORDER + (255,)
+        draw.rounded_rectangle((px_l, ry_1, px_r, ry_2), radius=18,
+                               fill=row_bg, outline=row_br, width=2)
 
-        icon_bg = GOLD if is_top else (26, 26, 32)
-        icon_col = (0, 0, 0) if is_top else GOLD
-        ibx = PX + 16
-        iby = ry_1 + (rh - 8) // 2 - 22
-        draw.rounded_rectangle((ibx, iby, ibx + 46, iby + 46), radius=11,
-                               fill=icon_bg, outline=icon_bg if is_top else (36, 36, 42), width=1)
-        _icon(draw, ibx + 23, iby + 23, code, 22, icon_col)
+        icon_box = 54
+        ibx = px_l + 21
+        iby = ry_1 + (rh - icon_box) // 2
+        if is_top:
+            _paste_gradient_rect(bg, (ibx, iby, ibx + icon_box, iby + icon_box),
+                                 15, GOLD, GOLD_DARK)
+            draw = ImageDraw.Draw(bg)
+            _icon(draw, ibx + icon_box // 2, iby + icon_box // 2 + 1,
+                  code, 28, (0, 0, 0))
+        else:
+            draw.rounded_rectangle((ibx, iby, ibx + icon_box, iby + icon_box),
+                                   radius=15,
+                                   fill=(26, 26, 32, 255),
+                                   outline=(60, 48, 20, 255), width=2)
+            _icon(draw, ibx + icon_box // 2, iby + icon_box // 2 + 1,
+                  code, 28, GOLD)
 
-        draw.text((ibx + 62, ry_1 + (rh - 8) // 2 - 13), lbl,
-                  font=_font(23), fill=TEXT_WHITE if is_top else (170, 170, 170))
+        lbl_col = TEXT_WHITE if is_top else TEXT_SOFT
+        draw.text((ibx + icon_box + 18, ry_1 + (rh - 24) // 2 - 2),
+                  lbl, font=_font(24), fill=lbl_col)
 
         val_str = f"{val} {unit}".strip()
-        vfont = _font(30) if is_top else _font(26)
+        vfont = _font(36) if is_top else _font(32)
         vw, _ = _tw(draw, val_str, vfont)
-        draw.text((PX_R - 22 - vw, ry_1 + (rh - 8) // 2 - 15), val_str,
-                  font=vfont, fill=TEXT_WHITE if is_top else GOLD)
+        v_col = TEXT_WHITE if is_top else GOLD
+        draw.text((px_r - 21 - vw, ry_1 + (rh - 32) // 2 - 2),
+                  val_str, font=vfont, fill=v_col)
 
     RY += PDC_H + GAP_R
 
-    # --- Inventory ---
-    draw.rounded_rectangle((RX1, RY, RX2, RY + INV_H), radius=20,
-                           fill=INNER_BG + (255,), outline=INNER_BORDER + (255,), width=1)
+    # ---------- inventory ----------
+    draw.rounded_rectangle((RX1, RY, RX2, RY + INV_H), radius=24,
+                           fill=LEFT_BG + (255,),
+                           outline=LEFT_BORDER + (255,), width=2)
 
-    IX = RX1 + 26
-    IX_R = RX2 - 26
-    IH_Y = RY + 22
-    _icon(draw, IX + 12, IH_Y + 11, IC_BOX_OPEN, 20, TEXT_MUTED)
-    draw.text((IX + 34, IH_Y), "ИНВЕНТАРЬ", font=_font(18), fill=TEXT_MUTED)
+    ix_l = RX1 + 24
+    ix_r = RX2 - 24
+    ih_y = RY + 17
+    _icon(draw, ix_l + 12, ih_y + 12, IC_BOX_OPEN, 22, TEXT_MUTED)
+    draw.text((ix_l + 36, ih_y), "ИНВЕНТАРЬ", font=_font(21), fill=TEXT_MUTED)
 
     inv_total = len(inventory)
     if inv_total > 3:
         extra = f"+{inv_total - 3} ещё"
-        ew, _ = _tw(draw, extra, _font(18))
-        _icon(draw, IX_R - ew - 24, IH_Y + 11, IC_CIRCLE_PLUS, 18, GREEN)
-        draw.text((IX_R - ew, IH_Y), extra, font=_font(18), fill=GREEN)
+        ew, _ = _tw(draw, extra, _font(21))
+        _icon(draw, ix_r - ew - 26, ih_y + 12, IC_CIRCLE_PLUS, 20, GREEN)
+        draw.text((ix_r - ew, ih_y), extra, font=_font(21), fill=GREEN)
     elif inv_total > 0:
         t = f"всего {inv_total}"
-        tw2, _ = _tw(draw, t, _font(18))
-        draw.text((IX_R - tw2, IH_Y), t, font=_font(18), fill=GREEN)
+        tw2, _ = _tw(draw, t, _font(21))
+        draw.text((ix_r - tw2, ih_y), t, font=_font(21), fill=GREEN)
 
     shown_inv = inventory[:3]
-    cards_y1 = IH_Y + 40
-    cards_y2 = RY + INV_H - 22
-    inv_w = (IX_R - IX - 2 * 12) // 3
+    ic_y1 = ih_y + 33
+    ic_y2 = RY + INV_H - 17
+    inv_gap = 12
+    inv_w = (ix_r - ix_l - 2 * inv_gap) // 3
     for i in range(3):
-        cx1 = IX + i * (inv_w + 12)
+        cx1 = ix_l + i * (inv_w + inv_gap)
         cx2 = cx1 + inv_w
-        draw.rounded_rectangle((cx1, cards_y1, cx2, cards_y2), radius=14,
-                               fill=INNER_BG + (255,),
-                               outline=INNER_BORDER + (255,), width=1)
-        if i < len(shown_inv):
-            it = shown_inv[i]
-            accent = it.get("accent", BLUE_ACCENT)
-            draw.rectangle((cx1 + 4, cards_y1 + 4, cx1 + 7, cards_y2 - 4), fill=accent)
-            icx = cx1 + 22
-            icy = cards_y1 + (cards_y2 - cards_y1) // 2 - 22
-            draw.rounded_rectangle((icx, icy, icx + 44, icy + 44), radius=11,
-                                   fill=(26, 26, 32, 255), outline=(36, 36, 42, 255), width=1)
-            _icon(draw, icx + 22, icy + 22, it.get("icon", IC_GEM), 20, accent)
-            iname = _strip_emoji(it.get("name", ""))[:18]
-            draw.text((icx + 58, cards_y1 + (cards_y2 - cards_y1) // 2 - 22),
-                      iname, font=_font(21), fill=TEXT_WHITE)
-            iq = it.get("qty", "")
+        filled = i < len(shown_inv)
+        if filled:
+            item = shown_inv[i]
+            accent = item.get("accent", BLUE_ACCENT)
+            draw.rounded_rectangle((cx1, ic_y1, cx2, ic_y2), radius=17,
+                                   fill=(13, 15, 14, 255),
+                                   outline=(40, 70, 50, 255), width=2)
+        else:
+            draw.rounded_rectangle((cx1, ic_y1, cx2, ic_y2), radius=17,
+                                   fill=INNER_BG + (255,),
+                                   outline=LEFT_BORDER + (255,), width=2)
+
+        if filled:
+            item = shown_inv[i]
+            accent = item.get("accent", BLUE_ACCENT)
+            icon_box = 66
+            ibx = cx1 + 21
+            iby = ic_y1 + (ic_y2 - ic_y1 - icon_box) // 2
+            draw.rounded_rectangle((ibx, iby, ibx + icon_box, iby + icon_box),
+                                   radius=17,
+                                   fill=(255, 255, 255, 10),
+                                   outline=(255, 255, 255, 16), width=2)
+            _icon(draw, ibx + icon_box // 2, iby + icon_box // 2 + 1,
+                  item.get("icon", IC_GEM), 30, accent)
+
+            iname = _strip_emoji(item.get("name", ""))[:16]
+            bx = ibx + icon_box + 18
+            draw.text((bx, ic_y1 + 26), iname, font=_font(24), fill=TEXT_WHITE)
+            iq = item.get("qty", "")
             if iq:
-                draw.text((icx + 58, cards_y1 + (cards_y2 - cards_y1) // 2 + 8),
-                          iq, font=_font(17), fill=TEXT_MUTED)
+                draw.text((bx, ic_y1 + 56), iq, font=_font(18), fill=TEXT_MUTED)
 
     RY += INV_H + GAP_R
 
-    # --- History ---
-    draw.rounded_rectangle((RX1, RY, RX2, RY + HIST_H), radius=20,
-                           fill=INNER_BG + (255,), outline=INNER_BORDER + (255,), width=1)
+    # ---------- history ----------
+    draw.rounded_rectangle((RX1, RY, RX2, RY + HIST_H), radius=24,
+                           fill=LEFT_BG + (255,),
+                           outline=LEFT_BORDER + (255,), width=2)
 
-    HX = RX1 + 26
-    HX_R = RX2 - 26
-    HH_Y = RY + 22
-    _icon(draw, HX + 12, HH_Y + 11, IC_CLOCK, 20, TEXT_MUTED)
-    draw.text((HX + 34, HH_Y), "ПОСЛЕДНИЕ ОПЕРАЦИИ", font=_font(18), fill=TEXT_MUTED)
+    hx_l = RX1 + 24
+    hx_r = RX2 - 24
+    hh_y = RY + 17
+    _icon(draw, hx_l + 12, hh_y + 12, IC_CLOCK, 22, TEXT_MUTED)
+    draw.text((hx_l + 36, hh_y), "ПОСЛЕДНИЕ ОПЕРАЦИИ", font=_font(21), fill=TEXT_MUTED)
 
     hist_shown = history[:6]
-    col_w = (HX_R - HX - 40) // 2
-    row_start = HH_Y + 42
-    row_bottom = RY + HIST_H - 18
-    row_h = (row_bottom - row_start) // 3
+    col_w = (hx_r - hx_l - 33) // 2
+    row_start = hh_y + 42
+    row_h = HIST_ROW_H
 
     for i, h in enumerate(hist_shown):
         col = i % 2
         row = i // 2
-        hx1 = HX + col * (col_w + 40)
+        hx1 = hx_l + col * (col_w + 33)
         hy_1 = row_start + row * row_h
-        draw.text((hx1, hy_1 + row_h // 2 - 13), h.get("date", ""),
-                  font=_font(21), fill=TEXT_MUTED)
+
+        draw.text((hx1, hy_1 + row_h // 2 - 14), h.get("date", ""),
+                  font=_font(23), fill=TEXT_MUTED)
+
         amt = h.get("amount", 0)
         if amt >= 0:
             amt_str = f"+{amt} DC"
@@ -600,14 +809,14 @@ def generate_profile_card(
         else:
             amt_str = f"−{abs(amt)} DC"
             colr = RED_NEG
-        aw2, _ = _tw(draw, amt_str, _font(23))
+        aw2, _ = _tw(draw, amt_str, _font(24))
         draw.text((hx1 + col_w - aw2, hy_1 + row_h // 2 - 14),
-                  amt_str, font=_font(23), fill=colr)
+                  amt_str, font=_font(24), fill=colr)
         if row < 2:
             draw.line((hx1, hy_1 + row_h - 4, hx1 + col_w, hy_1 + row_h - 4),
-                      fill=(26, 26, 26, 255), width=1)
+                      fill=(26, 26, 31, 255), width=2)
 
-    # --- Финальный вывод ---
+    # ---------- Финал ----------
     final = bg.convert("RGB")
     buf = io.BytesIO()
     final.save(buf, format="PNG", optimize=True)
@@ -617,5 +826,5 @@ def generate_profile_card(
 
 
 def generate_profile_id() -> str:
-    import time, random
+    import time
     return f"P-{int(time.time())}-{random.randint(100, 999)}"
