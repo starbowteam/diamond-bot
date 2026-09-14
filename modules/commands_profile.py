@@ -81,7 +81,7 @@ def _get_role_info_by_count(count: int):
 # ГЕНЕРАЦИЯ И ОТПРАВКА КАРТОЧКИ
 # ============================================================
 async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
-    # ⚡ САМОЕ ПЕРВОЕ ДЕЙСТВИЕ — defer, чтобы не словить 3-секундный таймаут
+    # ⚡ САМОЕ ПЕРВОЕ — defer, чтобы не словить 3-секундный таймаут
     await inter.response.defer(ephemeral=True)
 
     from modules.profile_card import generate_profile_card
@@ -211,7 +211,10 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
         file = disnake.File(buf, filename=filename)
         embed = disnake.Embed(color=6776679)
         embed.set_image(url=f"attachment://{filename}")
-        await inter.edit_original_response(embed=embed, file=file)
+
+        # ✅ ВАЖНО: followup.send с ephemeral=True — создаёт НОВОЕ
+        # эфемерное сообщение. Панель не трогается вообще.
+        await inter.followup.send(embed=embed, file=file, ephemeral=True)
 
         asyncio.create_task(log_discord(
             title="📇 Карточка профиля",
@@ -223,8 +226,9 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     except Exception as e:
         logger.exception(f"Ошибка рендера карточки профиля: {e}")
         try:
-            await inter.edit_original_response(
-                content=f"❌ Не удалось сгенерировать карточку. Попробуйте позже.\n`{str(e)[:200]}`"
+            await inter.followup.send(
+                f"❌ Не удалось сгенерировать карточку. Попробуйте позже.\n`{str(e)[:200]}`",
+                ephemeral=True
             )
         except Exception:
             pass
@@ -329,7 +333,7 @@ async def handle_transfer(inter: disnake.MessageInteraction):
     user_id = inter.author.id
     purchases = await get_user_purchases(user_id, only_unused=True)
     if not purchases:
-        return await inter.response.send_message("❌ У вас нет неиспользованных товаров для передачи.", ephemeral=True)
+        return await inter.followup.send("❌ У вас нет неиспользованных товаров для передачи.", ephemeral=True)
 
     options = []
     for idx, p in enumerate(purchases):
@@ -354,7 +358,7 @@ async def handle_transfer(inter: disnake.MessageInteraction):
         await inter2.response.send_modal(TransferRecipientModal(idx, purchases, inter2.author))
 
     select.callback = select_callback
-    await inter.response.send_message("Выберите товар, который хотите передать:", ephemeral=True, view=view)
+    await inter.followup.send("Выберите товар, который хотите передать:", ephemeral=True, view=view)
 
 
 class TransferRecipientModal(Modal):
@@ -537,7 +541,6 @@ class ProfileSelect(disnake.ui.StringSelect):
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
-        # логируем НЕ блокируя — иначе можно словить 3-секундный таймаут
         asyncio.create_task(log_discord(
             title="👤 Выбор в панели профиля",
             description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
@@ -551,7 +554,7 @@ class ProfileSelect(disnake.ui.StringSelect):
             await inter.response.defer(ephemeral=True)
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
             if not purchases:
-                return await inter.edit_original_response(content="❌ У вас нет неиспользованных покупок.")
+                return await inter.followup.send("❌ У вас нет неиспользованных покупок.", ephemeral=True)
             embed = disnake.Embed(
                 title="О какой покупке ты хочешь узнать?",
                 description="> Выбери нужный товар ниже.",
@@ -559,14 +562,14 @@ class ProfileSelect(disnake.ui.StringSelect):
             )
             embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
             view = PurchaseSelectView(inter.author.id, purchases)
-            await inter.edit_original_response(embed=embed, view=view)
+            await inter.followup.send(embed=embed, view=view, ephemeral=True)
         elif value == "transfer":
             await inter.response.defer(ephemeral=True)
             await handle_transfer(inter)
         elif value == "currency":
             await inter.response.defer(ephemeral=True)
             embeds = load_embed_from_file("vallue.json")
-            await inter.edit_original_response(embeds=embeds)
+            await inter.followup.send(embeds=embeds, ephemeral=True)
         elif value == "calc":
             await inter.response.send_modal(CalcModal())
         elif value == "discount":
