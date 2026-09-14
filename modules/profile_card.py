@@ -37,6 +37,10 @@ IC_CIRCLE_CHECK = 0xf058
 IC_CIRCLE_PLUS  = 0xf055
 IC_USER_SLASH   = 0xf506
 IC_CHART        = 0xf201
+IC_LOCK         = 0xf023
+IC_MEDAL        = 0xf5a2
+IC_IMAGE        = 0xf03e
+IC_BOLT         = 0xf0e7
 
 # ---- Палитра ----
 BG_DARK          = (10, 10, 12)
@@ -79,6 +83,7 @@ _EMOJI_RE = re.compile(
     flags=re.UNICODE,
 )
 
+
 def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub('', text).strip()
 
@@ -94,6 +99,7 @@ def _font(size: int):
     _FONT_CACHE[size] = f
     return f
 
+
 def _fa(size: int, regular: bool = False):
     key = (size, regular)
     if key in _FA_CACHE:
@@ -108,6 +114,7 @@ def _fa(size: int, regular: bool = False):
     _FA_CACHE[key] = f
     return f
 
+
 def _icon(draw, cx, cy, code, size, color, regular=False):
     f = _fa(size, regular)
     if f is None:
@@ -117,15 +124,18 @@ def _icon(draw, cx, cy, code, size, color, regular=False):
     except Exception:
         pass
 
+
 def _tw(draw, text, font):
     bb = draw.textbbox((0, 0), text, font=font)
     return bb[2] - bb[0], bb[3] - bb[1]
+
 
 def _blend(c1, c2, t):
     t = max(0.0, min(1.0, t))
     return (int(c1[0]*(1-t) + c2[0]*t),
             int(c1[1]*(1-t) + c2[1]*t),
             int(c1[2]*(1-t) + c2[2]*t))
+
 
 def _linear_gradient(width: int, height: int, c1, c2, horizontal=True) -> Image.Image:
     if width <= 0 or height <= 0:
@@ -145,6 +155,7 @@ def _linear_gradient(width: int, height: int, c1, c2, horizontal=True) -> Image.
             px[0, y] = _blend(c1, c2, t)
         return grad.resize((width, height), Image.NEAREST)
 
+
 def _paste_gradient_rect(base, box, radius, c1, c2, horizontal=True):
     x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
@@ -158,8 +169,9 @@ def _paste_gradient_rect(base, box, radius, c1, c2, horizontal=True):
         mask = Image.new('L', (w, h), 255)
     base.paste(grad, (x1, y1), mask)
 
+
 def _radial_glow(base: Image.Image, cx: int, cy: int, radius: int,
-                 color: Tuple[int,int,int], max_alpha: int = 50):
+                 color: Tuple[int, int, int], max_alpha: int = 50):
     if radius <= 0:
         return
     scale = 4
@@ -179,6 +191,7 @@ def _radial_glow(base: Image.Image, cx: int, cy: int, radius: int,
     overlay = overlay.resize((radius * 2, radius * 2), Image.BILINEAR)
     base.alpha_composite(overlay, (cx - radius, cy - radius))
 
+
 def _avatar_circle(avatar_bytes: Optional[bytes], size: int) -> Optional[Image.Image]:
     if not avatar_bytes:
         return None
@@ -191,6 +204,7 @@ def _avatar_circle(avatar_bytes: Optional[bytes], size: int) -> Optional[Image.I
     except Exception as e:
         logger.warning(f"Avatar: {e}")
         return None
+
 
 def _paste_avatar(base, avatar, x, y, size, border_color, border_w=5):
     mask = Image.new('L', (size, size), 0)
@@ -262,8 +276,8 @@ def generate_profile_card(
     draw.text((W - HP - rvw, HP + 44), rv, font=_font(26), fill=TEXT_WHITE)
 
     # ---- MAIN GRID ----
-    MAIN_Y1 = HP + logo_box + 20   # ~136
-    MAIN_Y2 = H - HP               # ~1162
+    MAIN_Y1 = HP + logo_box + 20
+    MAIN_Y2 = H - HP
     MAIN_X1 = HP
     MAIN_X2 = W - HP
     MAIN_W  = MAIN_X2 - MAIN_X1
@@ -280,7 +294,6 @@ def generate_profile_card(
     # ============ LEFT COLUMN ============
     draw.rounded_rectangle((LEFT_X1, MAIN_Y1, LEFT_X2, MAIN_Y2), radius=24,
                            fill=CARD_BG + (255,), outline=CARD_BORDER + (255,), width=2)
-    # Верхняя цветная полоса
     _paste_gradient_rect(bg, (LEFT_X1 + 3, MAIN_Y1 + 3, LEFT_X2 - 3, MAIN_Y1 + 10),
                          3, grad_c1, grad_c2)
     draw = ImageDraw.Draw(bg)
@@ -371,15 +384,11 @@ def generate_profile_card(
             draw.rounded_rectangle((LX1, ry1, LX2, ry2), radius=12,
                                    fill=INNER_BG + (255,),
                                    outline=INNER_BORDER + (255,), width=1)
-            # Цветная полоса слева
             draw.rectangle((LX1 + 1, ry1 + 4, LX1 + 5, ry2 - 4), fill=rc)
-            # Точка
             dot_y = ry1 + row_h // 2
             draw.ellipse((LX1 + 20, dot_y - 8, LX1 + 36, dot_y + 8), fill=rc)
-            # Имя (эмодзи убраны)
             rname = _strip_emoji(r.get("name", ""))[:32] or "—"
             draw.text((LX1 + 52, ry1 + row_h // 2 - 12), rname, font=_font(23), fill=TEXT_WHITE)
-            # Позиция
             pos_str = r.get("pos", "")
             if pos_str:
                 pw2, _ = _tw(draw, pos_str, _font(21))
@@ -405,7 +414,6 @@ def generate_profile_card(
     gap = 12
     card_w = (LX2 - LX1 - gap) // 2
 
-    # Отзывы
     c1x1 = LX1
     c1x2 = c1x1 + card_w
     draw.rounded_rectangle((c1x1, MS_Y1, c1x2, MS_Y1 + MS_H), radius=14,
@@ -414,7 +422,6 @@ def generate_profile_card(
     draw.text((c1x1 + 42, MS_Y1 + 22), "ОТЗЫВЫ", font=_font(16), fill=TEXT_MUTED)
     draw.text((c1x1 + 22, MS_Y1 + 52), str(reviews), font=_font(44), fill=BLUE_ACCENT)
 
-    # Покупки
     c2x1 = c1x2 + gap
     c2x2 = LX2
     draw.rounded_rectangle((c2x1, MS_Y1, c2x2, MS_Y1 + MS_H), radius=14,
@@ -446,7 +453,6 @@ def generate_profile_card(
         draw.rounded_rectangle((sx1, RY, sx2, RY + SH), radius=16,
                                fill=CARD_BG + (255,),
                                outline=CARD_BORDER + (255,), width=1)
-        # accent line
         draw.rectangle((sx1 + 4, RY + 4, sx2 - 4, RY + 7), fill=accent)
         _icon(draw, sx1 + 22, RY + 30, code, 20, TEXT_MUTED)
         draw.text((sx1 + 44, RY + 20), lbl, font=_font(14), fill=TEXT_MUTED)
@@ -459,7 +465,6 @@ def generate_profile_card(
     RY += SH + 14
 
     # --- Personal DC ---
-    # резервируем место снизу под inventory (240) и history (230)
     INV_H = 240
     HIST_H = 230
     GAP_R = 14
@@ -609,3 +614,8 @@ def generate_profile_card(
     buf.seek(0)
     logger.info("Profile card generated for user %s", user_id)
     return buf
+
+
+def generate_profile_id() -> str:
+    import time, random
+    return f"P-{int(time.time())}-{random.randint(100, 999)}"
