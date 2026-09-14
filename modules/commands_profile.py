@@ -2,6 +2,7 @@
 import os
 import json
 import time
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -14,116 +15,205 @@ from core.utils import (
     load_json, save_json, log_discord,
     get_dc_cache, save_dc_cache,
     get_roles_for_count,
-    clean_embed_for_discohook
+    clean_embed_for_discohook,
+    get_ticket_manager,
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
     get_user_purchases, remove_purchase,
     get_user_balance,
-    load_shop_catalog
+    load_shop_catalog,
 )
 
+
 # ============================================================
-# ПРОФИЛЬ
+# ЗАГРУЗКА ЭМБЕДОВ ИЗ ADD
 # ============================================================
-async def show_profile(inter: disnake.MessageInteraction, user: disnake.Member):
-    counts = load_json(FILES["review_counts"], {})
-    count = counts.get(str(user.id), 0)
-    target_role_ids = get_roles_for_count(count)
-    buyer_roles = [inter.guild.get_role(rid) for rid in target_role_ids if rid]
-    buyer_roles_names = ", ".join([r.mention for r in buyer_roles if r]) if buyer_roles else "Нет"
-    top_role = user.top_role
-    top_role_mention = top_role.mention if top_role else "Нет"
-    balance = await get_user_balance(user.id)
-    purchases = await get_user_purchases(user.id, only_unused=True)
-    purchases_text = ""
-    if purchases:
-        for p in purchases:
-            purchases_text += f"> {p['type']} {p['value']} - ⌛\n"
-    else:
-        purchases_text = "> Отсутствует"
-    history = get_dc_cache(user.id).get("history", [])
-    history_text = ""
-    if history:
-        for h in reversed(history[-5:]):
-            date_str = datetime.fromtimestamp(h["date"]).strftime("%d.%m")
-            sign = "+" if h["amount"] > 0 else ""
-            history_text += f"[{date_str}] {sign}{h['amount']} DC — {h['reason']}\n"
-    else:
-        history_text = "Нет операций."
-    joined_at = user.joined_at
-    joined_str = joined_at.strftime("%d.%m.%Y") if joined_at else "Неизвестно"
+def load_embed_from_file(filename: str) -> list[disnake.Embed]:
+    path = os.path.join(ADD_DIR, filename)
+    if not os.path.exists(path):
+        return [disnake.Embed(
+            title="❌ Файл не найден",
+            description=f"Файл `{filename}` отсутствует в папке add.",
+            color=0xff0000
+        )]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds = []
+        for e in data.get("embeds", []):
+            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
+        return embeds
+    except Exception as e:
+        logger.error(f"Ошибка загрузки {filename}: {e}")
+        return [disnake.Embed(
+            title="❌ Ошибка загрузки",
+            description=f"Не удалось загрузить {filename}.",
+            color=0xff0000
+        )]
+
+
+# ============================================================
+# ОПРЕДЕЛЕНИЕ РОЛИ ПО КОЛИЧЕСТВУ ОТЗЫВОВ
+# ============================================================
+def _get_role_info_by_count(count: int):
+    """Возвращает (role_key, next_name, progress_pct, progress_text)."""
     thresholds = [
-        (1, "Клуб"),
-        (2, "Бронзовый покупатель"),
-        (4, "Серебряный покупатель"),
-        (8, "Золотой покупатель"),
-        (12, "Алмазный покупатель"),
-        (17, "Изумрудный покупатель"),
-        (23, "Аметистовый покупатель"),
-        (25, "Легендарный покупатель"),
-        (float('inf'), "Покупатель века")
+        (0,  "none",      "Клуб",                       0,   "Напишите первый отзыв"),
+        (1,  "bronze",    "Silver Buyer",               20,  "Осталось 2 отзыва"),
+        (3,  "silver",    "Gold Buyer",                 40,  "Осталось 2 отзыва"),
+        (5,  "gold",      "Diamond Buyer",              55,  "Осталось 4 отзыва"),
+        (9,  "diamond",   "Emerald Buyer",              70,  "Осталось 4 отзыва"),
+        (13, "emerald",   "Amethyst Buyer",             80,  "Осталось 5 отзывов"),
+        (18, "amethyst",  "Legendary Buyer",            90,  "Осталось 6 отзывов"),
+        (24, "legendary", "Покупатель Века",            95,  "Осталось 2 отзыва"),
+        (26, "pka",       "—",                         100,  "Вы достигли вершины!"),
     ]
-    current_role_name = "Нет"
-    next_role_name = "Клуб"
-    next_threshold = 1
-    for threshold, name in thresholds:
-        if count >= threshold:
-            current_role_name = name
+    current = thresholds[0]
+    for i, t in enumerate(thresholds):
+        if count >= t[0]:
+            current = t
         else:
-            next_threshold = threshold
-            next_role_name = name
             break
-    if count >= 26:
-        progress_bar = "█" * 10 + " (Максимум)"
-        progress_text = "Вы достигли максимальной роли! 🎉"
-    else:
-        progress = min(count / next_threshold, 1.0)
-        bar_length = 10
-        filled = int(progress * bar_length)
-        bar = "█" * filled + "░" * (bar_length - filled)
-        progress_bar = f"{bar} {int(progress*100)}%"
-        progress_text = f"Осталось {next_threshold - count} отзывов до {next_role_name}"
-    role_color = 0x676767
-    if count >= 26:
-        role_color = 0xb3d9ff
-    elif count >= 24:
-        role_color = 0xe68585
-    elif count >= 18:
-        role_color = 0x9fc1ff
-    elif count >= 13:
-        role_color = 0x3d9e08
-    elif count >= 9:
-        role_color = 0x149bd0
-    elif count >= 5:
-        role_color = 0xae7911
-    elif count >= 3:
-        role_color = 0xb0b0b0
-    elif count >= 1:
-        role_color = 0xd15640
-    embed = disnake.Embed(
-        title=f"📋 Профиль {user.display_name}",
-        description=(
-            f"> **Текущая роль:** {current_role_name}\n"
-            f"> **Следующая:** {next_role_name}\n"
-            f"> **Прогресс:** {progress_bar}\n"
-            f"> {progress_text}\n\n"
-            f"> **Покупатель:** {buyer_roles_names}\n"
-            f"> **Отзывов:** {count}"
-        ),
-        color=role_color
+    return current[1], current[2], current[3], current[4]
+
+
+# ============================================================
+# ГЕНЕРАЦИЯ И ОТПРАВКА КАРТОЧКИ
+# ============================================================
+async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
+    """Отправляет карточку профиля в виде PNG."""
+    from modules.profile_card import (
+        generate_profile_card,
+        IC_CART, IC_USER_TIE, IC_BOX_OPEN, IC_GEM, IC_STAR, IC_FIRE, IC_TROPHY,
+        IC_PERCENT, IC_GIFT, IC_LOCK, IC_IMAGE, IC_BOLT, IC_MEDAL,
     )
-    embed.set_thumbnail(url=user.display_avatar.url)
-    embed.add_field(name="💎 Diamond Coins", value=f"{balance} DC", inline=True)
-    embed.add_field(name="👑 Высшая роль", value=top_role_mention, inline=True)
-    embed.add_field(name="🛒 Купленные товары (ожидают)", value=purchases_text, inline=False)
-    embed.add_field(name="📜 История (последние 5)", value=f">>> {history_text}", inline=False)
-    embed.add_field(
-        name="📑 О пользователе",
-        value=f">>> ID: {user.id}\nНа сервере с {joined_str}",
-        inline=False
+
+    # --- Данные пользователя ---
+    counts = load_json(FILES["review_counts"], {})
+    review_count = counts.get(str(user.id), 0)
+
+    role_key, next_name, progress_pct, progress_text = _get_role_info_by_count(review_count)
+
+    # Баланс и история
+    dc = get_dc_cache(user.id)
+    balance = dc.get("balance", 0)
+    history_raw = dc.get("history", []) or []
+
+    now_ts = int(time.time())
+    month_ago = now_ts - 30 * 86400
+
+    total_earned = sum(h.get("amount", 0) for h in history_raw if h.get("amount", 0) > 0)
+    earned_month = sum(h.get("amount", 0) for h in history_raw if h.get("amount", 0) > 0 and h.get("date", 0) >= month_ago)
+    spent_month = sum(abs(h.get("amount", 0)) for h in history_raw if h.get("amount", 0) < 0 and h.get("date", 0) >= month_ago)
+
+    # Инвентарь (неиспользованные покупки)
+    try:
+        purchases = await get_user_purchases(user.id, only_unused=True)
+    except Exception:
+        purchases = []
+
+    inventory = []
+    for p in purchases[:3]:
+        ptype = p.get("type", "")
+        name = p.get("value", "")[:16]
+        if ptype == "roles":
+            icon = IC_USER_TIE
+            accent = (20, 155, 208)
+        elif ptype == "discounts":
+            icon = IC_PERCENT
+            accent = (46, 204, 113)
+        elif ptype in ("design", "design_avatar", "design_banner"):
+            icon = IC_IMAGE
+            accent = (247, 201, 145)
+        elif ptype in ("ads",):
+            icon = IC_BOLT
+            accent = (255, 107, 107)
+        elif ptype in ("custom",):
+            icon = IC_GIFT
+            accent = (216, 142, 223)
+        else:
+            icon = IC_GEM
+            accent = (20, 155, 208)
+        inventory.append({
+            "icon": icon,
+            "name": name,
+            "qty": f"куплено {datetime.fromtimestamp(p.get('date', 0)).strftime('%d.%m.%Y')}",
+            "accent": accent,
+        })
+
+    # История — последние 6
+    history = []
+    for h in reversed(history_raw[-6:]):
+        date_str = datetime.fromtimestamp(h.get("date", 0)).strftime("%d.%m.%Y")
+        history.append({
+            "date": date_str,
+            "amount": h.get("amount", 0),
+        })
+
+    # Кастомные роли — роли пользователя ниже по иерархии чем 1127428607606796290
+    custom_roles = []
+    try:
+        guild = inter.guild
+        limit_role = guild.get_role(1127428607606796290)
+        limit_pos = limit_role.position if limit_role else 0
+        for r in user.roles:
+            if r.is_default():
+                continue
+            if r.position < limit_pos:
+                custom_roles.append({
+                    "name": r.name,
+                    "pos": f"#{r.position}",
+                    "color": r.color.to_rgb() if r.color.value else (136, 136, 136),
+                })
+        custom_roles.sort(key=lambda x: x["name"])
+    except Exception as e:
+        logger.warning(f"Custom roles error: {e}")
+
+    # Аватар
+    avatar_bytes = None
+    try:
+        avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
+    except Exception as e:
+        logger.warning(f"Avatar fetch error: {e}")
+
+    # Стрик — просто last_bonus
+    streak = 0
+    if dc.get("last_bonus", 0) >= now_ts - 86400:
+        streak = 1
+
+    # --- Генерация (в отдельном потоке) ---
+    buf = await asyncio.to_thread(
+        generate_profile_card,
+        user_name=user.display_name,
+        user_id=user.id,
+        avatar_bytes=avatar_bytes,
+        role_key=role_key,
+        reviews=review_count,
+        next_role_name=next_name,
+        progress_pct=progress_pct,
+        progress_text=progress_text,
+        balance=balance,
+        total_earned=total_earned,
+        earned_month=earned_month,
+        spent_month=spent_month,
+        purchases_count=len(purchases),
+        streak=streak,
+        inventory=inventory,
+        history=history,
+        custom_roles=custom_roles,
     )
-    await inter.response.send_message(embed=embed, ephemeral=True)
+
+    file = disnake.File(buf, filename=f"profile_{user.id}.png")
+    await inter.response.send_message(file=file, ephemeral=True)
+
+    await log_discord(
+        title="📇 Карточка профиля",
+        description=f"> **Пользователь:** {inter.author.mention}",
+        color=0x00aaff,
+        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+    )
+
 
 # ============================================================
 # УПРАВЛЕНИЕ ПОКУПКАМИ (селект товаров и возврат)
@@ -179,6 +269,7 @@ class PurchaseSelectView(View):
         view = ReturnItemView(self.user_id, idx, price)
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
 
+
 class ReturnItemView(View):
     def __init__(self, user_id, purchase_index, price):
         super().__init__(timeout=300)
@@ -215,6 +306,7 @@ class ReturnItemView(View):
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
+
 # ============================================================
 # ПЕРЕДАЧА ПОДАРКА
 # ============================================================
@@ -248,6 +340,7 @@ async def handle_transfer(inter: disnake.MessageInteraction):
 
     select.callback = select_callback
     await inter.response.send_message("Выберите товар, который хотите передать:", ephemeral=True, view=view)
+
 
 class TransferRecipientModal(Modal):
     def __init__(self, purchase_index, purchases, author):
@@ -302,8 +395,9 @@ class TransferRecipientModal(Modal):
             ephemeral=True
         )
 
+
 # ============================================================
-# МОДАЛКИ ДЛЯ КАЛЬКУЛЯТОРА И РАСЧЁТА СКИДКИ
+# МОДАЛКИ: КАЛЬКУЛЯТОР, СКИДКА
 # ============================================================
 class CalcModal(Modal):
     def __init__(self):
@@ -330,15 +424,10 @@ class CalcModal(Modal):
             result = eval(expr, {"__builtins__": None}, {})
             if isinstance(result, float) and result.is_integer():
                 result = int(result)
-            await inter.response.send_message(
-                f"🧮 **Результат:** `{result}`",
-                ephemeral=True
-            )
+            await inter.response.send_message(f"🧮 **Результат:** `{result}`", ephemeral=True)
         except Exception as e:
-            await inter.response.send_message(
-                f"❌ Ошибка в выражении: {str(e)}",
-                ephemeral=True
-            )
+            await inter.response.send_message(f"❌ Ошибка в выражении: {str(e)}", ephemeral=True)
+
 
 class DiscountModal(Modal):
     def __init__(self):
@@ -373,18 +462,16 @@ class DiscountModal(Modal):
         final_price = price * (1 - discount / 100)
         savings = price - final_price
 
-        embed = disnake.Embed(
-            title="🧾 Результат расчёта скидки",
-            color=0x2ecc71
-        )
+        embed = disnake.Embed(title="🧾 Результат расчёта скидки", color=0x2ecc71)
         embed.add_field(name="Исходная цена", value=f"`{price:.2f} ₽`", inline=True)
         embed.add_field(name="Скидка", value=f"`{discount:.0f}%`", inline=True)
         embed.add_field(name="Экономия", value=f"`{savings:.2f} ₽`", inline=True)
         embed.add_field(name="✅ Итоговая цена", value=f"**`{final_price:.2f} ₽`**", inline=False)
         await inter.response.send_message(embed=embed, ephemeral=True)
 
+
 # ============================================================
-# ПАНЕЛЬ ПРОФИЛЬ (селект)
+# ВЫБОР В ПАНЕЛИ ПРОФИЛЬ
 # ============================================================
 class ProfileSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -442,7 +529,8 @@ class ProfileSelect(disnake.ui.StringSelect):
         )
         value = inter.data.values[0]
         if value == "profile":
-            await show_profile(inter, inter.author)
+            # НОВОЕ: отправляем карточку-картинку
+            await show_profile_card(inter, inter.author)
         elif value == "purchases":
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
             if not purchases:
@@ -465,14 +553,19 @@ class ProfileSelect(disnake.ui.StringSelect):
         elif value == "discount":
             await inter.response.send_modal(DiscountModal())
 
+
 class ProfileView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(ProfileSelect())
 
+
 # ============================================================
 # ОТПРАВКА ПАНЕЛИ ПРОФИЛЬ
 # ============================================================
+PROFILE_CHANNEL_ID = 1540018373503483934
+
+
 async def send_profile_panel():
     from core.bot import bot
     await bot.wait_until_ready()
@@ -505,31 +598,3 @@ async def send_profile_panel():
         description=f"> Сообщение отправлено в {channel.mention}",
         color=0x00ff00
     )
-
-# ============================================================
-# ФУНКЦИЯ ЗАГРУЗКИ ЭМБЕДОВ ИЗ ADD
-# ============================================================
-def load_embed_from_file(filename: str) -> list[disnake.Embed]:
-    path = os.path.join(ADD_DIR, filename)
-    if not os.path.exists(path):
-        return [disnake.Embed(
-            title="❌ Файл не найден",
-            description=f"Файл `{filename}` отсутствует в папке add.",
-            color=0xff0000
-        )]
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        embeds = []
-        for e in data.get("embeds", []):
-            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
-        return embeds
-    except Exception as e:
-        logger.error(f"Ошибка загрузки {filename}: {e}")
-        return [disnake.Embed(
-            title="❌ Ошибка загрузки",
-            description=f"Не удалось загрузить {filename}.",
-            color=0xff0000
-        )]
-
-PROFILE_CHANNEL_ID = 1540018373503483934
