@@ -27,7 +27,7 @@ from modules.dc import (
 
 
 # ============================================================
-# ЗАГРУЗКА ЭМБЕДОВ ИЗ ADD
+# ХЕЛПЕР: загрузка JSON эмбеда из add/
 # ============================================================
 def load_embed_from_file(filename: str) -> list[disnake.Embed]:
     path = os.path.join(ADD_DIR, filename)
@@ -78,11 +78,10 @@ def _get_role_info_by_count(count: int):
 
 
 # ============================================================
-# ГЕНЕРАЦИЯ И ОТПРАВКА КАРТОЧКИ
+# ГЕНЕРАЦИЯ И ОТПРАВКА КАРТОЧКИ ПРОФИЛЯ
 # ============================================================
 async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
-    # ⚡ САМОЕ ПЕРВОЕ — defer, чтобы не словить 3-секундный таймаут
-    await inter.response.defer(ephemeral=True)
+    await inter.response.defer(with_message=True, ephemeral=True)
 
     from modules.profile_card import generate_profile_card
 
@@ -187,7 +186,7 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
         if dc.get("last_bonus", 0) >= now_ts - 86400:
             streak = 1
 
-        buf = await generate_profile_card(
+        buf, meta = await generate_profile_card(
             user_name=user.display_name,
             user_id=user.id,
             avatar_bytes=avatar_bytes,
@@ -209,16 +208,23 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
 
         filename = f"profile_{user.id}.png"
         file = disnake.File(buf, filename=filename)
+
         embed = disnake.Embed(color=6776679)
         embed.set_image(url=f"attachment://{filename}")
 
-        # ✅ ВАЖНО: followup.send с ephemeral=True — создаёт НОВОЕ
-        # эфемерное сообщение. Панель не трогается вообще.
-        await inter.followup.send(embed=embed, file=file, ephemeral=True)
+        if meta["cached"]:
+            embed.set_footer(text="⚡ Из кэша · Карточка обновляется при изменениях")
+        else:
+            embed.set_footer(text=f"✨ Сгенерировано за {meta['duration']:.1f} сек · Кэш 10 минут")
+
+        await inter.edit_original_response(content=None, embed=embed, file=file)
 
         asyncio.create_task(log_discord(
             title="📇 Карточка профиля",
-            description=f"> **Пользователь:** {inter.author.mention}",
+            description=(
+                f"> **Пользователь:** {inter.author.mention}\n"
+                f"> **Источник:** {'кэш' if meta['cached'] else f'рендер ({meta[\"duration\"]:.1f}с)'}"
+            ),
             color=0x00aaff,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         ))
@@ -226,9 +232,8 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
     except Exception as e:
         logger.exception(f"Ошибка рендера карточки профиля: {e}")
         try:
-            await inter.followup.send(
-                f"❌ Не удалось сгенерировать карточку. Попробуйте позже.\n`{str(e)[:200]}`",
-                ephemeral=True
+            await inter.edit_original_response(
+                content=f"❌ Не удалось сгенерировать карточку.\n`{str(e)[:200]}`"
             )
         except Exception:
             pass
@@ -327,127 +332,8 @@ class ReturnItemView(View):
 
 
 # ============================================================
-# ПЕРЕДАЧА ПОДАРКА
+# МОДАЛКА: РАСЧЁТ СКИДКИ
 # ============================================================
-async def handle_transfer(inter: disnake.MessageInteraction):
-    user_id = inter.author.id
-    purchases = await get_user_purchases(user_id, only_unused=True)
-    if not purchases:
-        return await inter.followup.send("❌ У вас нет неиспользованных товаров для передачи.", ephemeral=True)
-
-    options = []
-    for idx, p in enumerate(purchases):
-        label = p['value']
-        if len(label) > 100:
-            label = label[:97] + "..."
-        options.append(SelectOption(
-            label=label,
-            description=f"Куплен: {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}",
-            value=str(idx)
-        ))
-    select = Select(placeholder="Выберите товар для передачи...", options=options, custom_id="transfer_select")
-    view = View(timeout=300)
-    view.add_item(select)
-
-    async def select_callback(inter2: disnake.MessageInteraction):
-        if inter2.author.id != user_id:
-            return await inter2.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
-        idx = int(inter2.data.values[0])
-        if idx >= len(purchases):
-            return await inter2.response.send_message("❌ Товар не найден.", ephemeral=True)
-        await inter2.response.send_modal(TransferRecipientModal(idx, purchases, inter2.author))
-
-    select.callback = select_callback
-    await inter.followup.send("Выберите товар, который хотите передать:", ephemeral=True, view=view)
-
-
-class TransferRecipientModal(Modal):
-    def __init__(self, purchase_index, purchases, author):
-        self.purchase_index = purchase_index
-        self.purchases = purchases
-        self.author = author
-        components = [
-            TextInput(
-                label="Введите ID получателя",
-                placeholder="Например, 123456789012345678",
-                custom_id="recipient_id",
-                min_length=1,
-                max_length=30
-            )
-        ]
-        super().__init__(title="Передача подарка", components=components)
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        recipient_input = inter.text_values["recipient_id"].strip()
-        if not recipient_input.isdigit():
-            return await inter.response.send_message("❌ Введите корректный ID (только цифры).", ephemeral=True)
-        recipient_id = int(recipient_input)
-        if recipient_id == inter.author.id:
-            return await inter.response.send_message("❌ Вы не можете передать товар самому себе.", ephemeral=True)
-        guild = inter.guild
-        recipient_member = guild.get_member(recipient_id)
-        if not recipient_member:
-            return await inter.response.send_message("❌ Пользователь с таким ID не найден на сервере.", ephemeral=True)
-        if recipient_member.bot:
-            return await inter.response.send_message("❌ Нельзя передавать товар ботам.", ephemeral=True)
-
-        purchases = await get_user_purchases(self.author.id, only_unused=False)
-        if self.purchase_index >= len(purchases):
-            return await inter.response.send_message("❌ Этот товар уже был передан или использован.", ephemeral=True)
-        p = purchases[self.purchase_index]
-        success = await remove_purchase(self.author.id, self.purchase_index)
-        if not success:
-            return await inter.response.send_message("❌ Ошибка удаления товара у отправителя.", ephemeral=True)
-        await add_purchase(recipient_id, p['type'], p['value'])
-        await log_discord(
-            title="🎁 Передача подарка",
-            description=(
-                f"> **Отправитель:** {inter.author.mention}\n"
-                f"> **Получатель:** {recipient_member.mention}\n"
-                f"> **Товар:** `{p['value']}`"
-            ),
-            color=0x00ff00,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
-        await inter.response.send_message(
-            f"✅ Товар **{p['value']}** успешно передан {recipient_member.mention}!",
-            ephemeral=True
-        )
-
-
-# ============================================================
-# МОДАЛКИ: КАЛЬКУЛЯТОР, СКИДКА
-# ============================================================
-class CalcModal(Modal):
-    def __init__(self):
-        components = [
-            TextInput(
-                label="Введите выражение",
-                placeholder="Например: 2 + 2 * 10",
-                custom_id="expression",
-                min_length=1,
-                max_length=100
-            )
-        ]
-        super().__init__(title="🧮 Калькулятор", components=components)
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        expr = inter.text_values["expression"].strip()
-        allowed = set("0123456789+-*/().% ")
-        if not all(c in allowed for c in expr):
-            return await inter.response.send_message(
-                "❌ Разрешены только цифры и операторы + - * / ( ) . %",
-                ephemeral=True
-            )
-        try:
-            result = eval(expr, {"__builtins__": None}, {})
-            if isinstance(result, float) and result.is_integer():
-                result = int(result)
-            await inter.response.send_message(f"🧮 **Результат:** `{result}`", ephemeral=True)
-        except Exception as e:
-            await inter.response.send_message(f"❌ Ошибка в выражении: {str(e)}", ephemeral=True)
-
-
 class DiscountModal(Modal):
     def __init__(self):
         components = [
@@ -508,22 +394,10 @@ class ProfileSelect(disnake.ui.StringSelect):
                 value="purchases"
             ),
             disnake.SelectOption(
-                label="・Передать подарок",
-                description="Простая передача・радость обоим",
-                emoji="<:transfer:1541653944726716497>",
-                value="transfer"
-            ),
-            disnake.SelectOption(
                 label="・О валюте",
                 description="Трата валюты・Её получение",
                 emoji="<:buy:1538395716920148079>",
                 value="currency"
-            ),
-            disnake.SelectOption(
-                label="・Калькулятор",
-                description="Расчет цен・Корзина покупок",
-                emoji="<:calcu1:1538551848301109299>",
-                value="calc"
             ),
             disnake.SelectOption(
                 label="・Расчет скидки",
@@ -563,15 +437,10 @@ class ProfileSelect(disnake.ui.StringSelect):
             embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
             view = PurchaseSelectView(inter.author.id, purchases)
             await inter.followup.send(embed=embed, view=view, ephemeral=True)
-        elif value == "transfer":
-            await inter.response.defer(ephemeral=True)
-            await handle_transfer(inter)
         elif value == "currency":
             await inter.response.defer(ephemeral=True)
             embeds = load_embed_from_file("vallue.json")
             await inter.followup.send(embeds=embeds, ephemeral=True)
-        elif value == "calc":
-            await inter.response.send_modal(CalcModal())
         elif value == "discount":
             await inter.response.send_modal(DiscountModal())
 
@@ -610,7 +479,7 @@ async def send_profile_panel():
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
     embed2 = disnake.Embed(
         title="Твой профиль на сервере Diamond Shop",
-        description="> В данном разделе, ты можешь - увидить свой профиль, свои покупки, возможно - отменить их, и получить возрат, но - 75%! Узнать, как купить что либо за Diamond Coin и многое другое! Не забудь о калькуляторе, и расчете скидок, для своих покупок!",
+        description="> В данном разделе, ты можешь - увидить свой профиль, свои покупки, возможно - отменить их, и получить возрат, но - 75%! Узнать, как купить что либо за Diamond Coin и многое другое! Не забудь о расчете скидок, для своих покупок!",
         color=6776679
     )
     embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
