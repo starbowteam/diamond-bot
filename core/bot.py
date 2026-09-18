@@ -43,7 +43,7 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 # ============================================================
-# ГЛОБАЛЬНЫЕ КУЛДАУНЫ
+# ГЛОБАЛЬНЫЕ КУЛДАУНЫ И КОНСТАНТЫ ДЛЯ ОТЗЫВОВ
 # ============================================================
 _REVIEW_COOLDOWN = {}   # user_id -> last_review_ts
 REVIEW_COOLDOWN_SECONDS = 120
@@ -155,7 +155,6 @@ async def on_ready():
         )
         from modules.commands_profile import send_profile_panel, ProfileView
 
-        # Регистрируем ВСЕ постоянные View
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
         bot.add_view(TicketView())
@@ -254,12 +253,6 @@ async def keep_voice_alive():
 # ФУНКЦИЯ ПЕРЕСТРОЙКИ ПРАВ ТИКЕТА
 # ============================================================
 async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
-    """
-    Перестраивает права в тикет-канале:
-    - Менеджер получает права писать, создавать ветки, читать.
-    - Остальные менеджеры (роль) могут только читать.
-    - Клиент сохраняет право писать.
-    """
     guild = channel.guild
 
     for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
@@ -643,64 +636,27 @@ async def on_message(message: disnake.Message):
         now = time.time()
         text = (message.content or "").strip()
 
-        # ---- Проверка 1: КД 2 минуты ----
+        # ---- КД 2 минуты — тихо удаляем, без ответов ----
         last = _REVIEW_COOLDOWN.get(user_id, 0)
         if now - last < REVIEW_COOLDOWN_SECONDS:
-            remaining = int(REVIEW_COOLDOWN_SECONDS - (now - last))
             try:
                 await message.delete()
             except Exception:
                 pass
-            try:
-                warn = disnake.Embed(
-                    title="⏳ Слишком часто",
-                    description=(
-                        f"> {message.author.mention}, ты уже оставлял отзыв недавно.\n"
-                        f"> Подожди ещё **{remaining} сек** перед следующим."
-                    ),
-                    color=0xff6600
-                )
-                await message.channel.send(embed=warn, delete_after=10)
-            except Exception:
-                pass
             return
 
-        # ---- Проверка 2: запрет вложений (картинки, гифки, файлы, стикеры) ----
+        # ---- Запрет вложений — тихо удаляем ----
         if message.attachments or message.stickers or message.embeds:
             try:
                 await message.delete()
             except Exception:
                 pass
-            try:
-                warn = disnake.Embed(
-                    title="❌ Только текст",
-                    description=(
-                        f"> {message.author.mention}, отзыв должен содержать **только текст**.\n"
-                        f"> Картинки, гифки, стикеры, файлы и вложения — запрещены."
-                    ),
-                    color=0xff0000
-                )
-                await message.channel.send(embed=warn, delete_after=12)
-            except Exception:
-                pass
             return
 
-        # ---- Проверка 3: минимальная длина ----
+        # ---- Минимум 3 символа — тихо удаляем ----
         if len(text) < REVIEW_MIN_LENGTH:
             try:
                 await message.delete()
-            except Exception:
-                pass
-            try:
-                warn = disnake.Embed(
-                    title="❌ Слишком коротко",
-                    description=(
-                        f"> {message.author.mention}, отзыв слишком короткий.\n"
-                        f"> Минимум **{REVIEW_MIN_LENGTH} символа**."
-                    ),
-                    color=0xff0000
-                )
-                await message.channel.send(embed=warn, delete_after=12)
             except Exception:
                 pass
             return
@@ -717,25 +673,23 @@ async def on_message(message: disnake.Message):
         counts[str(user_id)] = counts.get(str(user_id), 0) + 1
         save_json(FILES["review_counts"], counts)
 
-        # Начисляем 15 DC
         try:
             await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке")
         except Exception as e:
             logger.exception(f"Ошибка начисления DC за отзыв: {e}")
 
-        # Обновляем роли
         if isinstance(message.author, disnake.Member):
             try:
                 await update_user_roles(message.author, counts[str(user_id)], keep_pka=True)
             except Exception as e:
                 logger.exception(f"Ошибка обновления ролей: {e}")
 
-        # ---- Красивый эмбед-подтверждение в канал ----
+        # ---- Красивый эмбед в ЛС автору ----
         try:
-            success_embed = disnake.Embed(
+            dm_embed = disnake.Embed(
                 title="✅ Отзыв принят!",
                 description=(
-                    f"> Спасибо за отзыв, {message.author.mention}!\n\n"
+                    f"> Спасибо за отзыв!\n\n"
                     f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
                     f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
                     f"> **Следующий отзыв:** через 2 минуты"
@@ -743,10 +697,10 @@ async def on_message(message: disnake.Message):
                 color=0x2ecc71,
                 timestamp=datetime.now(timezone.utc)
             )
-            success_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
-            await message.channel.send(embed=success_embed, delete_after=20)
+            dm_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+            await message.author.send(embed=dm_embed)
         except Exception as e:
-            logger.warning(f"Не удалось отправить эмбед об успехе: {e}")
+            logger.warning(f"Не удалось отправить ЛС об отзыве: {e}")
 
         # ---- Лог в общий лог-канал ----
         await log_discord(
