@@ -39,6 +39,7 @@ def reload_promo_cache():
     global promo_codes
     promo_codes = get_promo_codes()
 
+
 # ============================================================
 # ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – с зарплатой и авансом
 # ============================================================
@@ -50,6 +51,7 @@ SALARY_ROLES = {
     1457964854441672806: {"salary": 60, "advance": 20},
 }
 SALARY_ROLE_ORDER = [1471844291595731016, 1513935883475226796, 1154757071330365490, 1471190371181789234, 1457964854441672806]
+
 
 class DCSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -71,12 +73,6 @@ class DCSelect(disnake.ui.StringSelect):
                 description="Ручное управление покупками",
                 emoji="<:cart:1538399645238165624>",
                 value="purchases"
-            ),
-            disnake.SelectOption(
-                label="・Акция",
-                description="Ручное обновление акций",
-                emoji="<:actops:1538399662921490432>",
-                value="flash"
             ),
             disnake.SelectOption(
                 label="・Зарплата",
@@ -112,16 +108,6 @@ class DCSelect(disnake.ui.StringSelect):
             await inter.response.send_modal(TakeDcModal())
         elif value == "purchases":
             await inter.response.send_modal(ManagePurchasesModal())
-        elif value == "flash":
-            await inter.response.defer(ephemeral=True)
-            from modules.actions import refresh_actions_panel
-            await refresh_actions_panel()
-            await inter.edit_original_message(content="✅ Меню Actions обновлено с новой акцией!")
-            await log_discord(
-                title="🔄 Акция обновлена",
-                description=f"> **Админ:** {inter.author.mention} обновил акцию.",
-                color=0x00aaff
-            )
         elif value == "salary":
             await inter.response.defer(ephemeral=True)
             await self.process_salary(inter, "salary")
@@ -201,10 +187,12 @@ class DCSelect(disnake.ui.StringSelect):
             color=0x00ff00
         )
 
+
 class DCView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(DCSelect())
+
 
 # ============================================================
 # МОДАЛКИ ДЛЯ DC-ПАНЕЛИ
@@ -239,6 +227,7 @@ class GiveDcModal(Modal):
         await add_dc(user_id, amount, reason)
         await inter.response.send_message(f"✅ Начислено {amount} DC пользователю <@{user_id}>.", ephemeral=True)
 
+
 class TakeDcModal(Modal):
     def __init__(self):
         components = [
@@ -271,6 +260,7 @@ class TakeDcModal(Modal):
             await inter.response.send_message(f"✅ Снято {amount} DC у <@{user_id}>.", ephemeral=True)
         else:
             await inter.response.send_message(f"❌ Недостаточно DC у <@{user_id}>.", ephemeral=True)
+
 
 class ManagePurchasesModal(Modal):
     def __init__(self):
@@ -307,6 +297,7 @@ class ManagePurchasesModal(Modal):
                 await inter2.response.send_message(f"❌ Ошибка удаления покупки.", ephemeral=True)
         select.callback = select_callback
         await inter.response.send_message(f"Выберите покупку пользователя <@{user_id}>, которую хотите удалить:", ephemeral=True, view=view)
+
 
 # ============================================================
 # ПАНЕЛЬ ПРОМОКОДОВ
@@ -360,10 +351,12 @@ class PromoSelect(disnake.ui.StringSelect):
             text = "\n".join([f"{code} → {value}" for code, value in promo_codes.items()])
             await inter.response.send_message(f"```\n{text}\n```", ephemeral=True)
 
+
 class PromoView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(PromoSelect())
+
 
 class PromoAddModal(Modal):
     def __init__(self):
@@ -382,6 +375,7 @@ class PromoAddModal(Modal):
         reload_promo_cache()
         await inter.response.send_message(f"✅ Промокод `{code}` добавлен → {value}", ephemeral=True)
         await log_discord("➕ Промокод добавлен", f"Админ {inter.author.mention} добавил `{code}` → {value}", color=0x00ff00)
+
 
 class PromoRemoveSelectView(View):
     def __init__(self):
@@ -413,6 +407,7 @@ class PromoRemoveSelectView(View):
             await log_discord("➖ Промокод удалён", f"Админ {inter.author.mention} удалил `{code}`", color=0xff6600)
         else:
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
+
 
 # ============================================================
 # АДМИН-ПАНЕЛЬ
@@ -482,6 +477,7 @@ class ClearModal(Modal):
             logger.exception("Ошибка очистки: %s", e)
             await inter.response.send_message(f"❌ Ошибка при очистке: {e}", ephemeral=True)
 
+
 class GetJsonModal(Modal):
     def __init__(self):
         components = [
@@ -508,6 +504,7 @@ class GetJsonModal(Modal):
         buf = io.StringIO(json.dumps(payload, ensure_ascii=False, indent=2))
         await inter.response.send_message(file=disnake.File(fp=buf, filename="message.json"), ephemeral=True)
         await log_discord("📥 Выгрузка JSON", f"Админ {inter.author.mention} выгрузил JSON из {channel.mention}", color=0x00ff00)
+
 
 class AdminSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -564,18 +561,20 @@ class AdminSelect(disnake.ui.StringSelect):
         elif value == "clear":
             await inter.response.send_modal(ClearModal())
 
+
 class AdminView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(AdminSelect())
 
+
 async def recalc_reviews(inter: disnake.MessageInteraction):
-    # Реализация функции (из оригинала)
     try:
         await update_review_counter(silent=True)
         await inter.edit_original_response(content="✅ Отзывы пересчитаны и роли обновлены!")
     except Exception as e:
         await inter.edit_original_response(content=f"❌ Ошибка: {e}")
+
 
 # ============================================================
 # КОМАНДА /say
@@ -631,6 +630,7 @@ async def say(
         except Exception as e:
             logger.exception("say embed error: %s", e)
             await ctx.send("❌ Ошибка.", ephemeral=True)
+
 
 # ============================================================
 # КОМАНДА /gw_dc
@@ -703,6 +703,7 @@ async def gw_dc(
         logger.exception(f"Ошибка в команде gw_dc: {e}")
         await ctx.send(f"❌ Произошла ошибка: {e}", ephemeral=True)
 
+
 # ============================================================
 # СЛАШ-КОМАНДЫ ПАНЕЛЕЙ
 # ============================================================
@@ -720,6 +721,7 @@ async def panel_dc(inter: disnake.ApplicationCommandInteraction):
     embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
     await inter.send(embeds=[embed1, embed2], ephemeral=True, view=DCView())
 
+
 @commands.slash_command(name="promocodes", description="Управление промокодами (админ)")
 async def promocodes(inter: disnake.ApplicationCommandInteraction):
     if not has_admin_command_roles(inter.author):
@@ -734,6 +736,7 @@ async def promocodes(inter: disnake.ApplicationCommandInteraction):
     ]
     await inter.send(embeds=embeds, ephemeral=True, view=PromoView())
 
+
 @commands.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
 async def admin_panel(inter: disnake.ApplicationCommandInteraction):
     if not has_admin_command_roles(inter.author):
@@ -747,6 +750,7 @@ async def admin_panel(inter: disnake.ApplicationCommandInteraction):
         ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
     ]
     await inter.send(embeds=embeds, ephemeral=True, view=AdminView())
+
 
 # ============================================================
 # НАСТРОЙКА МОДУЛЯ (для main.py)
