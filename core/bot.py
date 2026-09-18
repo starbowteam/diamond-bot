@@ -692,7 +692,7 @@ async def on_message(message: disnake.Message):
                     f"> Спасибо за отзыв!\n\n"
                     f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
                     f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
-                    f"> **Следующий отзыв:** через 2 минуты"
+                    f"> **Следующий отзыв:** можно оставить через 2 минуты"
                 ),
                 color=0x2ecc71,
                 timestamp=datetime.now(timezone.utc)
