@@ -27,7 +27,8 @@ from core.utils import (
 from modules.actions import (
     send_actions_panel, handle_flash_interaction,
     refresh_daily_deal, load_flash_sale, save_flash_sale,
-    generate_random_deal, FLASH_SALE_FILE
+    generate_random_deal, FLASH_SALE_FILE,
+    FLASH_SALE_DURATION_HOURS, DAILY_DEAL_REFRESH_HOURS
 )
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
@@ -57,13 +58,14 @@ REVIEW_REWARD_DC = 15
 
 # Flash sale
 FLASH_SALE_ROLE_ID = 1127428607606796290
-FLASH_SALE_DURATION = 2 * 3600
+FLASH_SALE_DURATION = FLASH_SALE_DURATION_HOURS * 3600
 FLASH_SALE_CHANCE = 0.15
 FLASH_SALE_CHECK_MINUTES = 30
 FLASH_SALE_DISCOUNT = 90
 
 # МСК (UTC+3)
 MSK = timezone(timedelta(hours=3))
+
 
 # ============================================================
 # ЗАРПЛАТЫ И АВАНСЫ
@@ -85,7 +87,6 @@ SALARY_ROLE_ORDER = [
 
 
 async def process_salary(mode: str):
-    """mode: 'advance' или 'salary'."""
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
         logger.warning(f"process_salary({mode}): guild not found")
@@ -153,11 +154,9 @@ _banner_last_update = 0.0
 
 
 async def schedule_banner_update():
-    """Обновляет баннер с задержкой (debounce), чтобы не спамить при массовых удалениях."""
     global _banner_last_update
     _banner_last_update = time.time()
     await asyncio.sleep(5)
-    # Если за 5 сек пришли ещё сигналы — пропускаем, обработает последний
     if time.time() - _banner_last_update < 4.5:
         return
     try:
@@ -250,12 +249,13 @@ async def daily_bonus_task():
 
 @tasks.loop(minutes=5)
 async def daily_deal_task():
+    """Каждые 5 минут проверяем, не нужно ли обновить товар дня (слот 5ч)."""
     await bot.wait_until_ready()
     try:
         before = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
         deal = refresh_daily_deal()
         after = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
-        if before.get("date") != after.get("date"):
+        if before.get("slot") != after.get("slot"):
             logger.info(f"Товар дня авто-обновлён: {deal['item_data']['name'] if deal else '—'}")
     except Exception as e:
         logger.exception(f"daily_deal_task error: {e}")
@@ -314,7 +314,7 @@ async def flash_sale_task():
                         f"**Старая цена:** ~~{deal['original_price']} DC~~\n"
                         f"**Новая цена:** **{deal['new_price']} DC**\n"
                         f"**Скидка:** {FLASH_SALE_DISCOUNT}%\n\n"
-                        f"⏰ **Действует 2 часа!**"
+                        f"⏰ **Действует {FLASH_SALE_DURATION_HOURS} час!**"
                     ),
                     color=0xff0000,
                     timestamp=datetime.now(timezone.utc)
@@ -338,7 +338,7 @@ async def flash_sale_task():
                         f"> **Товар:** {deal['item_data']['name']}\n"
                         f"> **Категория:** {deal['category_label']}\n"
                         f"> **Скидка:** {FLASH_SALE_DISCOUNT}%\n"
-                        f"> **Длительность:** 2 часа"
+                        f"> **Длительность:** {FLASH_SALE_DURATION_HOURS} час"
                     ),
                     color=0xff0000
                 )
@@ -348,7 +348,6 @@ async def flash_sale_task():
 
 @tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
 async def salary_advance_task():
-    """Аванс — 15 числа в 00:00 МСК."""
     await bot.wait_until_ready()
     try:
         now_msk = datetime.now(MSK)
@@ -362,7 +361,6 @@ async def salary_advance_task():
 
 @tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
 async def salary_main_task():
-    """Зарплата — последний день месяца в 00:00 МСК."""
     await bot.wait_until_ready()
     try:
         now_msk = datetime.now(MSK)
@@ -634,10 +632,8 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
         )
 
 
-# ---- Отслеживание удалений (в т.ч. через API, без кэша) ----
 @bot.event
 async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
-    # Реагируем только на канал отзывов
     if payload.channel_id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         asyncio.create_task(schedule_banner_update())
 
@@ -855,7 +851,6 @@ async def on_message(message: disnake.Message):
         if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
             await add_message_dc(message.author.id)
 
-    # Авто-модерация отзывов
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         user_id = message.author.id
         now = time.time()
