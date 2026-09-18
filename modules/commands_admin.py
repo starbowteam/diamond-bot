@@ -41,18 +41,8 @@ def reload_promo_cache():
 
 
 # ============================================================
-# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) – с зарплатой и авансом
+# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) — БЕЗ ЗП/АВАНСА
 # ============================================================
-SALARY_ROLES = {
-    1471844291595731016: {"salary": 120, "advance": 50},
-    1513935883475226796: {"salary": 90, "advance": 30},
-    1154757071330365490: {"salary": 90, "advance": 30},
-    1471190371181789234: {"salary": 70, "advance": 25},
-    1457964854441672806: {"salary": 60, "advance": 20},
-}
-SALARY_ROLE_ORDER = [1471844291595731016, 1513935883475226796, 1154757071330365490, 1471190371181789234, 1457964854441672806]
-
-
 class DCSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -73,18 +63,6 @@ class DCSelect(disnake.ui.StringSelect):
                 description="Ручное управление покупками",
                 emoji="<:cart:1538399645238165624>",
                 value="purchases"
-            ),
-            disnake.SelectOption(
-                label="・Зарплата",
-                description="Выдача зарплаты сотруднику: 31 число.",
-                emoji="<:zapa:1538557843228332053>",
-                value="salary"
-            ),
-            disnake.SelectOption(
-                label="・Аванс",
-                description="Выдача аванса сотруднику: 15 число.",
-                emoji="<:avans:1538557862689902733>",
-                value="advance"
             )
         ]
         super().__init__(
@@ -108,84 +86,6 @@ class DCSelect(disnake.ui.StringSelect):
             await inter.response.send_modal(TakeDcModal())
         elif value == "purchases":
             await inter.response.send_modal(ManagePurchasesModal())
-        elif value == "salary":
-            await inter.response.defer(ephemeral=True)
-            await self.process_salary(inter, "salary")
-        elif value == "advance":
-            await inter.response.defer(ephemeral=True)
-            await self.process_salary(inter, "advance")
-
-    async def process_salary(self, inter: disnake.MessageInteraction, mode: str):
-        if not has_admin_command_roles(inter.author):
-            await inter.edit_original_response(content="⛔ У вас нет прав на это действие.")
-            return
-
-        guild = inter.guild
-        if not guild:
-            await inter.edit_original_response(content="❌ Не удалось определить сервер.")
-            return
-
-        members = guild.members
-        total = 0
-        awarded = 0
-        errors = 0
-        stats = {role_id: 0 for role_id in SALARY_ROLE_ORDER}
-
-        for member in members:
-            if member.bot:
-                continue
-
-            top_role_id = None
-            for role_id in SALARY_ROLE_ORDER:
-                if member.get_role(role_id):
-                    top_role_id = role_id
-                    break
-
-            if not top_role_id:
-                continue
-
-            amount = SALARY_ROLES[top_role_id][mode]
-            if amount <= 0:
-                continue
-
-            try:
-                await add_dc(member.id, amount, f"{'Зарплата' if mode == 'salary' else 'Аванс'} по роли {top_role_id}")
-                stats[top_role_id] += 1
-                awarded += 1
-                total += amount
-            except Exception as e:
-                logger.error(f"Ошибка начисления {mode} пользователю {member.id}: {e}")
-                errors += 1
-
-        result_lines = []
-        for role_id in SALARY_ROLE_ORDER:
-            count = stats[role_id]
-            if count > 0:
-                role = guild.get_role(role_id)
-                role_name = role.name if role else str(role_id)
-                result_lines.append(f"**{role_name}** – {count} чел.")
-
-        result_text = "\n".join(result_lines) if result_lines else "Никто не получил."
-
-        await inter.edit_original_response(
-            content=f"✅ **{'Зарплата' if mode == 'salary' else 'Аванс'}** выдана!\n"
-                    f"👥 Всего сотрудников: {awarded}\n"
-                    f"💎 Всего выдано: **{total} DC**\n"
-                    f"📊 Распределение:\n{result_text}\n"
-                    f"⚠️ Ошибок: {errors}"
-        )
-
-        await log_discord(
-            title=f"💰 Выдача {'зарплаты' if mode == 'salary' else 'аванса'}",
-            description=(
-                f"> **Админ:** {inter.author.mention}\n"
-                f"> **Сотрудников:** {awarded}\n"
-                f"> **Всего выдано:** {total} DC\n"
-                f"> **Ошибок:** {errors}\n"
-                f"> **Распределение:**\n{result_text}"
-            ),
-            color=0x00ff00
-        )
 
 
 class DCView(disnake.ui.View):
