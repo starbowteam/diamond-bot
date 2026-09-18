@@ -31,6 +31,32 @@ from modules.dc import (
 )
 from modules.actions import load_action_embed
 
+
+# ============================================================
+# ХЕЛПЕР: загрузка slid.json из actions/ или add/
+# ============================================================
+def _load_slid_embeds() -> list:
+    """Ищет slid.json в actions/ и add/, возвращает список embeds."""
+    base_project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        os.path.join(base_project, "actions", "slid.json"),
+        os.path.join(ADD_DIR, "slid.json"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return [
+                    disnake.Embed.from_dict(clean_embed_for_discohook(e))
+                    for e in data.get("embeds", [])
+                ]
+            except Exception as e:
+                logger.error(f"Ошибка чтения {path}: {e}")
+    logger.error("slid.json не найден ни в actions/, ни в add/")
+    return []
+
+
 # ============================================================
 # РОЛИ ДЛЯ ТИКЕТОВ
 # ============================================================
@@ -45,6 +71,7 @@ async def assign_ticket_role(member: disnake.Member, role_id: int):
         except Exception as e:
             logger.error(f"Не удалось выдать роль {role_id}: {e}")
 
+
 async def remove_ticket_role(member: disnake.Member, role_id: int):
     if role_id is None:
         return
@@ -55,6 +82,7 @@ async def remove_ticket_role(member: disnake.Member, role_id: int):
             logger.info(f"Снята роль {role.name} у пользователя {member}")
         except Exception as e:
             logger.error(f"Не удалось снять роль {role_id}: {e}")
+
 
 async def handle_ticket_roles_on_close(channel: disnake.TextChannel):
     user_id = get_ticket_owner(channel.id)
@@ -76,11 +104,13 @@ async def handle_ticket_roles_on_close(channel: disnake.TextChannel):
         elif category_id == CONFIG["COINS_CATEGORY_ID"]:
             await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["coins_created"])
 
+
 async def clear_ticket_owner(channel: disnake.TextChannel):
     user_id = get_ticket_owner(channel.id)
     if user_id:
         remove_ticket_owner(channel.id)
         await handle_ticket_roles_on_close(channel)
+
 
 # ============================================================
 # КЛАСС МОДЕРАЦИИ ОТЗЫВОВ
@@ -159,6 +189,7 @@ class ReviewModerationView(View):
         except:
             pass
         await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
+
 
 # ============================================================
 # МОДАЛКА ПОКУПКИ ЗА РЕАЛЬНЫЕ ДЕНЬГИ
@@ -261,6 +292,7 @@ class BuyTicketModal(Modal):
                 color=0x00ff00
             ))
 
+
 # ============================================================
 # МОДАЛКА ПОКУПКИ ЗА DC / ИНВАЙТЫ
 # ============================================================
@@ -272,7 +304,7 @@ class CoinsTicketModal(Modal):
         super().__init__(title="Создание тикета на покупку (DC/Инвайты)", components=components, custom_id="coins_ticket_modal")
 
     async def callback(self, inter: disnake.ModalInteraction):
-        await inter.response.defer(ephemeral=True)  # ДОБАВЛЕНО
+        await inter.response.defer(ephemeral=True)
         from core.bot import bot
         uid = inter.author.id
         now = time.time()
@@ -344,6 +376,7 @@ class CoinsTicketModal(Modal):
                 color=0x00ff00
             ))
 
+
 # ============================================================
 # ВЫБОР ТИПА ПОКУПКИ (СЕЛЕКТ-МЕНЮ)
 # ============================================================
@@ -392,10 +425,12 @@ class BuySelect(disnake.ui.StringSelect):
         elif value == "question":
             await inter.response.send_modal(QuestionModal())
 
+
 class BuyTypeView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(BuySelect())
+
 
 # ============================================================
 # МОДАЛКА ВОПРОСА
@@ -418,36 +453,29 @@ class QuestionModal(Modal):
         question = inter.text_values["question"]
         guild = inter.guild
 
-        # Категория для вопросов
         cat = guild.get_channel(1544363672128987196)
         if not cat:
             return await inter.edit_original_response(content="❌ Категория для вопросов не найдена.")
 
-        # Имя канала = никнейм пользователя (без пробелов)
         channel_name = inter.author.display_name.lower().replace(" ", "-")[:80]
         if not channel_name:
             channel_name = f"question-{inter.author.id}"
 
-        # Права доступа
         overwrites = {
             guild.default_role: disnake.PermissionOverwrite(view_channel=False),
             inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
         }
 
-        # Роль, у которой есть доступ
         support_role = guild.get_role(1423360115335106570)
         if support_role:
             overwrites[support_role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
-        # Админы тоже могут видеть (опционально)
         admin_role = guild.get_role(1127428607606796294)
         if admin_role:
             overwrites[admin_role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
-        # Создаём канал
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
 
-        # Собираем эмбеды
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url="https://cdn.discordapp.com/attachments/1064857845838925865/1544369476475158629/image.png?ex=6a9841a8&is=6a96f028&hm=e2f80206537e8c87820b03cccdb39f120cdc1452055767b4e122f455b3f66e1b&")
 
@@ -460,7 +488,6 @@ class QuestionModal(Modal):
         embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a979d63&is=6a964be3&hm=6b425dcaba72f3d56d43c943a7a02f5a4d6627fbfa68330b6a0a1905992e9705&")
         embed2.add_field(name="> Суть вопроса", value=f"```{question}```")
 
-        # Отправляем сообщение в канал с кнопкой закрытия
         view = QuestionTicketView()
         await ticket_channel.send(
             content=f"<@&1423360115335106570> - задан вопрос, постарайтесь ответить!",
@@ -468,16 +495,15 @@ class QuestionModal(Modal):
             view=view
         )
 
-        # Уведомляем пользователя
         await inter.edit_original_response(content=f"✅ Ваш вопрос создан: {ticket_channel.mention}")
 
-        # Логируем
         await log_discord(
             title="❓ Новый вопрос",
             description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {ticket_channel.mention}\n> **Вопрос:** {question}",
             color=0x00aaff,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
+
 
 # ============================================================
 # ВИД ДЛЯ КАНАЛА ВОПРОСА
@@ -494,7 +520,6 @@ class QuestionTicketView(View):
         row=0
     )
     async def howto(self, button: Button, inter: disnake.MessageInteraction):
-        # Отправляем эмбед с инструкцией (не эфемерно)
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1544387485684203682/image.png?ex=6a98526d&is=6a9700ed&hm=e6eb0b7ec153c23c7d63cb3fe64a405c56dee64cc9edbe9792cd69bfe7e4fe3b&")
 
@@ -530,7 +555,6 @@ class QuestionTicketView(View):
         row=0
     )
     async def close(self, button: Button, inter: disnake.MessageInteraction):
-        # Разрешаем закрыть автору вопроса, роли поддержки или админу
         if not any(r.id == 1423360115335106570 for r in inter.author.roles) and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ У вас нет прав на закрытие.", ephemeral=True)
 
@@ -547,7 +571,8 @@ class QuestionTicketView(View):
             color=0xff6600,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
-        
+
+
 # ============================================================
 # СЕЛЕКТ-МЕНЮ ДЛЯ ТИКЕТОВ
 # ============================================================
@@ -577,7 +602,6 @@ class TicketActionSelect(disnake.ui.StringSelect):
     async def callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0]
         if value == "requisites":
-            # Только для менеджеров с ролью 1154757071330365490
             if not any(r.id == 1154757071330365490 for r in inter.author.roles):
                 return await inter.response.send_message(
                     "⛔ Кнопка доступна только менеджерам.", ephemeral=True
@@ -606,10 +630,12 @@ class TicketActionSelect(disnake.ui.StringSelect):
             logger.exception("Ошибка при отправке policy: %s", e)
             await inter.response.send_message("❌ Ошибка при загрузке правил.", ephemeral=True)
 
+
 class SelectView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketActionSelect())
+
 
 # ============================================================
 # МОДАЛКА СОЗДАНИЯ СЧЁТА (только для менеджеров)
@@ -664,7 +690,6 @@ class InvoiceModal(Modal):
 
         order_id = generate_receipt_id()
 
-        # Генерация в отдельном потоке — не блокируем loop
         buf = await asyncio.to_thread(
             generate_receipt_png,
             manager_name=manager_name,
@@ -699,7 +724,8 @@ class InvoiceModal(Modal):
             color=0x00aaff,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
-        
+
+
 # ============================================================
 # КНОПКА ЗАКРЫТИЯ / ОЦЕНКИ
 # ============================================================
@@ -771,6 +797,7 @@ class TicketRatingView(View):
             except Exception as e2:
                 logger.error(f"Повторная ошибка при закрытии тикета: {e2}")
 
+
 class RatingModal(Modal):
     def __init__(self, channel, manager_id):
         self.channel = channel
@@ -804,6 +831,7 @@ class RatingModal(Modal):
             await send_manager_top()
         else:
             await inter.response.send_message("❌ Менеджер не назначен.", ephemeral=True)
+
 
 # ============================================================
 # ОСНОВНОЙ VIEW С КНОПКАМИ (РЕАЛЬНЫЕ ДЕНЬГИ)
@@ -926,7 +954,6 @@ class TicketView(View):
                 item_name = field.value.strip("`\n ")
             elif "промокод" in fn:
                 promo_value = field.value.strip("`\n ")
-                
 
         ed = order_embed.to_dict()
         ed["color"] = 0x676767
@@ -1001,8 +1028,8 @@ class TicketView(View):
         if not discounts:
             return await inter.response.send_message("❌ У вас нету доступных купленных скидок.", ephemeral=True)
 
-        slid_embeds = load_action_embed("slid.json")
-        if not slid_embeds or len(slid_embeds) == 0:
+        slid_embeds = _load_slid_embeds()
+        if not slid_embeds:
             slid_embeds = [disnake.Embed(
                 title="📦 Ваши скидки",
                 description="> Выберите скидку для применения к заказу.",
@@ -1031,6 +1058,8 @@ class TicketView(View):
 
             if discount_index >= len(discounts):
                 return await inter.response.send_message("❌ Скидка уже применена.", ephemeral=True)
+
+            channel = inter.channel
 
             discount_applied = False
             async for msg in channel.history(limit=50):
@@ -1086,6 +1115,7 @@ class TicketView(View):
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
         return callback
+
 
 class TicketPaidView(View):
     def __init__(self):
@@ -1163,6 +1193,7 @@ class TicketPaidView(View):
             embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
             view = TicketRatingView()
             await channel.send(embeds=[embed1, embed2], view=view)
+
 
 # ============================================================
 # КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC/ИНВАЙТЫ
@@ -1378,6 +1409,7 @@ class CoinsTicketButtons(View):
             )
         return callback
 
+
 # ============================================================
 # ВЫБОР ТИПА КАТАЛОГА
 # ============================================================
@@ -1427,10 +1459,12 @@ class CatalogTypeSelect(disnake.ui.StringSelect):
             embeds = load_action_embed("menu_happy.json")
             await inter.response.send_message(embeds=embeds, ephemeral=True)
 
+
 class CatalogTypeView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(CatalogTypeSelect())
+
 
 # ============================================================
 # КАТАЛОГ ДЛЯ РЕАЛЬНЫХ ДЕНЕГ
@@ -1451,7 +1485,7 @@ CATALOG_OPTIONS = [
     {"label": "・Epic Games", "description": "Фортнайт и Аккаунт ・ Заработок и донат",
      "emoji": "<:EpicGames:1465765441887797248>", "json_path": os.path.join(CATALOG_DIR, "menu_epic.json")},
     {"label": "・Supercell", "description": "Brawl Stars и Clash Royale ・Динамика и богатство",
-     "emoji": "<:SuperCell:1465768886484996260>", "json_path": os.path.join(CATALOG_DIR, "menu_supersell.json")},
+     "emoji": "<:SuperCell:1465768886484996260>", "json_path": os.path.join(CATALOG_DIR, "menu_supercell.json")},
     {"label": "・Spotify", "description": "Подписка на музыку ・Громкость и красочность",
      "emoji": "<:Spotify:1465770796411785330>", "json_path": os.path.join(CATALOG_DIR, "menu_spotify.json")},
     {"label": "・Дизайн", "description": "Отличный дизайн ・Выбор для лучших",
@@ -1459,6 +1493,7 @@ CATALOG_OPTIONS = [
     {"label": "・Бот для Дискорда", "description": "Рабочий и легкий ・Плавность и скорость",
      "emoji": "<:Bot:1465771816080380109>", "json_path": os.path.join(CATALOG_DIR, "menu_bot.json")},
 ]
+
 
 class CatalogSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -1496,17 +1531,19 @@ class CatalogSelect(disnake.ui.StringSelect):
         except Exception as e:
             logger.exception("CatalogSelect callback error: %s", e)
 
+
 class CatalogView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(CatalogSelect())
+
 
 # ============================================================
 # КАТАЛОГ ДЛЯ ПОКУПКИ ЗА DC
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
-        super().__init__(timeout=None)  # исправлено
+        super().__init__(timeout=None)
         catalog = load_shop_catalog()
         options = []
         for key, cat in catalog.items():
@@ -1700,6 +1737,7 @@ class BuySelectView(View):
         await inter.response.defer(ephemeral=True)
         await inter.edit_original_response(content="Выберите категорию:", view=BuySelectView())
 
+
 class GiftRecipientModal(Modal):
     def __init__(self, buy_view, original_inter, category, item_key, item):
         self.buy_view = buy_view
@@ -1734,6 +1772,7 @@ class GiftRecipientModal(Modal):
 
         await self.buy_view.process_buy(inter, self.category, self.item_key, self.item, recipient_id)
 
+
 # ============================================================
 # ПАНЕЛЬ ТИКЕТОВ
 # ============================================================
@@ -1763,7 +1802,7 @@ class TicketPanelView(View):
         custom_id="panel:promo",
         emoji=PartialEmoji(name="prom1", id=1539646792139014234)
     )
-    async def promo(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+    async def promo(self, button: disnake.Button, inter: disnake.MessageInteraction):
         text = "🎟️ Промокоды публикуются в <#1462070136856117258>, следи и забирай свою скидку!"
         await inter.response.send_message(text, ephemeral=True)
         await log_discord(
@@ -1779,7 +1818,7 @@ class TicketPanelView(View):
         custom_id="panel:catalog",
         emoji=PartialEmoji(name="catal", id=1539646769053306980)
     )
-    async def catalog(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+    async def catalog(self, button: disnake.Button, inter: disnake.MessageInteraction):
         embed = disnake.Embed(
             title="Выбор категории товаров",
             description="В чем представлен ваш товар? Выберите метод ниже.",
@@ -1788,6 +1827,7 @@ class TicketPanelView(View):
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a8679e3&is=6a852863&hm=59892e8783bfb24b381e2a76e3689f727bef8f1e3aea9595dd3d130b587dede4&")
         view = CatalogTypeView()
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
 # ============================================================
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ
