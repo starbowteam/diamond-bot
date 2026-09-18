@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+import time
 import random
 import disnake
 from disnake import SelectOption
@@ -9,8 +10,9 @@ from disnake import ButtonStyle, Embed
 from datetime import datetime, timezone
 
 from core.utils import (
-    BASE_DIR, logger, log_discord,
-    CONFIG, clean_embed_for_discohook,
+    BASE_DIR, DATA_DIR, CONFIG, logger, log_discord,
+    clean_embed_for_discohook,
+    load_json, save_json,
     get_dc_cache, save_dc_cache, sync_dc_to_json
 )
 from modules.dc import (
@@ -21,14 +23,12 @@ from modules.dc import (
 
 ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 
-# Категории (теперь только две: Premium и Акционный товар)
+# JSON-хранилища
+DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
+FLASH_SALE_FILE = os.path.join(DATA_DIR, "flash_sale.json")
+
+# Категории (Premium убран)
 CATEGORIES = [
-    {
-        "label": "・Premium",
-        "description": "Премиум ・Дополнения",
-        "emoji": "<:prem:1536788419638988982>",
-        "file": "menu_premium.json"
-    },
     {
         "label": "・Акционный товар",
         "description": "Каждый день, новый товар. Успевай!",
@@ -37,9 +37,90 @@ CATEGORIES = [
     }
 ]
 
-# Глобальная переменная для хранения текущего акционного товара
-current_flash_item = None
 
+# ============================================================
+# ХРАНИЛИЩЕ: DAILY DEAL
+# ============================================================
+def load_daily_deal() -> dict:
+    """Возвращает {'item': {...}, 'date': 'YYYY-MM-DD'} или пустой dict."""
+    return load_json(DAILY_DEAL_FILE, {})
+
+
+def save_daily_deal(data: dict):
+    save_json(DAILY_DEAL_FILE, data)
+
+
+def generate_random_deal(discount: int) -> dict | None:
+    """Генерирует случайный товар из каталога со скидкой discount%."""
+    catalog = load_shop_catalog()
+    items = []
+    for cat_key, cat_data in catalog.items():
+        for item_key, item_data in cat_data.get("items", {}).items():
+            items.append((cat_key, item_key, item_data))
+
+    if not items:
+        return None
+
+    cat_key, item_key, item_data = random.choice(items)
+    original_price = item_data["price"]
+    new_price = max(int(original_price * (100 - discount) / 100), 1)
+
+    return {
+        "cat_key": cat_key,
+        "item_key": item_key,
+        "item_data": item_data,
+        "original_price": original_price,
+        "discount": discount,
+        "new_price": new_price,
+        "category_label": catalog[cat_key]["label"],
+    }
+
+
+def refresh_daily_deal(force: bool = False) -> dict | None:
+    """Обновляет товар дня (если сегодня ещё не обновляли или force=True)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    data = load_daily_deal()
+
+    if not force and data.get("date") == today and data.get("item"):
+        return data["item"]
+
+    deal = generate_random_deal(discount=50)
+    if not deal:
+        return None
+
+    save_daily_deal({"date": today, "item": deal})
+    logger.info(f"Товар дня обновлён: {deal['item_data']['name']}")
+    return deal
+
+
+# ============================================================
+# ХРАНИЛИЩЕ: FLASH SALE
+# ============================================================
+def load_flash_sale() -> dict:
+    """Возвращает {'active': bool, 'item': {...}, 'started_at': int, 'message_id': int, 'channel_id': int}."""
+    return load_json(FLASH_SALE_FILE, {
+        "active": False, "item": None,
+        "started_at": 0, "message_id": 0, "channel_id": 0
+    })
+
+
+def save_flash_sale(data: dict):
+    save_json(FLASH_SALE_FILE, data)
+
+
+def get_flash_sale_item() -> dict | None:
+    """Возвращает активный flash-item или None."""
+    data = load_flash_sale()
+    if data.get("active") and data.get("item"):
+        # проверяем не истёк ли
+        if time.time() - data.get("started_at", 0) < 2 * 3600:
+            return data["item"]
+    return None
+
+
+# ============================================================
+# ЗАГРУЗКА EMBED'ОВ ИЗ ФАЙЛОВ
+# ============================================================
 def load_action_embed(filename: str) -> list[Embed]:
     path = os.path.join(ACTIONS_DIR, filename)
     try:
@@ -53,52 +134,11 @@ def load_action_embed(filename: str) -> list[Embed]:
         logger.error(f"Не удалось загрузить {filename}: {e}")
         return [disnake.Embed(title="Ошибка", description="Не удалось загрузить категорию.", color=0xff0000)]
 
-def generate_flash_item():
-    """Генерирует случайный товар для акции (скидка 50%). Исключает скидки 7%, 10%, 15%, 20%, оставляет 3% и 5%."""
-    catalog = load_shop_catalog()
-    items = []
-    for cat_key, cat_data in catalog.items():
-        if cat_key == "discounts":
-            for item_key, item_data in cat_data.get("items", {}).items():
-                try:
-                    percent = int(item_key)
-                    if percent in (3, 5):
-                        items.append((cat_key, item_key, item_data))
-                except:
-                    continue
-        else:
-            for item_key, item_data in cat_data.get("items", {}).items():
-                items.append((cat_key, item_key, item_data))
 
-    if not items:
-        return None
-
-    cat_key, item_key, item_data = random.choice(items)
-    original_price = item_data["price"]
-    new_price = int(original_price * 0.5)
-    if new_price < 1:
-        new_price = 1
-
-    category_label = catalog[cat_key]["label"]
-
-    return {
-        "cat_key": cat_key,
-        "item_key": item_key,
-        "item_data": item_data,
-        "original_price": original_price,
-        "discount": 50,
-        "new_price": new_price,
-        "category_label": category_label
-    }
-
-def refresh_flash_item():
-    """Обновляет акционный товар (сохраняет в глобальную переменную)."""
-    global current_flash_item
-    current_flash_item = generate_flash_item()
-    return current_flash_item
-
+# ============================================================
+# VIEW ДЛЯ ПОКУПКИ АКЦИИ
+# ============================================================
 class FlashBuyView(View):
-    """View для кнопки покупки (эфемерное сообщение) – только Купить."""
     def __init__(self, flash_item, user_id):
         super().__init__(timeout=300)
         self.flash_item = flash_item
@@ -109,6 +149,10 @@ class FlashBuyView(View):
             custom_id=f"flash_buy|{flash_item['cat_key']}|{flash_item['item_key']}|{flash_item['new_price']}"
         ))
 
+
+# ============================================================
+# СЕЛЕКТ ДЛЯ ACTIONS
+# ============================================================
 class ActionSelect(Select):
     def __init__(self):
         options = []
@@ -132,33 +176,60 @@ class ActionSelect(Select):
     async def callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0]
         if value == "None":
-            global current_flash_item
-            if current_flash_item is None:
-                current_flash_item = generate_flash_item()
-            if current_flash_item is None:
+            # Показываем daily deal + flash sale если активен
+            daily = refresh_daily_deal()
+            flash_item = get_flash_sale_item()
+
+            if not daily:
                 return await inter.response.send_message("❌ Нет доступных товаров для акции.", ephemeral=True)
 
-            flash = current_flash_item
+            # Основной embed — товар дня
             embed = disnake.Embed(
-                title="🔥 Акционный товар",
+                title="🔥 Акционный товар дня",
                 description=(
-                    f"**Товар:** {flash['item_data']['name']}\n"
-                    f"**Категория:** {flash['category_label']}\n"
-                    f"**Старая цена:** ~~{flash['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
-                    f"**Новая цена:** **{flash['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
-                    f"**Скидка:** {flash['discount']}%\n"
+                    f"**Товар:** {daily['item_data']['name']}\n"
+                    f"**Категория:** {daily['category_label']}\n"
+                    f"**Старая цена:** ~~{daily['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
+                    f"**Новая цена:** **{daily['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
+                    f"**Скидка:** {daily['discount']}%\n"
                 ),
                 color=0xff6600,
                 timestamp=datetime.now(timezone.utc)
             )
             embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
 
-            view = FlashBuyView(flash, inter.author.id)
-            await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+            embeds = [embed]
+            view = FlashBuyView(daily, inter.author.id)
+
+            # Если активен flash — добавляем второй embed + второй view
+            if flash_item:
+                flash_embed = disnake.Embed(
+                    title="⚡ МЕГА-СКИДКА! (только сейчас)",
+                    description=(
+                        f"**Товар:** {flash_item['item_data']['name']}\n"
+                        f"**Категория:** {flash_item['category_label']}\n"
+                        f"**Старая цена:** ~~{flash_item['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
+                        f"**Новая цена:** **{flash_item['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
+                        f"**Скидка:** {flash_item['discount']}%\n"
+                        f"**Истекает:** через 2 часа"
+                    ),
+                    color=0xff0000,
+                    timestamp=datetime.now(timezone.utc)
+                )
+                flash_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
+                embeds.append(flash_embed)
+                view.add_item(Button(
+                    label=f"⚡ Купить {flash_item['item_data']['name']} за {flash_item['new_price']} DC",
+                    style=ButtonStyle.danger,
+                    custom_id=f"flash_buy|{flash_item['cat_key']}|{flash_item['item_key']}|{flash_item['new_price']}"
+                ))
+
+            await inter.response.send_message(embeds=embeds, view=view, ephemeral=True)
 
             await log_discord(
                 title="📂 Просмотр акции",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {flash['item_data']['name']}",
+                description=f"> **Пользователь:** {inter.author.mention}\n> **Товар дня:** {daily['item_data']['name']}" +
+                            (f"\n> **⚡ Flash:** {flash_item['item_data']['name']}" if flash_item else ""),
                 color=0x00aaff
             )
         else:
@@ -175,13 +246,17 @@ class ActionSelect(Select):
                 color=0x00aaff
             )
 
+
 class ActionView(View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(ActionSelect())
 
+
+# ============================================================
+# ОБРАБОТКА ПОКУПКИ АКЦИИ
+# ============================================================
 async def handle_flash_interaction(inter: disnake.MessageInteraction):
-    """Обрабатывает кнопки покупки акции (custom_id начинается с flash_buy|)"""
     custom_id = inter.data.get("custom_id")
     if not custom_id or not custom_id.startswith("flash_buy|"):
         return
@@ -222,7 +297,7 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
                 )
                 await log_discord(
                     title="🔥 Покупка по акции (роль)",
-                    description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item_data['name']}\n> **Цена:** {price} DC\n> **Категория:** {cat_data.get('label', 'Неизвестно')}",
+                    description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item_data['name']}\n> **Цена:** {price} DC",
                     color=0xff6600
                 )
                 return
@@ -241,12 +316,16 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     )
     await log_discord(
         title="🔥 Покупка по акции",
-        description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item_data['name']}\n> **Цена:** {price} DC\n> **Категория:** {cat_data.get('label', 'Неизвестно')}",
+        description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item_data['name']}\n> **Цена:** {price} DC",
         color=0xff6600
     )
 
+
+# ============================================================
+# ОТПРАВКА ACTIONS ПАНЕЛИ
+# ============================================================
 async def send_actions_panel():
-    """Отправляет меню Actions (или обновляет его, удаляя старое)."""
+    """Отправляет меню Actions (обновляет старое)."""
     from core.bot import bot
     await bot.wait_until_ready()
 
@@ -257,7 +336,6 @@ async def send_actions_panel():
         logger.warning("Actions channel not found")
         return
 
-    # Удаляем старое сообщение с селект-меню
     async for msg in channel.history(limit=50):
         if msg.author == bot.user and msg.components:
             try:
@@ -266,17 +344,15 @@ async def send_actions_panel():
                 pass
             break
 
-    # Отправляем новое меню
     main_embeds = load_action_embed("menu_actions.json")
     await channel.send(embeds=main_embeds, view=ActionView())
-
     await log_discord(
         title="🔄 Меню Actions обновлено",
         description="> Панель действий переотправлена.",
         color=0x00ff00
     )
 
+
 async def refresh_actions_panel():
-    """Обновляет акционный товар и переотправляет меню Actions."""
-    refresh_flash_item()  # обновляем глобальный товар
+    """Обновляет панель Actions (для обратной совместимости)."""
     await send_actions_panel()
