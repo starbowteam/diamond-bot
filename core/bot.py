@@ -5,6 +5,7 @@ import asyncio
 import time
 import random
 from datetime import datetime, timezone, timedelta
+from datetime import time as dt_time
 from typing import List
 import disnake
 from disnake.ext import commands, tasks
@@ -47,7 +48,7 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 # ============================================================
-# КОНСТАНТЫ ДЛЯ ОТЗЫВОВ
+# КОНСТАНТЫ
 # ============================================================
 _REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
@@ -56,15 +57,115 @@ REVIEW_REWARD_DC = 15
 
 # Flash sale
 FLASH_SALE_ROLE_ID = 1127428607606796290
-FLASH_SALE_DURATION = 2 * 3600  # 2 часа
-FLASH_SALE_CHANCE = 0.15        # 15% шанс за проверку (раз в 30 мин ≈ 1-2 раза в сутки)
+FLASH_SALE_DURATION = 2 * 3600
+FLASH_SALE_CHANCE = 0.15
 FLASH_SALE_CHECK_MINUTES = 30
-FLASH_SALE_DISCOUNT = 90        # 90% скидка
+FLASH_SALE_DISCOUNT = 90
+
+# МСК (UTC+3)
+MSK = timezone(timedelta(hours=3))
+
+# ============================================================
+# ЗАРПЛАТЫ И АВАНСЫ
+# ============================================================
+SALARY_ROLES = {
+    1471844291595731016: {"advance": 70, "salary": 150},
+    1513935883475226796: {"advance": 50, "salary": 110},
+    1154757071330365490: {"advance": 50, "salary": 110},
+    1471190371181789234: {"advance": 45, "salary": 90},
+    1457964854441672806: {"advance": 40, "salary": 80},
+}
+SALARY_ROLE_ORDER = [
+    1471844291595731016,
+    1513935883475226796,
+    1154757071330365490,
+    1471190371181789234,
+    1457964854441672806,
+]
+
+
+async def process_salary(mode: str):
+    """mode: 'advance' или 'salary'."""
+    guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+    if not guild:
+        logger.warning(f"process_salary({mode}): guild not found")
+        return
+
+    total = 0
+    awarded = 0
+    errors = 0
+    stats = {role_id: 0 for role_id in SALARY_ROLE_ORDER}
+
+    for member in guild.members:
+        if member.bot:
+            continue
+
+        top_role_id = None
+        for role_id in SALARY_ROLE_ORDER:
+            if member.get_role(role_id):
+                top_role_id = role_id
+                break
+
+        if not top_role_id:
+            continue
+
+        amount = SALARY_ROLES[top_role_id][mode]
+        if amount <= 0:
+            continue
+
+        try:
+            await add_dc(member.id, amount,
+                         f"{'Зарплата' if mode == 'salary' else 'Аванс'} по роли {top_role_id} (авто)")
+            stats[top_role_id] += 1
+            awarded += 1
+            total += amount
+        except Exception as e:
+            logger.error(f"Ошибка авто-начисления {mode} пользователю {member.id}: {e}")
+            errors += 1
+
+    result_lines = []
+    for role_id in SALARY_ROLE_ORDER:
+        count = stats[role_id]
+        if count > 0:
+            role = guild.get_role(role_id)
+            role_name = role.name if role else str(role_id)
+            result_lines.append(f"**{role_name}** – {count} чел.")
+    result_text = "\n".join(result_lines) if result_lines else "Никто не получил."
+
+    logger.info(f"Авто-выдача {mode}: {awarded} чел., {total} DC, ошибок: {errors}")
+    await log_discord(
+        title=f"💰 Авто-выдача {'зарплаты' if mode == 'salary' else 'аванса'}",
+        description=(
+            f"> **Тип:** {'Зарплата (31 число)' if mode == 'salary' else 'Аванс (15 число)'}\n"
+            f"> **Сотрудников:** {awarded}\n"
+            f"> **Всего выдано:** {total} DC\n"
+            f"> **Ошибок:** {errors}\n"
+            f"> **Распределение:**\n{result_text}"
+        ),
+        color=0x00ff00
+    )
 
 
 # ============================================================
 # БАННЕР И СЧЁТЧИК ОТЗЫВОВ
 # ============================================================
+_banner_last_update = 0.0
+
+
+async def schedule_banner_update():
+    """Обновляет баннер с задержкой (debounce), чтобы не спамить при массовых удалениях."""
+    global _banner_last_update
+    _banner_last_update = time.time()
+    await asyncio.sleep(5)
+    # Если за 5 сек пришли ещё сигналы — пропускаем, обработает последний
+    if time.time() - _banner_last_update < 4.5:
+        return
+    try:
+        await update_review_counter(silent=True)
+    except Exception as e:
+        logger.exception(f"schedule_banner_update error: {e}")
+
+
 async def update_review_counter(silent: bool = False):
     try:
         text_ch = bot.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
@@ -149,7 +250,6 @@ async def daily_bonus_task():
 
 @tasks.loop(minutes=5)
 async def daily_deal_task():
-    """Авто-обновление товара дня."""
     await bot.wait_until_ready()
     try:
         before = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
@@ -163,17 +263,14 @@ async def daily_deal_task():
 
 @tasks.loop(minutes=FLASH_SALE_CHECK_MINUTES)
 async def flash_sale_task():
-    """Проверка активного flash sale + триггер нового."""
     await bot.wait_until_ready()
     try:
         data = load_flash_sale()
         now = time.time()
 
-        # 1. Если активен и истёк → удаляем пинг + деактивируем
         if data.get("active"):
             started = data.get("started_at", 0)
             if now - started >= FLASH_SALE_DURATION:
-                # удалить сообщение
                 ch_id = data.get("channel_id")
                 msg_id = data.get("message_id")
                 if ch_id and msg_id:
@@ -181,7 +278,7 @@ async def flash_sale_task():
                         ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                         msg = await ch.fetch_message(msg_id)
                         await msg.delete()
-                        logger.info(f"Flash sale истёк — сообщение удалено")
+                        logger.info("Flash sale истёк — сообщение удалено")
                     except Exception as e:
                         logger.warning(f"Не удалось удалить flash-сообщение: {e}")
                 save_flash_sale({
@@ -195,14 +292,12 @@ async def flash_sale_task():
                 )
                 return
 
-        # 2. Если не активен → шанс триггера
         if not data.get("active"):
             if random.random() < FLASH_SALE_CHANCE:
                 deal = generate_random_deal(discount=FLASH_SALE_DISCOUNT)
                 if not deal:
                     return
 
-                # Отправляем пинг в канал actions
                 channel = bot.get_channel(CONFIG["ACTIONS_CHANNEL_ID"])
                 if not channel:
                     channel = await bot.fetch_channel(CONFIG["ACTIONS_CHANNEL_ID"])
@@ -225,7 +320,7 @@ async def flash_sale_task():
                     timestamp=datetime.now(timezone.utc)
                 )
                 embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
-                embed.set_footer(text="Купить можно в акционных товарах · /акции или панель Actions")
+                embed.set_footer(text="Купить можно в акционных товарах")
 
                 msg = await channel.send(content=ping_text, embed=embed)
 
@@ -249,6 +344,35 @@ async def flash_sale_task():
                 )
     except Exception as e:
         logger.exception(f"flash_sale_task error: {e}")
+
+
+@tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
+async def salary_advance_task():
+    """Аванс — 15 числа в 00:00 МСК."""
+    await bot.wait_until_ready()
+    try:
+        now_msk = datetime.now(MSK)
+        if now_msk.day != 15:
+            return
+        logger.info("Авто-выдача аванса запущена (15 число, 00:00 МСК)")
+        await process_salary("advance")
+    except Exception as e:
+        logger.exception(f"salary_advance_task error: {e}")
+
+
+@tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
+async def salary_main_task():
+    """Зарплата — последний день месяца в 00:00 МСК."""
+    await bot.wait_until_ready()
+    try:
+        now_msk = datetime.now(MSK)
+        tomorrow = now_msk + timedelta(days=1)
+        if tomorrow.day != 1:
+            return
+        logger.info("Авто-выдача зарплаты запущена (последний день месяца, 00:00 МСК)")
+        await process_salary("salary")
+    except Exception as e:
+        logger.exception(f"salary_main_task error: {e}")
 
 
 # ============================================================
@@ -325,6 +449,10 @@ async def on_ready():
             daily_deal_task.start()
         if not flash_sale_task.is_running():
             flash_sale_task.start()
+        if not salary_advance_task.is_running():
+            salary_advance_task.start()
+        if not salary_main_task.is_running():
+            salary_main_task.start()
 
         logger.info("%s is ready", bot.user)
         await log_discord(
@@ -364,13 +492,55 @@ async def keep_voice_alive():
 
 
 # ============================================================
-# СОБЫТИЯ (без изменений, но без ролей тикетов)
+# ПЕРЕСТРОЙКА ПРАВ ТИКЕТА
+# ============================================================
+async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
+    guild = channel.guild
+
+    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
+        role = guild.get_role(role_id)
+        if role:
+            overwrite = disnake.PermissionOverwrite(
+                view_channel=True, send_messages=False,
+                read_message_history=True, add_reactions=False,
+                create_public_threads=False
+            )
+            await channel.set_permissions(role, overwrite=overwrite)
+
+    manager_overwrites = disnake.PermissionOverwrite(
+        view_channel=True, send_messages=True,
+        read_message_history=True, add_reactions=True,
+        create_public_threads=True, embed_links=True, attach_files=True
+    )
+    await channel.set_permissions(manager, overwrite=manager_overwrites)
+
+    owner_id = get_ticket_owner(channel.id)
+    if owner_id:
+        owner = guild.get_member(owner_id)
+        if owner and owner.id != manager.id:
+            owner_overwrite = disnake.PermissionOverwrite(
+                view_channel=True, send_messages=True,
+                read_message_history=True, add_reactions=True,
+                create_public_threads=True
+            )
+            await channel.set_permissions(owner, overwrite=owner_overwrite)
+
+    await log_discord(
+        title="🔐 Права тикета обновлены",
+        description=f"> **Тикет:** {channel.mention}\n> **Менеджер:** {manager.mention}",
+        color=0x00aaff,
+        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+    )
+
+
+# ============================================================
+# СОБЫТИЯ
 # ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
     await log_discord(
         title="👤 Участник зашёл",
-        description=f"> **{member.mention}** (`{member}`) присоединился к серверу.\n> ID: `{member.id}`",
+        description=f"> **{member.mention}** (`{member}`) присоединился.\n> ID: `{member.id}`",
         color=0x00ff00
     )
     role = member.guild.get_role(1127428607606796290)
@@ -464,6 +634,14 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
         )
 
 
+# ---- Отслеживание удалений (в т.ч. через API, без кэша) ----
+@bot.event
+async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
+    # Реагируем только на канал отзывов
+    if payload.channel_id == CONFIG["REVIEW_COUNT_CHANNEL"]:
+        asyncio.create_task(schedule_banner_update())
+
+
 @bot.event
 async def on_message_delete(message: disnake.Message):
     if message.author.bot:
@@ -487,6 +665,8 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
         description=f"> **Канал:** {channel.mention if channel else 'неизвестно'}\n> **Количество:** `{count}` сообщений",
         color=0xff6600
     )
+    if channel and channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
+        asyncio.create_task(schedule_banner_update())
 
 
 @bot.event
@@ -675,9 +855,7 @@ async def on_message(message: disnake.Message):
         if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
             await add_message_dc(message.author.id)
 
-    # ============================================================
-    # АВТО-МОДЕРАЦИЯ ОТЗЫВОВ
-    # ============================================================
+    # Авто-модерация отзывов
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         user_id = message.author.id
         now = time.time()
@@ -784,38 +962,3 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                     description=f"> **Пользователь:** {member.mention}\n> **Время:** {duration//60} мин.",
                     color=0x00aaff
                 )
-
-
-# ============================================================
-# ПЕРЕСТРОЙКА ПРАВ ТИКЕТА (без ролей)
-# ============================================================
-async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
-    guild = channel.guild
-
-    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
-        role = guild.get_role(role_id)
-        if role:
-            overwrite = disnake.PermissionOverwrite(
-                view_channel=True, send_messages=False,
-                read_message_history=True, add_reactions=False,
-                create_public_threads=False
-            )
-            await channel.set_permissions(role, overwrite=overwrite)
-
-    manager_overwrites = disnake.PermissionOverwrite(
-        view_channel=True, send_messages=True,
-        read_message_history=True, add_reactions=True,
-        create_public_threads=True, embed_links=True, attach_files=True
-    )
-    await channel.set_permissions(manager, overwrite=manager_overwrites)
-
-    owner_id = get_ticket_owner(channel.id)
-    if owner_id:
-        owner = guild.get_member(owner_id)
-        if owner and owner.id != manager.id:
-            owner_overwrite = disnake.PermissionOverwrite(
-                view_channel=True, send_messages=True,
-                read_message_history=True, add_reactions=True,
-                create_public_threads=True
-            )
-            await channel.set_permissions(owner, overwrite=owner_overwrite)
