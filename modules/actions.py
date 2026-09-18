@@ -3,9 +3,10 @@ import os
 import json
 import time
 import random
+import asyncio
 import disnake
 from disnake import SelectOption
-from disnake.ui import View, Select, Button
+from disnake.ui import View, Select, Button, Modal, TextInput
 from disnake import ButtonStyle, Embed
 from datetime import datetime, timezone
 
@@ -26,23 +27,13 @@ ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 # JSON-хранилища
 DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
 FLASH_SALE_FILE = os.path.join(DATA_DIR, "flash_sale.json")
-
-# Категории (Premium убран)
-CATEGORIES = [
-    {
-        "label": "・Акционный товар",
-        "description": "Каждый день, новый товар. Успевай!",
-        "emoji": "<:box:1536972791432220712>",
-        "file": None
-    }
-]
+ROULETTE_STATS_FILE = os.path.join(DATA_DIR, "roulette_stats.json")
 
 
 # ============================================================
 # ХРАНИЛИЩЕ: DAILY DEAL
 # ============================================================
 def load_daily_deal() -> dict:
-    """Возвращает {'item': {...}, 'date': 'YYYY-MM-DD'} или пустой dict."""
     return load_json(DAILY_DEAL_FILE, {})
 
 
@@ -50,8 +41,7 @@ def save_daily_deal(data: dict):
     save_json(DAILY_DEAL_FILE, data)
 
 
-def generate_random_deal(discount: int) -> dict | None:
-    """Генерирует случайный товар из каталога со скидкой discount%."""
+def generate_random_deal(discount: int):
     catalog = load_shop_catalog()
     items = []
     for cat_key, cat_data in catalog.items():
@@ -76,8 +66,7 @@ def generate_random_deal(discount: int) -> dict | None:
     }
 
 
-def refresh_daily_deal(force: bool = False) -> dict | None:
-    """Обновляет товар дня (если сегодня ещё не обновляли или force=True)."""
+def refresh_daily_deal(force: bool = False):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     data = load_daily_deal()
 
@@ -97,7 +86,6 @@ def refresh_daily_deal(force: bool = False) -> dict | None:
 # ХРАНИЛИЩЕ: FLASH SALE
 # ============================================================
 def load_flash_sale() -> dict:
-    """Возвращает {'active': bool, 'item': {...}, 'started_at': int, 'message_id': int, 'channel_id': int}."""
     return load_json(FLASH_SALE_FILE, {
         "active": False, "item": None,
         "started_at": 0, "message_id": 0, "channel_id": 0
@@ -108,20 +96,29 @@ def save_flash_sale(data: dict):
     save_json(FLASH_SALE_FILE, data)
 
 
-def get_flash_sale_item() -> dict | None:
-    """Возвращает активный flash-item или None."""
+def get_flash_sale_item():
     data = load_flash_sale()
     if data.get("active") and data.get("item"):
-        # проверяем не истёк ли
         if time.time() - data.get("started_at", 0) < 2 * 3600:
             return data["item"]
     return None
 
 
 # ============================================================
+# СТАТИСТИКА РУЛЕТКИ
+# ============================================================
+def load_roulette_stats() -> dict:
+    return load_json(ROULETTE_STATS_FILE, {"total_bets": 0, "total_won": 0, "total_lost": 0, "rolls": 0})
+
+
+def save_roulette_stats(data: dict):
+    save_json(ROULETTE_STATS_FILE, data)
+
+
+# ============================================================
 # ЗАГРУЗКА EMBED'ОВ ИЗ ФАЙЛОВ
 # ============================================================
-def load_action_embed(filename: str) -> list[Embed]:
+def load_action_embed(filename: str):
     path = os.path.join(ACTIONS_DIR, filename)
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -136,7 +133,7 @@ def load_action_embed(filename: str) -> list[Embed]:
 
 
 # ============================================================
-# VIEW ДЛЯ ПОКУПКИ АКЦИИ
+# ВИД ДЛЯ ПОКУПКИ АКЦИИ
 # ============================================================
 class FlashBuyView(View):
     def __init__(self, flash_item, user_id):
@@ -151,20 +148,329 @@ class FlashBuyView(View):
 
 
 # ============================================================
+# РУЛЕТКА МОНЕТ
+# ============================================================
+ROULETTE_ROLLS = [
+    {"name": "Проигрыш",          "mult": -1.0, "chance": 50.0, "color": 0xed4245, "emoji": "🎲", "desc": "Ты потерял ставку"},
+    {"name": "Малый выигрыш",     "mult":  0.2, "chance": 20.0, "color": 0x95a5a6, "emoji": "🔹", "desc": "+20% от ставки"},
+    {"name": "Средний выигрыш",   "mult":  0.5, "chance": 18.0, "color": 0x149bd0, "emoji": "🔸", "desc": "+50% от ставки"},
+    {"name": "Двойной",           "mult":  1.0, "chance":  8.0, "color": 0x2ecc71, "emoji": "💎", "desc": "х2 — удвоение ставки"},
+    {"name": "Тройной",           "mult":  2.0, "chance":  3.0, "color": 0xf7c991, "emoji": "👑", "desc": "х3 — тройная ставка"},
+    {"name": "JACKPOT",           "mult":  4.0, "chance":  0.9, "color": 0xffaa00, "emoji": "🎰", "desc": "х5 — джекпот!"},
+    {"name": "MEGA JACKPOT",      "mult":  9.0, "chance":  0.1, "color": 0xff00aa, "emoji": "⭐", "desc": "х10 — мега-джекпот!!!"},
+]
+
+
+def roll_roulette() -> dict:
+    total = sum(r["chance"] for r in ROULETTE_ROLLS)
+    r = random.uniform(0, total)
+    cur = 0
+    for roll in ROULETTE_ROLLS:
+        cur += roll["chance"]
+        if r <= cur:
+            return roll
+    return ROULETTE_ROLLS[0]
+
+
+class RouletteModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Ставка (DC)",
+                placeholder="Введи сумму от 1 до твоего баланса",
+                custom_id="bet",
+                min_length=1,
+                max_length=10
+            )
+        ]
+        super().__init__(title="🎰 Рулетка монет", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        user_id = inter.author.id
+
+        # Парсим ставку
+        bet_str = inter.text_values["bet"].strip()
+        if not bet_str.isdigit():
+            return await inter.response.send_message("❌ Ставка должна быть целым числом.", ephemeral=True)
+        bet = int(bet_str)
+        if bet < 1:
+            return await inter.response.send_message("❌ Минимальная ставка — 1 DC.", ephemeral=True)
+
+        balance = await get_user_balance(user_id)
+        if bet > balance:
+            return await inter.response.send_message(
+                f"❌ Недостаточно DC.\n> **Твой баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
+                ephemeral=True
+            )
+
+        # Defer, чтобы можно было делать анимацию
+        await inter.response.defer(ephemeral=True)
+
+        # Списываем ставку
+        success = await remove_dc(user_id, bet, "Ставка в рулетке монет")
+        if not success:
+            return await inter.edit_original_response(
+                content="❌ Не удалось списать DC. Попробуй позже."
+            )
+
+        # Анимация — 3 кадра
+        spin_embed1 = disnake.Embed(
+            title="🎰 Крутим барабаны...",
+            description=f"> Ставка: **{bet} DC**\n> \n> ⚫ ⚫ ⚫",
+            color=0x2b2d31,
+            timestamp=datetime.now(timezone.utc)
+        )
+        spin_embed1.set_footer(text="Удача решает всё...")
+        await inter.edit_original_response(embed=spin_embed1)
+
+        await asyncio.sleep(0.7)
+
+        temp_emoji = random.sample(
+            ["🎲", "🔹", "🔸", "💎", "👑", "🎰", "⭐"],
+            k=3
+        )
+        spin_embed2 = disnake.Embed(
+            title="🎰 Крутим барабаны...",
+            description=f"> Ставка: **{bet} DC**\n> \n> {temp_emoji[0]} {temp_emoji[1]} {temp_emoji[2]}",
+            color=0x2b2d31,
+            timestamp=datetime.now(timezone.utc)
+        )
+        spin_embed2.set_footer(text="Почти остановились...")
+        await inter.edit_original_response(embed=spin_embed2)
+
+        await asyncio.sleep(0.7)
+
+        temp_emoji2 = random.sample(
+            ["🎲", "🔹", "🔸", "💎", "👑", "🎰", "⭐"],
+            k=3
+        )
+        spin_embed3 = disnake.Embed(
+            title="🎰 Крутим барабаны...",
+            description=f"> Ставка: **{bet} DC**\n> \n> {temp_emoji2[0]} {temp_emoji2[1]} {temp_emoji2[2]}",
+            color=0x2b2d31,
+            timestamp=datetime.now(timezone.utc)
+        )
+        spin_embed3.set_footer(text="Замедляется...")
+        await inter.edit_original_response(embed=spin_embed3)
+
+        await asyncio.sleep(0.8)
+
+        # Результат
+        result = roll_roulette()
+        mult = result["mult"]
+
+        if mult > 0:
+            # Победил — возвращаем ставку + профит
+            payout = bet + int(bet * mult)
+            net = int(bet * mult)
+            await add_dc(user_id, payout, f"Выигрыш в рулетке: {result['name']}")
+            new_balance = await get_user_balance(user_id)
+
+            final_embed = disnake.Embed(
+                title=f"{result['emoji']} {result['name'].upper()}!",
+                description=(
+                    f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
+                    f"> 📊 Множитель: **x{1 + mult:.1f}**\n"
+                    f"> 💰 Чистый профит: **+{net} DC**\n"
+                    f"> 💎 Новый баланс: **{new_balance} DC**\n\n"
+                    f"> `{result['desc']}`"
+                ),
+                color=result["color"],
+                timestamp=datetime.now(timezone.utc)
+            )
+            final_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
+            final_embed.set_footer(text=f"Ставка: {bet} DC · Удача на твоей стороне!")
+
+            view = RouletteRetryView(bet)
+            await inter.edit_original_response(embed=final_embed, view=view)
+
+            # Обновляем глобальную статистику
+            stats = load_roulette_stats()
+            stats["total_bets"] = stats.get("total_bets", 0) + bet
+            stats["total_won"] = stats.get("total_won", 0) + net
+            stats["rolls"] = stats.get("rolls", 0) + 1
+            save_roulette_stats(stats)
+
+            asyncio.create_task(log_discord(
+                title=f"🎰 Рулетка: {result['name']}",
+                description=(
+                    f"> **Пользователь:** {inter.author.mention}\n"
+                    f"> **Ставка:** `{bet} DC`\n"
+                    f"> **Результат:** `x{1 + mult:.1f}`\n"
+                    f"> **Чистый профит:** `+{net} DC`\n"
+                    f"> **Новый баланс:** `{new_balance} DC`"
+                ),
+                color=result["color"]
+            ))
+        else:
+            # Проиграл
+            new_balance = await get_user_balance(user_id)
+
+            final_embed = disnake.Embed(
+                title=f"{result['emoji']} ПРОИГРЫШ",
+                description=(
+                    f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
+                    f"> 📊 Множитель: **x0**\n"
+                    f"> 💸 Потеряно: **−{bet} DC**\n"
+                    f"> 💎 Новый баланс: **{new_balance} DC**\n\n"
+                    f"> `Не расстраивайся, повезёт в следующий раз!`"
+                ),
+                color=result["color"],
+                timestamp=datetime.now(timezone.utc)
+            )
+            final_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
+            final_embed.set_footer(text=f"Ставка: {bet} DC · Попробуешь ещё?")
+
+            view = RouletteRetryView(bet)
+            await inter.edit_original_response(embed=final_embed, view=view)
+
+            stats = load_roulette_stats()
+            stats["total_bets"] = stats.get("total_bets", 0) + bet
+            stats["total_lost"] = stats.get("total_lost", 0) + bet
+            stats["rolls"] = stats.get("rolls", 0) + 1
+            save_roulette_stats(stats)
+
+            asyncio.create_task(log_discord(
+                title="🎰 Рулетка: проигрыш",
+                description=(
+                    f"> **Пользователь:** {inter.author.mention}\n"
+                    f"> **Ставка:** `{bet} DC`\n"
+                    f"> **Результат:** `x0`\n"
+                    f"> **Потеряно:** `−{bet} DC`\n"
+                    f"> **Новый баланс:** `{new_balance} DC`"
+                ),
+                color=0xed4245
+            ))
+
+
+class RouletteRetryView(View):
+    def __init__(self, last_bet: int):
+        super().__init__(timeout=300)
+        self.last_bet = last_bet
+
+        btn_retry = Button(
+            label="🎰 Играть ещё",
+            style=ButtonStyle.gray,
+            custom_id="roulette_retry"
+        )
+        btn_retry.callback = self.retry_callback
+        self.add_item(btn_retry)
+
+        btn_double = Button(
+            label=f"⚡ x2 ставку ({last_bet * 2} DC)",
+            style=ButtonStyle.gray,
+            custom_id="roulette_double"
+        )
+        btn_double.callback = self.double_callback
+        self.add_item(btn_double)
+
+    async def retry_callback(self, inter: disnake.MessageInteraction):
+        await inter.response.send_modal(RouletteModal())
+
+    async def double_callback(self, inter: disnake.MessageInteraction):
+        user_id = inter.author.id
+        new_bet = self.last_bet * 2
+        balance = await get_user_balance(user_id)
+
+        if new_bet > balance:
+            return await inter.response.send_message(
+                f"❌ Недостаточно DC для x2 ставки.\n"
+                f"> **Нужно:** `{new_bet} DC`\n> **У тебя:** `{balance} DC`",
+                ephemeral=True
+            )
+
+        # Списываем
+        success = await remove_dc(user_id, new_bet, "Ставка в рулетке (x2)")
+        if not success:
+            return await inter.response.send_message("❌ Ошибка списания DC.", ephemeral=True)
+
+        await inter.response.defer(ephemeral=True)
+
+        # Быстрая анимация (без пауз — юзер уже ждал)
+        result = roll_roulette()
+        mult = result["mult"]
+
+        if mult > 0:
+            payout = new_bet + int(new_bet * mult)
+            net = int(new_bet * mult)
+            await add_dc(user_id, payout, f"Выигрыш в рулетке: {result['name']}")
+            new_balance = await get_user_balance(user_id)
+
+            final_embed = disnake.Embed(
+                title=f"{result['emoji']} {result['name'].upper()}!",
+                description=(
+                    f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
+                    f"> 📊 Множитель: **x{1 + mult:.1f}**\n"
+                    f"> 💰 Чистый профит: **+{net} DC**\n"
+                    f"> 💎 Новый баланс: **{new_balance} DC**"
+                ),
+                color=result["color"],
+                timestamp=datetime.now(timezone.utc)
+            )
+            final_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
+            final_embed.set_footer(text=f"Ставка x2: {new_bet} DC · Победа!")
+
+            view = RouletteRetryView(new_bet)
+            await inter.edit_original_response(embed=final_embed, view=view)
+
+            asyncio.create_task(log_discord(
+                title=f"🎰 Рулетка: {result['name']} (x2)",
+                description=(
+                    f"> **Пользователь:** {inter.author.mention}\n"
+                    f"> **Ставка:** `{new_bet} DC`\n"
+                    f"> **Чистый профит:** `+{net} DC`\n"
+                    f"> **Баланс:** `{new_balance} DC`"
+                ),
+                color=result["color"]
+            ))
+        else:
+            new_balance = await get_user_balance(user_id)
+            final_embed = disnake.Embed(
+                title=f"{result['emoji']} ПРОИГРЫШ",
+                description=(
+                    f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
+                    f"> 💸 Потеряно: **−{new_bet} DC**\n"
+                    f"> 💎 Новый баланс: **{new_balance} DC**"
+                ),
+                color=result["color"],
+                timestamp=datetime.now(timezone.utc)
+            )
+            final_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
+            final_embed.set_footer(text=f"Ставка x2: {new_bet} DC")
+
+            view = RouletteRetryView(new_bet)
+            await inter.edit_original_response(embed=final_embed, view=view)
+
+            asyncio.create_task(log_discord(
+                title="🎰 Рулетка: проигрыш (x2)",
+                description=(
+                    f"> **Пользователь:** {inter.author.mention}\n"
+                    f"> **Ставка:** `{new_bet} DC`\n"
+                    f"> **Новый баланс:** `{new_balance} DC`"
+                ),
+                color=0xed4245
+            ))
+
+
+# ============================================================
 # СЕЛЕКТ ДЛЯ ACTIONS
 # ============================================================
 class ActionSelect(Select):
     def __init__(self):
-        options = []
-        for cat in CATEGORIES:
-            options.append(
-                SelectOption(
-                    label=cat["label"],
-                    description=cat["description"],
-                    emoji=cat["emoji"],
-                    value=str(cat["file"])
-                )
-            )
+        options = [
+            SelectOption(
+                label="・Акционный товар",
+                description="Неимоверные скидки на товары!",
+                emoji="<:box:1536972791432220712>",
+                value="deals"
+            ),
+            SelectOption(
+                label="・Рулетка монет",
+                description="Поставь Diamond Coins на удачу!",
+                emoji="<:ropulet:1550563615675781282>",
+                value="roulette"
+            ),
+        ]
         super().__init__(
             placeholder="Выберите категорию...",
             min_values=1,
@@ -175,15 +481,14 @@ class ActionSelect(Select):
 
     async def callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0]
-        if value == "None":
-            # Показываем daily deal + flash sale если активен
+
+        if value == "deals":
             daily = refresh_daily_deal()
             flash_item = get_flash_sale_item()
 
             if not daily:
                 return await inter.response.send_message("❌ Нет доступных товаров для акции.", ephemeral=True)
 
-            # Основной embed — товар дня
             embed = disnake.Embed(
                 title="🔥 Акционный товар дня",
                 description=(
@@ -201,7 +506,6 @@ class ActionSelect(Select):
             embeds = [embed]
             view = FlashBuyView(daily, inter.author.id)
 
-            # Если активен flash — добавляем второй embed + второй view
             if flash_item:
                 flash_embed = disnake.Embed(
                     title="⚡ МЕГА-СКИДКА! (только сейчас)",
@@ -232,19 +536,15 @@ class ActionSelect(Select):
                             (f"\n> **⚡ Flash:** {flash_item['item_data']['name']}" if flash_item else ""),
                 color=0x00aaff
             )
-        else:
-            embeds = load_action_embed(value)
-            await inter.response.send_message(embeds=embeds, ephemeral=True)
-            category_name = "Неизвестно"
-            for cat in CATEGORIES:
-                if cat["file"] == value:
-                    category_name = cat["label"]
-                    break
-            await log_discord(
-                title="📂 Просмотр категории (Actions)",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Категория:** {category_name}",
-                color=0x00aaff
-            )
+
+        elif value == "roulette":
+            balance = await get_user_balance(inter.author.id)
+            if balance < 1:
+                return await inter.response.send_message(
+                    "❌ У тебя нет DC для игры. Сначала заработай их активностью.",
+                    ephemeral=True
+                )
+            await inter.response.send_modal(RouletteModal())
 
 
 class ActionView(View):
@@ -258,7 +558,14 @@ class ActionView(View):
 # ============================================================
 async def handle_flash_interaction(inter: disnake.MessageInteraction):
     custom_id = inter.data.get("custom_id")
-    if not custom_id or not custom_id.startswith("flash_buy|"):
+    if not custom_id:
+        return
+
+    # Roulette retry buttons
+    if custom_id in ("roulette_retry", "roulette_double"):
+        return  # обрабатываются во View
+
+    if not custom_id.startswith("flash_buy|"):
         return
 
     parts = custom_id.split("|")
@@ -325,7 +632,6 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
 # ОТПРАВКА ACTIONS ПАНЕЛИ
 # ============================================================
 async def send_actions_panel():
-    """Отправляет меню Actions (обновляет старое)."""
     from core.bot import bot
     await bot.wait_until_ready()
 
@@ -354,5 +660,4 @@ async def send_actions_panel():
 
 
 async def refresh_actions_panel():
-    """Обновляет панель Actions (для обратной совместимости)."""
     await send_actions_panel()
