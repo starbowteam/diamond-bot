@@ -113,85 +113,6 @@ async def clear_ticket_owner(channel: disnake.TextChannel):
 
 
 # ============================================================
-# КЛАСС МОДЕРАЦИИ ОТЗЫВОВ
-# ============================================================
-class ReviewModerationView(View):
-    def __init__(self, user_id: int, content: str, msg_id: int, channel_id: int):
-        super().__init__(timeout=86400)
-        self.user_id = user_id
-        self.content = content
-        self.msg_id = msg_id
-        self.channel_id = channel_id
-        self.message = None
-
-    async def update_status_and_log(self, inter: disnake.MessageInteraction, status: str, log_title: str, log_color: int):
-        if not has_review_moderation_roles(inter.author):
-            return await inter.response.send_message("⛔ У вас нет прав.", ephemeral=True)
-        if self.message and self.message.embeds:
-            embeds = self.message.embeds
-            new_embeds = []
-            for i, embed in enumerate(embeds):
-                if i == 1:
-                    embed_dict = embed.to_dict()
-                    fields = embed_dict.get("fields", [])
-                    for field in fields:
-                        if field.get("name") == "> Статус":
-                            field["value"] = status
-                            break
-                    new_embeds.append(disnake.Embed.from_dict(embed_dict))
-                else:
-                    new_embeds.append(embed)
-            await self.message.edit(embeds=new_embeds, view=None)
-        for child in self.children:
-            child.disabled = True
-        await inter.response.edit_message(view=self)
-        log_chan = self.get_log_channel(inter)
-        if log_chan:
-            await log_chan.send(
-                embed=disnake.Embed(
-                    title=log_title,
-                    description=f"> **Админ:** {inter.author.mention}\n> **Автор отзыва:** <@{self.user_id}>\n> **Ссылка:** [перейти](https://discord.com/channels/{inter.guild_id}/{self.channel_id}/{self.msg_id})",
-                    color=log_color,
-                    timestamp=datetime.now(timezone.utc)
-                )
-            )
-
-    def get_log_channel(self, inter):
-        from core.bot import bot
-        return bot.get_channel(CONFIG["LOG_CHANNEL_ID"])
-
-    @disnake.ui.button(label="✅ Одобрить", style=ButtonStyle.success)
-    async def approve(self, button: Button, inter: disnake.MessageInteraction):
-        if not has_review_moderation_roles(inter.author):
-            return await inter.response.send_message("⛔ У вас нет прав для одобрения.", ephemeral=True)
-        await add_dc(self.user_id, 10, "Одобрение отзыва")
-        data = get_dc_cache(self.user_id)
-        data["last_review"] = now_ts()
-        save_dc_cache(self.user_id, data)
-        try:
-            from core.bot import bot
-            user = bot.get_user(self.user_id)
-            if user:
-                await user.send("✅ Ваш отзыв одобрен! Вам начислено **+10 DC**.")
-        except:
-            pass
-        await self.update_status_and_log(inter, "✅ Одобрено", "✅ Отзыв одобрен", 0x00ff00)
-
-    @disnake.ui.button(label="❌ Отклонить", style=ButtonStyle.danger)
-    async def reject(self, button: Button, inter: disnake.MessageInteraction):
-        if not has_review_moderation_roles(inter.author):
-            return await inter.response.send_message("⛔ У вас нет прав для отклонения.", ephemeral=True)
-        try:
-            from core.bot import bot
-            user = bot.get_user(self.user_id)
-            if user:
-                await user.send("❌ Ваш отзыв был отклонён администратором.")
-        except:
-            pass
-        await self.update_status_and_log(inter, "❌ Отклонено", "❌ Отзыв отклонён", 0xff0000)
-
-
-# ============================================================
 # МОДАЛКА ПОКУПКИ ЗА РЕАЛЬНЫЕ ДЕНЬГИ
 # ============================================================
 class BuyTicketModal(Modal):
@@ -1786,7 +1707,7 @@ class TicketPanelView(View):
         custom_id="panel:buy",
         emoji=PartialEmoji(name="shopg", id=1539646815530651718)
     )
-    async def buy(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+    async def buy(self, button: disnake.Button, inter: disnake.MessageInteraction):
         embed = disnake.Embed(
             color=6776679,
             title="Выбор категории по оплате",
