@@ -58,58 +58,13 @@ def _load_slid_embeds() -> list:
 
 
 # ============================================================
-# РОЛИ ДЛЯ ТИКЕТОВ
+# ВЛАДЕЛЕЦ ТИКЕТА (без ролей)
 # ============================================================
-async def assign_ticket_role(member: disnake.Member, role_id: int):
-    if role_id is None:
-        return
-    role = member.guild.get_role(role_id)
-    if role and role not in member.roles:
-        try:
-            await member.add_roles(role)
-            logger.info(f"Выдана роль {role.name} пользователю {member}")
-        except Exception as e:
-            logger.error(f"Не удалось выдать роль {role_id}: {e}")
-
-
-async def remove_ticket_role(member: disnake.Member, role_id: int):
-    if role_id is None:
-        return
-    role = member.guild.get_role(role_id)
-    if role and role in member.roles:
-        try:
-            await member.remove_roles(role)
-            logger.info(f"Снята роль {role.name} у пользователя {member}")
-        except Exception as e:
-            logger.error(f"Не удалось снять роль {role_id}: {e}")
-
-
-async def handle_ticket_roles_on_close(channel: disnake.TextChannel):
-    user_id = get_ticket_owner(channel.id)
-    if not user_id:
-        logger.warning(f"Не найден владелец для канала {channel.id}")
-        return
-    member = channel.guild.get_member(user_id)
-    if not member:
-        return
-    category = channel.category
-    if not category:
-        return
-    category_id = category.id
-    count = get_user_tickets_count_in_category(user_id, category_id)
-    if count <= 1:
-        if category_id == CONFIG["TICKET_CATEGORY_ID"] or category_id == CONFIG["PAID_CATEGORY_ID"]:
-            await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
-            await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_paid"])
-        elif category_id == CONFIG["COINS_CATEGORY_ID"]:
-            await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["coins_created"])
-
-
-async def clear_ticket_owner(channel: disnake.TextChannel):
+def clear_ticket_owner(channel: disnake.TextChannel):
+    """Убираем владельца тикета. Роли тикетов больше не используются."""
     user_id = get_ticket_owner(channel.id)
     if user_id:
         remove_ticket_owner(channel.id)
-        await handle_ticket_roles_on_close(channel)
 
 
 # ============================================================
@@ -201,9 +156,6 @@ class BuyTicketModal(Modal):
 
         add_ticket_owner(ticket_channel.id, inter.author.id, cat.id)
 
-        member = inter.author
-        await assign_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
-
         log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
         if log_ch:
             await log_ch.send(embed=disnake.Embed(
@@ -284,9 +236,6 @@ class CoinsTicketModal(Modal):
         await inter.edit_original_response(content=f"✅ Тикет создан: {ticket_channel.mention}")
 
         add_ticket_owner(ticket_channel.id, inter.author.id, cat.id)
-
-        member = inter.author
-        await assign_ticket_role(member, CONFIG["TICKET_ROLES"]["coins_created"])
 
         log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
         if log_ch:
@@ -700,7 +649,7 @@ class TicketRatingView(View):
             if manager_id:
                 increment_manager_closed(manager_id)
                 add_closed_order(manager_id, channel.id)
-            await clear_ticket_owner(channel)
+            clear_ticket_owner(channel)
             await channel.delete()
             await log_discord(
                 title="🗑️ Тикет закрыт (после выполнения)",
@@ -803,7 +752,7 @@ class TicketView(View):
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
             await asyncio.sleep(3)
             try:
-                await clear_ticket_owner(channel)
+                clear_ticket_owner(channel)
                 await channel.delete()
                 await log_discord(
                     title="🗑️ Тикет закрыт",
@@ -907,10 +856,6 @@ class TicketView(View):
         await channel.send(embed=embed)
 
         await inter.response.send_message("✅ Заказ отмечен как оплаченный.", ephemeral=True)
-
-        member = inter.author
-        await remove_ticket_role(member, CONFIG["TICKET_ROLES"]["real_created"])
-        await assign_ticket_role(member, CONFIG["TICKET_ROLES"]["real_paid"])
 
         await log_discord(
             title="💰 Заказ оплачен",
@@ -1084,7 +1029,7 @@ class TicketPaidView(View):
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
             await asyncio.sleep(3)
             try:
-                await clear_ticket_owner(channel)
+                clear_ticket_owner(channel)
                 await channel.delete()
                 await log_discord(
                     title="🗑️ Тикет закрыт (оплаченный)",
@@ -1145,7 +1090,7 @@ class CoinsTicketButtons(View):
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
             await asyncio.sleep(3)
             try:
-                await clear_ticket_owner(channel)
+                clear_ticket_owner(channel)
                 await channel.delete()
                 await log_discord(
                     title="🗑️ Тикет закрыт (DC/Инвайты)",
