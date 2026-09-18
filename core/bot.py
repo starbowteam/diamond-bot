@@ -42,6 +42,15 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
+# ============================================================
+# ГЛОБАЛЬНЫЕ КУЛДАУНЫ
+# ============================================================
+_REVIEW_COOLDOWN = {}   # user_id -> last_review_ts
+REVIEW_COOLDOWN_SECONDS = 120
+REVIEW_MIN_LENGTH = 3
+REVIEW_REWARD_DC = 15
+
+
 async def update_review_counter(silent: bool = False):
     try:
         text_ch = bot.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
@@ -63,6 +72,7 @@ async def update_review_counter(silent: bool = False):
                 description=f"> **Ошибка:** `{str(e)}`",
                 color=0xff0000
             )
+
 
 async def update_server_banner(review_count: int, silent: bool = False):
     try:
@@ -107,15 +117,18 @@ async def update_server_banner(review_count: int, silent: bool = False):
                 color=0xff0000
             )
 
+
 @tasks.loop(hours=24)
 async def review_counter_task():
     await bot.wait_until_ready()
     await update_review_counter(silent=False)
 
+
 @tasks.loop(hours=24)
 async def daily_bonus_task():
     await bot.wait_until_ready()
     await daily_bonus()
+
 
 @bot.event
 async def on_ready():
@@ -209,6 +222,7 @@ async def on_ready():
             color=0xff0000
         )
 
+
 async def keep_voice_alive():
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -235,6 +249,7 @@ async def keep_voice_alive():
             logger.exception("keep_voice_alive loop error: %s", e)
         await asyncio.sleep(60)
 
+
 # ============================================================
 # ФУНКЦИЯ ПЕРЕСТРОЙКИ ПРАВ ТИКЕТА
 # ============================================================
@@ -247,20 +262,18 @@ async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: dis
     """
     guild = channel.guild
 
-    # Шаг 1: Запрещаем писать ВСЕМ ролям из TICKET_MANAGE_ROLES
     for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
         role = guild.get_role(role_id)
         if role:
             overwrite = disnake.PermissionOverwrite(
                 view_channel=True,
-                send_messages=False,          # Не может писать
-                read_message_history=True,    # Может читать
-                add_reactions=False,          # Не может ставить эмодзи
-                create_public_threads=False   # Не может создавать ветки
+                send_messages=False,
+                read_message_history=True,
+                add_reactions=False,
+                create_public_threads=False
             )
             await channel.set_permissions(role, overwrite=overwrite)
 
-    # Шаг 2: Выдаем права назначенному менеджеру (персональные права)
     manager_overwrites = disnake.PermissionOverwrite(
         view_channel=True,
         send_messages=True,
@@ -272,7 +285,6 @@ async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: dis
     )
     await channel.set_permissions(manager, overwrite=manager_overwrites)
 
-    # Шаг 3: Убеждаемся, что владелец тикета (клиент) может писать
     owner_id = get_ticket_owner(channel.id)
     if owner_id:
         owner = guild.get_member(owner_id)
@@ -292,6 +304,7 @@ async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: dis
         color=0x00aaff,
         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
     )
+
 
 # ============================================================
 # События
@@ -344,6 +357,7 @@ async def on_member_join(member: disnake.Member):
         color=0x00aaff
     )
 
+
 @bot.event
 async def on_member_remove(member: disnake.Member):
     guild = member.guild
@@ -365,6 +379,7 @@ async def on_member_remove(member: disnake.Member):
             color=0xff6600
         )
     db.commit()
+
 
 @bot.event
 async def on_member_update(before: disnake.Member, after: disnake.Member):
@@ -396,6 +411,7 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
             color=0xffff00
         )
 
+
 @bot.event
 async def on_message_delete(message: disnake.Message):
     if message.author.bot:
@@ -409,6 +425,7 @@ async def on_message_delete(message: disnake.Message):
         color=0xff6600
     )
 
+
 @bot.event
 async def on_bulk_message_delete(messages: List[disnake.Message]):
     channel = messages[0].channel if messages else None
@@ -418,6 +435,7 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
         description=f"> **Канал:** {channel.mention if channel else 'неизвестно'}\n> **Количество:** `{count}` сообщений",
         color=0xff6600
     )
+
 
 @bot.event
 async def on_message_edit(before: disnake.Message, after: disnake.Message):
@@ -437,6 +455,7 @@ async def on_message_edit(before: disnake.Message, after: disnake.Message):
         color=0xffff00
     )
 
+
 @bot.event
 async def on_guild_channel_create(channel: disnake.abc.GuildChannel):
     await log_discord(
@@ -445,6 +464,7 @@ async def on_guild_channel_create(channel: disnake.abc.GuildChannel):
         color=0x00ff00
     )
 
+
 @bot.event
 async def on_guild_channel_delete(channel: disnake.abc.GuildChannel):
     await log_discord(
@@ -452,6 +472,7 @@ async def on_guild_channel_delete(channel: disnake.abc.GuildChannel):
         description=f"> **Название:** `{channel.name}`\n> **Тип:** `{channel.type}`\n> **ID:** `{channel.id}`",
         color=0xff0000
     )
+
 
 @bot.event
 async def on_guild_channel_update(before: disnake.abc.GuildChannel, after: disnake.abc.GuildChannel):
@@ -462,6 +483,7 @@ async def on_guild_channel_update(before: disnake.abc.GuildChannel, after: disna
             color=0xffff00
         )
 
+
 @bot.event
 async def on_guild_role_create(role: disnake.Role):
     await log_discord(
@@ -470,6 +492,7 @@ async def on_guild_role_create(role: disnake.Role):
         color=0x00ff00
     )
 
+
 @bot.event
 async def on_guild_role_delete(role: disnake.Role):
     await log_discord(
@@ -477,6 +500,7 @@ async def on_guild_role_delete(role: disnake.Role):
         description=f"> **Название:** `{role.name}`\n> **ID:** `{role.id}`",
         color=0xff0000
     )
+
 
 @bot.event
 async def on_guild_role_update(before: disnake.Role, after: disnake.Role):
@@ -493,6 +517,7 @@ async def on_guild_role_update(before: disnake.Role, after: disnake.Role):
             color=0xffff00
         )
 
+
 @bot.event
 async def on_invite_create(invite: disnake.Invite):
     db.execute("REPLACE INTO invites_snapshot VALUES (?, ?, ?, ?)",
@@ -504,6 +529,7 @@ async def on_invite_create(invite: disnake.Invite):
         color=0x00aaff
     )
 
+
 @bot.event
 async def on_invite_delete(invite: disnake.Invite):
     db.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
@@ -513,6 +539,7 @@ async def on_invite_delete(invite: disnake.Invite):
         description=f"> **Код:** `{invite.code}`\n> **Канал:** {invite.channel.mention if invite.channel else 'Неизвестно'}",
         color=0xff6600
     )
+
 
 @bot.event
 async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
@@ -537,6 +564,7 @@ async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
                 )
             except Exception as e:
                 logger.error(f"Не удалось выдать реакционную роль: {e}")
+
 
 @bot.event
 async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
@@ -564,18 +592,20 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
                 except Exception as e:
                     logger.error(f"Не удалось снять реакционную роль: {e}")
 
+
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
     from modules.commands_tickets import handle_interaction
     await handle_interaction(inter)
     await handle_flash_interaction(inter)
 
+
 @bot.event
 async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
-    # Автоназначение менеджера при первом сообщении в тикете (ИСПРАВЛЕНО)
+    # Автоназначение менеджера при первом сообщении в тикете
     if message.channel.category:
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
@@ -583,7 +613,6 @@ async def on_message(message: disnake.Message):
                 owner_id = get_ticket_owner(message.channel.id)
                 if message.author.id != owner_id and any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
                     assign_ticket_manager(message.channel.id, message.author.id)
-                    # Красивое сообщение
                     embed = disnake.Embed(
                         title="✅ Менеджер назначен",
                         description=f"> **Менеджер:** {message.author.mention}\n> **Тикет:** {message.channel.mention}",
@@ -598,63 +627,148 @@ async def on_message(message: disnake.Message):
                         color=0x00aaff,
                         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
                     )
-                    # Перестраиваем права в канале
                     await reassign_ticket_permissions(message.channel, message.author)
 
+    # Начисление DC за сообщения (кроме канала отзывов)
     from modules.dc import add_message_dc
     if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
         if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
             await add_message_dc(message.author.id)
 
+    # ============================================================
+    # АВТОМАТИЧЕСКАЯ МОДЕРАЦИЯ ОТЗЫВОВ
+    # ============================================================
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
+        user_id = message.author.id
+        now = time.time()
+        text = (message.content or "").strip()
+
+        # ---- Проверка 1: КД 2 минуты ----
+        last = _REVIEW_COOLDOWN.get(user_id, 0)
+        if now - last < REVIEW_COOLDOWN_SECONDS:
+            remaining = int(REVIEW_COOLDOWN_SECONDS - (now - last))
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                warn = disnake.Embed(
+                    title="⏳ Слишком часто",
+                    description=(
+                        f"> {message.author.mention}, ты уже оставлял отзыв недавно.\n"
+                        f"> Подожди ещё **{remaining} сек** перед следующим."
+                    ),
+                    color=0xff6600
+                )
+                await message.channel.send(embed=warn, delete_after=10)
+            except Exception:
+                pass
+            return
+
+        # ---- Проверка 2: запрет вложений (картинки, гифки, файлы, стикеры) ----
+        if message.attachments or message.stickers or message.embeds:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                warn = disnake.Embed(
+                    title="❌ Только текст",
+                    description=(
+                        f"> {message.author.mention}, отзыв должен содержать **только текст**.\n"
+                        f"> Картинки, гифки, стикеры, файлы и вложения — запрещены."
+                    ),
+                    color=0xff0000
+                )
+                await message.channel.send(embed=warn, delete_after=12)
+            except Exception:
+                pass
+            return
+
+        # ---- Проверка 3: минимальная длина ----
+        if len(text) < REVIEW_MIN_LENGTH:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                warn = disnake.Embed(
+                    title="❌ Слишком коротко",
+                    description=(
+                        f"> {message.author.mention}, отзыв слишком короткий.\n"
+                        f"> Минимум **{REVIEW_MIN_LENGTH} символа**."
+                    ),
+                    color=0xff0000
+                )
+                await message.channel.send(embed=warn, delete_after=12)
+            except Exception:
+                pass
+            return
+
+        # ---- Всё ок — принимаем отзыв ----
+        _REVIEW_COOLDOWN[user_id] = now
+
         try:
             await message.add_reaction("💎")
         except Exception as e:
             logger.warning(f"Не удалось поставить реакцию на отзыв: {e}")
 
         counts = load_json(FILES["review_counts"], {})
-        user_id = str(message.author.id)
-        counts[user_id] = counts.get(user_id, 0) + 1
+        counts[str(user_id)] = counts.get(str(user_id), 0) + 1
         save_json(FILES["review_counts"], counts)
 
-        if isinstance(message.author, disnake.Member):
-            await update_user_roles(message.author, counts[user_id], keep_pka=True)
-            await log_discord(
-                title="🔄 Роли обновлены (отзыв)",
-                description=f"> **Пользователь:** {message.author.mention}\n> **Отзывов стало:** `{counts[user_id]}`",
-                color=0x00ff00
-            )
-
-        from modules.commands_tickets import ReviewModerationView
-        embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1531737026322370872/image.png?ex=6a6a4cc5&is=6a68fb45&hm=e5cf13f52a87fc671b53b8422a3cffa149579ce66d40846ed15a8c9d2ec89d76&")
-        embed2 = disnake.Embed(
-            title="✍️ Новый отзыв на модерацию",
-            description=f">>> Автор: {message.author.mention}\nОтзыв: {message.content}\n\n",
-            color=6776679
-        )
-        embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1530795801268453447/pisk.png?ex=6a69832f&is=6a6831af&hm=106c0b5c55c83b94fce2e11af7a4c65ec26d550b6da30575f1fef0981f7dc914&")
-        embed2.add_field(name="> Канал", value="<#1462074763437543435>", inline=True)
-        embed2.add_field(name="> Ссылка на отзыв", value=f"[Перейти]({message.jump_url})", inline=True)
-        embed2.add_field(name="> Статус", value="🕑 На рассмотрении", inline=True)
-
-        view = ReviewModerationView(message.author.id, message.content, message.id, message.channel.id)
-        log_channel = bot.get_channel(CONFIG["MODERATION_LOG_CHANNEL"])
-        if log_channel:
-            sent_msg = await log_channel.send(embeds=[embed1, embed2], view=view)
-            view.message = sent_msg
-
+        # Начисляем 15 DC
         try:
-            await message.author.send("📩 Ваш отзыв отправлен на модерацию по начислению Diamond Coins. Ожидайте подтверждения от администратора.")
-        except:
-            pass
+            await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке")
+        except Exception as e:
+            logger.exception(f"Ошибка начисления DC за отзыв: {e}")
+
+        # Обновляем роли
+        if isinstance(message.author, disnake.Member):
+            try:
+                await update_user_roles(message.author, counts[str(user_id)], keep_pka=True)
+            except Exception as e:
+                logger.exception(f"Ошибка обновления ролей: {e}")
+
+        # ---- Красивый эмбед-подтверждение в канал ----
+        try:
+            success_embed = disnake.Embed(
+                title="✅ Отзыв принят!",
+                description=(
+                    f"> Спасибо за отзыв, {message.author.mention}!\n\n"
+                    f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
+                    f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
+                    f"> **Следующий отзыв:** через 2 минуты"
+                ),
+                color=0x2ecc71,
+                timestamp=datetime.now(timezone.utc)
+            )
+            success_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
+            await message.channel.send(embed=success_embed, delete_after=20)
+        except Exception as e:
+            logger.warning(f"Не удалось отправить эмбед об успехе: {e}")
+
+        # ---- Лог в общий лог-канал ----
+        await log_discord(
+            title="📝 Отзыв принят",
+            description=(
+                f"> **Пользователь:** {message.author.mention}\n"
+                f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
+                f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
+                f"> **Текст:** {text[:200]}\n"
+                f"> **Ссылка:** [перейти]({message.jump_url})"
+            ),
+            color=0x00ff00
+        )
 
         await update_review_counter(silent=False)
         return
 
     await bot.process_commands(message)
 
+
 voice_track = {}
+
 
 @bot.event
 async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceState, after: disnake.VoiceState):
