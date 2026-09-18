@@ -23,7 +23,11 @@ from core.utils import (
     add_closed_order
 )
 
-from modules.actions import send_actions_panel, handle_flash_interaction
+from modules.actions import (
+    send_actions_panel, handle_flash_interaction,
+    refresh_daily_deal, load_flash_sale, save_flash_sale,
+    generate_random_deal, FLASH_SALE_FILE
+)
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
@@ -43,14 +47,24 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 # ============================================================
-# ГЛОБАЛЬНЫЕ КУЛДАУНЫ И КОНСТАНТЫ ДЛЯ ОТЗЫВОВ
+# КОНСТАНТЫ ДЛЯ ОТЗЫВОВ
 # ============================================================
-_REVIEW_COOLDOWN = {}   # user_id -> last_review_ts
+_REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
 REVIEW_REWARD_DC = 15
 
+# Flash sale
+FLASH_SALE_ROLE_ID = 1127428607606796290
+FLASH_SALE_DURATION = 2 * 3600  # 2 часа
+FLASH_SALE_CHANCE = 0.15        # 15% шанс за проверку (раз в 30 мин ≈ 1-2 раза в сутки)
+FLASH_SALE_CHECK_MINUTES = 30
+FLASH_SALE_DISCOUNT = 90        # 90% скидка
 
+
+# ============================================================
+# БАННЕР И СЧЁТЧИК ОТЗЫВОВ
+# ============================================================
 async def update_review_counter(silent: bool = False):
     try:
         text_ch = bot.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
@@ -118,6 +132,9 @@ async def update_server_banner(review_count: int, silent: bool = False):
             )
 
 
+# ============================================================
+# TASKS
+# ============================================================
 @tasks.loop(hours=24)
 async def review_counter_task():
     await bot.wait_until_ready()
@@ -130,28 +147,127 @@ async def daily_bonus_task():
     await daily_bonus()
 
 
+@tasks.loop(minutes=5)
+async def daily_deal_task():
+    """Авто-обновление товара дня."""
+    await bot.wait_until_ready()
+    try:
+        before = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
+        deal = refresh_daily_deal()
+        after = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
+        if before.get("date") != after.get("date"):
+            logger.info(f"Товар дня авто-обновлён: {deal['item_data']['name'] if deal else '—'}")
+    except Exception as e:
+        logger.exception(f"daily_deal_task error: {e}")
+
+
+@tasks.loop(minutes=FLASH_SALE_CHECK_MINUTES)
+async def flash_sale_task():
+    """Проверка активного flash sale + триггер нового."""
+    await bot.wait_until_ready()
+    try:
+        data = load_flash_sale()
+        now = time.time()
+
+        # 1. Если активен и истёк → удаляем пинг + деактивируем
+        if data.get("active"):
+            started = data.get("started_at", 0)
+            if now - started >= FLASH_SALE_DURATION:
+                # удалить сообщение
+                ch_id = data.get("channel_id")
+                msg_id = data.get("message_id")
+                if ch_id and msg_id:
+                    try:
+                        ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+                        msg = await ch.fetch_message(msg_id)
+                        await msg.delete()
+                        logger.info(f"Flash sale истёк — сообщение удалено")
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить flash-сообщение: {e}")
+                save_flash_sale({
+                    "active": False, "item": None,
+                    "started_at": 0, "message_id": 0, "channel_id": 0
+                })
+                await log_discord(
+                    title="⚡ Flash sale завершён",
+                    description=f"> **Товар:** {data.get('item', {}).get('item_data', {}).get('name', '—')}",
+                    color=0xff6600
+                )
+                return
+
+        # 2. Если не активен → шанс триггера
+        if not data.get("active"):
+            if random.random() < FLASH_SALE_CHANCE:
+                deal = generate_random_deal(discount=FLASH_SALE_DISCOUNT)
+                if not deal:
+                    return
+
+                # Отправляем пинг в канал actions
+                channel = bot.get_channel(CONFIG["ACTIONS_CHANNEL_ID"])
+                if not channel:
+                    channel = await bot.fetch_channel(CONFIG["ACTIONS_CHANNEL_ID"])
+                if not channel:
+                    return
+
+                ping_text = f"<@&{FLASH_SALE_ROLE_ID}> - ***Огромная скидка в акционных товарах, успей купить!***"
+
+                embed = disnake.Embed(
+                    title="⚡ МЕГА-СКИДКА ТОЛЬКО СЕЙЧАС!",
+                    description=(
+                        f"**Товар:** {deal['item_data']['name']}\n"
+                        f"**Категория:** {deal['category_label']}\n"
+                        f"**Старая цена:** ~~{deal['original_price']} DC~~\n"
+                        f"**Новая цена:** **{deal['new_price']} DC**\n"
+                        f"**Скидка:** {FLASH_SALE_DISCOUNT}%\n\n"
+                        f"⏰ **Действует 2 часа!**"
+                    ),
+                    color=0xff0000,
+                    timestamp=datetime.now(timezone.utc)
+                )
+                embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
+                embed.set_footer(text="Купить можно в акционных товарах · /акции или панель Actions")
+
+                msg = await channel.send(content=ping_text, embed=embed)
+
+                save_flash_sale({
+                    "active": True,
+                    "item": deal,
+                    "started_at": int(now),
+                    "message_id": msg.id,
+                    "channel_id": channel.id
+                })
+                logger.info(f"Flash sale запущен: {deal['item_data']['name']} ({FLASH_SALE_DISCOUNT}%)")
+                await log_discord(
+                    title="⚡ Flash sale запущен",
+                    description=(
+                        f"> **Товар:** {deal['item_data']['name']}\n"
+                        f"> **Категория:** {deal['category_label']}\n"
+                        f"> **Скидка:** {FLASH_SALE_DISCOUNT}%\n"
+                        f"> **Длительность:** 2 часа"
+                    ),
+                    color=0xff0000
+                )
+    except Exception as e:
+        logger.exception(f"flash_sale_task error: {e}")
+
+
+# ============================================================
+# ON READY
+# ============================================================
 @bot.event
 async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
         from modules.commands_tickets import (
-            TicketPanelView,
-            TicketPaidView,
-            TicketView,
-            CoinsTicketButtons,
-            TicketRatingView,
-            SelectView,
-            CatalogTypeView,
-            CatalogView,
-            BuySelectView,
-            QuestionTicketView,
-            handle_interaction
+            TicketPanelView, TicketPaidView, TicketView, CoinsTicketButtons,
+            TicketRatingView, SelectView, CatalogTypeView, CatalogView,
+            BuySelectView, QuestionTicketView, handle_interaction
         )
         from modules.commands_panels import (
             send_home_panel, send_tarology_panel, send_ticket_panel,
-            send_manager_top, send_work_panel, ResetStatsView, HomeView, TarologyView,
-            WorkView
+            send_manager_top, send_work_panel, ResetStatsView, HomeView,
+            TarologyView, WorkView
         )
         from modules.commands_profile import send_profile_panel, ProfileView
 
@@ -181,6 +297,7 @@ async def on_ready():
         bot.loop.create_task(send_manager_top())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+        counts = {}
         if guild:
             for member in guild.members:
                 if member.bot:
@@ -197,8 +314,6 @@ async def on_ready():
                     if member:
                         await update_user_roles(member, count, keep_pka=True)
                 logger.info(f"Роли обновлены для {len(counts)} пользователей по отзывам")
-            else:
-                logger.info("Нет данных об отзывах для обновления ролей")
 
         await update_review_counter(silent=False)
 
@@ -206,6 +321,10 @@ async def on_ready():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
             daily_bonus_task.start()
+        if not daily_deal_task.is_running():
+            daily_deal_task.start()
+        if not flash_sale_task.is_running():
+            flash_sale_task.start()
 
         logger.info("%s is ready", bot.user)
         await log_discord(
@@ -237,11 +356,6 @@ async def keep_voice_alive():
                         if voice_channel and isinstance(voice_channel, disnake.VoiceChannel):
                             await voice_channel.connect()
                             logger.info("Подключился к голосовому каналу: %s", voice_channel.name)
-                            await log_discord(
-                                title="🔊 Подключение к голосовому каналу",
-                                description=f"> Бот подключился к {voice_channel.mention}",
-                                color=0x00aaff
-                            )
                     except Exception as e:
                         logger.debug("keep_voice_alive connect failed: %s", e)
         except Exception as e:
@@ -250,57 +364,7 @@ async def keep_voice_alive():
 
 
 # ============================================================
-# ФУНКЦИЯ ПЕРЕСТРОЙКИ ПРАВ ТИКЕТА
-# ============================================================
-async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
-    guild = channel.guild
-
-    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
-        role = guild.get_role(role_id)
-        if role:
-            overwrite = disnake.PermissionOverwrite(
-                view_channel=True,
-                send_messages=False,
-                read_message_history=True,
-                add_reactions=False,
-                create_public_threads=False
-            )
-            await channel.set_permissions(role, overwrite=overwrite)
-
-    manager_overwrites = disnake.PermissionOverwrite(
-        view_channel=True,
-        send_messages=True,
-        read_message_history=True,
-        add_reactions=True,
-        create_public_threads=True,
-        embed_links=True,
-        attach_files=True
-    )
-    await channel.set_permissions(manager, overwrite=manager_overwrites)
-
-    owner_id = get_ticket_owner(channel.id)
-    if owner_id:
-        owner = guild.get_member(owner_id)
-        if owner and owner.id != manager.id:
-            owner_overwrite = disnake.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                add_reactions=True,
-                create_public_threads=True
-            )
-            await channel.set_permissions(owner, overwrite=owner_overwrite)
-
-    await log_discord(
-        title="🔐 Права тикета обновлены",
-        description=f"> **Тикет:** {channel.mention}\n> **Менеджер:** {manager.mention}\n> **Остальные менеджеры** получили доступ только на просмотр.",
-        color=0x00aaff,
-        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-    )
-
-
-# ============================================================
-# События
+# СОБЫТИЯ (без изменений, но без ролей тикетов)
 # ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
@@ -313,11 +377,6 @@ async def on_member_join(member: disnake.Member):
     if role:
         try:
             await member.add_roles(role)
-            await log_discord(
-                title="👤 Автороль выдана",
-                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}",
-                color=0x00aaff
-            )
         except Exception as e:
             logger.error(f"Не удалось выдать роль: {e}")
     guild = member.guild
@@ -550,11 +609,6 @@ async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
         if role:
             try:
                 await payload.member.add_roles(role)
-                await log_discord(
-                    title="✅ Выдана реакционная роль",
-                    description=f"> **Пользователь:** {payload.member.mention}\n> **Роль:** {role.mention}\n> **Реакция:** {payload.emoji}\n> **Сообщение:** <https://discord.com/channels/{payload.guild_id}/{payload.channel_id}/{payload.message_id}>",
-                    color=0x00ff00
-                )
             except Exception as e:
                 logger.error(f"Не удалось выдать реакционную роль: {e}")
 
@@ -577,11 +631,6 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
             if member:
                 try:
                     await member.remove_roles(role)
-                    await log_discord(
-                        title="❌ Снята реакционная роль",
-                        description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Реакция:** {payload.emoji}\n> **Сообщение:** <https://discord.com/channels/{payload.guild_id}/{payload.channel_id}/{payload.message_id}>",
-                        color=0xff0000
-                    )
                 except Exception as e:
                     logger.error(f"Не удалось снять реакционную роль: {e}")
 
@@ -598,7 +647,6 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
-    # Автоназначение менеджера при первом сообщении в тикете
     if message.channel.category:
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
@@ -622,21 +670,19 @@ async def on_message(message: disnake.Message):
                     )
                     await reassign_ticket_permissions(message.channel, message.author)
 
-    # Начисление DC за сообщения (кроме канала отзывов)
     from modules.dc import add_message_dc
     if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
         if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
             await add_message_dc(message.author.id)
 
     # ============================================================
-    # АВТОМАТИЧЕСКАЯ МОДЕРАЦИЯ ОТЗЫВОВ
+    # АВТО-МОДЕРАЦИЯ ОТЗЫВОВ
     # ============================================================
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         user_id = message.author.id
         now = time.time()
         text = (message.content or "").strip()
 
-        # ---- КД 2 минуты — тихо удаляем, без ответов ----
         last = _REVIEW_COOLDOWN.get(user_id, 0)
         if now - last < REVIEW_COOLDOWN_SECONDS:
             try:
@@ -645,7 +691,6 @@ async def on_message(message: disnake.Message):
                 pass
             return
 
-        # ---- Запрет вложений — тихо удаляем ----
         if message.attachments or message.stickers or message.embeds:
             try:
                 await message.delete()
@@ -653,7 +698,6 @@ async def on_message(message: disnake.Message):
                 pass
             return
 
-        # ---- Минимум 3 символа — тихо удаляем ----
         if len(text) < REVIEW_MIN_LENGTH:
             try:
                 await message.delete()
@@ -661,7 +705,6 @@ async def on_message(message: disnake.Message):
                 pass
             return
 
-        # ---- Всё ок — принимаем отзыв ----
         _REVIEW_COOLDOWN[user_id] = now
 
         try:
@@ -684,7 +727,6 @@ async def on_message(message: disnake.Message):
             except Exception as e:
                 logger.exception(f"Ошибка обновления ролей: {e}")
 
-        # ---- Красивый эмбед в ЛС автору ----
         try:
             dm_embed = disnake.Embed(
                 title="✅ Отзыв принят!",
@@ -702,7 +744,6 @@ async def on_message(message: disnake.Message):
         except Exception as e:
             logger.warning(f"Не удалось отправить ЛС об отзыве: {e}")
 
-        # ---- Лог в общий лог-канал ----
         await log_discord(
             title="📝 Отзыв принят",
             description=(
@@ -731,7 +772,7 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
     user_id = member.id
     if after.channel and (before.channel is None or before.channel != after.channel):
         voice_track[user_id] = (after.channel.id, int(time.time()))
-    elif before.channel and (after.channel is None or before.channel != after.channel):
+    elif before.channel and (after.channel is None or after.channel != before.channel):
         if user_id in voice_track:
             channel_id, join_time = voice_track.pop(user_id)
             duration = int(time.time()) - join_time
@@ -740,6 +781,41 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                 await add_voice_dc(user_id, duration)
                 await log_discord(
                     title="🎙️ Выход из голосового канала",
-                    description=f"> **Пользователь:** {member.mention}\n> **Время:** {duration//60} мин.\n> **Начислено:** за голосовую активность",
+                    description=f"> **Пользователь:** {member.mention}\n> **Время:** {duration//60} мин.",
                     color=0x00aaff
                 )
+
+
+# ============================================================
+# ПЕРЕСТРОЙКА ПРАВ ТИКЕТА (без ролей)
+# ============================================================
+async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
+    guild = channel.guild
+
+    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
+        role = guild.get_role(role_id)
+        if role:
+            overwrite = disnake.PermissionOverwrite(
+                view_channel=True, send_messages=False,
+                read_message_history=True, add_reactions=False,
+                create_public_threads=False
+            )
+            await channel.set_permissions(role, overwrite=overwrite)
+
+    manager_overwrites = disnake.PermissionOverwrite(
+        view_channel=True, send_messages=True,
+        read_message_history=True, add_reactions=True,
+        create_public_threads=True, embed_links=True, attach_files=True
+    )
+    await channel.set_permissions(manager, overwrite=manager_overwrites)
+
+    owner_id = get_ticket_owner(channel.id)
+    if owner_id:
+        owner = guild.get_member(owner_id)
+        if owner and owner.id != manager.id:
+            owner_overwrite = disnake.PermissionOverwrite(
+                view_channel=True, send_messages=True,
+                read_message_history=True, add_reactions=True,
+                create_public_threads=True
+            )
+            await channel.set_permissions(owner, overwrite=owner_overwrite)
