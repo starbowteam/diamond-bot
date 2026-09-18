@@ -29,6 +29,10 @@ DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
 FLASH_SALE_FILE = os.path.join(DATA_DIR, "flash_sale.json")
 ROULETTE_STATS_FILE = os.path.join(DATA_DIR, "roulette_stats.json")
 
+# Тайминги
+DAILY_DEAL_REFRESH_HOURS = 5       # Обновление товара дня
+FLASH_SALE_DURATION_HOURS = 1      # Длительность flash sale
+
 
 # ============================================================
 # ХРАНИЛИЩЕ: DAILY DEAL
@@ -66,19 +70,25 @@ def generate_random_deal(discount: int):
     }
 
 
+def _current_deal_slot() -> int:
+    """Возвращает номер 5-часового слота с epoch (для сравнения)."""
+    return int(time.time() // (DAILY_DEAL_REFRESH_HOURS * 3600))
+
+
 def refresh_daily_deal(force: bool = False):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """Обновляет товар дня, если прошло 5 часов или force=True."""
+    current_slot = _current_deal_slot()
     data = load_daily_deal()
 
-    if not force and data.get("date") == today and data.get("item"):
+    if not force and data.get("slot") == current_slot and data.get("item"):
         return data["item"]
 
     deal = generate_random_deal(discount=50)
     if not deal:
         return None
 
-    save_daily_deal({"date": today, "item": deal})
-    logger.info(f"Товар дня обновлён: {deal['item_data']['name']}")
+    save_daily_deal({"slot": current_slot, "item": deal, "updated_at": int(time.time())})
+    logger.info(f"Товар дня обновлён (слот {current_slot}): {deal['item_data']['name']}")
     return deal
 
 
@@ -99,7 +109,7 @@ def save_flash_sale(data: dict):
 def get_flash_sale_item():
     data = load_flash_sale()
     if data.get("active") and data.get("item"):
-        if time.time() - data.get("started_at", 0) < 2 * 3600:
+        if time.time() - data.get("started_at", 0) < FLASH_SALE_DURATION_HOURS * 3600:
             return data["item"]
     return None
 
@@ -188,7 +198,6 @@ class RouletteModal(Modal):
     async def callback(self, inter: disnake.ModalInteraction):
         user_id = inter.author.id
 
-        # Парсим ставку
         bet_str = inter.text_values["bet"].strip()
         if not bet_str.isdigit():
             return await inter.response.send_message("❌ Ставка должна быть целым числом.", ephemeral=True)
@@ -203,17 +212,15 @@ class RouletteModal(Modal):
                 ephemeral=True
             )
 
-        # Defer, чтобы можно было делать анимацию
         await inter.response.defer(ephemeral=True)
 
-        # Списываем ставку
         success = await remove_dc(user_id, bet, "Ставка в рулетке монет")
         if not success:
             return await inter.edit_original_response(
                 content="❌ Не удалось списать DC. Попробуй позже."
             )
 
-        # Анимация — 3 кадра
+        # Анимация
         spin_embed1 = disnake.Embed(
             title="🎰 Крутим барабаны...",
             description=f"> Ставка: **{bet} DC**\n> \n> ⚫ ⚫ ⚫",
@@ -225,10 +232,7 @@ class RouletteModal(Modal):
 
         await asyncio.sleep(0.7)
 
-        temp_emoji = random.sample(
-            ["🎲", "🔹", "🔸", "💎", "👑", "🎰", "⭐"],
-            k=3
-        )
+        temp_emoji = random.sample(["🎲", "🔹", "🔸", "💎", "👑", "🎰", "⭐"], k=3)
         spin_embed2 = disnake.Embed(
             title="🎰 Крутим барабаны...",
             description=f"> Ставка: **{bet} DC**\n> \n> {temp_emoji[0]} {temp_emoji[1]} {temp_emoji[2]}",
@@ -240,10 +244,7 @@ class RouletteModal(Modal):
 
         await asyncio.sleep(0.7)
 
-        temp_emoji2 = random.sample(
-            ["🎲", "🔹", "🔸", "💎", "👑", "🎰", "⭐"],
-            k=3
-        )
+        temp_emoji2 = random.sample(["🎲", "🔹", "🔸", "💎", "👑", "🎰", "⭐"], k=3)
         spin_embed3 = disnake.Embed(
             title="🎰 Крутим барабаны...",
             description=f"> Ставка: **{bet} DC**\n> \n> {temp_emoji2[0]} {temp_emoji2[1]} {temp_emoji2[2]}",
@@ -255,12 +256,10 @@ class RouletteModal(Modal):
 
         await asyncio.sleep(0.8)
 
-        # Результат
         result = roll_roulette()
         mult = result["mult"]
 
         if mult > 0:
-            # Победил — возвращаем ставку + профит
             payout = bet + int(bet * mult)
             net = int(bet * mult)
             await add_dc(user_id, payout, f"Выигрыш в рулетке: {result['name']}")
@@ -284,7 +283,6 @@ class RouletteModal(Modal):
             view = RouletteRetryView(bet)
             await inter.edit_original_response(embed=final_embed, view=view)
 
-            # Обновляем глобальную статистику
             stats = load_roulette_stats()
             stats["total_bets"] = stats.get("total_bets", 0) + bet
             stats["total_won"] = stats.get("total_won", 0) + net
@@ -303,7 +301,6 @@ class RouletteModal(Modal):
                 color=result["color"]
             ))
         else:
-            # Проиграл
             new_balance = await get_user_balance(user_id)
 
             final_embed = disnake.Embed(
@@ -379,14 +376,12 @@ class RouletteRetryView(View):
                 ephemeral=True
             )
 
-        # Списываем
         success = await remove_dc(user_id, new_bet, "Ставка в рулетке (x2)")
         if not success:
             return await inter.response.send_message("❌ Ошибка списания DC.", ephemeral=True)
 
         await inter.response.defer(ephemeral=True)
 
-        # Быстрая анимация (без пауз — юзер уже ждал)
         result = roll_roulette()
         mult = result["mult"]
 
@@ -489,6 +484,12 @@ class ActionSelect(Select):
             if not daily:
                 return await inter.response.send_message("❌ Нет доступных товаров для акции.", ephemeral=True)
 
+            # Сколько осталось до обновления товара дня
+            now_ts = int(time.time())
+            slot_seconds = DAILY_DEAL_REFRESH_HOURS * 3600
+            next_update_ts = ((now_ts // slot_seconds) + 1) * slot_seconds
+            minutes_left = max((next_update_ts - now_ts) // 60, 0)
+
             embed = disnake.Embed(
                 title="🔥 Акционный товар дня",
                 description=(
@@ -496,17 +497,23 @@ class ActionSelect(Select):
                     f"**Категория:** {daily['category_label']}\n"
                     f"**Старая цена:** ~~{daily['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
                     f"**Новая цена:** **{daily['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
-                    f"**Скидка:** {daily['discount']}%\n"
+                    f"**Скидка:** {daily['discount']}%\n\n"
+                    f"🕐 Обновится через **{minutes_left} мин**"
                 ),
                 color=0xff6600,
                 timestamp=datetime.now(timezone.utc)
             )
-            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
+            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282552555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&" if False else "https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
 
             embeds = [embed]
             view = FlashBuyView(daily, inter.author.id)
 
             if flash_item:
+                # Сколько осталось у flash
+                fs_data = load_flash_sale()
+                elapsed = now_ts - fs_data.get("started_at", now_ts)
+                fs_left = max((FLASH_SALE_DURATION_HOURS * 3600 - elapsed) // 60, 0)
+
                 flash_embed = disnake.Embed(
                     title="⚡ МЕГА-СКИДКА! (только сейчас)",
                     description=(
@@ -514,8 +521,8 @@ class ActionSelect(Select):
                         f"**Категория:** {flash_item['category_label']}\n"
                         f"**Старая цена:** ~~{flash_item['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
                         f"**Новая цена:** **{flash_item['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
-                        f"**Скидка:** {flash_item['discount']}%\n"
-                        f"**Истекает:** через 2 часа"
+                        f"**Скидка:** {flash_item['discount']}%\n\n"
+                        f"⏰ Истекает через **{fs_left} мин**"
                     ),
                     color=0xff0000,
                     timestamp=datetime.now(timezone.utc)
@@ -561,9 +568,8 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     if not custom_id:
         return
 
-    # Roulette retry buttons
     if custom_id in ("roulette_retry", "roulette_double"):
-        return  # обрабатываются во View
+        return
 
     if not custom_id.startswith("flash_buy|"):
         return
