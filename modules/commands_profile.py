@@ -215,15 +215,22 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
         if meta["cached"]:
             embed.set_footer(text="⚡ Из кэша · Карточка обновляется при изменениях")
         else:
-            embed.set_footer(text=f"✨ Сгенерировано за {meta['duration']:.1f} сек · Кэш 10 минут")
+            duration = meta["duration"]
+            embed.set_footer(text=f"✨ Сгенерировано за {duration:.1f} сек · Кэш 10 минут")
 
         await inter.edit_original_response(content=None, embed=embed, file=file)
+
+        # Лог — отдельно, без f-string с вложенными кавычками
+        if meta["cached"]:
+            source_str = "кэш"
+        else:
+            source_str = f"рендер ({meta['duration']:.1f}с)"
 
         asyncio.create_task(log_discord(
             title="📇 Карточка профиля",
             description=(
                 f"> **Пользователь:** {inter.author.mention}\n"
-                f"> **Источник:** {'кэш' if meta['cached'] else f'рендер ({meta[\"duration\"]:.1f}с)'}"
+                f"> **Источник:** {source_str}"
             ),
             color=0x00aaff,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
