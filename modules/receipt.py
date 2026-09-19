@@ -22,6 +22,7 @@ ICON_USER_TIE    = 0xf508
 ICON_BOX         = 0xf466
 ICON_CREDIT_CARD = 0xf09d
 ICON_CLOCK       = 0xf017
+ICON_USER        = 0xf007
 
 
 def _get_font(size: int):
@@ -74,7 +75,8 @@ def _draw_centered(draw, cx, y, text, font, fill):
 
 def generate_receipt_png(
     manager_name: str,
-    ticket_name: str,
+    customer_name: str,
+    product_name: str,
     amount: int,
     discount_percent: int = 0,
     order_id: Optional[str] = None,
@@ -178,7 +180,7 @@ def generate_receipt_png(
     _draw_icon(draw, cx_, y, ICON_CART, 22, (74, 74, 79), solid=True)
     y += 27
 
-    # 4. МЕНЕДЖЕР / ЗАКАЗ
+    # 4. МЕНЕДЖЕР / ЗАКАЗЧИК
     meta_h = 99
     gap_x = 21
     card_w = (W - PAD * 2 - gap_x) // 2
@@ -192,9 +194,9 @@ def generate_receipt_png(
     cx2 = PAD + card_w + gap_x
     draw.rounded_rectangle((cx2, y, cx2 + card_w, y + meta_h),
                            radius=21, fill=INNER, outline=BORDER, width=3)
-    _draw_icon(draw, cx2 + 39, y + meta_h // 2, ICON_BOX, 24, MUTED, solid=True)
-    draw.text((cx2 + 69, y + 18), "ЗАКАЗ", font=_get_font(15), fill=MUTED)
-    draw.text((cx2 + 69, y + 48), ticket_name[:24], font=_get_font(28), fill=TEXT)
+    _draw_icon(draw, cx2 + 39, y + meta_h // 2, ICON_USER, 24, MUTED, solid=True)
+    draw.text((cx2 + 69, y + 18), "ЗАКАЗЧИК", font=_get_font(15), fill=MUTED)
+    draw.text((cx2 + 69, y + 48), customer_name[:24], font=_get_font(28), fill=TEXT)
 
     y += meta_h + 21
 
@@ -215,7 +217,7 @@ def generate_receipt_png(
 
     row_y = items_top + 48
     item_font = _get_font(21)
-    draw.text((PAD + ip, row_y), ticket_name[:40], font=item_font, fill=TEXT)
+    draw.text((PAD + ip, row_y), product_name[:40], font=item_font, fill=TEXT)
     amt_str = f"{amount} Р"
     aw, _ = _text_size(draw, amt_str, item_font)
     draw.text((W - PAD - ip - aw, row_y), amt_str, font=item_font, fill=TEXT)
@@ -239,10 +241,9 @@ def generate_receipt_png(
 
     y = items_top + items_h + 18
 
-    # 6. РЕКВИЗИТЫ — от y до нижней линии, где будет нижний блок
-    # Нижний блок фиксированной высоты ~110
+    # 6. РЕКВИЗИТЫ
     bottom_block_h = 110
-    content_bottom = H - M - 30  # нижний край контента
+    content_bottom = H - M - 30
     req_top = y
     req_h = content_bottom - req_top - bottom_block_h
 
@@ -259,7 +260,6 @@ def generate_receipt_png(
         ("СБП", "+7 983 694 76 41"),
     ]
 
-    # Заголовок занимает ~75px от req_top
     inner_top = req_top + 75
     inner_bottom = req_top + req_h - 22
     available = inner_bottom - inner_top
@@ -269,7 +269,6 @@ def generate_receipt_png(
     inner_side = 36
     col_w = (W - PAD * 2 - inner_side * 2 - col_gap) // 2
 
-    # Шрифты реквизитов — крупнее
     k_font = _get_font(17)
     v_font = _get_font(28)
 
@@ -288,7 +287,7 @@ def generate_receipt_png(
         vw, _ = _text_size(draw, val, v_font)
         draw.text((item_x + col_w - vw, row_y_center - 6), val, font=v_font, fill=TEXT)
 
-    # 7. НИЗ — прижат к низу
+    # 7. НИЗ
     y = req_top + req_h + 25
     draw.line((PAD, y, W - PAD, y), fill=LINE, width=2)
     y += 24
