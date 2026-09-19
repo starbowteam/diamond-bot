@@ -360,7 +360,7 @@ class RouletteRetryView(View):
         self.add_item(btn_retry)
 
         btn_double = Button(
-            label="ㅤㅤㅤДвойная ставкаㅤㅤㅤ",
+            label="ㅤㅤㅤДвойная ставкаㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="roulette_double",
             emoji=PartialEmoji(name="flash", id=1550686028522590309),
