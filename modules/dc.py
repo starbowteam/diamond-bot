@@ -80,7 +80,8 @@ async def remove_dc(user_id: int, amount: int, reason: str) -> bool:
     )
     return True
 
-async def add_purchase(user_id: int, item_type: str, item_value: str):
+async def add_purchase(user_id: int, item_type: str, item_value: str, from_action: bool = False):
+    """Добавляет покупку. from_action=True — товар куплен по акции (нельзя вернуть)."""
     data = get_dc_cache(user_id)
     for p in data["purchases"]:
         if p["type"] == item_type and p["value"] == item_value and not p["used"]:
@@ -89,6 +90,7 @@ async def add_purchase(user_id: int, item_type: str, item_value: str):
         "type": item_type,
         "value": item_value,
         "used": False,
+        "from_action": from_action,   # ← флаг «акция»
         "date": int(time.time())
     })
     save_dc_cache(user_id, data)
@@ -237,7 +239,7 @@ def create_default_catalog() -> dict:
     return catalog
 
 # ============================================================
-# Ежедневный бонус (комиссия удалена)
+# Ежедневный бонус
 # ============================================================
 async def daily_bonus():
     from core.bot import bot
@@ -296,9 +298,6 @@ def get_progress_bar(count: int):
                 f"Следующая: **{next_role}** (нужно {next_threshold} отзывов)\n"
                 f"Прогресс: `{bar}` {int(progress*100)}%")
 
-# ============================================================
-# Получение всех данных DC (для статистики, не используется)
-# ============================================================
 def get_dc_cache_all() -> dict:
     rows = cur.execute("SELECT * FROM dc_cache").fetchall()
     data = {}
@@ -317,8 +316,5 @@ def get_dc_cache_all() -> dict:
         }
     return data
 
-# ============================================================
-# Настройка модуля (для main.py)
-# ============================================================
 def setup_dc(bot):
     pass
