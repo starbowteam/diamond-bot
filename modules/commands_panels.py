@@ -21,6 +21,7 @@ from core.utils import (
 from modules.commands_profile import load_embed_from_file
 from modules.commands_tickets import TicketPanelView
 
+
 # ============================================================
 # ПАНЕЛЬ "ДОСКА" (board.json)
 # ============================================================
@@ -47,10 +48,12 @@ def load_board_embed() -> list[disnake.Embed]:
             color=0xff0000
         )]
 
+
 # ============================================================
 # ПАНЕЛЬ "СПРАВОЧНИК" (Home)
 # ============================================================
 HOME_CHANNEL_ID = 1532398684074016870
+
 
 class HomeSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -108,10 +111,12 @@ class HomeSelect(disnake.ui.StringSelect):
             embeds = load_board_embed()
             await inter.response.send_message(embeds=embeds, ephemeral=True)
 
+
 class HomeView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(HomeSelect())
+
 
 async def send_home_panel():
     from core.bot import bot
@@ -144,10 +149,12 @@ async def send_home_panel():
         color=0x00ff00
     )
 
+
 # ============================================================
 # ПАНЕЛЬ "EARLY TAROLOGY"
 # ============================================================
 TAROLOGY_CHANNEL_ID = 1536796929873420308
+
 
 class TarologySelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -193,17 +200,19 @@ class TarologySelect(disnake.ui.StringSelect):
                 title="🔮 Подробности и акции.",
                 description=(
                     "> Данный канал создан для того, чтобы помочь вам влиться в сферу заработка с помощью раскладов.\n\n"
-                    "> При покупке расклада (стоимость — 5-₽) вы получаете расклад на любую интересующую вас тему с высокой точностью. А при оставлении отзыва в Early Tarology и в Diamond — вы получаете кэшбэк в виде Diamond Coins в размере 100% от суммы заказа. Таким образом, вы помогаете человеку развиваться в этом деле, узнаёте интересующую вас правду и получаете бонус на основные покупки."
+                    "> При покупке расклада (стоимость — 40₽) вы получаете расклад на любую интересующую вас тему с высокой точностью. А при оставлении отзыва в Early Tarology и в Diamond — вы получаете кэшбэк в виде Diamond Coins в размере 20 шт. Таким образом, вы помогаете человеку развиваться в этом деле, узнаёте интересующую вас правду и получаете бонус на основные покупки."
                 ),
                 color=6776679
             )
             embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a83d6e3&is=6a828563&hm=0f9076ebc4177417cab012cf73e561f41aeb34fc6c897d365fd894f19784699f&")
             await inter.response.send_message(embed=embed, ephemeral=True)
 
+
 class TarologyView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TarologySelect())
+
 
 async def send_tarology_panel():
     from core.bot import bot
@@ -240,10 +249,12 @@ async def send_tarology_panel():
         color=0x00ff00
     )
 
+
 # ============================================================
 # ПАНЕЛЬ ТИКЕТОВ (send_ticket_panel)
 # ============================================================
 TICKET_PANEL_CHANNEL_ID = 1462136361711829053
+
 
 async def send_ticket_panel():
     from core.bot import bot
@@ -290,10 +301,12 @@ async def send_ticket_panel():
         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
     )
 
+
 # ============================================================
-# НОВАЯ ПАНЕЛЬ "РАБОТА" (канал 1532435807242289314)
+# ПАНЕЛЬ "КОДЕКС МАГАЗИНА" (было: Рабочая панель)
 # ============================================================
 WORK_CHANNEL_ID = 1532435807242289314
+
 
 class WorkSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -309,6 +322,12 @@ class WorkSelect(disnake.ui.StringSelect):
                 description="Статистика менеджеров продаж",
                 emoji="<:diagram:1541881258873983046>",
                 value="top"
+            ),
+            disnake.SelectOption(
+                label="Правила по тикетам",
+                description="Строго для прочтения Sales-Manager-ам.",
+                emoji="<:banne1:1538551829246513312>",
+                value="tickets"
             )
         ]
         super().__init__(
@@ -321,7 +340,7 @@ class WorkSelect(disnake.ui.StringSelect):
 
     async def callback(self, inter: disnake.MessageInteraction):
         await log_discord(
-            title="📂 Выбор в панели работы",
+            title="📂 Выбор в панели Кодекса",
             description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
             color=0x00aaff
         )
@@ -331,6 +350,9 @@ class WorkSelect(disnake.ui.StringSelect):
             await inter.response.send_message(embeds=embeds, ephemeral=True)
         elif value == "top":
             await self.send_top(inter)
+        elif value == "tickets":
+            embeds = load_embed_from_file("ticket.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
 
     async def send_top(self, inter):
         guild = inter.guild
@@ -353,7 +375,6 @@ class WorkSelect(disnake.ui.StringSelect):
 
         data.sort(key=lambda x: (-x[1], -x[2]))
 
-        # Строим строки для описания
         lines = []
         for m, closed, avg in data:
             lines.append(f"> {m.mention} - **{closed}** закрытых заказов. [Рейтинг: **{avg:.1f}**]")
@@ -361,11 +382,9 @@ class WorkSelect(disnake.ui.StringSelect):
         best = data[0] if data else None
         best_mention = best[0].mention if best else "Нет данных"
 
-        # Первый эмбед (большая картинка)
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
 
-        # Второй эмбед (таблица)
         description = "> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n"
         if lines:
             description += "\n".join(lines) + "\n"
@@ -385,12 +404,15 @@ class WorkSelect(disnake.ui.StringSelect):
 
         await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
+
 class WorkView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(WorkSelect())
 
+
 async def send_work_panel():
+    """Отправляет панель «Кодекс магазина» (было: Рабочая панель)."""
     from core.bot import bot
     await bot.wait_until_ready()
     channel = bot.get_channel(WORK_CHANNEL_ID)
@@ -408,45 +430,24 @@ async def send_work_panel():
                 pass
             break
 
-    embeds = load_embed_from_file("panel_zp.json")
-    if not embeds:
-        embeds = [disnake.Embed(
-            title="❌ Ошибка",
-            description="Не удалось загрузить панель работы.",
-            color=0xff0000
-        )]
+    # Инлайн-эмбеды вместо panel_zp.json
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1550864427455356938/image.png?ex=6aafe28d&is=6aae910d&hm=37683a13a82f6430ea83e49b010d5537d1cdc47b0563fb0d8ef9d50f2232d3c7&")
 
-    await channel.send(embeds=embeds, view=WorkView())
+    embed2 = disnake.Embed(
+        title="Кодекс магазина",
+        description="> В данном разделе прописаны зарплаты сотрудников, рейтинг менеджеров, а также - устав, которому стоит придерживаться сотруднику по тикету.",
+        color=6776679
+    )
+    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532434728056131695/pisk.png?ex=6a8f1d8e&is=6a8dcc0e&hm=2ae99e47c47afa88c941afcfd1c827370f8c0f3ab08c69a00820bd4da8ac78f1&")
+
+    await channel.send(embeds=[embed1, embed2], view=WorkView())
     await log_discord(
-        title="📂 Панель работы отправлена",
+        title="📂 Панель «Кодекс магазина» отправлена",
         description=f"> Сообщение отправлено в {channel.mention}",
         color=0x00ff00
     )
 
-# -*- coding: utf-8 -*-
-import os
-import json
-from datetime import datetime, timezone
-
-import disnake
-from disnake import ButtonStyle, SelectOption
-from disnake.ui import Button, Modal, Select, TextInput, View
-
-from core.utils import (
-    CONFIG, ADD_DIR, CATALOG_DIR, logger,
-    log_discord,
-    clean_embed_for_discohook,
-    load_json,
-    cur, db,
-    reset_manager_stats,
-    has_admin_command_roles,
-    get_closed_orders, remove_closed_order,
-    add_closed_order
-)
-from modules.commands_profile import load_embed_from_file
-from modules.commands_tickets import TicketPanelView
-
-# ... (остальные классы/функции остаются как в предыдущей версии, заменяем только модалку)
 
 # ============================================================
 # ЛОГИРОВАНИЕ И КНОПКИ СБРОСА / СПИСАНИЯ
@@ -474,6 +475,7 @@ class ResetStatsView(View):
             return await inter.response.send_message("⛔ У вас нет прав на списание.", ephemeral=True)
         await inter.response.send_modal(SpisatZakazModal())
 
+
 class SpisatZakazModal(Modal):
     def __init__(self):
         components = [
@@ -496,7 +498,6 @@ class SpisatZakazModal(Modal):
         if not orders:
             return await inter.response.send_message("❌ У этого менеджера нет закрытых заказов.", ephemeral=True)
 
-        # Строим селект с заказами
         options = []
         for order in orders:
             closed_at = datetime.fromtimestamp(order["closed_at"]).strftime("%d.%m.%Y %H:%M")
@@ -512,7 +513,6 @@ class SpisatZakazModal(Modal):
         async def select_callback(inter2: disnake.MessageInteraction):
             order_id = int(inter2.data.values[0])
             remove_closed_order(order_id)
-            # Уменьшаем счетчик closed_tickets у менеджера
             cur.execute("UPDATE manager_stats SET closed_tickets = MAX(closed_tickets - 1, 0) WHERE user_id = ?", (manager_id,))
             db.commit()
             await inter2.response.send_message("✅ Заказ списан. Статистика менеджера обновлена.", ephemeral=True)
@@ -526,11 +526,11 @@ class SpisatZakazModal(Modal):
         select.callback = select_callback
         await inter.response.send_message("Выберите заказ для списания:", ephemeral=True, view=view)
 
+
 # ============================================================
 # ТОП МЕНЕДЖЕРОВ (обновление логов)
 # ============================================================
 async def send_manager_top():
-    """Обновляет только логи (кнопки сброса/списания), топ смотрит через селект."""
     from core.bot import bot
     await bot.wait_until_ready()
 
