@@ -34,7 +34,7 @@ from modules.actions import load_action_embed
 
 
 # ============================================================
-# ХЕЛПЕР: загрузка slid.json из actions/ или add/
+# ХЕЛПЕР: загрузка slid.json
 # ============================================================
 def _load_slid_embeds() -> list:
     base_project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,7 +74,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     if not cat:
         return await inter.response.send_message("❌ Категория не найдена.", ephemeral=True)
 
-    # Название канала = имя заказчика
     raw = user.display_name.lower().replace(" ", "-")
     raw = re.sub(r"[^a-zа-яё0-9\-_]", "", raw)
     channel_name = raw[:80] or f"order-{user.id}"
@@ -100,7 +99,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         logger.error(f"Не удалось создать тикет: {e}")
         return await inter.edit_original_response(content=f"❌ Ошибка создания тикета: {e}")
 
-    # Загружаем шаблон info-o-zakaze.json
+    # Загружаем info-o-zakaze.json
     try:
         with open(CONFIG["INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -129,7 +128,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         view=view
     )
 
-    # Селект с политикой и счётом
     select_embed = disnake.Embed(
         title="Что именно нужно посмотреть?",
         description="Ниже, выбор - просмотр политики по заказу, либо - создать счет  \n\nВыберите нужный пункт.",
@@ -140,7 +138,10 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    await inter.edit_original_response(content=f"✅ Тикет создан: {ticket_channel.mention}")
+    # ✅ Новое эфемерное сообщение
+    await inter.edit_original_response(
+        content=f"{user.mention}, тикет создан - #{ticket_channel.id}, сообщите в тикете, о товаре, который вы хотите купить!"
+    )
 
     log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
     if log_ch:
@@ -275,7 +276,6 @@ class BuySelect(disnake.ui.StringSelect):
         )
         value = inter.data.values[0]
         if value == "real":
-            # Сразу создаём тикет без модалки
             await create_real_ticket(inter)
         elif value == "coins":
             await inter.response.send_modal(CoinsTicketModal())
@@ -495,7 +495,7 @@ class SelectView(disnake.ui.View):
 
 
 # ============================================================
-# МОДАЛКА СОЗДАНИЯ СЧЁТА (только для менеджеров)
+# МОДАЛКА СОЗДАНИЯ СЧЁТА
 # ============================================================
 class InvoiceModal(Modal):
     def __init__(self):
@@ -552,7 +552,6 @@ class InvoiceModal(Modal):
         manager = inter.guild.get_member(manager_id) if manager_id else None
         manager_name = str(manager) if manager else "—"
 
-        # Имя заказчика = владелец тикета
         owner_id = get_ticket_owner(inter.channel.id)
         owner = inter.guild.get_member(owner_id) if owner_id else None
         customer_name = owner.display_name if owner else inter.channel.name
@@ -601,7 +600,8 @@ class InvoiceModal(Modal):
 # МОДАЛКА ВВОДА ПРОМОКОДА
 # ============================================================
 class PromoCodeModal(Modal):
-    def __init__(self):
+    def __init__(self, original_view: View):
+        self.original_view = original_view
         components = [
             TextInput(
                 label="Промокод",
@@ -651,9 +651,18 @@ class PromoCodeModal(Modal):
         embeds[1] = new_embed
         await target_msg.edit(embeds=embeds)
 
+        # 🔒 Блокируем все кнопки в view скидок
+        try:
+            for child in self.original_view.children:
+                child.disabled = True
+            await inter.message.edit(view=self.original_view)
+        except Exception as e:
+            logger.warning(f"Не удалось обновить view скидок: {e}")
+
         await inter.response.send_message(
             f"✅ Промокод **{code}** активирован!\n"
-            f"> **Скидка:** `{value}`",
+            f"> **Скидка:** `{value}`\n\n"
+            f"> Ввести повторно уже нельзя.",
             ephemeral=True
         )
 
@@ -957,7 +966,7 @@ class TicketView(View):
 
         view = View(timeout=300)
 
-        # Первая кнопка — Ввести промокод
+        # ---- Промокод: row 0, первая кнопка ----
         btn_promo = Button(
             label="Ввести промокод",
             style=ButtonStyle.gray,
@@ -966,21 +975,23 @@ class TicketView(View):
             row=0
         )
 
-        async def promo_callback(inter2: disnake.MessageInteraction):
+        async def promo_callback(inter2: disnake.MessageInteraction, _view=view):
             if inter2.author.id != inter.author.id:
                 return await inter2.response.send_message("⛔ Это не ваш тикет.", ephemeral=True)
-            await inter2.response.send_modal(PromoCodeModal())
+            await inter2.response.send_modal(PromoCodeModal(original_view=_view))
 
         btn_promo.callback = promo_callback
         view.add_item(btn_promo)
 
-        # Купленные скидки — начиная с row=1
-        row = 1
-        col = 0
+        # ---- Купленные скидки: 2 в row 0, потом по 3 ----
+        current_row = 0
+        current_col = 1  # в row 0 уже 1 кнопка промокода
+
         for idx, p in enumerate(discounts):
-            if col >= 5:
-                row += 1
-                col = 0
+            if current_col >= 3:
+                current_row += 1
+                current_col = 0
+
             label = p['value']
             if len(label) > 80:
                 label = label[:77] + "..."
@@ -988,11 +999,11 @@ class TicketView(View):
                 label=label,
                 style=ButtonStyle.gray,
                 custom_id=f"apply_discount_{inter.author.id}_{idx}",
-                row=row
+                row=current_row
             )
             btn.callback = self.create_discount_callback(idx, inter, discounts)
             view.add_item(btn)
-            col += 1
+            current_col += 1
 
         await inter.response.send_message(embeds=slid_embeds, view=view, ephemeral=True)
 
@@ -1046,6 +1057,13 @@ class TicketView(View):
                     embeds[1] = new_embed
                     await msg.edit(embeds=embeds)
                     break
+
+            # Блокируем view
+            try:
+                if inter.message and inter.message.components:
+                    await inter.message.edit(view=View())
+            except Exception:
+                pass
 
             await inter.response.send_message(
                 f"✅ Скидка **{item_value}** применена к заказу!",
@@ -1774,5 +1792,4 @@ class TicketPanelView(View):
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ
 # ============================================================
 async def handle_interaction(inter: disnake.MessageInteraction):
-    # Логика buy_ticket убрана — теперь тикет создаётся сразу из BuySelect
     pass
