@@ -350,7 +350,7 @@ class RouletteRetryView(View):
         self.last_bet = last_bet
 
         btn_retry = Button(
-            label="Играть еще",
+            label="ㅤㅤㅤㅤㅤㅤㅤИграть ещеㅤㅤㅤㅤㅤㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="roulette_retry",
             emoji=PartialEmoji(name="gamee", id=1550686072168517632)
@@ -359,14 +359,14 @@ class RouletteRetryView(View):
         self.add_item(btn_retry)
 
         btn_double = Button(
-            label=f"Двойная ставка ({last_bet * 2} DC)",
+            label=f"ㅤㅤㅤㅤДвойная ставка ({last_bet * 2} DC)ㅤㅤㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="roulette_double",
             emoji=PartialEmoji(name="flash", id=1550686028522590309)
         )
         btn_double.callback = self.double_callback
         self.add_item(btn_double)
-
+        
     async def retry_callback(self, inter: disnake.MessageInteraction):
         await inter.response.send_modal(RouletteModal())
 
