@@ -3,31 +3,26 @@
     {
       "color": 6776679,
       "image": {
-        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527179314465079417/image.png?ex=6a5efe12&is=6a5dac92&hm=128f983d9fcacd66b9fdac71708d848ee4a0a5777bc461004f7f161272b9403a&=&format=webp&quality=lossless&width=1870&height=727"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1550721938454741042/zakaz.png?ex=6aaf5dd9&is=6aae0c59&hm=f8071bfe18d6c6dbdfa08f3fbd87e168a3e3d9cf52535aa0d067f84668ca5d0b&"
       },
       "fields": []
     },
     {
       "title": "Информация о заказе по данному тикету:",
-      "description": "Статус - Не оплачен\n> Ожидайте <@&1154757071330365490> для подтверждкения.\n> Время: <t:1784558066:f>",
+      "description": "Статус - Не оплачен\n> Ожидайте <@&1154757071330365490> для подтверждкения.\n> Время заказа: <t:1784558066:f>",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aaf5863&is=6aae06e3&hm=340cdf78d7ad826ed27c86522bda7ab9cab8adbef50aa707a4aff615fd63fd2c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
-          "name": "> Позиция:",
-          "value": "```Discord Nitro```",
+          "name": "> Заказчик",
+          "value": "```Никнейм заказчика```",
           "inline": true
         },
         {
-          "name": "> Способ оплаты:",
-          "value": "```Тинькофф```",
-          "inline": true
-        },
-        {
-          "name": "> Промокод",
-          "value": "```Не активирован```",
+          "name": "> Скидка на товар",
+          "value": "```Не активирована```",
           "inline": true
         }
       ]
