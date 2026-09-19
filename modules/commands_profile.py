@@ -186,7 +186,8 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
         if dc.get("last_bonus", 0) >= now_ts - 86400:
             streak = 1
 
-        buf, meta = await generate_profile_card(
+        # === ГЕНЕРАЦИЯ — поддержка разных форматов возврата ===
+        result = await generate_profile_card(
             user_name=user.display_name,
             user_id=user.id,
             avatar_bytes=avatar_bytes,
@@ -206,24 +207,33 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
             custom_roles=custom_roles,
         )
 
+        # Универсальный разбор: может вернуть (buf, meta), buf, или dict
+        if isinstance(result, tuple) and len(result) == 2:
+            buf, meta = result
+        elif hasattr(result, "read"):
+            buf = result
+            meta = {"cached": False, "duration": 0.0}
+        else:
+            buf = result
+            meta = {"cached": False, "duration": 0.0}
+
         filename = f"profile_{user.id}.png"
         file = disnake.File(buf, filename=filename)
 
         embed = disnake.Embed(color=6776679)
         embed.set_image(url=f"attachment://{filename}")
 
-        if meta["cached"]:
+        cached = meta.get("cached", False)
+        duration = meta.get("duration", 0.0)
+
+        if cached:
             embed.set_footer(text="⚡ Из кэша · Карточка обновляется при изменениях")
         else:
-            duration = meta["duration"]
             embed.set_footer(text=f"✨ Сгенерировано за {duration:.1f} сек · Кэш 10 минут")
 
         await inter.edit_original_response(content=None, embed=embed, file=file)
 
-        if meta["cached"]:
-            source_str = "кэш"
-        else:
-            source_str = f"рендер ({meta['duration']:.1f}с)"
+        source_str = "кэш" if cached else f"рендер ({duration:.1f}с)"
 
         asyncio.create_task(log_discord(
             title="📇 Карточка профиля",
