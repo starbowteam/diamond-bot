@@ -20,7 +20,8 @@ from core.utils import (
     get_user_tickets_count_in_category,
     assign_ticket_manager, get_ticket_manager, clear_ticket_manager,
     increment_manager_closed, add_manager_rating,
-    add_closed_order
+    add_closed_order,
+    get_promo_codes
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
@@ -36,7 +37,6 @@ from modules.actions import load_action_embed
 # ХЕЛПЕР: загрузка slid.json из actions/ или add/
 # ============================================================
 def _load_slid_embeds() -> list:
-    """Ищет slid.json в actions/ и add/, возвращает список embeds."""
     base_project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = [
         os.path.join(base_project, "actions", "slid.json"),
@@ -57,113 +57,99 @@ def _load_slid_embeds() -> list:
     return []
 
 
-# ============================================================
-# ВЛАДЕЛЕЦ ТИКЕТА (без ролей)
-# ============================================================
 def clear_ticket_owner(channel: disnake.TextChannel):
-    """Убираем владельца тикета. Роли тикетов больше не используются."""
     user_id = get_ticket_owner(channel.id)
     if user_id:
         remove_ticket_owner(channel.id)
 
 
 # ============================================================
-# МОДАЛКА ПОКУПКИ ЗА РЕАЛЬНЫЕ ДЕНЬГИ
+# СОЗДАНИЕ ТИКЕТА ЗА РЕАЛЬНЫЕ ДЕНЬГИ (без формы)
 # ============================================================
-class BuyTicketModal(Modal):
-    def __init__(self):
-        components = [
-            TextInput(label="Товар", placeholder="Введите название товара", custom_id="item_name", min_length=4, max_length=50),
-            TextInput(label="Промокод (необязательно)", placeholder="Введите промокод, если есть", custom_id="promo_code", required=False, max_length=50)
-        ]
-        super().__init__(title="Создание тикета на покупку", components=components, custom_id="buy_ticket_modal")
+async def create_real_ticket(inter: disnake.MessageInteraction):
+    user = inter.author
+    guild = inter.guild
 
-    async def callback(self, inter: disnake.ModalInteraction):
-        await inter.response.defer(ephemeral=True)
-        from core.bot import bot
-        uid = inter.author.id
-        now = time.time()
-        last = getattr(bot, "_user_ticket_cooldowns", {})
-        if uid in last and now - last[uid] < CONFIG["TICKET_COOLDOWN_SECONDS"]:
-            remaining = int(CONFIG["TICKET_COOLDOWN_SECONDS"] - (now - last[uid]))
-            return await inter.edit_original_response(content=f"⏳ Подождите {remaining} сек.")
-        last[uid] = now
-        bot._user_ticket_cooldowns = last
+    cat = guild.get_channel(CONFIG["TICKET_CATEGORY_ID"])
+    if not cat:
+        return await inter.response.send_message("❌ Категория не найдена.", ephemeral=True)
 
-        item = inter.text_values.get("item_name", "—")
-        promo = inter.text_values.get("promo_code", "").strip().upper()
-        promo_display = "Не введён"
-        if promo:
-            from core.utils import get_promo_codes
-            promo_codes = get_promo_codes()
-            if promo in promo_codes:
-                promo_display = f"{promo} — {promo_codes[promo]}"
-            else:
-                promo_display = "Неверный промокод"
+    # Название канала = имя заказчика
+    raw = user.display_name.lower().replace(" ", "-")
+    raw = re.sub(r"[^a-zа-яё0-9\-_]", "", raw)
+    channel_name = raw[:80] or f"order-{user.id}"
 
-        guild = inter.guild
-        cat = guild.get_channel(CONFIG["TICKET_CATEGORY_ID"])
-        if not cat:
-            return await inter.edit_original_response(content="❌ Категория не найдена")
+    overwrites = {
+        guild.default_role: disnake.PermissionOverwrite(view_channel=False),
+        user: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+    }
+    for rid in CONFIG["TICKET_VIEW_ROLES"]:
+        role = guild.get_role(rid)
+        if role:
+            overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    for rid in CONFIG["TICKET_MANAGE_ROLES"]:
+        role = guild.get_role(rid)
+        if role:
+            overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
-        safe_item = item.lower().replace(" ", "-")[:80]
-        channel_name = f"{safe_item}"
-        overwrites = {
-            guild.default_role: disnake.PermissionOverwrite(view_channel=False),
-            inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        }
-        for rid in CONFIG["TICKET_VIEW_ROLES"]:
-            role = guild.get_role(rid)
-            if role:
-                overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        for rid in CONFIG["TICKET_MANAGE_ROLES"]:
-            role = guild.get_role(rid)
-            if role:
-                overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    await inter.response.defer(ephemeral=True)
 
+    try:
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
+    except Exception as e:
+        logger.error(f"Не удалось создать тикет: {e}")
+        return await inter.edit_original_response(content=f"❌ Ошибка создания тикета: {e}")
 
+    # Загружаем шаблон info-o-zakaze.json
+    try:
         with open(CONFIG["INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
-            embeds_list = [disnake.Embed.from_dict(e) for e in data.get("embeds", [])]
+        embeds_list = [disnake.Embed.from_dict(e) for e in data.get("embeds", [])]
+    except Exception as e:
+        logger.error(f"Ошибка загрузки шаблона: {e}")
+        embeds_list = [disnake.Embed(color=6776679), disnake.Embed(title="Информация о заказе", color=6776679)]
 
-        embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=0x7c3131)
-        embed_order_info.clear_fields()
-        embed_order_info.add_field(name="> Позиция:", value=f"```{item}```", inline=True)
-        embed_order_info.add_field(name="> Промокод:", value=f"```{promo_display}```", inline=True)
+    embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=0x7c3131)
+    embed_order_info.clear_fields()
+    embed_order_info.add_field(name="> Заказчик", value=f"```{user.display_name}```", inline=True)
+    embed_order_info.add_field(name="> Скидка на товар", value="```Не активирована```", inline=True)
 
-        current_time = int(time.time())
-        embed_order_info.description = f"Статус - Не оплачен\nОжидайте <@&1154757071330365490> для подтверждения.\nВремя: <t:{current_time}:F>"
+    current_time = int(time.time())
+    embed_order_info.description = (
+        f"Статус - Не оплачен\n"
+        f"> Ожидайте <@&1154757071330365490> для подтверждения.\n"
+        f"> Время заказа: <t:{current_time}:f>"
+    )
 
-        view = TicketView()
-        await ticket_channel.send(
-            f"> Добрый день, {inter.author.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
-            f"> В селекте ниже, можете ознакомиться с политикой, а менеджер - после уточнения заказа, создаст вам счет.",
-            embeds=[embeds_list[0], embed_order_info],
-            view=view
-        )
+    view = TicketView()
+    await ticket_channel.send(
+        f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
+        f"> После уточнения заказа - менеджер создаст вам счёт.",
+        embeds=[embeds_list[0], embed_order_info],
+        view=view
+    )
 
-        select_embed = disnake.Embed(
-            title="Что именно нужно посмотреть?",
-            description="Ниже, выбор - просмотр политики по заказу, либо - создать счет  \n\nВыберите нужный пункт.",
-            color=6776679
-        )
-        select_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8b1723&is=6a89c5a3&hm=84444a514a08c282e27d51013698ba7b5e82c75a45ae4a004c56b3e58a9acd12&")
-        select_view = SelectView()
-        await ticket_channel.send(embed=select_embed, view=select_view)
+    # Селект с политикой и счётом
+    select_embed = disnake.Embed(
+        title="Что именно нужно посмотреть?",
+        description="Ниже, выбор - просмотр политики по заказу, либо - создать счет  \n\nВыберите нужный пункт.",
+        color=6776679
+    )
+    select_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8b1723&is=6a89c5a3&hm=84444a514a08c282e27d51013698ba7b5e82c75a45ae4a004c56b3e58a9acd12&")
+    await ticket_channel.send(embed=select_embed, view=SelectView())
 
-        await inter.edit_original_response(content=f"✅ Тикет создан: {ticket_channel.mention}")
+    add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-        add_ticket_owner(ticket_channel.id, inter.author.id, cat.id)
+    await inter.edit_original_response(content=f"✅ Тикет создан: {ticket_channel.mention}")
 
-        log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
-        if log_ch:
-            await log_ch.send(embed=disnake.Embed(
-                title="📩 Тикет создан (реальные деньги)",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {ticket_channel.mention}\n> **Товар:** `{item}`\n> **Промокод:** `{promo_display}`",
-                timestamp=datetime.now(timezone.utc),
-                color=0x00ff00
-            ))
+    log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
+    if log_ch:
+        await log_ch.send(embed=disnake.Embed(
+            title="📩 Тикет создан (реальные деньги)",
+            description=f"> **Заказчик:** {user.mention}\n> **Канал:** {ticket_channel.mention}",
+            timestamp=datetime.now(timezone.utc),
+            color=0x00ff00
+        ))
 
 
 # ============================================================
@@ -289,7 +275,8 @@ class BuySelect(disnake.ui.StringSelect):
         )
         value = inter.data.values[0]
         if value == "real":
-            await inter.response.send_modal(BuyTicketModal())
+            # Сразу создаём тикет без модалки
+            await create_real_ticket(inter)
         elif value == "coins":
             await inter.response.send_modal(CoinsTicketModal())
         elif value == "question":
@@ -514,6 +501,13 @@ class InvoiceModal(Modal):
     def __init__(self):
         components = [
             TextInput(
+                label="Товар / Услуга",
+                placeholder="Например: Discord Nitro 1 Month",
+                custom_id="product",
+                min_length=2,
+                max_length=80
+            ),
+            TextInput(
                 label="Введите сумму для счёта",
                 placeholder="Например: 445",
                 custom_id="amount",
@@ -533,9 +527,10 @@ class InvoiceModal(Modal):
     async def callback(self, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
 
-        import asyncio
+        import asyncio as _asyncio
         from modules.receipt import generate_receipt_png, generate_receipt_id
 
+        product_name = inter.text_values["product"].strip()
         amount_str = inter.text_values["amount"].strip()
         discount_str = inter.text_values.get("discount", "").strip()
 
@@ -556,14 +551,19 @@ class InvoiceModal(Modal):
         manager_id = get_ticket_manager(inter.channel.id)
         manager = inter.guild.get_member(manager_id) if manager_id else None
         manager_name = str(manager) if manager else "—"
-        ticket_name = inter.channel.name
+
+        # Имя заказчика = владелец тикета
+        owner_id = get_ticket_owner(inter.channel.id)
+        owner = inter.guild.get_member(owner_id) if owner_id else None
+        customer_name = owner.display_name if owner else inter.channel.name
 
         order_id = generate_receipt_id()
 
-        buf = await asyncio.to_thread(
+        buf = await _asyncio.to_thread(
             generate_receipt_png,
             manager_name=manager_name,
-            ticket_name=ticket_name,
+            customer_name=customer_name,
+            product_name=product_name,
             amount=amount,
             discount_percent=discount_percent,
             order_id=order_id
@@ -587,11 +587,84 @@ class InvoiceModal(Modal):
             description=(
                 f"> **Менеджер:** {inter.author.mention}\n"
                 f"> **Канал:** {inter.channel.mention}\n"
+                f"> **Товар/Услуга:** {product_name}\n"
                 f"> **Сумма:** {amount} Р\n"
                 + (f"> **Скидка:** {discount_percent}%\n" if discount_percent > 0 else "")
                 + f"> **Итого:** {total} Р"
             ),
             color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
+
+# ============================================================
+# МОДАЛКА ВВОДА ПРОМОКОДА
+# ============================================================
+class PromoCodeModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Промокод",
+                placeholder="Введите код промокода",
+                custom_id="promo_code",
+                min_length=1,
+                max_length=50
+            )
+        ]
+        super().__init__(title="🎟️ Ввод промокода", components=components, custom_id="promo_code_modal")
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        code = inter.text_values["promo_code"].strip().upper()
+
+        codes = get_promo_codes()
+        if code not in codes:
+            return await inter.response.send_message(
+                "❌ Такой промокод не найден или уже недействителен.",
+                ephemeral=True
+            )
+
+        value = codes[code]
+        channel = inter.channel
+
+        # Ищем info-эмбед заказа
+        target_msg = None
+        async for msg in channel.history(limit=50):
+            if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
+                target_msg = msg
+                break
+
+        if not target_msg:
+            return await inter.response.send_message(
+                "❌ Не найдено сообщение с информацией о заказе.",
+                ephemeral=True
+            )
+
+        # Обновляем поле "Скидка на товар"
+        embed_dict = target_msg.embeds[1].to_dict()
+        for field in embed_dict.get("fields", []):
+            if "скидка" in field.get("name", "").lower():
+                field["value"] = f"```{code} — {value}```"
+                break
+
+        new_embed = disnake.Embed.from_dict(embed_dict)
+        embeds = list(target_msg.embeds)
+        embeds[1] = new_embed
+        await target_msg.edit(embeds=embeds)
+
+        await inter.response.send_message(
+            f"✅ Промокод **{code}** активирован!\n"
+            f"> **Скидка:** `{value}`",
+            ephemeral=True
+        )
+
+        await log_discord(
+            title="🎟️ Промокод активирован",
+            description=(
+                f"> **Пользователь:** {inter.author.mention}\n"
+                f"> **Тикет:** {channel.mention}\n"
+                f"> **Код:** `{code}` — {value}"
+            ),
+            color=0x00ff00,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
@@ -661,11 +734,6 @@ class TicketRatingView(View):
             await send_manager_top()
         except Exception as e:
             logger.error(f"Ошибка при закрытии тикета: {e}")
-            try:
-                await asyncio.sleep(3)
-                await channel.delete()
-            except Exception as e2:
-                logger.error(f"Повторная ошибка при закрытии тикета: {e2}")
 
 
 class RatingModal(Modal):
@@ -816,15 +884,6 @@ class TicketView(View):
             return await inter.response.send_message("Заказ уже оплачен.", ephemeral=True)
 
         order_embed = msg.embeds[1]
-        item_name = "—"
-        promo_value = "—"
-        for field in order_embed.fields:
-            fn = field.name.lower()
-            if "позиция" in fn:
-                item_name = field.value.strip("`\n ")
-            elif "промокод" in fn:
-                promo_value = field.value.strip("`\n ")
-
         ed = order_embed.to_dict()
         ed["color"] = 0x676767
         ed["description"] = (
@@ -845,11 +904,9 @@ class TicketView(View):
         else:
             logger.warning("PAID_CATEGORY_ID not found: %s", CONFIG["PAID_CATEGORY_ID"])
 
-        manager_role = inter.guild.get_role(CONFIG["MANAGER_ROLE_ID"])
-        manager_ping = manager_role.mention if manager_role else "@менеджер"
         embed = disnake.Embed(
             title="💚 Заказ оплачен",
-            description=f"> **Подтвердил:** {inter.author.mention}\n> **Товар:** `{item_name}`\n> **Промокод:** `{promo_value}`",
+            description=f"> **Подтвердил:** {inter.author.mention}",
             color=0x2ecc71
         )
         embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
@@ -861,8 +918,6 @@ class TicketView(View):
             title="💰 Заказ оплачен",
             description=(
                 f"> **Канал:** {channel.mention}\n"
-                f"> **Товар:** `{item_name}`\n"
-                f"> **Промокод:** `{promo_value}`\n"
                 f"> **Подтвердил:** {inter.author.mention}"
             ),
             color=0x2ecc71,
@@ -875,13 +930,14 @@ class TicketView(View):
         if not owner_id or inter.author.id != owner_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
+        # Проверка: скидка уже применена?
         discount_applied = False
         async for msg in channel.history(limit=50):
             if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
-                embed = msg.embeds[1]
-                for field in embed.fields:
-                    if "промокод" in field.name.lower():
-                        if field.value.strip("`\n ") not in ["Не введён", "Не активирован"]:
+                for field in msg.embeds[1].fields:
+                    if "скидка" in field.name.lower():
+                        val = field.value.strip("`\n ")
+                        if val not in ["Не активирована", "Не введён", "Не активирован"]:
                             discount_applied = True
                         break
                 break
@@ -891,29 +947,52 @@ class TicketView(View):
         all_purchases = await get_user_purchases(inter.author.id, only_unused=True)
         discounts = [p for p in all_purchases if p.get('type') == 'discounts']
 
-        if not discounts:
-            return await inter.response.send_message("❌ У вас нету доступных купленных скидок.", ephemeral=True)
-
         slid_embeds = _load_slid_embeds()
         if not slid_embeds:
             slid_embeds = [disnake.Embed(
                 title="📦 Ваши скидки",
-                description="> Выберите скидку для применения к заказу.",
+                description="> Введи промокод или выбери купленную скидку.",
                 color=6776679
             )]
 
         view = View(timeout=300)
+
+        # Первая кнопка — Ввести промокод
+        btn_promo = Button(
+            label="Ввести промокод",
+            style=ButtonStyle.gray,
+            custom_id=f"promo_input_{inter.author.id}",
+            emoji=PartialEmoji(name="prom1", id=1539646792139014234),
+            row=0
+        )
+
+        async def promo_callback(inter2: disnake.MessageInteraction):
+            if inter2.author.id != inter.author.id:
+                return await inter2.response.send_message("⛔ Это не ваш тикет.", ephemeral=True)
+            await inter2.response.send_modal(PromoCodeModal())
+
+        btn_promo.callback = promo_callback
+        view.add_item(btn_promo)
+
+        # Купленные скидки — начиная с row=1
+        row = 1
+        col = 0
         for idx, p in enumerate(discounts):
+            if col >= 5:
+                row += 1
+                col = 0
             label = p['value']
             if len(label) > 80:
                 label = label[:77] + "..."
             btn = Button(
                 label=label,
                 style=ButtonStyle.gray,
-                custom_id=f"apply_discount_{inter.author.id}_{idx}"
+                custom_id=f"apply_discount_{inter.author.id}_{idx}",
+                row=row
             )
             btn.callback = self.create_discount_callback(idx, inter, discounts)
             view.add_item(btn)
+            col += 1
 
         await inter.response.send_message(embeds=slid_embeds, view=view, ephemeral=True)
 
@@ -930,10 +1009,10 @@ class TicketView(View):
             discount_applied = False
             async for msg in channel.history(limit=50):
                 if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
-                    embed = msg.embeds[1]
-                    for field in embed.fields:
-                        if "промокод" in field.name.lower():
-                            if field.value.strip("`\n ") not in ["Не введён", "Не активирован"]:
+                    for field in msg.embeds[1].fields:
+                        if "скидка" in field.name.lower():
+                            val = field.value.strip("`\n ")
+                            if val not in ["Не активирована", "Не введён", "Не активирован"]:
                                 discount_applied = True
                             break
                     break
@@ -943,11 +1022,9 @@ class TicketView(View):
             item_value = discounts[discount_index]['value']
 
             full_purchases = await get_user_purchases(inter.author.id, only_unused=False)
-            target = None
             target_index = None
             for i, p in enumerate(full_purchases):
                 if p['value'] == item_value and p.get('type') == 'discounts' and not p.get('used'):
-                    target = p
                     target_index = i
                     break
             if target_index is None:
@@ -961,7 +1038,7 @@ class TicketView(View):
                 if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
                     embed_dict = msg.embeds[1].to_dict()
                     for field in embed_dict.get("fields", []):
-                        if "промокод" in field.get("name", "").lower():
+                        if "скидка" in field.get("name", "").lower():
                             field["value"] = f"```{item_value}```"
                             break
                     new_embed = disnake.Embed.from_dict(embed_dict)
@@ -1237,11 +1314,9 @@ class CoinsTicketButtons(View):
             item_value = purchases[purchase_index]['value']
 
             full_purchases = await get_user_purchases(user_id, only_unused=False)
-            target = None
             target_index = None
             for i, p in enumerate(full_purchases):
                 if p['value'] == item_value and p.get('type') != 'discounts' and not p.get('used'):
-                    target = p
                     target_index = i
                     break
             if target_index is None:
@@ -1699,5 +1774,5 @@ class TicketPanelView(View):
 # ОБРАБОТЧИК ИНТЕРАКЦИЙ
 # ============================================================
 async def handle_interaction(inter: disnake.MessageInteraction):
-    if inter.data.get("custom_id") == "menu:buy_ticket":
-        await inter.response.send_modal(BuyTicketModal())
+    # Логика buy_ticket убрана — теперь тикет создаётся сразу из BuySelect
+    pass
