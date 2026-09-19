@@ -63,7 +63,6 @@ def clear_ticket_owner(channel: disnake.TextChannel):
         remove_ticket_owner(channel.id)
 
 
-# ============================================================
 # СОЗДАНИЕ ТИКЕТА ЗА РЕАЛЬНЫЕ ДЕНЬГИ (без формы)
 # ============================================================
 async def create_real_ticket(inter: disnake.MessageInteraction):
@@ -97,7 +96,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
     except Exception as e:
         logger.error(f"Не удалось создать тикет: {e}")
-        return await inter.edit_original_response(content=f"❌ Ошибка создания тикета: {e}")
+        return await inter.followup.send(content=f"❌ Ошибка создания тикета: {e}", ephemeral=True)
 
     # Загружаем info-o-zakaze.json
     try:
@@ -138,9 +137,13 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # ✅ Новое эфемерное сообщение
-    await inter.edit_original_response(
-        content=f"{user.mention}, тикет создан - #{ticket_channel.id}, сообщите в тикете, о товаре, который вы хотите купить!"
+    # ✅ ОТДЕЛЬНОЕ НОВОЕ сообщение (не заменяет эмбед), с кликабельным <#channel_id>
+    await inter.followup.send(
+        content=(
+            f"{user.mention}, тикет создан — <#{ticket_channel.id}>!\n"
+            f"> Сообщите в тикете, о товаре, который вы хотите купить."
+        ),
+        ephemeral=True
     )
 
     log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
