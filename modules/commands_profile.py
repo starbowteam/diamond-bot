@@ -220,7 +220,6 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
 
         await inter.edit_original_response(content=None, embed=embed, file=file)
 
-        # Лог — отдельно, без f-string с вложенными кавычками
         if meta["cached"]:
             source_str = "кэш"
         else:
@@ -275,6 +274,20 @@ class PurchaseSelectView(View):
         if idx >= len(self.purchases):
             return await inter.response.send_message("❌ Товар не найден.", ephemeral=True)
         p = self.purchases[idx]
+
+        # ---- Проверка: акционный товар нельзя вернуть ----
+        if p.get("from_action"):
+            embed = disnake.Embed(
+                title="❌ Возврат невозможен",
+                description=(
+                    f"> Товар **{p['value']}** куплен по **акции**.\n\n"
+                    f"> Акционные товары возврату и обмену **не подлежат**. "
+                    f"Они выдаются один раз и сгорают после использования."
+                ),
+                color=0xff0000
+            )
+            return await inter.response.send_message(embed=embed, ephemeral=True)
+
         catalog = load_shop_catalog()
         price = None
         for cat_key, cat_data in catalog.items():
@@ -320,6 +333,13 @@ class ReturnItemView(View):
         if self.purchase_index >= len(purchases):
             return await inter.response.send_message("❌ Этот товар уже был возвращён или применён.", ephemeral=True)
         p = purchases[self.purchase_index]
+
+        # ---- Двойная защита от возврата акционного ----
+        if p.get("from_action"):
+            return await inter.response.send_message(
+                "❌ Акционный товар нельзя вернуть.", ephemeral=True
+            )
+
         success = await remove_purchase(self.user_id, self.purchase_index)
         if not success:
             return await inter.response.send_message("❌ Ошибка при возврате товара.", ephemeral=True)
