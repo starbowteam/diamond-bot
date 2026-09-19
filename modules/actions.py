@@ -166,15 +166,15 @@ class FlashBuyView(View):
 # ============================================================
 # РУЛЕТКА МОНЕТ
 # ============================================================
-# Шансы пересчитаны — выигрыш реже
+# Шансы: проигрыш 67%, выигрышных всего 33%
 ROULETTE_ROLLS = [
-    {"name": "Проигрыш",        "mult": -1.0, "chance": 62.0, "color": 0xed4245, "emoji": "🎲", "desc": "Ты потерял ставку"},
-    {"name": "Малый выигрыш",   "mult":  0.2, "chance": 18.0, "color": 0x95a5a6, "emoji": "🔹", "desc": "+20% от ставки"},
-    {"name": "Средний выигрыш", "mult":  0.5, "chance": 12.0, "color": 0x149bd0, "emoji": "🔸", "desc": "+50% от ставки"},
-    {"name": "Двойной",         "mult":  1.0, "chance":  5.0, "color": 0x2ecc71, "emoji": "💎", "desc": "х2 — удвоение ставки"},
+    {"name": "Проигрыш",        "mult": -1.0, "chance": 67.0, "color": 0xed4245, "emoji": "🎲", "desc": "Ты потерял ставку"},
+    {"name": "Малый выигрыш",   "mult":  0.2, "chance": 16.0, "color": 0x95a5a6, "emoji": "🔹", "desc": "+20% от ставки"},
+    {"name": "Средний выигрыш", "mult":  0.5, "chance": 10.0, "color": 0x149bd0, "emoji": "🔸", "desc": "+50% от ставки"},
+    {"name": "Двойной",         "mult":  1.0, "chance":  4.0, "color": 0x2ecc71, "emoji": "💎", "desc": "х2 — удвоение ставки"},
     {"name": "Тройной",         "mult":  2.0, "chance":  2.0, "color": 0xf7c991, "emoji": "👑", "desc": "х3 — тройная ставка"},
-    {"name": "JACKPOT",         "mult":  4.0, "chance":  0.8, "color": 0xffaa00, "emoji": "🎰", "desc": "х5 — джекпот!"},
-    {"name": "MEGA JACKPOT",    "mult":  9.0, "chance":  0.2, "color": 0xff00aa, "emoji": "⭐", "desc": "х10 — мега-джекпот!!!"},
+    {"name": "JACKPOT",         "mult":  4.0, "chance":  0.7, "color": 0xffaa00, "emoji": "🎰", "desc": "х5 — джекпот!"},
+    {"name": "MEGA JACKPOT",    "mult":  9.0, "chance":  0.3, "color": 0xff00aa, "emoji": "⭐", "desc": "х10 — мега-джекпот!!!"},
 ]
 
 
@@ -203,14 +203,19 @@ def _build_spin_embeds() -> list:
 
 
 def _build_win_embeds(result: dict, bet: int, net: int, new_balance: int) -> list:
+    total_payout = bet + net  # что вернётся на баланс
+
     embed1 = disnake.Embed(color=6776679)
     embed1.set_image(url=IMG_ROULETTE_WIN)
+
     embed2 = disnake.Embed(
         title=f"{result['emoji']}  {result['name'].upper()}!",
         description=(
             f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
-            f"> 📊 Множитель: **x{1 + result['mult']:.1f}**\n"
-            f"> 💰 Чистый профит: **+{net} DC**\n"
+            f"> 📊 Множитель: **x{1 + result['mult']:.1f}**\n\n"
+            f"> 💵 Твоя ставка: **{bet} DC**\n"
+            f"> ✅ Возврат: **+{total_payout} DC**\n"
+            f"> 📈 Чистый профит: **+{net} DC**\n"
             f"> 💎 Новый баланс: **{new_balance} DC**"
         ),
         color=result["color"],
@@ -225,11 +230,13 @@ def _build_win_embeds(result: dict, bet: int, net: int, new_balance: int) -> lis
 def _build_lose_embeds(result: dict, bet: int, new_balance: int) -> list:
     embed1 = disnake.Embed(color=6776679)
     embed1.set_image(url=IMG_ROULETTE_LOSE)
+
     embed2 = disnake.Embed(
         title=f"{result['emoji']}  ПРОИГРЫШ",
         description=(
             f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
-            f"> 📊 Множитель: **x0**\n"
+            f"> 📊 Множитель: **x0**\n\n"
+            f"> 💵 Твоя ставка: **{bet} DC**\n"
             f"> 💸 Потеряно: **−{bet} DC**\n"
             f"> 💎 Новый баланс: **{new_balance} DC**"
         ),
@@ -368,7 +375,7 @@ class RouletteRetryView(View):
         )
         btn_double.callback = self.double_callback
         self.add_item(btn_double)
-        
+
     async def retry_callback(self, inter: disnake.MessageInteraction):
         await inter.response.send_modal(RouletteModal())
 
