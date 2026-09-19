@@ -34,7 +34,7 @@ from modules.actions import load_action_embed
 
 
 # ============================================================
-# ХЕЛПЕР: загрузка slid.json
+# ХЕЛПЕР
 # ============================================================
 def _load_slid_embeds() -> list:
     base_project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -63,7 +63,15 @@ def clear_ticket_owner(channel: disnake.TextChannel):
         remove_ticket_owner(channel.id)
 
 
-# СОЗДАНИЕ ТИКЕТА ЗА РЕАЛЬНЫЕ ДЕНЬГИ (без формы)
+def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
+    """Тикет оплачен, если находится в paid-категории."""
+    if not channel.category:
+        return False
+    return channel.category.id == CONFIG["PAID_CATEGORY_ID"]
+
+
+# ============================================================
+# СОЗДАНИЕ ТИКЕТА ЗА РЕАЛЬНЫЕ ДЕНЬГИ
 # ============================================================
 async def create_real_ticket(inter: disnake.MessageInteraction):
     user = inter.author
@@ -98,7 +106,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         logger.error(f"Не удалось создать тикет: {e}")
         return await inter.followup.send(content=f"❌ Ошибка создания тикета: {e}", ephemeral=True)
 
-    # Загружаем info-o-zakaze.json
     try:
         with open(CONFIG["INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -137,7 +144,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # ✅ ОТДЕЛЬНОЕ НОВОЕ сообщение (не заменяет эмбед), с кликабельным <#channel_id>
     await inter.followup.send(
         content=(
             f"{user.mention}, тикет создан — <#{ticket_channel.id}>!\n"
@@ -238,7 +244,7 @@ class CoinsTicketModal(Modal):
 
 
 # ============================================================
-# ВЫБОР ТИПА ПОКУПКИ (СЕЛЕКТ-МЕНЮ)
+# ВЫБОР ТИПА ПОКУПКИ
 # ============================================================
 class BuySelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -434,6 +440,71 @@ class QuestionTicketView(View):
 
 
 # ============================================================
+# МОДАЛКА ИЗМЕНЕНИЯ НАЗВАНИЯ ТИКЕТА
+# ============================================================
+class RenameTicketModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Новое название тикета",
+                placeholder="Введите новое название",
+                custom_id="new_name",
+                min_length=2,
+                max_length=80
+            )
+        ]
+        super().__init__(title="✏️ Изменение названия тикета", components=components, custom_id="rename_ticket_modal")
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        new_name_raw = inter.text_values["new_name"].strip()
+
+        # Нормализуем в slug-style
+        new_name = new_name_raw.lower().replace(" ", "-")
+        new_name = re.sub(r"[^a-zа-яё0-9\-_]", "", new_name)
+        new_name = new_name[:80]
+        if not new_name:
+            return await inter.response.send_message("❌ Введите корректное название.", ephemeral=True)
+
+        channel = inter.channel
+        old_name = channel.name
+
+        try:
+            await channel.edit(name=new_name)
+        except Exception as e:
+            logger.error(f"Не удалось переименовать канал: {e}")
+            return await inter.response.send_message(f"❌ Ошибка переименования: {e}", ephemeral=True)
+
+        # Сообщение в тикет
+        try:
+            await channel.send(
+                content=(
+                    f"> **Тикет переименован** — новый заказ: **{new_name_raw}**\n"
+                    f"> Выполнение заказа скоро начнётся, ожидайте."
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось отправить сообщение в тикет: {e}")
+
+        await inter.response.send_message(
+            f"✅ Название тикета изменено с `{old_name}` на `{new_name}`.",
+            ephemeral=True
+        )
+
+        await log_discord(
+            title="✏️ Название тикета изменено",
+            description=(
+                f"> **Пользователь:** {inter.author.mention}\n"
+                f"> **Тикет:** {channel.mention}\n"
+                f"> **Было:** `{old_name}`\n"
+                f"> **Стало:** `{new_name}`\n"
+                f"> **Новое название (raw):** {new_name_raw}"
+            ),
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
+
+# ============================================================
 # СЕЛЕКТ-МЕНЮ ДЛЯ ТИКЕТОВ
 # ============================================================
 class TicketActionSelect(disnake.ui.StringSelect):
@@ -454,6 +525,12 @@ class TicketActionSelect(disnake.ui.StringSelect):
                     description="Правила и условия магазина",
                     emoji="<:Politic:1539657020695650384>",
                     value="policy"
+                ),
+                disnake.SelectOption(
+                    label="Изменить название тикета",
+                    description="Изменения для удобства выполнения.",
+                    emoji="<:image:1550869363266027641>",
+                    value="rename"
                 )
             ],
             custom_id="ticket_action_select"
@@ -469,6 +546,34 @@ class TicketActionSelect(disnake.ui.StringSelect):
             await inter.response.send_modal(InvoiceModal())
         elif value == "policy":
             await self.send_policy(inter)
+        elif value == "rename":
+            # 1) Только для оплаченных тикетов
+            if not _is_paid_ticket(inter.channel):
+                return await inter.response.send_message(
+                    "⛔ **Кнопка доступна только для оплаченных тикетов.**\n"
+                    "> Дождитесь подтверждения оплаты менеджером.",
+                    ephemeral=True
+                )
+
+            # 2) Только назначенный менеджер (или админ)
+            assigned_manager_id = get_ticket_manager(inter.channel.id)
+            is_admin = has_admin_command_roles(inter.author)
+
+            if not is_admin:
+                if assigned_manager_id is None:
+                    return await inter.response.send_message(
+                        "⛔ **Переименовать тикет может только назначенный менеджер.**\n"
+                        "> Менеджер ещё не назначен.",
+                        ephemeral=True
+                    )
+                if inter.author.id != assigned_manager_id:
+                    return await inter.response.send_message(
+                        f"⛔ **Переименовать тикет может только назначенный менеджер.**\n"
+                        f"> Назначенный менеджер: <@{assigned_manager_id}>",
+                        ephemeral=True
+                    )
+
+            await inter.response.send_modal(RenameTicketModal())
 
     async def send_policy(self, inter: disnake.MessageInteraction):
         policy_path = os.path.join(CATALOG_DIR, "menu_policy.json")
@@ -495,6 +600,8 @@ class SelectView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketActionSelect())
+
+
 
 
 # ============================================================
@@ -629,7 +736,6 @@ class PromoCodeModal(Modal):
         value = codes[code]
         channel = inter.channel
 
-        # Ищем info-эмбед заказа
         target_msg = None
         async for msg in channel.history(limit=50):
             if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
@@ -642,7 +748,6 @@ class PromoCodeModal(Modal):
                 ephemeral=True
             )
 
-        # Обновляем поле "Скидка на товар"
         embed_dict = target_msg.embeds[1].to_dict()
         for field in embed_dict.get("fields", []):
             if "скидка" in field.get("name", "").lower():
@@ -654,7 +759,6 @@ class PromoCodeModal(Modal):
         embeds[1] = new_embed
         await target_msg.edit(embeds=embeds)
 
-        # 🔒 Блокируем все кнопки в view скидок
         try:
             for child in self.original_view.children:
                 child.disabled = True
@@ -942,7 +1046,6 @@ class TicketView(View):
         if not owner_id or inter.author.id != owner_id:
             return await inter.response.send_message("⛔ Эта кнопка доступна только создателю тикета.", ephemeral=True)
 
-        # Проверка: скидка уже применена?
         discount_applied = False
         async for msg in channel.history(limit=50):
             if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
@@ -969,7 +1072,6 @@ class TicketView(View):
 
         view = View(timeout=300)
 
-        # ---- Промокод: row 0, первая кнопка ----
         btn_promo = Button(
             label="Ввести промокод",
             style=ButtonStyle.gray,
@@ -986,9 +1088,8 @@ class TicketView(View):
         btn_promo.callback = promo_callback
         view.add_item(btn_promo)
 
-        # ---- Купленные скидки: 2 в row 0, потом по 3 ----
         current_row = 0
-        current_col = 1  # в row 0 уже 1 кнопка промокода
+        current_col = 1
 
         for idx, p in enumerate(discounts):
             if current_col >= 3:
@@ -1061,7 +1162,6 @@ class TicketView(View):
                     await msg.edit(embeds=embeds)
                     break
 
-            # Блокируем view
             try:
                 if inter.message and inter.message.components:
                     await inter.message.edit(view=View())
