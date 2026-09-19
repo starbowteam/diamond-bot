@@ -350,7 +350,7 @@ class RouletteRetryView(View):
         self.last_bet = last_bet
 
         btn_retry = Button(
-            label="ㅤㅤㅤㅤㅤㅤㅤИграть ещеㅤㅤㅤㅤㅤㅤㅤ",
+            label="ㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤИграть ещеㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="roulette_retry",
             emoji=PartialEmoji(name="gamee", id=1550686072168517632)
@@ -359,7 +359,7 @@ class RouletteRetryView(View):
         self.add_item(btn_retry)
 
         btn_double = Button(
-            label=f"ㅤㅤㅤㅤДвойная ставка ({last_bet * 2} DC)ㅤㅤㅤㅤ",
+            label="ㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤДвойная ставкаㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤ",
             style=ButtonStyle.gray,
             custom_id="roulette_double",
             emoji=PartialEmoji(name="flash", id=1550686028522590309)
