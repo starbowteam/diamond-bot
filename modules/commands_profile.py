@@ -246,119 +246,6 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
 
 
 # ============================================================
-# УПРАВЛЕНИЕ ПОКУПКАМИ
-# ============================================================
-class PurchaseSelectView(View):
-    def __init__(self, user_id, purchases):
-        super().__init__(timeout=300)
-        self.user_id = user_id
-        self.purchases = purchases
-        options = []
-        for idx, p in enumerate(purchases):
-            label = p['value']
-            if len(label) > 100:
-                label = label[:97] + "..."
-            options.append(SelectOption(
-                label=label,
-                description=f"Куплен: {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}",
-                value=str(idx)
-            ))
-        select = Select(placeholder="Выберите товар...", options=options, custom_id="purchase_select")
-        select.callback = self.purchase_select_callback
-        self.add_item(select)
-
-    async def purchase_select_callback(self, inter: disnake.MessageInteraction):
-        if inter.author.id != self.user_id:
-            return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
-        idx = int(inter.data.values[0])
-        if idx >= len(self.purchases):
-            return await inter.response.send_message("❌ Товар не найден.", ephemeral=True)
-        p = self.purchases[idx]
-
-        # ---- Проверка: акционный товар нельзя вернуть ----
-        if p.get("from_action"):
-            embed = disnake.Embed(
-                title="❌ Возврат невозможен",
-                description=(
-                    f"> Товар **{p['value']}** куплен по **акции**.\n\n"
-                    f"> Акционные товары возврату и обмену **не подлежат**. "
-                    f"Они выдаются один раз и сгорают после использования."
-                ),
-                color=0xff0000
-            )
-            return await inter.response.send_message(embed=embed, ephemeral=True)
-
-        catalog = load_shop_catalog()
-        price = None
-        for cat_key, cat_data in catalog.items():
-            for item_key, item_data in cat_data.get("items", {}).items():
-                if item_data.get("name") == p['value']:
-                    price = item_data.get("price")
-                    break
-            if price is not None:
-                break
-        if price is None:
-            price = 0
-        embed = disnake.Embed(
-            title="Информация о покупке!",
-            description=(
-                f"> **Товар:** {p['value']}\n"
-                f"> **Куплен:** {datetime.fromtimestamp(p['date']).strftime('%d.%m.%Y')}\n\n"
-                f"> **Цена:** {price} DC\n\n"
-                "`Вы можете вернуть товар, получить DC обратно, но получите - только 75% Для этого - нажмите на кнопку ниже, в выборном меню.`"
-            ),
-            color=6776679
-        )
-        embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
-        view = ReturnItemView(self.user_id, idx, price)
-        await inter.response.send_message(embed=embed, view=view, ephemeral=True)
-
-
-class ReturnItemView(View):
-    def __init__(self, user_id, purchase_index, price):
-        super().__init__(timeout=300)
-        self.user_id = user_id
-        self.purchase_index = purchase_index
-        self.price = price
-
-    @disnake.ui.button(
-        label="Вернуть товар",
-        style=disnake.ButtonStyle.danger,
-        custom_id="return_item"
-    )
-    async def return_item(self, button: Button, inter: disnake.MessageInteraction):
-        if inter.author.id != self.user_id:
-            return await inter.response.send_message("⛔ Это не ваш товар.", ephemeral=True)
-        purchases = await get_user_purchases(self.user_id, only_unused=False)
-        if self.purchase_index >= len(purchases):
-            return await inter.response.send_message("❌ Этот товар уже был возвращён или применён.", ephemeral=True)
-        p = purchases[self.purchase_index]
-
-        # ---- Двойная защита от возврата акционного ----
-        if p.get("from_action"):
-            return await inter.response.send_message(
-                "❌ Акционный товар нельзя вернуть.", ephemeral=True
-            )
-
-        success = await remove_purchase(self.user_id, self.purchase_index)
-        if not success:
-            return await inter.response.send_message("❌ Ошибка при возврате товара.", ephemeral=True)
-        refund = int(self.price * 0.75)
-        await add_dc(self.user_id, refund, f"Возврат товара: {p['value']} (75%)")
-        await inter.response.send_message(
-            f"✅ Товар **{p['value']}** возвращён!\n"
-            f"💎 Вам начислено **{refund} DC** (75% от стоимости).",
-            ephemeral=True
-        )
-        await log_discord(
-            title="🔄 Возврат товара",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {p['value']}\n> **Возвращено:** {refund} DC",
-            color=0xffaa00,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
-
-
-# ============================================================
 # МОДАЛКА: РАСЧЁТ СКИДКИ
 # ============================================================
 class DiscountModal(Modal):
@@ -415,12 +302,6 @@ class ProfileSelect(disnake.ui.StringSelect):
                 value="profile"
             ),
             disnake.SelectOption(
-                label="・Управление покупками",
-                description="Удобно・Узнай о покупке",
-                emoji="<:cart:1538399645238165624>",
-                value="purchases"
-            ),
-            disnake.SelectOption(
                 label="・О валюте",
                 description="Трата валюты・Её получение",
                 emoji="<:buy:1538395716920148079>",
@@ -451,19 +332,6 @@ class ProfileSelect(disnake.ui.StringSelect):
         value = inter.data.values[0]
         if value == "profile":
             await show_profile_card(inter, inter.author)
-        elif value == "purchases":
-            await inter.response.defer(ephemeral=True)
-            purchases = await get_user_purchases(inter.author.id, only_unused=True)
-            if not purchases:
-                return await inter.followup.send("❌ У вас нет неиспользованных покупок.", ephemeral=True)
-            embed = disnake.Embed(
-                title="О какой покупке ты хочешь узнать?",
-                description="> Выбери нужный товар ниже.",
-                color=6776679
-            )
-            embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
-            view = PurchaseSelectView(inter.author.id, purchases)
-            await inter.followup.send(embed=embed, view=view, ephemeral=True)
         elif value == "currency":
             await inter.response.defer(ephemeral=True)
             embeds = load_embed_from_file("vallue.json")
@@ -506,7 +374,7 @@ async def send_profile_panel():
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
     embed2 = disnake.Embed(
         title="Твой профиль на сервере Diamond Shop",
-        description="> В данном разделе, ты можешь - увидить свой профиль, свои покупки, возможно - отменить их, и получить возрат, но - 75%! Узнать, как купить что либо за Diamond Coin и многое другое! Не забудь о расчете скидок, для своих покупок!",
+        description="> В данном разделе, ты можешь - увидить свой профиль, узнать о валюте, рассчитать скидку на покупку и многое другое!",
         color=6776679
     )
     embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a887423&is=6a8722a3&hm=42c31ce6b67f4dbe9bc8e19eecfa29d805c871131064ccf76672953bff3573d6&")
