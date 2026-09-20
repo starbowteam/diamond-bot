@@ -41,7 +41,7 @@ FLASH_SALE_DISCOUNT = 70
 DAILY_DEALS_PER_CYCLE = 5
 
 # ============================================================
-# КАРТИНКИ ДЛЯ ЭМБЕДОВ РУЛЕТКИ
+# КАРТИНКИ
 # ============================================================
 IMG_ROULETTE_SPIN   = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685793872248842/image.png?ex=6aaf3c2f&is=6aadeaaf&hm=67254a55d5004c897269e64255ad1a54e9a29689a383fda711316592a5bad350&"
 IMG_ROULETTE_WIN    = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&"
@@ -92,14 +92,20 @@ def _current_deal_slot() -> int:
 def refresh_daily_deal(force: bool = False):
     """
     Логика чередования: 5 обычных акций (30%) → 1 флеш-слот.
-    При флеш-слоте обычная акция не обновляется, но помечается флагом flash_slot.
+    Форсим обновление если скидка в сохранённой акции не совпадает с константой.
     """
     current_slot = _current_deal_slot()
     data = load_daily_deal()
 
-    # Слот не менялся — возвращаем текущий item
+    saved_item = data.get("item")
+    # Если сохранённая акция имеет неправильный процент — форсим
+    if saved_item and saved_item.get("discount") != DAILY_DEAL_DISCOUNT:
+        logger.info(f"Скидка в сохранённой акции ({saved_item.get('discount')}%) != {DAILY_DEAL_DISCOUNT}%. Форсим обновление.")
+        force = True
+
+    # Слот не менялся и всё ок — возвращаем текущий
     if not force and data.get("slot") == current_slot:
-        return data.get("item")
+        return saved_item
 
     counter = data.get("counter", 0)
     old_item = data.get("item")
@@ -150,6 +156,9 @@ def save_flash_sale(data: dict):
 def get_flash_sale_item():
     data = load_flash_sale()
     if data.get("active") and data.get("item"):
+        # Если скидка не 70% — считаем невалидным
+        if data["item"].get("discount") != FLASH_SALE_DISCOUNT:
+            return None
         if time.time() - data.get("started_at", 0) < FLASH_SALE_DURATION_HOURS * 3600:
             return data["item"]
     return None
@@ -224,7 +233,7 @@ def save_roulette_stats(data: dict):
 
 
 # ============================================================
-# ЗАГРУЗКА EMBED'ОВ ИЗ ФАЙЛОВ
+# ЗАГРУЗКА EMBED'ОВ
 # ============================================================
 def load_action_embed(filename: str):
     path = os.path.join(ACTIONS_DIR, filename)
@@ -256,7 +265,7 @@ class FlashBuyView(View):
 
 
 # ============================================================
-# РУЛЕТКА МОНЕТ (шансы чуть подняты)
+# РУЛЕТКА МОНЕТ
 # ============================================================
 ROULETTE_ROLLS = [
     {"name": "Проигрыш",        "mult": -1.0, "chance": 62.0, "color": 0xed4245, "emoji": "🎲", "desc": "Ты потерял ставку"},
