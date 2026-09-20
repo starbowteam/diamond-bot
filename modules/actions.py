@@ -43,10 +43,12 @@ DAILY_DEALS_PER_CYCLE = 5
 # ============================================================
 # КАРТИНКИ
 # ============================================================
-IMG_ROULETTE_SPIN   = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685793872248842/image.png?ex=6aaf3c2f&is=6aadeaaf&hm=67254a55d5004c897269e64255ad1a54e9a29689a383fda711316592a5bad350&"
-IMG_ROULETTE_WIN    = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&"
-IMG_ROULETTE_LOSE   = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685884456636527/image.png?ex=6aaf3c45&is=6aadeac5&hm=451731816ed61f6878fba789858bdf5aed0ef69cfe1bfd5ce5378a7f9a1e4a18&"
-IMG_STRIPE          = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aaeafa3&is=6aad5e23&hm=9190ceac69655c6c96803bdfb25627b447bb205ef0e467f13abd39d43d5f165b&"
+IMG_ROULETTE_SPIN = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685793872248842/image.png?ex=6aaf3c2f&is=6aadeaaf&hm=67254a55d5004c897269e64255ad1a54e9a29689a383fda711316592a5bad350&"
+IMG_ROULETTE_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&"
+IMG_ROULETTE_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685884456636527/image.png?ex=6aaf3c45&is=6aadeac5&hm=451731816ed61f6878fba789858bdf5aed0ef69cfe1bfd5ce5378a7f9a1e4a18&"
+
+# Полоска (нижняя картинка для всех embed2)
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 
 # 🃏 Блэкджек — 5 картинок
 IMG_BJ_TABLE = "https://media.discordapp.net/attachments/1527006158282555412/1551293759461920808/image.png?ex=6ab17265&is=6ab020e5&hm=d6e9e598b1981259566f329a2b43f19ab5bbd49440d6c9a6a8f1c31d6b2f9d38&=&format=webp&quality=lossless"
@@ -56,24 +58,25 @@ IMG_BJ_PUSH  = "https://media.discordapp.net/attachments/1527006158282555412/155
 IMG_BJ_BUST  = "https://media.discordapp.net/attachments/1527006158282555412/1551293761059823666/image.png?ex=6ab17266&is=6ab020e6&hm=cf6f037552d279906a3ef039621b52ada29c481a18c4eba86971380b72a57b1e&=&format=webp&quality=lossless"
 
 # 🪙 Монетка — 4 картинки
-IMG_COIN_WAIT     = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296470286860308/image.png?ex=6ab174ec&is=6ab0236c&hm=9a3e8e1cfa2d069d888e2bbcae69fbd2de05fcd4d8564b5856c85c14e6db3a9d&"
-IMG_COIN_FLIP     = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296470722940948/image.png?ex=6ab174ec&is=6ab0236c&hm=b7fbb9f71639147c3f67199c535648efa7df7e2fcda2ab3e039ddd29b121f335&"
-IMG_COIN_WIN      = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296698964377781/image.png?ex=6ab17522&is=6ab023a2&hm=ef1cd116093f11594be461116cb2d2c11d7ae0f2f36d5e8ee88e82349d79de70&"
-IMG_COIN_LOSE     = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296699820023989/image.png?ex=6ab17522&is=6ab023a2&hm=ca876fcb9981a13bff89958dfbd4061abec6dfad28a6e6e578c2563bbeb3ac97&"
+IMG_COIN_WAIT = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296470286860308/image.png?ex=6ab174ec&is=6ab0236c&hm=9a3e8e1cfa2d069d888e2bbcae69fbd2de05fcd4d8564b5856c85c14e6db3a9d&"
+IMG_COIN_FLIP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296470722940948/image.png?ex=6ab174ec&is=6ab0236c&hm=b7fbb9f71639147c3f67199c535648efa7df7e2fcda2ab3e039ddd29b121f335&"
+IMG_COIN_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296698964377781/image.png?ex=6ab17522&is=6ab023a2&hm=ef1cd116093f11594be461116cb2d2c11d7ae0f2f36d5e8ee88e82349d79de70&"
+IMG_COIN_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296699820023989/image.png?ex=6ab17522&is=6ab023a2&hm=ca876fcb9981a13bff89958dfbd4061abec6dfad28a6e6e578c2563bbeb3ac97&"
 
 # ============================================================
-# ЭМОДЗИ
+# ЭМОДЗИ (PartialEmoji — только для кнопок)
 # ============================================================
-EMOJI_BJ_SELECT   = "<:joke:1551288467659428020>"
-EMOJI_BJ_HIT      = PartialEmoji(name="adde", id=1551288309240696954)
-EMOJI_BJ_STAND    = PartialEmoji(name="PAM", id=1551288362822795434)
-EMOJI_BJ_DOUBLE   = PartialEmoji(name="flas", id=1551289202279325756)
+EMOJI_BJ_HIT    = PartialEmoji(name="adde", id=1551288309240696954)
+EMOJI_BJ_STAND  = PartialEmoji(name="PAM", id=1551288362822795434)
+EMOJI_BJ_DOUBLE = PartialEmoji(name="flas", id=1551289202279325756)
 
-EMOJI_COIN_SELECT = "<:coins:1539649259245408340>"
 EMOJI_COIN_HEADS  = PartialEmoji(name="image", id=1551296060729725019)
 EMOJI_COIN_TAILS  = PartialEmoji(name="2313", id=1551296094468575366)
 EMOJI_COIN_RETRY  = PartialEmoji(name="Otziv", id=1541808692314243172)
 EMOJI_COIN_DOUBLE = PartialEmoji(name="flas", id=1551289202279325756)
+
+# Символ для padding кнопок (Hangul Filler — занимает ширину, но не виден)
+P = "\u3164"
 
 
 # ============================================================
@@ -444,7 +447,7 @@ class RouletteRetryView(View):
         self.last_bet = last_bet
 
         btn_retry = Button(
-            label="ㅤㅤㅤИграть ещеㅤㅤㅤ",
+            label="Играть еще",
             style=ButtonStyle.gray,
             custom_id="roulette_retry",
             emoji=PartialEmoji(name="gamee", id=1550686072168517632),
@@ -454,7 +457,7 @@ class RouletteRetryView(View):
         self.add_item(btn_retry)
 
         btn_double = Button(
-            label="ㅤㅤㅤДвойная ставкаㅤㅤ",
+            label="Двойная ставка",
             style=ButtonStyle.gray,
             custom_id="roulette_double",
             emoji=PartialEmoji(name="flash", id=1550686028522590309),
@@ -575,15 +578,16 @@ def _build_bj_embeds(game: dict, hide_dealer: bool = True,
                      result_kind: str = "table") -> list:
     """
     result_kind: table | win | lose | push | bust
+    embed1 — картинка состояния; embed2 — полоска IMG_STRIPE.
     """
     player_val = _hand_value(game["player"])
     dealer_val = _hand_value(game["dealer"]) if not hide_dealer else _hand_value([game["dealer"][0]])
 
     img_map = {
-        "win":  IMG_BJ_WIN,
-        "lose": IMG_BJ_LOSE,
-        "push": IMG_BJ_PUSH,
-        "bust": IMG_BJ_BUST,
+        "win":   IMG_BJ_WIN,
+        "lose":  IMG_BJ_LOSE,
+        "push":  IMG_BJ_PUSH,
+        "bust":  IMG_BJ_BUST,
         "table": IMG_BJ_TABLE,
     }
     img = img_map.get(result_kind, IMG_BJ_TABLE)
@@ -597,18 +601,18 @@ def _build_bj_embeds(game: dict, hide_dealer: bool = True,
         dealer_line = _hand_str(game["dealer"])
 
     player_line = _hand_str(game["player"])
-    title = result_title or "🃏 Блэкджек"
+    title = result_title or "Блэкджек"
     color = result_color or 6776679
 
     desc = (
-        f"**🎩 Дилер:** {dealer_line}\n"
-        f"**💰 Очки дилера:** `{dealer_val if not hide_dealer else '?'}`\n\n"
-        f"**👤 Ваши карты:** {player_line}\n"
-        f"**💰 Ваши очки:** `{player_val}`\n\n"
-        f"💵 **Ставка:** `{game['bet']} DC`"
+        f"**Дилер:** {dealer_line}\n"
+        f"**Очки дилера:** `{dealer_val if not hide_dealer else '?'}`\n\n"
+        f"**Ваши карты:** {player_line}\n"
+        f"**Ваши очки:** `{player_val}`\n\n"
+        f"**Ставка:** `{game['bet']} DC`"
     )
     if game.get("doubled"):
-        desc += f"\n⚡ **Удвоено:** `{game['bet']} DC` (итого в банке)"
+        desc += f"\n**Удвоено:** `{game['bet']} DC` (итого в банке)"
 
     embed2 = disnake.Embed(
         title=title,
@@ -616,7 +620,7 @@ def _build_bj_embeds(game: dict, hide_dealer: bool = True,
         color=color,
         timestamp=datetime.now(timezone.utc)
     )
-    embed2.set_image(url=img)
+    embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
 
@@ -631,7 +635,7 @@ class BlackjackBetModal(Modal):
                 max_length=10
             )
         ]
-        super().__init__(title="🃏 Блэкджек — ставка", components=components)
+        super().__init__(title="Блэкджек — ставка", components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
         user_id = inter.author.id
@@ -679,8 +683,9 @@ class BlackjackView(View):
         super().__init__(timeout=300)
         self.game = game
 
+        # 3 кнопки — делят ширину эмбеда на 3. Лейблы короткие, пробелы = P
         btn_hit = Button(
-            label="ㅤㅤㅤㅤВзятьㅤㅤㅤㅤ",
+            label=f"{P}{P}Взять{P}{P}",
             style=ButtonStyle.gray,
             custom_id="bj_hit",
             emoji=EMOJI_BJ_HIT,
@@ -690,7 +695,7 @@ class BlackjackView(View):
         self.add_item(btn_hit)
 
         btn_stand = Button(
-            label="ㅤㅤㅤㅤХватитㅤㅤㅤ",
+            label=f"{P}{P}Хватит{P}{P}",
             style=ButtonStyle.gray,
             custom_id="bj_stand",
             emoji=EMOJI_BJ_STAND,
@@ -700,7 +705,7 @@ class BlackjackView(View):
         self.add_item(btn_stand)
 
         btn_double = Button(
-            label="ㅤУдвоить ставкуㅤ",
+            label=f"{P}{P}Удвоить{P}{P}",
             style=ButtonStyle.danger,
             custom_id="bj_double",
             emoji=EMOJI_BJ_DOUBLE,
@@ -728,7 +733,7 @@ class BlackjackView(View):
             await inter.response.edit_message(
                 embeds=_build_bj_embeds(
                     self.game, hide_dealer=False,
-                    result_title="💥 ПЕРЕБОР!",
+                    result_title="ПЕРЕБОР!",
                     result_color=0xed4245,
                     result_kind="bust"
                 ),
@@ -755,13 +760,13 @@ class BlackjackView(View):
         dealer_val = _hand_value(self.game["dealer"])
 
         if dealer_val > 21:
-            title, color, outcome = "🎉 ДИЛЕР ПЕРЕБРАЛ — ВЫ ВЫИГРАЛИ!", 0x2ecc71, "win"
+            title, color, outcome = "ДИЛЕР ПЕРЕБРАЛ — ВЫ ВЫИГРАЛИ!", 0x2ecc71, "win"
         elif player_val > dealer_val:
-            title, color, outcome = "🎉 ПОБЕДА!", 0x2ecc71, "win"
+            title, color, outcome = "ПОБЕДА!", 0x2ecc71, "win"
         elif player_val == dealer_val:
-            title, color, outcome = "🤝 НИЧЬЯ (возврат)", 0xf7c991, "push"
+            title, color, outcome = "НИЧЬЯ (возврат)", 0xf7c991, "push"
         else:
-            title, color, outcome = "😢 ВЫ ПРОИГРАЛИ", 0xed4245, "lose"
+            title, color, outcome = "ВЫ ПРОИГРАЛИ", 0xed4245, "lose"
 
         await inter.response.edit_message(
             embeds=_build_bj_embeds(
@@ -804,16 +809,16 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
 
     if outcome == "blackjack":
         payout = int(total_bet * BLACKJACK_BLACKJACK_MULT)
-        reason = "🃏 Блэкджек (x2.5)"
+        reason = "Блэкджек (x2.5)"
     elif outcome == "win":
         payout = int(total_bet * BLACKJACK_WIN_MULT)
-        reason = "🃏 Победа в блэкджеке (x2)"
+        reason = "Победа в блэкджеке (x2)"
     elif outcome == "push":
         payout = total_bet
-        reason = "🃏 Ничья в блэкджеке (возврат)"
+        reason = "Ничья в блэкджеке (возврат)"
     else:
         payout = 0
-        reason = "🃏 Проигрыш в блэкджеке"
+        reason = "Проигрыш в блэкджеке"
 
     if payout > 0:
         await add_dc(user_id, payout, reason)
@@ -840,9 +845,9 @@ async def _bj_finish(inter: disnake.MessageInteraction, game: dict):
     dealer_val = _hand_value(game["dealer"])
 
     if dealer_val == 21 and len(game["dealer"]) == 2:
-        title, outcome, color, kind = "🤝 ДВОЙНОЙ БЛЭКДЖЕК — НИЧЬЯ", "push", 0xf7c991, "push"
+        title, outcome, color, kind = "ДВОЙНОЙ БЛЭКДЖЕК — НИЧЬЯ", "push", 0xf7c991, "push"
     else:
-        title, outcome, color, kind = "🎉 БЛЭКДЖЕК! x2.5", "blackjack", 0x2ecc71, "win"
+        title, outcome, color, kind = "БЛЭКДЖЕК! x2.5", "blackjack", 0x2ecc71, "win"
 
     await inter.edit_original_response(
         embeds=_build_bj_embeds(
@@ -856,12 +861,13 @@ async def _bj_finish(inter: disnake.MessageInteraction, game: dict):
 
 
 class BlackjackRetryView(View):
+    """2 кнопки — делят ширину эмбеда на 2."""
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
         self.last_bet = last_bet
 
         btn_retry = Button(
-            label="ㅤㅤㅤИграть ещёㅤㅤㅤ",
+            label=f"{P}{P}Играть ещё{P}{P}",
             style=ButtonStyle.gray,
             custom_id="bj_retry",
             emoji=EMOJI_BJ_HIT,
@@ -871,7 +877,7 @@ class BlackjackRetryView(View):
         self.add_item(btn_retry)
 
         btn_double = Button(
-            label="ㅤУдвоить ставкуㅤ",
+            label=f"{P}{P}{P}Удвоить{P}{P}{P}",
             style=ButtonStyle.danger,
             custom_id="bj_double_next",
             emoji=EMOJI_BJ_DOUBLE,
@@ -926,25 +932,25 @@ class BlackjackRetryView(View):
 # ============================================================
 COINFLIP_MIN_BET = 5
 COINFLIP_MAX_BET = 25000
-COINFLIP_WIN_MULT = 1.9   # RTP 95%
+COINFLIP_WIN_MULT = 1.9
 
 
 def _build_coin_choice_embeds(bet: int) -> list:
     embed1 = disnake.Embed(color=6776679)
     embed1.set_image(url=IMG_COIN_WAIT)
     embed2 = disnake.Embed(
-        title="🪙 Монетка — выбор стороны",
+        title="Монетка — выбор стороны",
         description=(
             f"> Выберите сторону, на которую ставите:\n\n"
-            f"> <:image:1551296060729725019> **Орёл** — или — <:2313:1551296094468575366> **Решка**\n\n"
-            f"💵 **Ставка:** `{bet} DC`\n"
-            f"🎯 **Выплата при победе:** `x{COINFLIP_WIN_MULT}`\n\n"
-            f"⏰ У вас 60 секунд на выбор."
+            f"> **Орёл** — или — **Решка**\n\n"
+            f"**Ставка:** `{bet} DC`\n"
+            f"**Выплата при победе:** `x{COINFLIP_WIN_MULT}`\n\n"
+            f"У вас 60 секунд на выбор."
         ),
         color=6776679,
         timestamp=datetime.now(timezone.utc)
     )
-    embed2.set_image(url=IMG_COIN_WAIT)
+    embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
 
@@ -952,19 +958,17 @@ def _build_coin_spin_embeds() -> list:
     embed1 = disnake.Embed(color=6776679)
     embed1.set_image(url=IMG_COIN_FLIP)
     embed2 = disnake.Embed(
-        title="🪙 Монетка крутится...",
-        description="> ⚡ 🪙 ⚡\n\n> Ждём результата...",
+        title="Монетка крутится...",
+        description="> Ждём результата...",
         color=6776679
     )
-    embed2.set_image(url=IMG_COIN_FLIP)
+    embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
 
 def _build_coin_result_embeds(bet: int, result_side: str, user_choice: str,
                               won: bool, payout: int, new_balance: int) -> list:
-    emoji_str = "<:image:1551296060729725019>" if result_side == "heads" else "<:2313:1551296094468575366>"
     name = "ОРЁЛ" if result_side == "heads" else "РЕШКА"
-    user_emoji_str = "<:image:1551296060729725019>" if user_choice == "heads" else "<:2313:1551296094468575366>"
     user_name = "Орёл" if user_choice == "heads" else "Решка"
 
     img = IMG_COIN_WIN if won else IMG_COIN_LOSE
@@ -975,31 +979,31 @@ def _build_coin_result_embeds(bet: int, result_side: str, user_choice: str,
     if won:
         net = payout - bet
         embed2 = disnake.Embed(
-            title=f"{emoji_str} {name} — ВЫ ПОБЕДИЛИ!",
+            title=f"{name} — ВЫ ПОБЕДИЛИ!",
             description=(
-                f"> Выпало: **{emoji_str} {name}**\n"
-                f"> Ваш выбор: **{user_emoji_str} {user_name}**\n\n"
-                f"> 💵 Ставка: **{bet} DC**\n"
-                f"> ✅ Выплата: **+{payout} DC**\n"
-                f"> 📈 Профит: **+{net} DC**\n"
-                f"> 💎 Баланс: **{new_balance} DC**"
+                f"> Выпало: **{name}**\n"
+                f"> Ваш выбор: **{user_name}**\n\n"
+                f"> **Ставка:** `{bet} DC`\n"
+                f"> **Выплата:** `+{payout} DC`\n"
+                f"> **Профит:** `+{net} DC`\n"
+                f"> **Баланс:** `{new_balance} DC`"
             ),
             color=0x2ecc71,
             timestamp=datetime.now(timezone.utc)
         )
     else:
         embed2 = disnake.Embed(
-            title=f"{emoji_str} {name} — МИМО!",
+            title=f"{name} — МИМО!",
             description=(
-                f"> Выпало: **{emoji_str} {name}**\n"
-                f"> Ваш выбор: **{user_emoji_str} {user_name}**\n\n"
-                f"> 💸 Потеряно: **−{bet} DC**\n"
-                f"> 💎 Баланс: **{new_balance} DC**"
+                f"> Выпало: **{name}**\n"
+                f"> Ваш выбор: **{user_name}**\n\n"
+                f"> **Потеряно:** `−{bet} DC`\n"
+                f"> **Баланс:** `{new_balance} DC`"
             ),
             color=0xed4245,
             timestamp=datetime.now(timezone.utc)
         )
-    embed2.set_image(url=img)
+    embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
 
@@ -1014,7 +1018,7 @@ class CoinflipBetModal(Modal):
                 max_length=10
             )
         ]
-        super().__init__(title="🪙 Монетка — ставка", components=components)
+        super().__init__(title="Монетка — ставка", components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
         user_id = inter.author.id
@@ -1044,12 +1048,13 @@ class CoinflipBetModal(Modal):
 
 
 class CoinflipChoiceView(View):
+    """2 кнопки — делят ширину эмбеда на 2."""
     def __init__(self, bet: int):
         super().__init__(timeout=60)
         self.bet = bet
 
         btn_heads = Button(
-            label="ㅤㅤㅤㅤㅤㅤОрёлㅤㅤㅤㅤㅤㅤ",
+            label=f"{P}{P}{P}{P}Орёл{P}{P}{P}{P}",
             style=ButtonStyle.gray,
             custom_id="coin_heads",
             emoji=EMOJI_COIN_HEADS,
@@ -1059,7 +1064,7 @@ class CoinflipChoiceView(View):
         self.add_item(btn_heads)
 
         btn_tails = Button(
-            label="ㅤㅤㅤㅤㅤㅤРешкаㅤㅤㅤㅤㅤ",
+            label=f"{P}{P}{P}{P}Решка{P}{P}{P}{P}",
             style=ButtonStyle.gray,
             custom_id="coin_tails",
             emoji=EMOJI_COIN_TAILS,
@@ -1079,7 +1084,7 @@ class CoinflipChoiceView(View):
 
         if won:
             payout = int(bet * COINFLIP_WIN_MULT)
-            await add_dc(user_id, payout, f"🪙 Монетка ({result_side})")
+            await add_dc(user_id, payout, f"Монетка ({result_side})")
         else:
             payout = 0
 
@@ -1113,12 +1118,13 @@ class CoinflipChoiceView(View):
 
 
 class CoinflipRetryView(View):
+    """2 кнопки — делят ширину эмбеда на 2."""
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
         self.last_bet = last_bet
 
         btn_retry = Button(
-            label="ㅤㅤㅤㅤИграть ещёㅤㅤㅤㅤ",
+            label=f"{P}{P}Играть ещё{P}{P}",
             style=ButtonStyle.gray,
             custom_id="coin_retry",
             emoji=EMOJI_COIN_RETRY,
@@ -1128,7 +1134,7 @@ class CoinflipRetryView(View):
         self.add_item(btn_retry)
 
         btn_double = Button(
-            label="ㅤㅤУдвоить ставкуㅤㅤ",
+            label=f"{P}{P}{P}Удвоить{P}{P}{P}",
             style=ButtonStyle.danger,
             custom_id="coin_double",
             emoji=EMOJI_COIN_DOUBLE,
@@ -1184,13 +1190,13 @@ class ActionSelect(Select):
             SelectOption(
                 label="・Блэкджек",
                 description="21 очко — классика казино!",
-                emoji=EMOJI_BJ_SELECT,
+                emoji="<:joke:1551288467659428020>",
                 value="blackjack"
             ),
             SelectOption(
                 label="・Монетка",
                 description="Орёл или решка? Быстрая игра!",
-                emoji=EMOJI_COIN_SELECT,
+                emoji="<:coins:1539649259245408340>",
                 value="coinflip"
             ),
         ]
@@ -1219,14 +1225,14 @@ class ActionSelect(Select):
 
             if daily:
                 embed = disnake.Embed(
-                    title="🔥 Акционный товар дня",
+                    title="Акционный товар дня",
                     description=(
                         f"**Товар:** {daily['item_data']['name']}\n"
                         f"**Категория:** {daily['category_label']}\n"
                         f"**Старая цена:** ~~{daily['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
                         f"**Новая цена:** **{daily['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
                         f"**Скидка:** {daily['discount']}%\n\n"
-                        f"🕐 Обновится через **{minutes_left} мин**"
+                        f"Обновится через **{minutes_left} мин**"
                     ),
                     color=0xff6600,
                     timestamp=datetime.now(timezone.utc)
@@ -1245,14 +1251,14 @@ class ActionSelect(Select):
                 fs_left = max((FLASH_SALE_DURATION_HOURS * 3600 - elapsed) // 60, 0)
 
                 flash_embed = disnake.Embed(
-                    title="⚡ МЕГА-СКИДКА! (только сейчас)",
+                    title="МЕГА-СКИДКА! (только сейчас)",
                     description=(
                         f"**Товар:** {flash_item['item_data']['name']}\n"
                         f"**Категория:** {flash_item['category_label']}\n"
                         f"**Старая цена:** ~~{flash_item['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
                         f"**Новая цена:** **{flash_item['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
                         f"**Скидка:** {flash_item['discount']}%\n\n"
-                        f"⏰ Истекает через **{fs_left} мин**"
+                        f"Истекает через **{fs_left} мин**"
                     ),
                     color=0xff0000,
                     timestamp=datetime.now(timezone.utc)
@@ -1260,7 +1266,7 @@ class ActionSelect(Select):
                 flash_embed.set_image(url=IMG_STRIPE)
                 embeds.append(flash_embed)
                 view.add_item(Button(
-                    label=f"⚡ Купить {flash_item['item_data']['name']} за {flash_item['new_price']} DC",
+                    label=f"Купить {flash_item['item_data']['name']} за {flash_item['new_price']} DC",
                     style=ButtonStyle.danger,
                     custom_id=f"flash_buy|{flash_item['cat_key']}|{flash_item['item_key']}|{flash_item['new_price']}"
                 ))
@@ -1317,7 +1323,6 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     if not custom_id:
         return
 
-    # Whitelist — свои View-обработчики
     if custom_id in (
         "roulette_retry", "roulette_double",
         "bj_hit", "bj_stand", "bj_double", "bj_retry", "bj_double_next",
