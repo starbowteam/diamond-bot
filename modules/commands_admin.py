@@ -530,7 +530,7 @@ async def send_staff_panels():
     promo_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
     await channel.send(embeds=[promo_embed1, promo_embed2], view=PromoView())
 
-    # --- 3. Админ-панель ---
+       # --- 3. Админ-панель ---
     admin_embed1 = disnake.Embed(color=6776679)
     admin_embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&")
     admin_embed2 = disnake.Embed(
@@ -538,7 +538,7 @@ async def send_staff_panels():
         description="> С помощью данной панели, происходит управление сервером, старые команды, были заменены одной панелью, что дает доступ, в одном виде. Ниже - предоставлены кнопки. Используй с умом.",
         color=6776679
     )
-    admin_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307759390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+    admin_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
     await channel.send(embeds=[admin_embed1, admin_embed2], view=AdminView())
 
     await log_discord(
