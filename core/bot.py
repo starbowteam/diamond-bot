@@ -28,7 +28,8 @@ from modules.actions import (
     send_actions_panel, handle_flash_interaction,
     refresh_daily_deal, load_flash_sale, save_flash_sale,
     generate_random_deal, FLASH_SALE_FILE,
-    FLASH_SALE_DURATION_HOURS, DAILY_DEAL_REFRESH_HOURS
+    FLASH_SALE_DURATION_HOURS, DAILY_DEAL_REFRESH_HOURS,
+    start_flash_sale,
 )
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
@@ -59,9 +60,7 @@ REVIEW_REWARD_DC = 15
 # Flash sale
 FLASH_SALE_ROLE_ID = 1127428607606796290
 FLASH_SALE_DURATION = FLASH_SALE_DURATION_HOURS * 3600
-FLASH_SALE_CHANCE = 0.15
 FLASH_SALE_CHECK_MINUTES = 30
-FLASH_SALE_DISCOUNT = 90
 
 # МСК (UTC+3)
 MSK = timezone(timedelta(hours=3))
@@ -249,20 +248,26 @@ async def daily_bonus_task():
 
 @tasks.loop(minutes=5)
 async def daily_deal_task():
-    """Каждые 5 минут проверяем, не нужно ли обновить товар дня (слот 5ч)."""
+    """Обновляет товар дня + детектирует флеш-слоты."""
     await bot.wait_until_ready()
     try:
         before = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
         deal = refresh_daily_deal()
         after = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
+
         if before.get("slot") != after.get("slot"):
-            logger.info(f"Товар дня авто-обновлён: {deal['item_data']['name'] if deal else '—'}")
+            if after.get("flash_slot"):
+                logger.info("Флеш-слот — запускаем флеш-акцию")
+                await start_flash_sale(bot)
+            elif deal:
+                logger.info(f"Товар дня авто-обновлён: {deal['item_data']['name']}")
     except Exception as e:
         logger.exception(f"daily_deal_task error: {e}")
 
 
 @tasks.loop(minutes=FLASH_SALE_CHECK_MINUTES)
 async def flash_sale_task():
+    """Только удаление истёкшего флеша (запуск — в daily_deal_task)."""
     await bot.wait_until_ready()
     try:
         data = load_flash_sale()
@@ -289,58 +294,6 @@ async def flash_sale_task():
                     title="⚡ Flash sale завершён",
                     description=f"> **Товар:** {data.get('item', {}).get('item_data', {}).get('name', '—')}",
                     color=0xff6600
-                )
-                return
-
-        if not data.get("active"):
-            if random.random() < FLASH_SALE_CHANCE:
-                deal = generate_random_deal(discount=FLASH_SALE_DISCOUNT)
-                if not deal:
-                    return
-
-                channel = bot.get_channel(CONFIG["ACTIONS_CHANNEL_ID"])
-                if not channel:
-                    channel = await bot.fetch_channel(CONFIG["ACTIONS_CHANNEL_ID"])
-                if not channel:
-                    return
-
-                ping_text = f"<@&{FLASH_SALE_ROLE_ID}> - ***Огромная скидка в акционных товарах, успей купить!***"
-
-                embed = disnake.Embed(
-                    title="⚡ МЕГА-СКИДКА ТОЛЬКО СЕЙЧАС!",
-                    description=(
-                        f"**Товар:** {deal['item_data']['name']}\n"
-                        f"**Категория:** {deal['category_label']}\n"
-                        f"**Старая цена:** ~~{deal['original_price']} DC~~\n"
-                        f"**Новая цена:** **{deal['new_price']} DC**\n"
-                        f"**Скидка:** {FLASH_SALE_DISCOUNT}%\n\n"
-                        f"⏰ **Действует {FLASH_SALE_DURATION_HOURS} час!**"
-                    ),
-                    color=0xff0000,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1532256186026426408/pisk.png?ex=6a7cab06&is=6a7b5986&hm=d6bea516ccf8362ee32747c2028ee41914139ddb974ff851e6d6cc3950ca9ab2&")
-                embed.set_footer(text="Купить можно в акционных товарах")
-
-                msg = await channel.send(content=ping_text, embed=embed)
-
-                save_flash_sale({
-                    "active": True,
-                    "item": deal,
-                    "started_at": int(now),
-                    "message_id": msg.id,
-                    "channel_id": channel.id
-                })
-                logger.info(f"Flash sale запущен: {deal['item_data']['name']} ({FLASH_SALE_DISCOUNT}%)")
-                await log_discord(
-                    title="⚡ Flash sale запущен",
-                    description=(
-                        f"> **Товар:** {deal['item_data']['name']}\n"
-                        f"> **Категория:** {deal['category_label']}\n"
-                        f"> **Скидка:** {FLASH_SALE_DISCOUNT}%\n"
-                        f"> **Длительность:** {FLASH_SALE_DURATION_HOURS} час"
-                    ),
-                    color=0xff0000
                 )
     except Exception as e:
         logger.exception(f"flash_sale_task error: {e}")
@@ -825,6 +778,8 @@ async def on_message(message: disnake.Message):
 
     if message.channel.category:
         cat_id = message.channel.category.id
+        # Только эти 3 категории — назначаем менеджера с первого сообщения
+        # Категория вопросов (1544363672128987196) НЕ входит
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
             if get_ticket_manager(message.channel.id) is None:
                 owner_id = get_ticket_owner(message.channel.id)
