@@ -345,6 +345,10 @@ async def on_ready():
             TarologyView, WorkView
         )
         from modules.commands_profile import send_profile_panel, ProfileView
+        # === НОВОЕ: view для служебных панелей ===
+        from modules.commands_admin import (
+            DCView, PromoView, AdminView, send_staff_panels
+        )
 
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
@@ -362,6 +366,11 @@ async def on_ready():
         bot.add_view(WorkView())
         bot.add_view(QuestionTicketView())
 
+        # === НОВОЕ: регистрируем persistent-view для служебных панелей ===
+        bot.add_view(DCView())
+        bot.add_view(PromoView())
+        bot.add_view(AdminView())
+
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
@@ -370,6 +379,8 @@ async def on_ready():
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_manager_top())
+        # === НОВОЕ: шлём служебные панели в канал ===
+        bot.loop.create_task(send_staff_panels())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         counts = {}
@@ -778,8 +789,6 @@ async def on_message(message: disnake.Message):
 
     if message.channel.category:
         cat_id = message.channel.category.id
-        # Только эти 3 категории — назначаем менеджера с первого сообщения
-        # Категория вопросов (1544363672128987196) НЕ входит
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
             if get_ticket_manager(message.channel.id) is None:
                 owner_id = get_ticket_owner(message.channel.id)
