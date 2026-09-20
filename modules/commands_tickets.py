@@ -143,13 +143,24 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    await inter.followup.send(
-        content=(
-            f"> {user.mention}, тикет создан — <#{ticket_channel.id}>\n"
-            f"> Сообщите в тикете, о товаре, который вы хотите купить."
-        ),
-        ephemeral=True
-    )
+    # Эфемерное сообщение — только текст, без embed'а и без селекта
+    try:
+        await inter.response.edit_message(
+            content=(
+                f"> {user.mention}, тикет создан — {ticket_channel.mention}\n"
+                f"> Сообщите в тикете, о товаре, который вы хотите купить."
+            ),
+            embeds=[],
+            view=None
+        )
+    except Exception:
+        await inter.followup.send(
+            content=(
+                f"> {user.mention}, тикет создан — {ticket_channel.mention}\n"
+                f"> Сообщите в тикете, о товаре, который вы хотите купить."
+            ),
+            ephemeral=True
+        )
 
     log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
     if log_ch:
@@ -237,13 +248,27 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    await inter.edit_original_response(
-        content=(
-            f"> {user.mention}, тикет на категорию **DC** — создан.\n"
-            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем\n"
-            f"> Перейти: <#{ticket_channel.id}>"
-        )
+    # Эфемерное сообщение — только текст с >, без embed'а и без селекта
+    new_content = (
+        f"> {user.mention}, тикет на категорию **DC** — создан.\n"
+        f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем\n"
+        f"> Перейти: {ticket_channel.mention}"
     )
+    try:
+        await inter.response.edit_message(
+            content=new_content,
+            embeds=[],
+            view=None
+        )
+    except Exception:
+        try:
+            await inter.edit_original_response(
+                content=new_content,
+                embeds=[],
+                view=None
+            )
+        except Exception:
+            await inter.followup.send(content=new_content, ephemeral=True)
 
     log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
     if log_ch:
