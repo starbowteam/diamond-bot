@@ -3,6 +3,7 @@ import os
 import json
 import io
 import re
+import time
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -46,7 +47,7 @@ def reload_promo_cache():
 
 
 # ============================================================
-# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc) — БЕЗ ЗП/АВАНСА
+# ПАНЕЛЬ ЭКОНОМИКИ (panel_dc)
 # ============================================================
 class DCSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -530,7 +531,7 @@ async def send_staff_panels():
     promo_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
     await channel.send(embeds=[promo_embed1, promo_embed2], view=PromoView())
 
-       # --- 3. Админ-панель ---
+    # --- 3. Админ-панель ---
     admin_embed1 = disnake.Embed(color=6776679)
     admin_embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&")
     admin_embed2 = disnake.Embed(
@@ -565,11 +566,14 @@ async def say(
     if not has_admin_command_roles(ctx.author):
         return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
 
+    # Defer на всякий случай — операция может быть долгой
+    await ctx.response.defer(ephemeral=True)
+
     if тип_сообщения == "text":
         if not текст:
-            return await ctx.send("Введите текст.", ephemeral=True)
+            return await ctx.edit_original_response(content="Введите текст.")
         await канал.send(текст)
-        await ctx.send("✅ Отправлено", ephemeral=True)
+        await ctx.edit_original_response(content="✅ Отправлено")
         await log_discord(
             title="📨 Say: текст",
             description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
@@ -579,9 +583,9 @@ async def say(
 
     if тип_сообщения == "embed":
         if not текст and not файл:
-            return await ctx.send("Укажите JSON или файл.", ephemeral=True)
+            return await ctx.edit_original_response(content="Укажите JSON или файл.")
         if текст and файл:
-            return await ctx.send("Только один источник.", ephemeral=True)
+            return await ctx.edit_original_response(content="Только один источник.")
         try:
             if файл:
                 raw = await файл.read()
@@ -589,11 +593,11 @@ async def say(
             else:
                 data = json.loads(текст)
             if "embeds" not in data:
-                return await ctx.send("Нет поля 'embeds'.", ephemeral=True)
+                return await ctx.edit_original_response(content="Нет поля 'embeds'.")
             embeds = [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data["embeds"]]
             content = data.get("content", " ")
             await канал.send(content=content, embeds=embeds)
-            await ctx.send("✅ Embed отправлен", ephemeral=True)
+            await ctx.edit_original_response(content="✅ Embed отправлен")
             await log_discord(
                 title="📨 Say: embed",
                 description=f"> **Админ:** {ctx.author.mention}\n> **Канал:** {канал.mention}",
@@ -601,7 +605,7 @@ async def say(
             )
         except Exception as e:
             logger.exception("say embed error: %s", e)
-            await ctx.send("❌ Ошибка.", ephemeral=True)
+            await ctx.edit_original_response(content="❌ Ошибка.")
 
 
 # ============================================================
@@ -619,61 +623,92 @@ async def dc_file(
     if not has_admin_command_roles(ctx.author):
         return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
 
+    # Сразу defer — операция долгая, 3 секунды не хватит
+    await ctx.response.defer(ephemeral=True)
+
     if amount <= 0:
-        return await ctx.send("❌ Количество DC должно быть больше 0.", ephemeral=True)
+        return await ctx.edit_original_response(content="❌ Количество DC должно быть больше 0.")
 
     if not file.filename.endswith('.txt'):
-        return await ctx.send("❌ Файл должен быть в формате .txt", ephemeral=True)
+        return await ctx.edit_original_response(content="❌ Файл должен быть в формате .txt")
 
     try:
-        content = await file.read()
-        text = content.decode('utf-8')
+        raw = await file.read()
+        text = raw.decode('utf-8')
         lines = text.strip().splitlines()
+
         user_ids = []
+        skipped = 0
         for line in lines:
             line = line.strip()
             if line.isdigit():
                 user_ids.append(int(line))
-            else:
-                await ctx.send(f"⚠️ Строка '{line}' не является ID, пропущена.", ephemeral=True)
+            elif line:
+                skipped += 1
 
         if not user_ids:
-            return await ctx.send("❌ В файле не найдено ни одного корректного ID.", ephemeral=True)
+            return await ctx.edit_original_response(
+                content="❌ В файле не найдено ни одного корректного ID."
+            )
 
+        # Работаем НАПРЯМУЮ с dc_cache — без 100 логов в Discord (это и убивало таймаут)
         success_count = 0
         fail_count = 0
+        now = int(time.time())
+        reason = f"Начисление из файла ({amount} DC)"
+
         for uid in user_ids:
             try:
-                await add_dc(uid, amount, f"Начисление из файла ({amount} DC)")
+                data = get_dc_cache(uid)
+                data["balance"] += amount
+                data["history"].append({
+                    "date": now,
+                    "amount": amount,
+                    "reason": reason,
+                })
+                if len(data["history"]) > 50:
+                    data["history"] = data["history"][-50:]
+                save_dc_cache(uid, data)
                 success_count += 1
             except Exception as e:
-                logger.error(f"Ошибка начисления {amount} DC пользователю {uid}: {e}")
+                logger.error(f"dc_file: ошибка начисления {amount} DC пользователю {uid}: {e}")
                 fail_count += 1
 
-        await ctx.send(
-            f"✅ Начисление завершено!\n"
-            f"👥 Всего получателей: {len(user_ids)}\n"
-            f"✅ Успешно начислено: {success_count}\n"
-            f"❌ Ошибок: {fail_count}\n"
-            f"💎 Всего выдано: {success_count * amount} DC",
-            ephemeral=True
-        )
+        # Один синк в JSON после всей пачки
+        try:
+            sync_dc_to_json()
+        except Exception as e:
+            logger.warning(f"dc_file: sync_dc_to_json error: {e}")
 
+        await ctx.edit_original_response(content=(
+            f"✅ **Начисление завершено!**\n"
+            f"👥 Всего получателей: **{len(user_ids)}**\n"
+            f"✅ Успешно: **{success_count}**\n"
+            f"❌ Ошибок: **{fail_count}**\n"
+            f"⚠️ Пропущено строк: **{skipped}**\n"
+            f"💎 Всего выдано: **{success_count * amount} DC**"
+        ))
+
+        # Один общий лог вместо сотни
         await log_discord(
             title="💎 Начисление DC из файла",
             description=(
                 f"> **Админ:** {ctx.author.mention}\n"
                 f"> **Количество:** {amount} DC на человека\n"
                 f"> **Получателей:** {len(user_ids)}\n"
-                f"> **Всего выдано:** {success_count * amount} DC"
+                f"> **Всего выдано:** {success_count * amount} DC\n"
+                f"> **Ошибок:** {fail_count}"
             ),
             color=0xffaa00,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
     except Exception as e:
-        logger.exception(f"Ошибка в команде dc_file: {e}")
-        await ctx.send(f"❌ Произошла ошибка: {e}", ephemeral=True)
+        logger.exception(f"dc_file error: {e}")
+        try:
+            await ctx.edit_original_response(content=f"❌ Произошла ошибка: {e}")
+        except Exception:
+            pass
 
 
 # ============================================================
