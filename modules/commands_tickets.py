@@ -64,7 +64,6 @@ def clear_ticket_owner(channel: disnake.TextChannel):
 
 
 def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
-    """Тикет оплачен, если находится в paid-категории."""
     if not channel.category:
         return False
     return channel.category.id == CONFIG["PAID_CATEGORY_ID"]
@@ -146,7 +145,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     await inter.followup.send(
         content=(
-            f"{user.mention}, тикет создан — <#{ticket_channel.id}>!\n"
+            f"> {user.mention}, тикет создан — <#{ticket_channel.id}>\n"
             f"> Сообщите в тикете, о товаре, который вы хотите купить."
         ),
         ephemeral=True
@@ -163,7 +162,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# СОЗДАНИЕ ТИКЕТА ЗА DIAMOND COINS (через селект товаров)
+# СОЗДАНИЕ ТИКЕТА ЗА DIAMOND COINS
 # ============================================================
 async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict, purchase_index: int):
     user = inter.author
@@ -200,7 +199,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         logger.error(f"Не удалось создать DC-тикет: {e}")
         return await inter.edit_original_response(content=f"❌ Ошибка создания тикета: {e}")
 
-    # Удаляем товар из инвентаря (тратится на этот тикет)
+    # Удаляем товар из инвентаря
     try:
         await remove_purchase(user.id, purchase_index)
     except Exception as e:
@@ -217,8 +216,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=0x7c3131)
     embed_order_info.clear_fields()
-    embed_order_info.add_field(name="> Заказчик", value=f"```{user.display_name}```", inline=True)
-    embed_order_info.add_field(name="> Нужный товар", value=f"```{item_name}```", inline=True)
+    embed_order_info.add_field(name="> Нужный товар", value=f"```{item_name}```", inline=False)
 
     current_time = int(time.time())
     embed_order_info.description = (
@@ -229,14 +227,23 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     view = CoinsTicketButtons()
     await ticket_channel.send(
-        f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n",
+        content=(
+            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
+            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем"
+        ),
         embeds=[embeds_list[0], embed_order_info],
         view=view
     )
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    await inter.edit_original_response(content=f"✅ Тикет создан: {ticket_channel.mention}")
+    await inter.edit_original_response(
+        content=(
+            f"> {user.mention}, тикет на категорию **DC** — создан.\n"
+            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем\n"
+            f"> Перейти: <#{ticket_channel.id}>"
+        )
+    )
 
     log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
     if log_ch:
@@ -292,7 +299,6 @@ class BuySelect(disnake.ui.StringSelect):
         if value == "real":
             await create_real_ticket(inter)
         elif value == "coins":
-            # Открываем селект с купленными товарами (кроме скидок)
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
             purchases = [p for p in purchases if p.get('type') != 'discounts']
 
@@ -335,7 +341,12 @@ class CoinsBuySelect(disnake.ui.StringSelect):
             label = p.get("value", "—")
             if len(label) > 90:
                 label = label[:87] + "..."
-            options.append(disnake.SelectOption(label=label, value=str(idx)))
+            date_str = datetime.fromtimestamp(p.get("date", 0)).strftime("%d.%m.%Y")
+            options.append(disnake.SelectOption(
+                label=label,
+                description=f"Куплено: {date_str}",
+                value=str(idx)
+            ))
         super().__init__(
             placeholder="Выберите товар...",
             min_values=1,
@@ -345,13 +356,10 @@ class CoinsBuySelect(disnake.ui.StringSelect):
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
-        if inter.author.id != inter.message.interaction_metadata.user.id if hasattr(inter.message, 'interaction_metadata') else None:
-            pass  # оставим без этой проверки, user_id через self.purchases
         idx = int(inter.data.values[0])
         if idx >= len(self.purchases):
             return await inter.response.send_message("❌ Товар не найден.", ephemeral=True)
 
-        # Проверяем, что покупка ещё существует
         user_purchases = await get_user_purchases(inter.author.id, only_unused=False)
         target = self.purchases[idx]
         target_index = None
@@ -903,7 +911,6 @@ class TicketRatingView(View):
         await asyncio.sleep(3)
         try:
             manager_id = get_ticket_manager(channel.id)
-            # Учёт только для оплаченных тикетов
             if manager_id and _is_paid_ticket(channel):
                 increment_manager_closed(manager_id)
                 add_closed_order(manager_id, channel.id)
@@ -1333,7 +1340,7 @@ class TicketPaidView(View):
 
 
 # ============================================================
-# КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC (обновлённые — 2 кнопки)
+# КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC
 # ============================================================
 class CoinsTicketButtons(View):
     def __init__(self):
@@ -1419,7 +1426,7 @@ class CoinsTicketButtons(View):
 
 
 # ============================================================
-# ВЫБОР ТИПА КАТАЛОГА (убран invites)
+# ВЫБОР ТИПА КАТАЛОГА
 # ============================================================
 class CatalogTypeSelect(disnake.ui.StringSelect):
     def __init__(self):
