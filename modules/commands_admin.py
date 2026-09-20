@@ -31,6 +31,11 @@ from modules.dc import (
 from modules.commands_profile import load_embed_from_file
 
 # ============================================================
+# КАНАЛ С СЛУЖЕБНЫМИ ПАНЕЛЯМИ
+# ============================================================
+STAFF_PANEL_CHANNEL_ID = 1551276116679860314
+
+# ============================================================
 # ЗАГРУЗКА ПРОМОКОДОВ
 # ============================================================
 promo_codes = get_promo_codes()
@@ -332,7 +337,7 @@ class ClearModal(Modal):
         ]
         super().__init__(title="🧹 Очистка канала", components=components)
 
-    async def callback(self, inter: disnake.MessageInteraction):
+    async def callback(self, inter: disnake.ModalInteraction):
         channel_id_str = inter.text_values["channel_id"].strip()
         amount_str = inter.text_values["amount"].strip()
 
@@ -385,7 +390,7 @@ class GetJsonModal(Modal):
         ]
         super().__init__(title="Получить JSON сообщения", components=components)
 
-    async def callback(self, inter: disnake.MessageInteraction):
+    async def callback(self, inter: disnake.ModalInteraction):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         link = inter.text_values["link"].strip()
@@ -477,6 +482,73 @@ async def recalc_reviews(inter: disnake.MessageInteraction):
 
 
 # ============================================================
+# ОТПРАВКА ВСЕХ СЛУЖЕБНЫХ ПАНЕЛЕЙ В КАНАЛ
+# ============================================================
+async def send_staff_panels():
+    """Отправляет 3 панели (Экономика / Промокоды / Админ) в канал STAFF_PANEL_CHANNEL_ID."""
+    from core.bot import bot
+    await bot.wait_until_ready()
+
+    channel = bot.get_channel(STAFF_PANEL_CHANNEL_ID)
+    if not channel:
+        try:
+            channel = await bot.fetch_channel(STAFF_PANEL_CHANNEL_ID)
+        except Exception as e:
+            logger.warning(f"Staff panel channel not found: {e}")
+            return
+    if not channel:
+        logger.warning("Staff panel channel not found")
+        return
+
+    # Чистим прошлые сообщения бота
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+    # --- 1. Экономическая панель DC ---
+    dc_embed1 = disnake.Embed(color=6776679)
+    dc_embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202627005874318/image.png?ex=6a81d254&is=6a8080d4&hm=638d4a0af652ad4a72f25c2d193abff8e74879cf2dd173079a863484559c1dca&=&format=webp&quality=lossless")
+    dc_embed2 = disnake.Embed(
+        title="Экономическая панель Diamond Coins",
+        description="> В данном разделе, происходит ручная корректировка валютного дела, связанного с акциями, и самой валютой, ниже - кнопки. Нажимай с умом.",
+        color=6776679
+    )
+    dc_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
+    await channel.send(embeds=[dc_embed1, dc_embed2], view=DCView())
+
+    # --- 2. Панель промокодов ---
+    promo_embed1 = disnake.Embed(color=6776679)
+    promo_embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1537853007754957021/image.png?ex=6a808cb8&is=6a7f3b38&hm=9a8ed29d187e151fe6fe207910dd8665d74b9e2ab794c62e364e72e17079d7f6&=&format=webp&quality=lossless")
+    promo_embed2 = disnake.Embed(
+        title="Управление промокодами",
+        description="> Используй данную панель, для управления промокодами.",
+        color=6776679
+    )
+    promo_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+    await channel.send(embeds=[promo_embed1, promo_embed2], view=PromoView())
+
+    # --- 3. Админ-панель ---
+    admin_embed1 = disnake.Embed(color=6776679)
+    admin_embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&")
+    admin_embed2 = disnake.Embed(
+        title="Панель управление сервером",
+        description="> С помощью данной панели, происходит управление сервером, старые команды, были заменены одной панелью, что дает доступ, в одном виде. Ниже - предоставлены кнопки. Используй с умом.",
+        color=6776679
+    )
+    admin_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307759390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
+    await channel.send(embeds=[admin_embed1, admin_embed2], view=AdminView())
+
+    await log_discord(
+        title="🛠️ Служебные панели обновлены",
+        description=f"> Панели (Экономика DC / Промокоды / Админ) отправлены в {channel.mention}",
+        color=0x00ff00
+    )
+
+
+# ============================================================
 # КОМАНДА /say
 # ============================================================
 @commands.slash_command(
@@ -533,16 +605,16 @@ async def say(
 
 
 # ============================================================
-# КОМАНДА /gw_dc
+# КОМАНДА /dc_file (было: /gw_dc)
 # ============================================================
 @commands.slash_command(
-    name="gw_dc",
-    description="Выдать DC победителям розыгрыша из файла (админ)"
+    name="dc_file",
+    description="Начислить DC всем ID из текстового файла (админ)"
 )
-async def gw_dc(
+async def dc_file(
     ctx,
-    amount: int = commands.Param(description="Количество DC для каждого победителя"),
-    file: disnake.Attachment = commands.Param(description="Текстовый файл с ID победителей (по одному на строку)")
+    amount: int = commands.Param(description="Количество DC для каждого получателя"),
+    file: disnake.Attachment = commands.Param(description="Текстовый файл с ID (по одному на строку)")
 ):
     if not has_admin_command_roles(ctx.author):
         return await ctx.send("⛔ У вас нет прав.", ephemeral=True)
@@ -572,15 +644,15 @@ async def gw_dc(
         fail_count = 0
         for uid in user_ids:
             try:
-                await add_dc(uid, amount, f"Выигрыш в розыгрыше ({amount} DC)")
+                await add_dc(uid, amount, f"Начисление из файла ({amount} DC)")
                 success_count += 1
             except Exception as e:
                 logger.error(f"Ошибка начисления {amount} DC пользователю {uid}: {e}")
                 fail_count += 1
 
         await ctx.send(
-            f"✅ Розыгрыш завершён!\n"
-            f"👥 Всего участников: {len(user_ids)}\n"
+            f"✅ Начисление завершено!\n"
+            f"👥 Всего получателей: {len(user_ids)}\n"
             f"✅ Успешно начислено: {success_count}\n"
             f"❌ Ошибок: {fail_count}\n"
             f"💎 Всего выдано: {success_count * amount} DC",
@@ -588,11 +660,11 @@ async def gw_dc(
         )
 
         await log_discord(
-            title="🎁 Выдача DC победителям розыгрыша",
+            title="💎 Начисление DC из файла",
             description=(
                 f"> **Админ:** {ctx.author.mention}\n"
                 f"> **Количество:** {amount} DC на человека\n"
-                f"> **Участников:** {len(user_ids)}\n"
+                f"> **Получателей:** {len(user_ids)}\n"
                 f"> **Всего выдано:** {success_count * amount} DC"
             ),
             color=0xffaa00,
@@ -600,64 +672,13 @@ async def gw_dc(
         )
 
     except Exception as e:
-        logger.exception(f"Ошибка в команде gw_dc: {e}")
+        logger.exception(f"Ошибка в команде dc_file: {e}")
         await ctx.send(f"❌ Произошла ошибка: {e}", ephemeral=True)
 
 
 # ============================================================
-# СЛАШ-КОМАНДЫ ПАНЕЛЕЙ
-# ============================================================
-@commands.slash_command(name="panel_dc", description="Экономическая панель Diamond Coins (админ)")
-async def panel_dc(inter: disnake.ApplicationCommandInteraction):
-    if not has_admin_command_roles(inter.author):
-        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202627005874318/image.png?ex=6a81d254&is=6a8080d4&hm=638d4a0af652ad4a72f25c2d193abff8e74879cf2dd173079a863484559c1dca&=&format=webp&quality=lossless")
-    embed2 = disnake.Embed(
-        title="Экономическая панель Diamond Coins",
-        description="> В данном разделе, происходит ручная корректировка валютного дела, связанного с акциями, и самой валютой, ниже - кнопки. Нажимай с умом.",
-        color=6776679
-    )
-    embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
-    await inter.send(embeds=[embed1, embed2], ephemeral=True, view=DCView())
-
-
-@commands.slash_command(name="promocodes", description="Управление промокодами (админ)")
-async def promocodes(inter: disnake.ApplicationCommandInteraction):
-    if not has_admin_command_roles(inter.author):
-        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
-    embeds = [
-        disnake.Embed(color=6776679).set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1537853007754957021/image.png?ex=6a808cb8&is=6a7f3b38&hm=9a8ed29d187e151fe6fe207910dd8665d74b9e2ab794c62e364e72e17079d7f6&=&format=webp&quality=lossless"),
-        disnake.Embed(
-            title="Управление промокодами",
-            description="> Используй данную панель, для управления промокодами.",
-            color=6776679
-        ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
-    ]
-    await inter.send(embeds=embeds, ephemeral=True, view=PromoView())
-
-
-@commands.slash_command(name="admin_panel", description="Панель управления сервером (админ)")
-async def admin_panel(inter: disnake.ApplicationCommandInteraction):
-    if not has_admin_command_roles(inter.author):
-        return await inter.send("⛔ У вас нет прав.", ephemeral=True)
-    embeds = [
-        disnake.Embed(color=6776679).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&"),
-        disnake.Embed(
-            title="Панель управление сервером",
-            description="> С помощью данной панели, происходит управление сервером, старые команды, были заменены одной панелью, что дает доступ, в одном виде. Ниже - предоставлены кнопки. Используй с умом.",
-            color=6776679
-        ).set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a808b23&is=6a7f39a3&hm=38fda4f54c273fb8cada8c1332a7f5fe77041eed1e642797bd7e8d92094252b7&")
-    ]
-    await inter.send(embeds=embeds, ephemeral=True, view=AdminView())
-
-
-# ============================================================
-# НАСТРОЙКА МОДУЛЯ (для main.py)
+# РЕГИСТРАЦИЯ СЛЭШ-КОМАНД
 # ============================================================
 def setup_commands_admin(bot):
-    bot.add_slash_command(panel_dc)
-    bot.add_slash_command(admin_panel)
-    bot.add_slash_command(promocodes)
     bot.add_slash_command(say)
-    bot.add_slash_command(gw_dc)
+    bot.add_slash_command(dc_file)
