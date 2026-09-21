@@ -33,6 +33,8 @@ from modules.dc import (
 from modules.actions import load_action_embed
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1541805596842664017/image.png?ex=6a8eeddb&is=6a8d9c5b&hm=bd497621b27b7c095b9b6cd3af8fa2d5135f68ad247ca03a2e3305c4350107e7&"
+
 
 # ============================================================
 # ЗАЩИТА ОТ БАГОЮЗА
@@ -54,7 +56,7 @@ def _release_buy_lock(uid: int):
 
 
 # ============================================================
-# ХЕЛПЕР
+# ХЕЛПЕРЫ
 # ============================================================
 def _load_slid_embeds() -> list:
     base_project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,11 +117,8 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         if role:
             overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
-    # Быстрый ответ — ставим "⏳" в ephemeral (в рамках 3 сек)
     try:
-        await inter.response.edit_message(
-            content="⏳ Создаём тикет...", embeds=[], view=None
-        )
+        await inter.response.edit_message(content="⏳ Создаём тикет...", embeds=[], view=None)
     except Exception as e:
         logger.warning(f"edit_message '⏳' failed: {e}")
 
@@ -133,7 +132,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
             pass
         return
 
-    # Загружаем шаблон
     try:
         with open(CONFIG["INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -172,7 +170,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # Финальное сообщение в ephemeral — заменяем "⏳"
     try:
         await inter.edit_original_response(
             content=(
@@ -911,7 +908,7 @@ class TicketRatingView(View):
                 color=0xff6600,
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
-            from modules.commands_panels import send_manager_top
+            from modules.commands_staff import send_manager_top
             await send_manager_top()
         except Exception as e:
             logger.error(f"Ошибка при закрытии тикета: {e}")
@@ -940,7 +937,7 @@ class RatingModal(Modal):
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             )
             await inter.response.send_message(f"✅ Спасибо! Оценка {rating}/5 сохранена.", ephemeral=True)
-            from modules.commands_panels import send_manager_top
+            from modules.commands_staff import send_manager_top
             await send_manager_top()
         else:
             await inter.response.send_message("❌ Менеджер не назначен.", ephemeral=True)
@@ -988,7 +985,7 @@ class TicketView(View):
                     color=0xff6600,
                     channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
                 )
-                from modules.commands_panels import send_manager_top
+                from modules.commands_staff import send_manager_top
                 await send_manager_top()
             except Exception as e:
                 logger.error(f"Ошибка закрытия: {e}")
@@ -1005,7 +1002,7 @@ class TicketView(View):
         manager_mention = manager.mention if manager else "Не назначен"
 
         embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541805596842664017/image.png?ex=6a8eeddb&is=6a8d9c5b&hm=bd497621b27b7c095b9b6cd3af8fa2d5135f68ad247ca03a2e3305c4350107e7&")
+        embed1.set_image(url=IMG_ORDER_PAID)
         embed2 = disnake.Embed(
             title="Отзыв после выполнения товара.\n",
             description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
@@ -1060,6 +1057,32 @@ class TicketView(View):
         )
         embed.set_image(url=_IMG_STRIPE)
         await channel.send(embed=embed)
+
+        # ⬇️ ЛС клиенту о подтверждении оплаты
+        try:
+            owner_id_here = get_ticket_owner(channel.id)
+            owner_member = inter.guild.get_member(owner_id_here) if owner_id_here else None
+            if owner_member:
+                embed_dm1 = disnake.Embed(color=6776679)
+                embed_dm1.set_image(url=IMG_ORDER_PAID)
+                embed_dm2 = disnake.Embed(
+                    title="💚 Ваш заказ подтверждён как оплачен!",
+                    description=(
+                        f"> Менеджер **{inter.author.display_name}** подтвердил оплату вашего заказа.\n\n"
+                        f"> **Тикет:** {channel.mention}\n\n"
+                        f"> Скоро мы приступим к его выполнению. "
+                        f"Если у вас есть вопросы — пишите прямо в тикете."
+                    ),
+                    color=0x2ecc71,
+                    timestamp=datetime.now(timezone.utc)
+                )
+                embed_dm2.set_image(url=_IMG_STRIPE)
+                await owner_member.send(embeds=[embed_dm1, embed_dm2])
+        except disnake.Forbidden:
+            logger.warning(f"ЛС закрыты у {owner_id_here}")
+        except Exception as e:
+            logger.warning(f"ЛС при оплате: {e}")
+
         await inter.response.send_message("✅ Заказ отмечен как оплаченный.", ephemeral=True)
         await log_discord(
             title="💰 Заказ оплачен",
@@ -1098,10 +1121,12 @@ class TicketView(View):
             emoji=PartialEmoji(name="prom1", id=1539646792139014234),
             row=0
         )
+
         async def promo_callback(inter2: disnake.MessageInteraction, _view=view):
             if inter2.author.id != inter.author.id:
                 return await inter2.response.send_message("⛔ Это не ваш тикет.", ephemeral=True)
             await inter2.response.send_modal(PromoCodeModal(original_view=_view))
+
         btn_promo.callback = promo_callback
         view.add_item(btn_promo)
         current_row = 0
@@ -1217,7 +1242,7 @@ class TicketPaidView(View):
                     color=0xff6600,
                     channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
                 )
-                from modules.commands_panels import send_manager_top
+                from modules.commands_staff import send_manager_top
                 await send_manager_top()
             except Exception as e:
                 logger.error(f"Ошибка при закрытии: {e}")
@@ -1228,7 +1253,7 @@ class TicketPaidView(View):
             user_mention = owner.mention if owner else f"<@{owner_id}>"
             manager_mention = manager.mention if manager else "Не назначен"
             embed1 = disnake.Embed(color=6776679)
-            embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541805596842664017/image.png?ex=6a8eeddb&is=6a8d9c5b&hm=bd497621b27b7c095b9b6cd3af8fa2d5135f68ad247ca03a2e3305c4350107e7&")
+            embed1.set_image(url=IMG_ORDER_PAID)
             embed2 = disnake.Embed(
                 title="Отзыв после выполнения товара.\n",
                 description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
@@ -1301,7 +1326,7 @@ class CoinsTicketButtons(View):
                     color=0xff6600,
                     channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
                 )
-                from modules.commands_panels import send_manager_top
+                from modules.commands_staff import send_manager_top
                 await send_manager_top()
             except Exception as e:
                 logger.error(f"Ошибка закрытия: {e}")
@@ -1312,7 +1337,7 @@ class CoinsTicketButtons(View):
             user_mention = owner.mention if owner else f"<@{owner_id}>"
             manager_mention = manager.mention if manager else "Не назначен"
             embed1 = disnake.Embed(color=6776679)
-            embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541805596842664017/image.png?ex=6a8eeddb&is=6a8d9c5b&hm=bd497621b27b7c095b9b6cd3af8fa2d5135f68ad247ca03a2e3305c4350107e7&")
+            embed1.set_image(url=IMG_ORDER_PAID)
             embed2 = disnake.Embed(
                 title="Отзыв после выполнения товара.\n",
                 description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
@@ -1455,14 +1480,20 @@ class BuySelectView(View):
             return await inter.response.edit_message(
                 content="❌ В этой категории пока нет товаров.", embeds=[], view=None
             )
+
+        # ⬇️ Показываем баланс
+        user_balance = await get_user_balance(inter.author.id)
+
         options = []
         for key, item in items.items():
             label = f"{item['name']} - {item['price']} DC"
             if len(label) > 100:
                 label = label[:97] + "..."
+            can_afford = "✅" if user_balance >= item["price"] else "❌"
+            desc = f"{can_afford} {item.get('description', '')[:90]}"
             options.append(SelectOption(
                 label=label,
-                description=item.get("description", "")[:100],
+                description=desc,
                 value=f"{category}_{key}",
             ))
         view = View(timeout=None)
@@ -1472,7 +1503,16 @@ class BuySelectView(View):
         back_btn = Button(label="🔙 Назад", style=ButtonStyle.gray, custom_id="buy_back")
         back_btn.callback = self.back_callback
         view.add_item(back_btn)
-        await inter.response.edit_message(content="Выберите товар из категории:", embeds=[], view=view)
+
+        await inter.response.edit_message(
+            content=(
+                f"💎 **Ваш баланс:** `{user_balance} DC`\n"
+                f"> **✅** — можете купить · **❌** — не хватает DC\n\n"
+                f"Выберите товар из категории:"
+            ),
+            embeds=[],
+            view=view
+        )
 
     async def item_callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0]
@@ -1489,14 +1529,30 @@ class BuySelectView(View):
                 content="❌ Товар не найден.", embeds=[], view=None
             )
 
+        # ⬇️ Показываем баланс и статус покупки
+        user_balance = await get_user_balance(inter.author.id)
+        price = item["price"]
+        if user_balance >= price:
+            status_line = f"**Ваш баланс:** `{user_balance} DC`\n**Статус:** ✅ Можете купить"
+            color = 0x2ecc71
+        else:
+            missing = price - user_balance
+            status_line = (
+                f"**Ваш баланс:** `{user_balance} DC`\n"
+                f"**Цена:** `{price} DC`\n"
+                f"**Не хватает:** ❌ `{missing} DC`"
+            )
+            color = 0xed4245
+
         embed = disnake.Embed(
             title="🛒 Информация о товаре:",
             description=(
                 f"> **Название:** {item['name']}\n\n"
                 f"> **Описание:** {item['description']}\n\n"
-                "Как покупаем данный товар, выберите способ ниже:\n\n"
+                f"{status_line}\n\n"
+                "Как покупаем данный товар, выберите способ ниже:"
             ),
-            color=6776679
+            color=color
         )
         embed.set_image(url=_IMG_STRIPE)
 
