@@ -58,6 +58,10 @@ _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/153785
 # ============================================================
 # КАРТОЧКА ПРОФИЛЯ + 3 КНОПКИ
 # ============================================================
+IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
+IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
+
+
 class ProfileCardView(View):
     def __init__(self):
         super().__init__(timeout=300)
@@ -71,9 +75,11 @@ class ProfileCardView(View):
     async def inv_btn(self, button, inter: disnake.MessageInteraction):
         purchases = await get_user_purchases(inter.author.id, only_unused=True)
 
+        # embed1 — шапка с картинкой
         embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url=_IMG_STRIPE)
+        embed1.set_image(url=IMG_INV_TOP)
 
+        # embed2 — данные
         if not purchases:
             desc = (
                 "> У вас пока нет купленных товаров за **Diamond Coin**.\n"
@@ -130,9 +136,11 @@ class ProfileCardView(View):
                 continue
             custom.append(r)
 
+        # embed1 — шапка с картинкой
         embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url=_IMG_STRIPE)
+        embed1.set_image(url=IMG_ROLES_TOP)
 
+        # embed2 — данные
         if not custom:
             desc = (
                 "> У вас нет кастомных ролей.\n"
