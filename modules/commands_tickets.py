@@ -33,7 +33,12 @@ from modules.dc import (
 from modules.actions import load_action_embed
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+
+# ЛС клиенту при подтверждении оплаты
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
+
+# Запрос отзыва при закрытии тикета
+IMG_RATING = "https://cdn.discordapp.com/attachments/1527006158282555412/1551636456403894383/image.png?ex=6ab2b18f&is=6ab1600f&hm=b735a4db21085a96326573718f9c397d574fd2d6690c5c55a22e7bc33f4da67a&"
 
 
 # ============================================================
@@ -1001,8 +1006,9 @@ class TicketView(View):
         user_mention = owner.mention if owner else f"<@{owner_id}>"
         manager_mention = manager.mention if manager else "Не назначен"
 
+        # ⬇️ IMG_RATING — это картинка для запроса отзыва
         embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url=IMG_ORDER_PAID)
+        embed1.set_image(url=IMG_RATING)
         embed2 = disnake.Embed(
             title="Отзыв после выполнения товара.\n",
             description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
@@ -1058,7 +1064,7 @@ class TicketView(View):
         embed.set_image(url=_IMG_STRIPE)
         await channel.send(embed=embed)
 
-        # ⬇️ ЛС клиенту о подтверждении оплаты
+        # ⬇️ ЛС клиенту — картинка IMG_ORDER_PAID
         try:
             owner_id_here = get_ticket_owner(channel.id)
             owner_member = inter.guild.get_member(owner_id_here) if owner_id_here else None
@@ -1252,8 +1258,9 @@ class TicketPaidView(View):
             manager = channel.guild.get_member(manager_id) if manager_id else None
             user_mention = owner.mention if owner else f"<@{owner_id}>"
             manager_mention = manager.mention if manager else "Не назначен"
+            # ⬇️ IMG_RATING — для запроса отзыва
             embed1 = disnake.Embed(color=6776679)
-            embed1.set_image(url=IMG_ORDER_PAID)
+            embed1.set_image(url=IMG_RATING)
             embed2 = disnake.Embed(
                 title="Отзыв после выполнения товара.\n",
                 description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
@@ -1336,8 +1343,9 @@ class CoinsTicketButtons(View):
             manager = channel.guild.get_member(manager_id) if manager_id else None
             user_mention = owner.mention if owner else f"<@{owner_id}>"
             manager_mention = manager.mention if manager else "Не назначен"
+            # ⬇️ IMG_RATING — для запроса отзыва
             embed1 = disnake.Embed(color=6776679)
-            embed1.set_image(url=IMG_ORDER_PAID)
+            embed1.set_image(url=IMG_RATING)
             embed2 = disnake.Embed(
                 title="Отзыв после выполнения товара.\n",
                 description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
@@ -1481,7 +1489,6 @@ class BuySelectView(View):
                 content="❌ В этой категории пока нет товаров.", embeds=[], view=None
             )
 
-        # ⬇️ Показываем баланс
         user_balance = await get_user_balance(inter.author.id)
 
         options = []
@@ -1529,7 +1536,6 @@ class BuySelectView(View):
                 content="❌ Товар не найден.", embeds=[], view=None
             )
 
-        # ⬇️ Показываем баланс и статус покупки
         user_balance = await get_user_balance(inter.author.id)
         price = item["price"]
         if user_balance >= price:
