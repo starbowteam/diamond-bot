@@ -39,7 +39,7 @@ from modules.dc import (
     daily_bonus
 )
 from modules.boosts import (
-    apply_boost, get_review_cooldown, try_daily_reset,
+    apply_boost, get_review_cooldown,
 )
 
 intents = disnake.Intents.default()
@@ -61,7 +61,6 @@ _REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
 
-# 💎 Награды за отзыв по роли (после перехода)
 REVIEW_REWARDS_BY_ROLE = [
     (1127430321214861395,  1, 15),
     (1137721688683970643,  3, 25),
@@ -79,12 +78,11 @@ FLASH_SALE_CHECK_MINUTES = 30
 
 MSK = timezone(timedelta(hours=3))
 
-# Джекпот
 JACKPOT_DRAW_HOURS = 6
 JACKPOT_BASE_BANK = 1000
 
 
-def get_review_reward(new_review_count: int) -> int:
+def get_review_reward(new_review_count):
     reward = 15
     for _role_id, min_count, dc in REVIEW_REWARDS_BY_ROLE:
         if new_review_count >= min_count:
@@ -94,7 +92,7 @@ def get_review_reward(new_review_count: int) -> int:
     return reward
 
 
-def get_review_reward_role_name(new_review_count: int) -> str:
+def get_review_reward_role_name(new_review_count):
     name = "Клуб"
     map_names = {
         1127430321214861395: "Bronze Buyer",
@@ -125,42 +123,33 @@ SALARY_ROLES = {
     1457964854441672806: {"advance": 40, "salary": 80},
 }
 SALARY_ROLE_ORDER = [
-    1471844291595731016,
-    1513935883475226796,
-    1154757071330365490,
-    1471190371181789234,
+    1471844291595731016, 1513935883475226796,
+    1154757071330365490, 1471190371181789234,
     1457964854441672806,
 ]
 
 
-async def process_salary(mode: str):
+async def process_salary(mode):
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
-        logger.warning(f"process_salary({mode}): guild not found")
         return
-
     total = 0
     awarded = 0
     errors = 0
     stats = {role_id: 0 for role_id in SALARY_ROLE_ORDER}
-
     for member in guild.members:
         if member.bot:
             continue
-
         top_role_id = None
         for role_id in SALARY_ROLE_ORDER:
             if member.get_role(role_id):
                 top_role_id = role_id
                 break
-
         if not top_role_id:
             continue
-
         amount = SALARY_ROLES[top_role_id][mode]
         if amount <= 0:
             continue
-
         try:
             await add_dc(member.id, amount,
                          f"{'Зарплата' if mode == 'salary' else 'Аванс'} по роли {top_role_id} (авто)")
@@ -168,28 +157,16 @@ async def process_salary(mode: str):
             awarded += 1
             total += amount
         except Exception as e:
-            logger.error(f"Ошибка авто-начисления {mode} пользователю {member.id}: {e}")
+            logger.error(f"salary error {member.id}: {e}")
             errors += 1
-
     result_lines = []
     for role_id in SALARY_ROLE_ORDER:
-        count = stats[role_id]
-        if count > 0:
+        if stats[role_id] > 0:
             role = guild.get_role(role_id)
-            role_name = role.name if role else str(role_id)
-            result_lines.append(f"**{role_name}** – {count} чел.")
-    result_text = "\n".join(result_lines) if result_lines else "Никто не получил."
-
-    logger.info(f"Авто-выдача {mode}: {awarded} чел., {total} DC, ошибок: {errors}")
+            result_lines.append(f"**{role.name if role else role_id}** – {stats[role_id]}")
     await log_discord(
         title=f"💰 Авто-выдача {'зарплаты' if mode == 'salary' else 'аванса'}",
-        description=(
-            f"> **Тип:** {'Зарплата (31 число)' if mode == 'salary' else 'Аванс (15 число)'}\n"
-            f"> **Сотрудников:** {awarded}\n"
-            f"> **Всего выдано:** {total} DC\n"
-            f"> **Ошибок:** {errors}\n"
-            f"> **Распределение:**\n{result_text}"
-        ),
+        description=f"> **Сотрудников:** {awarded}\n> **Всего:** {total} DC\n> **Ошибок:** {errors}",
         color=0x00ff00
     )
 
@@ -209,65 +186,44 @@ async def schedule_banner_update():
     try:
         await update_review_counter(silent=True)
     except Exception as e:
-        logger.exception(f"schedule_banner_update error: {e}")
+        logger.exception(f"schedule_banner_update: {e}")
 
 
-async def update_review_counter(silent: bool = False):
+async def update_review_counter(silent=False):
     try:
         text_ch = bot.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
         if not text_ch:
             text_ch = await bot.fetch_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
         if not text_ch:
-            logger.warning("update_review_counter: review channel not found")
             return
         count = 1431
         async for m in text_ch.history(limit=None):
             count += 1
-        logger.info("Review count: %s", count)
         await update_server_banner(count, silent)
     except Exception as e:
-        logger.exception("update_review_counter error: %s", e)
-        if not silent:
-            await log_discord(
-                title="❌ Ошибка обновления счётчика отзывов",
-                description=f"> **Ошибка:** `{str(e)}`",
-                color=0xff0000
-            )
+        logger.exception("update_review_counter: %s", e)
 
 
-async def update_server_banner(review_count: int, silent: bool = False):
+async def update_server_banner(review_count, silent=False):
     try:
         from PIL import Image, ImageDraw, ImageFont
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
         font_path = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
-
-        if not os.path.exists(base_path):
+        if not os.path.exists(base_path) or not os.path.exists(font_path):
             return
-        if not os.path.exists(font_path):
-            return
-
         img = Image.open(base_path).convert("RGBA")
         draw = ImageDraw.Draw(img)
         font = ImageFont.truetype(font_path, 400)
-        text = str(review_count)
-        draw.text((594, 540), text, font=font, fill=(255, 255, 255), anchor="mm")
+        draw.text((594, 540), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
         img.save(output_path)
-
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if not guild:
             return
         with open(output_path, "rb") as f:
             await guild.edit(banner=f.read())
-        logger.info("Banner updated with %s reviews", review_count)
-        if not silent:
-            await log_discord(
-                title="🖼️ Баннер обновлён",
-                description=f"> **Количество отзывов:** `{review_count}`",
-                color=0x00aaff
-            )
     except Exception as e:
-        logger.exception("Banner update error: %s", e)
+        logger.exception("Banner error: %s", e)
 
 
 # ============================================================
@@ -292,15 +248,11 @@ async def daily_deal_task():
         before = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
         deal = refresh_daily_deal()
         after = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
-
         if before.get("slot") != after.get("slot"):
             if after.get("flash_slot"):
-                logger.info("Флеш-слот — запускаем флеш-акцию")
                 await start_flash_sale(bot)
-            elif deal:
-                logger.info(f"Товар дня авто-обновлён: {deal['item_data']['name']}")
     except Exception as e:
-        logger.exception(f"daily_deal_task error: {e}")
+        logger.exception(f"daily_deal_task: {e}")
 
 
 @tasks.loop(minutes=FLASH_SALE_CHECK_MINUTES)
@@ -309,7 +261,6 @@ async def flash_sale_task():
     try:
         data = load_flash_sale()
         now = time.time()
-
         if data.get("active"):
             started = data.get("started_at", 0)
             if now - started >= FLASH_SALE_DURATION:
@@ -320,123 +271,101 @@ async def flash_sale_task():
                         ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                         msg = await ch.fetch_message(msg_id)
                         await msg.delete()
-                    except Exception as e:
-                        logger.warning(f"Не удалось удалить flash-сообщение: {e}")
+                    except Exception:
+                        pass
                 save_flash_sale({
                     "active": False, "item": None,
                     "started_at": 0, "message_id": 0, "channel_id": 0
                 })
-                await log_discord(
-                    title="⚡ Flash sale завершён",
-                    description=f"> **Товар:** {data.get('item', {}).get('item_data', {}).get('name', '—')}",
-                    color=0xff6600
-                )
     except Exception as e:
-        logger.exception(f"flash_sale_task error: {e}")
+        logger.exception(f"flash_sale_task: {e}")
+
+
+@tasks.loop(minutes=10)
+async def boost_cleanup_task():
+    """Удаляет истёкшие и использованные предметы."""
+    await bot.wait_until_ready()
+    try:
+        now = int(time.time())
+        cur.execute("""
+            DELETE FROM user_items
+            WHERE (expires_at > 0 AND expires_at < ?)
+               OR uses_left = 0
+        """, (now,))
+        db.commit()
+    except Exception as e:
+        logger.exception(f"boost_cleanup_task: {e}")
 
 
 @tasks.loop(hours=JACKPOT_DRAW_HOURS)
 async def jackpot_draw_task():
-    """Розыгрыш джекпота раз в N часов."""
     await bot.wait_until_ready()
     try:
         participants = get_jackpot_participants()
         if not participants:
-            logger.info("Jackpot: нет билетов — пропускаем")
             return
-
         jackpot = load_jackpot()
         bank = jackpot.get("bank", 0)
         if bank < 100:
-            logger.info(f"Jackpot: банк слишком мал ({bank}) — пропускаем")
             return
-
         winner_id = random.choice(participants)
-
         try:
-            await add_dc(winner_id, bank, "🎰 Выигрыш в мега-джекпоте казино")
+            await add_dc(winner_id, bank, "🎰 Выигрыш в мега-джекпоте")
         except Exception as e:
-            logger.exception(f"Jackpot: ошибка начисления {e}")
+            logger.exception(f"jackpot add_dc: {e}")
             return
-
-        # Обновляем статистику
         jackpot["bank"] = JACKPOT_BASE_BANK
         jackpot["last_draw"] = int(time.time())
         jackpot["last_winner"] = winner_id
         jackpot["history"] = (jackpot.get("history", []) + [{
-            "winner": winner_id,
-            "amount": bank,
-            "date": int(time.time())
+            "winner": winner_id, "amount": bank, "date": int(time.time())
         }])[-20:]
         save_jackpot(jackpot)
-
         clear_all_jackpot_tickets()
-
-        # Общий лог
         await log_discord(
             title="🎰 ДЖЕКПОТ РАЗЫГРАН!",
             description=(
                 f"> **Победитель:** <@{winner_id}>\n"
                 f"> **Выигрыш:** `{bank} DC`\n"
-                f"> **Участников:** `{len(participants)}`\n\n"
-                f"> Билеты сброшены, банк обнулён до базового `{JACKPOT_BASE_BANK} DC`."
+                f"> **Участников:** `{len(participants)}`\n"
+                f"> Банк сброшен до `{JACKPOT_BASE_BANK} DC`."
             ),
-            color=0xff00aa,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            color=0xff00aa, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
-
-        # Пинг победителя
         try:
             guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
             if guild:
                 winner = guild.get_member(winner_id)
                 if winner:
-                    dm_embed = disnake.Embed(
+                    dm = disnake.Embed(
                         title="🎉 ВЫ ВЫИГРАЛИ ДЖЕКПОТ!",
-                        description=(
-                            f"> Ваш билет выиграл мега-джекпот казино!\n\n"
-                            f"> **Выигрыш:** `{bank} DC`\n"
-                            f"> Заберите свой приз — он уже на балансе!"
-                        ),
+                        description=f"> **Выигрыш:** `{bank} DC`\n> Уже на балансе!",
                         color=0xff00aa,
                         timestamp=datetime.now(timezone.utc)
                     )
-                    dm_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&")
-                    await winner.send(embed=dm_embed)
+                    dm.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&")
+                    await winner.send(embed=dm)
         except Exception as e:
-            logger.warning(f"Jackpot: не удалось отправить ЛС победителю: {e}")
-
-        logger.info(f"Jackpot разыгран: {winner_id} получил {bank} DC из {len(participants)} билетов")
-
+            logger.warning(f"jackpot dm: {e}")
     except Exception as e:
-        logger.exception(f"jackpot_draw_task error: {e}")
+        logger.exception(f"jackpot_draw_task: {e}")
 
 
 @tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
 async def salary_advance_task():
     await bot.wait_until_ready()
-    try:
-        now_msk = datetime.now(MSK)
-        if now_msk.day != 15:
-            return
-        logger.info("Авто-выдача аванса запущена (15 число, 00:00 МСК)")
-        await process_salary("advance")
-    except Exception as e:
-        logger.exception(f"salary_advance_task error: {e}")
+    if datetime.now(MSK).day != 15:
+        return
+    await process_salary("advance")
 
 
 @tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
 async def salary_main_task():
     await bot.wait_until_ready()
-    try:
-        now_msk = datetime.now(MSK)
-        tomorrow = now_msk + timedelta(days=1)
-        if tomorrow.day != 1:
-            return
-        logger.info("Авто-выдача зарплаты запущена (последний день месяца, 00:00 МСК)")
-        await process_salary("salary")
-    except Exception as e:
-        logger.exception(f"salary_main_task error: {e}")
+    now_msk = datetime.now(MSK)
+    if (now_msk + timedelta(days=1)).day != 1:
+        return
+    await process_salary("salary")
 
 
 # ============================================================
@@ -458,9 +387,7 @@ async def on_ready():
             TarologyView, WorkView
         )
         from modules.commands_profile import send_profile_panel, ProfileView
-        from modules.commands_admin import (
-            DCView, PromoView, AdminView, send_staff_panels
-        )
+        from modules.commands_admin import DCView, PromoView, AdminView, send_staff_panels
 
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
@@ -508,7 +435,7 @@ async def on_ready():
                     member = guild.get_member(uid)
                     if member:
                         await update_user_roles(member, count, keep_pka=True)
-                logger.info(f"Роли обновлены для {len(counts)} пользователей по отзывам")
+                logger.info(f"Роли обновлены для {len(counts)} пользователей")
 
         await update_review_counter(silent=False)
 
@@ -520,6 +447,8 @@ async def on_ready():
             daily_deal_task.start()
         if not flash_sale_task.is_running():
             flash_sale_task.start()
+        if not boost_cleanup_task.is_running():
+            boost_cleanup_task.start()
         if not jackpot_draw_task.is_running():
             jackpot_draw_task.start()
         if not salary_advance_task.is_running():
@@ -530,7 +459,7 @@ async def on_ready():
         logger.info("%s is ready", bot.user)
         await log_discord(
             title="✅ Бот запустился",
-            description=f"> **{bot.user}** готов и онлайн.\n> Роли обновлены для {len(counts) if counts else 0} пользователей.",
+            description=f"> **{bot.user}** готов и онлайн.",
             color=0x00ff00
         )
     except Exception as e:
@@ -567,7 +496,7 @@ async def keep_voice_alive():
 # ============================================================
 # ПЕРЕСТРОЙКА ПРАВ ТИКЕТА
 # ============================================================
-async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
+async def reassign_ticket_permissions(channel, manager):
     guild = channel.guild
 
     for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
@@ -610,7 +539,7 @@ async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: dis
 # СОБЫТИЯ
 # ============================================================
 @bot.event
-async def on_member_join(member: disnake.Member):
+async def on_member_join(member):
     await log_discord(
         title="👤 Участник зашёл",
         description=f"> **{member.mention}** (`{member}`) присоединился.\n> ID: `{member.id}`",
@@ -646,15 +575,10 @@ async def on_member_join(member: disnake.Member):
     db.execute("INSERT INTO invites (guild_id, inviter_id, member_id, joined_at, is_bot) VALUES (?, ?, ?, ?, ?)",
                 (guild.id, inviter_id, member.id, joined_at, is_bot))
     db.commit()
-    await log_discord(
-        title="📨 Использован инвайт",
-        description=f"> **Пользователь:** {member.mention}\n> **Пригласил:** <@{inviter_id}>\n> **Код:** `{used_invite.code}`",
-        color=0x00aaff
-    )
 
 
 @bot.event
-async def on_member_remove(member: disnake.Member):
+async def on_member_remove(member):
     guild = member.guild
     await log_discord(
         title="🚪 Участник вышел",
@@ -670,14 +594,14 @@ async def on_member_remove(member: disnake.Member):
                     (guild.id, member.id))
         await log_discord(
             title="⚠️ Фейковый вход",
-            description=f"> **Пользователь:** {member.mention}\n> Ушёл менее чем через **10 минут** после входа.",
+            description=f"> **Пользователь:** {member.mention}\n> Ушёл <10 мин.",
             color=0xff6600
         )
     db.commit()
 
 
 @bot.event
-async def on_member_update(before: disnake.Member, after: disnake.Member):
+async def on_member_update(before, after):
     if before.display_name != after.display_name:
         await log_discord(
             title="✏️ Изменён никнейм",
@@ -708,13 +632,13 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
 
 
 @bot.event
-async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
+async def on_raw_message_delete(payload):
     if payload.channel_id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         asyncio.create_task(schedule_banner_update())
 
 
 @bot.event
-async def on_message_delete(message: disnake.Message):
+async def on_message_delete(message):
     if message.author.bot:
         return
     content = message.content or "[Нет текста]"
@@ -722,18 +646,17 @@ async def on_message_delete(message: disnake.Message):
         content = content[:1021] + "..."
     await log_discord(
         title="🗑️ Удалено сообщение",
-        description=f"> **Автор:** {message.author.mention} (`{message.author}`)\n> **Канал:** {message.channel.mention}\n> **Содержание:**\n```\n{content}\n```",
+        description=f"> **Автор:** {message.author.mention}\n> **Канал:** {message.channel.mention}\n```\n{content}\n```",
         color=0xff6600
     )
 
 
 @bot.event
-async def on_bulk_message_delete(messages: List[disnake.Message]):
+async def on_bulk_message_delete(messages):
     channel = messages[0].channel if messages else None
-    count = len(messages)
     await log_discord(
-        title="🗑️ Массовое удаление сообщений",
-        description=f"> **Канал:** {channel.mention if channel else 'неизвестно'}\n> **Количество:** `{count}` сообщений",
+        title="🗑️ Массовое удаление",
+        description=f"> **Канал:** {channel.mention if channel else '—'}\n> **Количество:** `{len(messages)}`",
         color=0xff6600
     )
     if channel and channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
@@ -741,44 +664,40 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
 
 
 @bot.event
-async def on_message_edit(before: disnake.Message, after: disnake.Message):
+async def on_message_edit(before, after):
     if before.author.bot:
         return
     if before.content == after.content:
         return
-    before_content = before.content or "[Нет текста]"
-    after_content = after.content or "[Нет текста]"
-    if len(before_content) > 500:
-        before_content = before_content[:497] + "..."
-    if len(after_content) > 500:
-        after_content = after_content[:497] + "..."
+    b_content = (before.content or "")[:500]
+    a_content = (after.content or "")[:500]
     await log_discord(
         title="✏️ Изменено сообщение",
-        description=f"> **Автор:** {before.author.mention} (`{before.author}`)\n> **Канал:** {before.channel.mention}\n> **Было:**\n```\n{before_content}\n```\n> **Стало:**\n```\n{after_content}\n```",
+        description=f"> **Автор:** {before.author.mention}\n> **Канал:** {before.channel.mention}\n> **Было:**\n```\n{b_content}\n```\n> **Стало:**\n```\n{a_content}\n```",
         color=0xffff00
     )
 
 
 @bot.event
-async def on_guild_channel_create(channel: disnake.abc.GuildChannel):
+async def on_guild_channel_create(channel):
     await log_discord(
         title="➕ Создан канал",
-        description=f"> **Название:** {channel.mention} (`{channel.name}`)\n> **Тип:** `{channel.type}`\n> **ID:** `{channel.id}`",
+        description=f"> **Название:** {channel.mention}\n> **Тип:** `{channel.type}`\n> **ID:** `{channel.id}`",
         color=0x00ff00
     )
 
 
 @bot.event
-async def on_guild_channel_delete(channel: disnake.abc.GuildChannel):
+async def on_guild_channel_delete(channel):
     await log_discord(
         title="➖ Удалён канал",
-        description=f"> **Название:** `{channel.name}`\n> **Тип:** `{channel.type}`\n> **ID:** `{channel.id}`",
+        description=f"> **Название:** `{channel.name}`\n> **ID:** `{channel.id}`",
         color=0xff0000
     )
 
 
 @bot.event
-async def on_guild_channel_update(before: disnake.abc.GuildChannel, after: disnake.abc.GuildChannel):
+async def on_guild_channel_update(before, after):
     if before.name != after.name:
         await log_discord(
             title="✏️ Изменён канал",
@@ -788,16 +707,16 @@ async def on_guild_channel_update(before: disnake.abc.GuildChannel, after: disna
 
 
 @bot.event
-async def on_guild_role_create(role: disnake.Role):
+async def on_guild_role_create(role):
     await log_discord(
         title="➕ Создана роль",
-        description=f"> **Название:** {role.mention} (`{role.name}`)\n> **Цвет:** `{role.color}`\n> **ID:** `{role.id}`",
+        description=f"> **Название:** {role.mention}\n> **ID:** `{role.id}`",
         color=0x00ff00
     )
 
 
 @bot.event
-async def on_guild_role_delete(role: disnake.Role):
+async def on_guild_role_delete(role):
     await log_discord(
         title="➖ Удалена роль",
         description=f"> **Название:** `{role.name}`\n> **ID:** `{role.id}`",
@@ -806,46 +725,30 @@ async def on_guild_role_delete(role: disnake.Role):
 
 
 @bot.event
-async def on_guild_role_update(before: disnake.Role, after: disnake.Role):
+async def on_guild_role_update(before, after):
     if before.name != after.name:
         await log_discord(
             title="✏️ Изменена роль",
             description=f"> **Роль:** {after.mention}\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
             color=0xffff00
         )
-    if before.color != after.color:
-        await log_discord(
-            title="🎨 Изменён цвет роли",
-            description=f"> **Роль:** {after.mention}\n> **Было:** `{before.color}`\n> **Стало:** `{after.color}`",
-            color=0xffff00
-        )
 
 
 @bot.event
-async def on_invite_create(invite: disnake.Invite):
+async def on_invite_create(invite):
     db.execute("REPLACE INTO invites_snapshot VALUES (?, ?, ?, ?)",
                 (invite.code, invite.guild.id, invite.uses, invite.inviter.id if invite.inviter else None))
     db.commit()
-    await log_discord(
-        title="📨 Создан инвайт",
-        description=f"> **Код:** `{invite.code}`\n> **Создатель:** {invite.inviter.mention if invite.inviter else 'Неизвестно'}\n> **Канал:** {invite.channel.mention if invite.channel else 'Неизвестно'}\n> **Лимит использований:** `{invite.max_uses}`",
-        color=0x00aaff
-    )
 
 
 @bot.event
-async def on_invite_delete(invite: disnake.Invite):
+async def on_invite_delete(invite):
     db.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
     db.commit()
-    await log_discord(
-        title="🗑️ Удалён инвайт",
-        description=f"> **Код:** `{invite.code}`\n> **Канал:** {invite.channel.mention if invite.channel else 'Неизвестно'}",
-        color=0xff6600
-    )
 
 
 @bot.event
-async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
+async def on_raw_reaction_add(payload):
     if payload.member is None or payload.member.bot:
         return
     guild = bot.get_guild(payload.guild_id)
@@ -865,7 +768,7 @@ async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
 
 
 @bot.event
-async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
+async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
         return
     guild = bot.get_guild(payload.guild_id)
@@ -887,14 +790,14 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
 
 
 @bot.event
-async def on_interaction(inter: disnake.MessageInteraction):
+async def on_interaction(inter):
     from modules.commands_tickets import handle_interaction
     await handle_interaction(inter)
     await handle_flash_interaction(inter)
 
 
 @bot.event
-async def on_message(message: disnake.Message):
+async def on_message(message):
     if message.author.bot:
         return
 
@@ -931,7 +834,6 @@ async def on_message(message: disnake.Message):
         now = time.time()
         text = (message.content or "").strip()
 
-        # Динамический кулдаун (учитывает буст review_cd)
         review_cd = get_review_cooldown(user_id)
 
         last = _REVIEW_COOLDOWN.get(user_id, 0)
@@ -961,14 +863,13 @@ async def on_message(message: disnake.Message):
         try:
             await message.add_reaction("💎")
         except Exception as e:
-            logger.warning(f"Не удалось поставить реакцию на отзыв: {e}")
+            logger.warning(f"Не удалось поставить реакцию: {e}")
 
         counts = load_json(FILES["review_counts"], {})
         new_count = counts.get(str(user_id), 0) + 1
         counts[str(user_id)] = new_count
         save_json(FILES["review_counts"], counts)
 
-        # 💎 Награда по роли + буст
         reward_dc_base = get_review_reward(new_count)
         reward_dc = apply_boost(user_id, "review", reward_dc_base)
         reward_role_name = get_review_reward_role_name(new_count)
@@ -1015,7 +916,7 @@ async def on_message(message: disnake.Message):
             dm_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6a8e62e3&is=6a8d1163&hm=1bb78040233c69c4629e20b50c7dd52a621f0eba270ddc51152b974800d6b48b&")
             await message.author.send(embed=dm_embed)
         except Exception as e:
-            logger.warning(f"Не удалось отправить ЛС об отзыве: {e}")
+            logger.warning(f"Не удалось отправить ЛС: {e}")
 
         await log_discord(
             title="📝 Отзыв принят",
@@ -1040,7 +941,7 @@ voice_track = {}
 
 
 @bot.event
-async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceState, after: disnake.VoiceState):
+async def on_voice_state_update(member, before, after):
     if member.bot:
         return
     user_id = member.id
