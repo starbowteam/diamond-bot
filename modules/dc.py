@@ -2,9 +2,7 @@
 import os
 import json
 import time
-import random
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone
 import disnake
 from disnake.ext import commands
 from disnake.ui import View, Button, Select, Modal, TextInput
@@ -22,15 +20,13 @@ from core.utils import (
 )
 from modules.boosts import (
     apply_boost, get_review_cooldown, get_multiplier,
-    try_daily_reset, is_daily_reset_active,
 )
 
 # ============================================================
-# DC DATA (работа с кешем)
+# DC DATA
 # ============================================================
 def get_user_dc_data(user_id: int) -> dict:
-    data = get_dc_cache(user_id)
-    return data
+    return get_dc_cache(user_id)
 
 def save_user_dc_data(user_id: int, user_data: dict):
     save_dc_cache(user_id, user_data)
@@ -85,7 +81,6 @@ async def remove_dc(user_id: int, amount: int, reason: str) -> bool:
     return True
 
 async def add_purchase(user_id: int, item_type: str, item_value: str, from_action: bool = False):
-    """Добавляет покупку. from_action=True — товар куплен по акции."""
     data = get_dc_cache(user_id)
     for p in data["purchases"]:
         if p["type"] == item_type and p["value"] == item_value and not p["used"]:
@@ -120,9 +115,7 @@ async def remove_purchase(user_id: int, purchase_index: int):
 # Активность
 # ============================================================
 async def check_and_reset_daily(user_id: int):
-    # Сначала проверяем — есть ли у юзера купленный буст daily_reset
-    if try_daily_reset(user_id):
-        return True
+    """Обнуляет счётчики раз в 24 часа. Бусты daily_reset не трогают этот код."""
     data = get_dc_cache(user_id)
     now = int(time.time())
     last_reset = data.get("last_reset_date", 0)
@@ -176,7 +169,6 @@ async def add_voice_dc(user_id: int, seconds: int):
     max_dc = CONFIG["MAX_DAILY_VOICE"]
 
     if mult > 1.0:
-        # При бусте лимит не растёт, но эффективная ставка выше
         target = min(int(hours * base_rate * mult), max_dc * 2)
     else:
         target = min(hours * base_rate, max_dc)
@@ -198,7 +190,7 @@ async def add_voice_dc(user_id: int, seconds: int):
         sync_dc_to_json()
 
 # ============================================================
-# Каталог магазина
+# Каталог
 # ============================================================
 def load_shop_catalog() -> dict:
     path = CONFIG["SHOP_CATALOG_PATH"]
@@ -265,7 +257,7 @@ def create_default_catalog() -> dict:
                 "boost_all_x2":        {"name": "x2 ко всему DC-заработку (12ч)", "price": 280, "description": "Удвоение ЛЮБОГО заработка на 12 часов",     "boost_type": "all_mult",      "value": 2.0, "duration_hours": 12},
                 "boost_review_x2":     {"name": "x2 к DC за отзывы (7 дней)",     "price": 320, "description": "Удвоение награды за отзывы на неделю",       "boost_type": "review_mult",   "value": 2.0, "duration_hours": 168},
                 "boost_cooldown_half": {"name": "Кулдаун отзыва 60 сек (24ч)",    "price": 90,  "description": "Отзыв можно оставить через минуту вместо двух", "boost_type": "review_cd",  "value": 60,  "duration_hours": 24},
-                "boost_daily_reset":   {"name": "Сброс дневного лимита",          "price": 60,  "description": "Обнуляет счётчики сообщений/войса на сегодня", "boost_type": "daily_reset", "value": 0,   "duration_hours": 0}
+                "boost_daily_reset":   {"name": "Сброс дневного лимита",          "price": 60,  "description": "Мгновенно обнуляет счётчики сообщений/войса", "boost_type": "daily_reset", "value": 0,   "duration_hours": 0}
             }
         },
         "casino": {
@@ -318,9 +310,6 @@ async def daily_bonus():
             save_dc_cache(member.id, data)
             sync_dc_to_json()
 
-# ============================================================
-# Прогресс-бар для профиля
-# ============================================================
 def get_progress_bar(count: int):
     thresholds = [
         (1, "club", "Клуб"),
