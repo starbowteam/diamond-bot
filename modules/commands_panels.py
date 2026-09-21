@@ -1,314 +1,139 @@
 # -*- coding: utf-8 -*-
-import os, json, asyncio
+import os
+import json
 from datetime import datetime, timezone
 
 import disnake
-from disnake import ButtonStyle, SelectOption, PartialEmoji
+from disnake import ButtonStyle, SelectOption
 from disnake.ui import Button, Modal, Select, TextInput, View
 
 from core.utils import (
-    CONFIG, FILES, ADD_DIR, logger,
-    load_json, log_discord,
-    get_dc_cache,
+    CONFIG, ADD_DIR, CATALOG_DIR, logger,
+    log_discord,
     clean_embed_for_discohook,
+    load_json,
+    cur, db,
+    reset_manager_stats,
+    has_admin_command_roles,
+    get_closed_orders, remove_closed_order,
+    add_closed_order
 )
-from modules.dc import get_user_purchases
-
-# Padding-символ (Hangul Filler) — занимает место, но невидим
-P = "\u3164"
+from modules.commands_profile import load_embed_from_file
 
 
-def load_embed_from_file(filename: str):
-    path = os.path.join(ADD_DIR, filename)
-    if not os.path.exists(path):
-        return [disnake.Embed(title="❌ Файл не найден", description=f"`{filename}`", color=0xff0000)]
+# ============================================================
+# ХЕЛПЕР: реквизиты для нового менеджерского топа
+# ============================================================
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+
+
+# ============================================================
+# ПАНЕЛЬ "ДОСКА" (board.json)
+# ============================================================
+def load_board_embed() -> list:
+    board_path = os.path.join(ADD_DIR, "board.json")
+    if not os.path.exists(board_path):
+        return [disnake.Embed(
+            title="📋 Доска объявлений",
+            description="> Здесь будет важная информация. Пока данных нет.",
+            color=6776679
+        )]
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(board_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
+        embeds = []
+        for e in data.get("embeds", []):
+            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
+        return embeds
     except Exception as e:
-        logger.error(f"load_embed err {filename}: {e}")
-        return [disnake.Embed(title="❌ Ошибка", description=str(e), color=0xff0000)]
-
-
-def _role_info(count: int):
-    thresholds = [
-        (0,  "none",      "Клуб"),
-        (1,  "bronze",    "Silver Buyer"),
-        (3,  "silver",    "Gold Buyer"),
-        (5,  "gold",      "Diamond Buyer"),
-        (9,  "diamond",   "Emerald Buyer"),
-        (13, "emerald",   "Amethyst Buyer"),
-        (18, "amethyst",  "Legendary Buyer"),
-        (24, "legendary", "Покупатель Века"),
-        (26, "pka",       "Покупатель Века"),
-    ]
-    cur = thresholds[0]
-    for t in thresholds:
-        if count >= t[0]:
-            cur = t
-        else:
-            break
-    return cur[1], cur[2]
-
-
-_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+        logger.error(f"Ошибка загрузки board.json: {e}")
+        return [disnake.Embed(
+            title="❌ Ошибка",
+            description="Не удалось загрузить доску объявлений.",
+            color=0xff0000
+        )]
 
 
 # ============================================================
-# КАРТОЧКА ПРОФИЛЯ + 3 КНОПКИ
+# ПАНЕЛЬ "СПРАВОЧНИК" (Home)
 # ============================================================
-class ProfileCardView(View):
-    def __init__(self):
-        super().__init__(timeout=300)
-
-    @disnake.ui.button(
-        label=f"{P}Инвентарь DC{P}",
-        style=ButtonStyle.gray,
-        custom_id="pcard:inv",
-        emoji=PartialEmoji(name="prize", id=1539657202170859561)
-    )
-    async def inv_btn(self, button, inter: disnake.MessageInteraction):
-        purchases = await get_user_purchases(inter.author.id, only_unused=True)
-
-        embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url=_IMG_STRIPE)
-
-        if not purchases:
-            desc = (
-                "> У вас пока нет купленных товаров за **Diamond Coin**.\n"
-                "> Загляните в каталог магазина, чтобы найти что-то по вкусу!"
-            )
-        else:
-            lines = []
-            for p in purchases[:30]:
-                t = p.get("type", "—")
-                v = p.get("value", "—")
-                lines.append(f"> 💎 **{v}** — `{t}`")
-            desc = "\n".join(lines)
-            if len(purchases) > 30:
-                desc += f"\n\n> …и ещё **{len(purchases) - 30}** позиций"
-
-        embed2 = disnake.Embed(
-            title="Ваш инвентарь Diamond Coin",
-            description=desc,
-            color=6776679,
-            timestamp=datetime.now(timezone.utc)
-        )
-        embed2.set_image(url=_IMG_STRIPE)
-
-        await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
-
-    @disnake.ui.button(
-        label=f"{P}Кастомные роли{P}",
-        style=ButtonStyle.gray,
-        custom_id="pcard:roles",
-        emoji=PartialEmoji(name="image", id=1550869363266027641)
-    )
-    async def roles_btn(self, button, inter: disnake.MessageInteraction):
-        guild = inter.guild
-        member = inter.author
-
-        excluded = set()
-        for rid in CONFIG.get("ROLE_IDS", {}).values():
-            excluded.add(rid)
-        excluded.update({
-            1127428607606796290, 1154757071330365490, 1471844291595731016,
-            1471190371181789234, 1457964854441672806, 1423360115335106570,
-            1539523399611580476,
-        })
-        limit_role = guild.get_role(1127428607606796290)
-        max_pos = limit_role.position if limit_role else 9999
-
-        custom = []
-        for r in sorted(member.roles, key=lambda x: -x.position):
-            if r.is_default() or r.managed:
-                continue
-            if r.id in excluded:
-                continue
-            if r.position >= max_pos:
-                continue
-            custom.append(r)
-
-        embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url=_IMG_STRIPE)
-
-        if not custom:
-            desc = (
-                "> У вас нет кастомных ролей.\n"
-                "> Приобретите **кастомную роль** в каталоге магазина!"
-            )
-        else:
-            lines = []
-            for r in custom[:40]:
-                color_hex = f"#{r.color.value:06x}" if r.color.value else "#888888"
-                lines.append(f"> <@&{r.id}> — `{color_hex}` · позиция `#{r.position}`")
-            desc = "\n".join(lines)
-            if len(custom) > 40:
-                desc += f"\n\n> …и ещё **{len(custom) - 40}** ролей"
-
-        embed2 = disnake.Embed(
-            title="Ваши кастомные роли",
-            description=desc,
-            color=6776679,
-            timestamp=datetime.now(timezone.utc)
-        )
-        embed2.set_image(url=_IMG_STRIPE)
-
-        await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
-
-    @disnake.ui.button(
-        label=f"{P}О валюте{P}",
-        style=ButtonStyle.gray,
-        custom_id="pcard:coin",
-        emoji=PartialEmoji(name="pravil", id=1544388874497687622)
-    )
-    async def coin_btn(self, button, inter: disnake.MessageInteraction):
-        embeds = load_embed_from_file("vallue.json")
-        await inter.response.send_message(embeds=embeds, ephemeral=True)
+HOME_CHANNEL_ID = 1532398684074016870
 
 
-async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
-    await inter.response.defer(with_message=True, ephemeral=True)
-
-    from modules.profile_card import generate_profile_card
-
-    counts = load_json(FILES["review_counts"], {})
-    review_count = counts.get(str(user.id), 0)
-    role_key, _ = _role_info(review_count)
-
-    dc = get_dc_cache(user.id)
-    balance = dc.get("balance", 0)
-    history_raw = dc.get("history", []) or []
-    history = list(reversed(history_raw[-5:]))
-
-    avatar_bytes = None
-    try:
-        avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
-    except Exception as e:
-        logger.warning(f"avatar fetch err: {e}")
-
-    joined_at = None
-    if isinstance(user, disnake.Member) and user.joined_at:
-        joined_at = user.joined_at
-
-    try:
-        buf = await asyncio.to_thread(
-            generate_profile_card,
-            user.display_name,
-            user.id,
-            avatar_bytes,
-            role_key,
-            review_count,
-            balance,
-            joined_at,
-            history,
-        )
-
-        filename = f"profile_{user.id}.png"
-        file = disnake.File(buf, filename=filename)
-
-        embed = disnake.Embed(color=6776679)
-        embed.set_image(url=f"attachment://{filename}")
-
-        await inter.edit_original_response(
-            content=None, embed=embed, file=file,
-            view=ProfileCardView()
-        )
-
-        asyncio.create_task(log_discord(
-            title="📇 Карточка профиля",
-            description=f"> **Пользователь:** {user.mention}",
-            color=0x00aaff,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        ))
-    except Exception as e:
-        logger.exception(f"profile card err: {e}")
-        try:
-            await inter.edit_original_response(content=f"❌ Ошибка: `{str(e)[:200]}`")
-        except Exception:
-            pass
-
-
-# ============================================================
-# МОДАЛКА СКИДКИ
-# ============================================================
-class DiscountModal(Modal):
-    def __init__(self):
-        components = [
-            TextInput(label="Исходная цена", placeholder="Сумма", custom_id="price", min_length=1, max_length=20),
-            TextInput(label="Скидка (%)", placeholder="%", custom_id="discount_percent", min_length=1, max_length=10),
-        ]
-        super().__init__(title="Расчёт скидки", components=components)
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        try:
-            price = float(inter.text_values["price"].replace(",", ".").strip())
-            discount = float(inter.text_values["discount_percent"].replace(",", ".").strip())
-        except ValueError:
-            return await inter.response.send_message("❌ Введите числа.", ephemeral=True)
-        if discount < 0 or discount > 100:
-            return await inter.response.send_message("❌ Скидка 0-100%.", ephemeral=True)
-        final_price = price * (1 - discount / 100)
-        savings = price - final_price
-        embed = disnake.Embed(title="🧾 Результат расчёта", color=0x2ecc71)
-        embed.add_field(name="Исходная", value=f"`{price:.2f} ₽`", inline=True)
-        embed.add_field(name="Скидка", value=f"`{discount:.0f}%`", inline=True)
-        embed.add_field(name="Экономия", value=f"`{savings:.2f} ₽`", inline=True)
-        embed.add_field(name="✅ Итого", value=f"**`{final_price:.2f} ₽`**", inline=False)
-        await inter.response.send_message(embed=embed, ephemeral=True)
-
-
-# ============================================================
-# ПАНЕЛЬ ПРОФИЛЯ — СЕЛЕКТ
-# ============================================================
-class ProfilePanelSelect(disnake.ui.StringSelect):
+class HomeSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
-            SelectOption(
-                label="・Мой профиль",
-                description="Открыть карточку профиля",
-                emoji="<:people:1538395694648529009>",
-                value="profile"
+            disnake.SelectOption(
+                label="・Работа в Diamond",
+                description="Карьера・Заработная плата",
+                emoji="<:working:1538767619602120744>",
+                value="work"
             ),
-            SelectOption(
-                label="・Расчёт скидки",
-                description="Посчитать итоговую цену со скидкой",
-                emoji="<:ckidsk:1538551877665427557>",
-                value="discount"
+            disnake.SelectOption(
+                label="・Экосистема Diamond",
+                description="Наши сайты・Лучшая жизнь",
+                emoji="<:site:1538768985602916352>",
+                value="eco"
             ),
+            disnake.SelectOption(
+                label="・Роли покупателей",
+                description="Достоинства・Разделение прав",
+                emoji="<:roles:1540046665984249878>",
+                value="roles"
+            ),
+            disnake.SelectOption(
+                label="・Доска",
+                description="Знай о важном・Информация",
+                emoji="<:banne1:1538551829246513312>",
+                value="board"
+            )
         ]
         super().__init__(
-            placeholder="Выберите действие...",
+            placeholder="Выберите раздел...",
             min_values=1,
             max_values=1,
             options=options,
-            custom_id="profile_panel_select"
+            custom_id="home_select"
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="📖 Выбор в справочнике",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
         value = inter.data.values[0]
-        if value == "profile":
-            await show_profile_card(inter, inter.author)
-        elif value == "discount":
-            await inter.response.send_modal(DiscountModal())
+        if value == "work":
+            embeds = load_embed_from_file("work.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "eco":
+            embeds = load_embed_from_file("eco.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "roles":
+            embeds = load_embed_from_file("role.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "board":
+            embeds = load_board_embed()
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
 
 
-class ProfilePanelView(View):
+class HomeView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(ProfilePanelSelect())
+        self.add_item(HomeSelect())
 
 
-PROFILE_CHANNEL_ID = 1540018373503483934
-
-
-async def send_profile_panel():
+async def send_home_panel():
     from core.bot import bot
     await bot.wait_until_ready()
-    channel = bot.get_channel(PROFILE_CHANNEL_ID) or await bot.fetch_channel(PROFILE_CHANNEL_ID)
+    channel = bot.get_channel(HOME_CHANNEL_ID)
     if not channel:
-        logger.warning("Profile panel channel not found")
+        try:
+            channel = await bot.fetch_channel(HOME_CHANNEL_ID)
+        except Exception:
+            channel = None
+    if not channel:
+        logger.warning("Home panel channel not found")
         return
 
     async for msg in channel.history(limit=50):
@@ -320,17 +145,437 @@ async def send_profile_panel():
             break
 
     embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1538771484778958898/image.png?ex=6a83e41e&is=6a82929e&hm=78e0190f6955969d2c2f630b4e9d560557c5c08d4f0c5caf8b32fbfd520332ab&")
     embed2 = disnake.Embed(
-        title="Твой профиль на сервере Diamond Shop",
-        description="> Здесь можно увидеть свой профиль, инвентарь, кастомные роли и рассчитать скидку.",
+        title="Справочник посетителя Diamond",
+        description="Справочник посетителя Diamond, в нем можно ознакомиться о нас, нашей экосистемой, узнать о важном, способе получения валюты сервера, достоинствах ролей покупателя и многом другом!",
         color=6776679
     )
-    embed2.set_image(url=_IMG_STRIPE)
-
-    await channel.send(embeds=[embed1, embed2], view=ProfilePanelView())
+    embed2.set_image(url=IMG_STRIPE)
+    await channel.send(embeds=[embed1, embed2], view=HomeView())
     await log_discord(
-        title="👤 Панель Профиль отправлена",
+        title="📖 Справочник отправлен (обновлён)",
         description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+
+
+# ============================================================
+# ПАНЕЛЬ "EARLY TAROLOGY"
+# ============================================================
+TAROLOGY_CHANNEL_ID = 1536796929873420308
+
+
+class TarologySelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="・Контакты для связи",
+                description="Связь для заказа",
+                emoji="<:people:1538395694648529009>",
+                value="contacts"
+            ),
+            disnake.SelectOption(
+                label="・Подробности и акции",
+                description="Узнайте больше, о данной сфере и бонусах",
+                emoji="<:CARDS:1538780592425017454>",
+                value="details"
+            )
+        ]
+        super().__init__(
+            placeholder="Узнать о раскладах",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="tarology_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="🔮 Выбор в Early Tarology",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
+        value = inter.data.values[0]
+        if value == "contacts":
+            embed = disnake.Embed(
+                title="📞 Контакты для связи",
+                description="> Связаться можно в ТГК - https://t.me/earlytarology",
+                color=6776679
+            )
+            embed.set_image(url=IMG_STRIPE)
+            await inter.response.send_message(embed=embed, ephemeral=True)
+        elif value == "details":
+            embed = disnake.Embed(
+                title="🔮 Подробности и акции.",
+                description=(
+                    "> Данный канал создан для того, чтобы помочь вам влиться в сферу заработка с помощью раскладов.\n\n"
+                    "> При покупке расклада (стоимость — 40₽) вы получаете расклад на любую интересующую вас тему с высокой точностью. А при оставлении отзыва в Early Tarology и в Diamond — вы получаете кэшбэк в виде Diamond Coins в размере 20 шт. Таким образом, вы помогаете человеку развиваться в этом деле, узнаёте интересующую вас правду и получаете бонус на основные покупки."
+                ),
+                color=6776679
+            )
+            embed.set_image(url=IMG_STRIPE)
+            await inter.response.send_message(embed=embed, ephemeral=True)
+
+
+class TarologyView(disnake.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TarologySelect())
+
+
+async def send_tarology_panel():
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(TAROLOGY_CHANNEL_ID)
+    if not channel:
+        try:
+            channel = await bot.fetch_channel(TAROLOGY_CHANNEL_ID)
+        except Exception:
+            channel = None
+    if not channel:
+        logger.warning("Tarology panel channel not found")
+        return
+
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            break
+
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1536977317912518677/image.png?ex=6a834bec&is=6a81fa6c&hm=a2a91a7975af349270ec5d97d17f7814e87de0da7943103eceb10dbbb3725978&=&format=webp&quality=lossless&width=1536&height=597")
+
+    embed2 = disnake.Embed(
+        title="Early Tarology от Diamond Lady",
+        description="> Данный канал, путь в мистику и веру. Расклады неимоверно точные, она приугадала почти все, что произошло в магазине за Пол-Года до событий. Цены низкие, качество высокое. Информация - ниже по категориям.",
+        color=6776679
+    )
+    embed2.set_image(url=IMG_STRIPE)
+
+    await channel.send(embeds=[embed1, embed2], view=TarologyView())
+    await log_discord(
+        title="🔮 Панель Early Tarology отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+
+
+# ============================================================
+# ПАНЕЛЬ ТИКЕТОВ (send_ticket_panel)
+# ============================================================
+TICKET_PANEL_CHANNEL_ID = 1462136361711829053
+
+
+async def send_ticket_panel():
+    from core.bot import bot
+    from modules.commands_tickets import TicketPanelView
+    await bot.wait_until_ready()
+    channel = bot.get_channel(TICKET_PANEL_CHANNEL_ID)
+    if not channel:
+        try:
+            channel = await bot.fetch_channel(TICKET_PANEL_CHANNEL_ID)
+        except Exception:
+            channel = None
+    if not channel:
+        logger.warning("Ticket panel channel not found")
+        return
+
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            break
+
+    embed_path = os.path.join(CATALOG_DIR, "menu_embed.json")
+    embed = disnake.Embed(
+        title="🛒 Панель покупок",
+        description=(
+            "> Нажмите **Купить**, чтобы создать тикет для заказа.\n"
+            "> Нажмите **Промокоды**, чтобы узнать о текущих акциях.\n"
+            "> Нажмите **Каталог**, чтобы посмотреть ассортимент товаров."
+        ),
+        color=6776679
+    )
+    embed.set_image(url=IMG_STRIPE)
+
+    if os.path.exists(embed_path):
+        try:
+            with open(embed_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("embeds") and len(data["embeds"]) > 0:
+                embed = disnake.Embed.from_dict(clean_embed_for_discohook(data["embeds"][0]))
+        except Exception as e:
+            logger.error(f"Ошибка загрузки menu_embed.json: {e}")
+
+    await channel.send(embed=embed, view=TicketPanelView())
+    await log_discord(
+        title="🛒 Панель тикетов отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00,
+        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+    )
+
+
+# ============================================================
+# ПАНЕЛЬ "КОДЕКС МАГАЗИНА" (Work)
+# ============================================================
+WORK_CHANNEL_ID = 1532435807242289314
+
+
+class WorkSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(
+                label="Зарплата",
+                description="О заработной плате работников",
+                emoji="<:shopf:1541881304981966920>",
+                value="salary"
+            ),
+            disnake.SelectOption(
+                label="Топ Sales Manager",
+                description="Статистика менеджеров продаж",
+                emoji="<:diagram:1541881258873983046>",
+                value="top"
+            ),
+            disnake.SelectOption(
+                label="Правила по тикетам",
+                description="Строго для прочтения Sales-Manager-ам.",
+                emoji="<:banne1:1538551829246513312>",
+                value="tickets"
+            )
+        ]
+        super().__init__(
+            placeholder="Выберите раздел...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="work_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await log_discord(
+            title="📂 Выбор в панели Кодекса",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            color=0x00aaff
+        )
+        value = inter.data.values[0]
+        if value == "salary":
+            embeds = load_embed_from_file("zp.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+        elif value == "top":
+            await self.send_top(inter)
+        elif value == "tickets":
+            embeds = load_embed_from_file("ticket.json")
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
+
+    async def send_top(self, inter):
+        guild = inter.guild
+        sales_role = guild.get_role(1154757071330365490)
+        if not sales_role:
+            return await inter.response.send_message("❌ Роль Sales Manager не найдена.", ephemeral=True)
+
+        rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
+        stats = {row["user_id"]: row for row in rows}
+        members = [m for m in guild.members if sales_role in m.roles and not m.bot]
+
+        data = []
+        for m in members:
+            s = stats.get(m.id)
+            closed = s["closed_tickets"] if s else 0
+            total_rating = s["total_rating"] if s else 0
+            ratings_count = s["ratings_count"] if s else 0
+            avg = total_rating / ratings_count if ratings_count else 0
+            data.append((m, closed, avg))
+
+        data.sort(key=lambda x: (-x[1], -x[2]))
+
+        lines = []
+        for m, closed, avg in data:
+            lines.append(f"> {m.mention} - **{closed}** закрытых заказов. [Рейтинг: **{avg:.1f}**]")
+
+        best = data[0] if data else None
+        best_mention = best[0].mention if best else "Нет данных"
+
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
+
+        description = "> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n"
+        if lines:
+            description += "\n".join(lines) + "\n"
+        else:
+            description += "> Пока нет данных.\n"
+
+        embed2 = disnake.Embed(
+            title="Таблиц работников на роли Sales Manager.\n",
+            description=description,
+            color=6776679
+        )
+        embed2.set_image(url=IMG_STRIPE)
+        if best:
+            embed2.add_field(
+                name="По актуальным данным, работником недели является ",
+                value=f"<@&1154757071330365490> - {best_mention}, уверенное повышение!",
+                inline=False
+            )
+
+        await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
+
+
+class WorkView(disnake.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(WorkSelect())
+
+
+async def send_work_panel():
+    """Отправляет панель «Кодекс магазина»."""
+    from core.bot import bot
+    await bot.wait_until_ready()
+    channel = bot.get_channel(WORK_CHANNEL_ID)
+    if not channel:
+        try:
+            channel = await bot.fetch_channel(WORK_CHANNEL_ID)
+        except Exception:
+            channel = None
+    if not channel:
+        logger.warning("Work panel channel not found")
+        return
+
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            break
+
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1550864427455356938/image.png?ex=6aafe28d&is=6aae910d&hm=37683a13a82f6430ea83e49b010d5537d1cdc47b0563fb0d8ef9d50f2232d3c7&")
+
+    embed2 = disnake.Embed(
+        title="Кодекс магазина",
+        description="> В данном разделе прописаны зарплаты сотрудников, рейтинг менеджеров, а также - устав, которому стоит придерживаться сотруднику по тикету.",
+        color=6776679
+    )
+    embed2.set_image(url=IMG_STRIPE)
+
+    await channel.send(embeds=[embed1, embed2], view=WorkView())
+    await log_discord(
+        title="📂 Панель «Кодекс магазина» отправлена",
+        description=f"> Сообщение отправлено в {channel.mention}",
+        color=0x00ff00
+    )
+
+
+# ============================================================
+# СБРОС СТАТИСТИКИ / СПИСАНИЕ
+# ============================================================
+class ResetStatsView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
+    async def reset(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
+        reset_manager_stats()
+        await send_work_panel()
+        await log_discord(
+            title="📊 Статистика сброшена",
+            description=f"> **Админ:** {inter.author.mention}\n> Статистика менеджеров обнулена.",
+            color=0xff6600
+        )
+        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
+
+    @disnake.ui.button(label="Списать заказ", style=ButtonStyle.secondary, custom_id="spisat_zakaz")
+    async def spisat(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на списание.", ephemeral=True)
+        await inter.response.send_modal(SpisatZakazModal())
+
+
+class SpisatZakazModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="ID менеджера",
+                placeholder="Введите ID менеджера",
+                custom_id="manager_id",
+                min_length=1,
+                max_length=30
+            )
+        ]
+        super().__init__(title="Списание заказа", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        manager_input = inter.text_values["manager_id"].strip()
+        if not manager_input.isdigit():
+            return await inter.response.send_message("❌ Введите корректный ID менеджера.", ephemeral=True)
+        manager_id = int(manager_input)
+        orders = get_closed_orders(manager_id)
+        if not orders:
+            return await inter.response.send_message("❌ У этого менеджера нет закрытых заказов.", ephemeral=True)
+
+        options = []
+        for order in orders:
+            closed_at = datetime.fromtimestamp(order["closed_at"]).strftime("%d.%m.%Y %H:%M")
+            label = f"Заказ #{order['id']} – {closed_at}"
+            if len(label) > 100:
+                label = label[:97] + "..."
+            options.append(SelectOption(label=label, value=str(order["id"]), description=f"Канал: {order['channel_id']}"))
+
+        select = Select(placeholder="Выберите заказ для списания...", options=options, custom_id="spisat_order_select")
+        view = View(timeout=60)
+        view.add_item(select)
+
+        async def select_callback(inter2: disnake.MessageInteraction):
+            order_id = int(inter2.data.values[0])
+            remove_closed_order(order_id)
+            cur.execute("UPDATE manager_stats SET closed_tickets = MAX(closed_tickets - 1, 0) WHERE user_id = ?", (manager_id,))
+            db.commit()
+            await inter2.response.send_message("✅ Заказ списан. Статистика менеджера обновлена.", ephemeral=True)
+            await send_work_panel()
+            await log_discord(
+                title="🗑️ Заказ списан",
+                description=f"> **Админ:** {inter2.author.mention}\n> **Менеджер:** <@{manager_id}>\n> **Заказ:** #{order_id}",
+                color=0xff6600
+            )
+
+        select.callback = select_callback
+        await inter.response.send_message("Выберите заказ для списания:", ephemeral=True, view=view)
+
+
+# ============================================================
+# ТОП МЕНЕДЖЕРОВ (лог-канал)
+# ============================================================
+async def send_manager_top():
+    from core.bot import bot
+    await bot.wait_until_ready()
+
+    log_channel = bot.get_channel(1462418981825810535)
+    if log_channel:
+        async for msg in log_channel.history(limit=50):
+            if msg.author == bot.user and msg.components:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                break
+        embed_log = disnake.Embed(
+            title="🗑️ Управление статистикой менеджеров",
+            description="> Нажмите кнопку ниже, чтобы сбросить статистику менеджеров (только для администраторов).",
+            color=0xff6600
+        )
+        embed_log.set_image(url=IMG_STRIPE)
+        await log_channel.send(embed=embed_log, view=ResetStatsView())
+
+    await log_discord(
+        title="📊 Статистика менеджеров обновлена",
+        description="> Панель работы и логи обновлены.",
         color=0x00ff00
     )
