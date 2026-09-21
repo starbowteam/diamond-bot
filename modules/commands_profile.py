@@ -3,7 +3,7 @@ import os, json, asyncio
 from datetime import datetime, timezone
 
 import disnake
-from disnake import ButtonStyle, SelectOption
+from disnake import ButtonStyle, SelectOption, PartialEmoji
 from disnake.ui import Button, Modal, Select, TextInput, View
 
 from core.utils import (
@@ -13,6 +13,9 @@ from core.utils import (
     clean_embed_for_discohook,
 )
 from modules.dc import get_user_purchases
+
+# Padding-символ (Hangul Filler) — занимает место, но невидим
+P = "\u3164"
 
 
 def load_embed_from_file(filename: str):
@@ -59,7 +62,12 @@ class ProfileCardView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label="Инвентарь DC", style=ButtonStyle.gray, custom_id="pcard:inv")
+    @disnake.ui.button(
+        label=f"{P}Инвентарь DC{P}",
+        style=ButtonStyle.gray,
+        custom_id="pcard:inv",
+        emoji=PartialEmoji(name="prize", id=1539657202170859561)
+    )
     async def inv_btn(self, button, inter: disnake.MessageInteraction):
         purchases = await get_user_purchases(inter.author.id, only_unused=True)
 
@@ -91,7 +99,12 @@ class ProfileCardView(View):
 
         await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
-    @disnake.ui.button(label="Кастомные роли", style=ButtonStyle.gray, custom_id="pcard:roles")
+    @disnake.ui.button(
+        label=f"{P}Кастомные роли{P}",
+        style=ButtonStyle.gray,
+        custom_id="pcard:roles",
+        emoji=PartialEmoji(name="image", id=1550869363266027641)
+    )
     async def roles_btn(self, button, inter: disnake.MessageInteraction):
         guild = inter.guild
         member = inter.author
@@ -144,7 +157,12 @@ class ProfileCardView(View):
 
         await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
-    @disnake.ui.button(label="О валюте", style=ButtonStyle.gray, custom_id="pcard:coin")
+    @disnake.ui.button(
+        label=f"{P}О валюте{P}",
+        style=ButtonStyle.gray,
+        custom_id="pcard:coin",
+        emoji=PartialEmoji(name="pravil", id=1544388874497687622)
+    )
     async def coin_btn(self, button, inter: disnake.MessageInteraction):
         embeds = load_embed_from_file("vallue.json")
         await inter.response.send_message(embeds=embeds, ephemeral=True)
@@ -282,6 +300,8 @@ class ProfilePanelView(View):
         self.add_item(ProfilePanelSelect())
 
 
+PROFILE_CHANNEL_ID = 1540018373508348   # ← ВНИМАНИЕ: поменяй на свой реальный ID канала
+# В твоём коде было: 1540018373503483934 — оставь как было, если работает.
 PROFILE_CHANNEL_ID = 1540018373503483934
 
 
