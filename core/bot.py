@@ -34,7 +34,7 @@ from modules.actions import (
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
-    daily_bonus, check_unused_purchases,
+    daily_bonus, check_unused_purchases, daily_activity_payout,
 )
 
 intents = disnake.Intents.default()
@@ -67,7 +67,7 @@ MSK = timezone(timedelta(hours=3))
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1551605614839463977/image.png?ex=6ab294d6&is=6ab14356&hm=4bddf29fabcc31cf6d81f58d190276c64503a03f1b27fa66b35e465e68d54000&"
-IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1541805596842664017/image.png?ex=6a8eeddb&is=6a8d9c5b&hm=bd497621b27b7c095b9b6cd3af8fa2d5135f68ad247ca03a2e3305c4350107e7&"
+IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
 
@@ -112,14 +112,23 @@ async def process_salary(mode: str):
         if amount <= 0:
             continue
         try:
-            await add_dc(member.id, amount,
-                         f"{'Зарплата' if mode == 'salary' else 'Аванс'} по роли {top_role_id} (авто)")
+            await add_dc(
+                member.id, amount,
+                f"{'Зарплата' if mode == 'salary' else 'Аванс'} по роли {top_role_id} (авто)",
+                notify=True, log=False
+            )
             stats[top_role_id] += 1
             awarded += 1
             total += amount
+            await asyncio.sleep(0.4)
         except Exception as e:
             logger.error(f"Ошибка авто-начисления {mode} {member.id}: {e}")
             errors += 1
+
+    try:
+        sync_dc_to_json()
+    except Exception:
+        pass
 
     result_lines = []
     for role_id in SALARY_ROLE_ORDER:
@@ -303,6 +312,16 @@ async def unused_purchase_reminder_task():
         logger.exception(f"unused_purchase_reminder_task: {e}")
 
 
+@tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
+async def daily_activity_payout_task():
+    """В 00:00 МСК — итоговая выплата за активность за день."""
+    await bot.wait_until_ready()
+    try:
+        await daily_activity_payout()
+    except Exception as e:
+        logger.exception(f"daily_activity_payout_task: {e}")
+
+
 # ============================================================
 # ON READY
 # ============================================================
@@ -319,7 +338,7 @@ async def on_ready():
         from modules.commands_profile import send_profile_panel, ProfilePanelView, ProfileCardView
         from modules.commands_staff import (
             send_home_panel, send_tarology_panel, send_ticket_panel,
-            send_manager_top, send_work_panel, send_staff_panels,
+            send_work_panel, send_staff_panels,
             HomeView, TarologyView, WorkView,
             DCView, PromoView, AdminView,
         )
@@ -350,7 +369,6 @@ async def on_ready():
         bot.loop.create_task(send_work_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
-        bot.loop.create_task(send_manager_top())
         bot.loop.create_task(send_staff_panels())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -388,6 +406,8 @@ async def on_ready():
             salary_main_task.start()
         if not unused_purchase_reminder_task.is_running():
             unused_purchase_reminder_task.start()
+        if not daily_activity_payout_task.is_running():
+            daily_activity_payout_task.start()
 
         logger.info("%s is ready", bot.user)
         await log_discord(
@@ -475,7 +495,7 @@ async def on_member_join(member: disnake.Member):
         except Exception as e:
             logger.error(f"Не удалось выдать роль: {e}")
 
-    # === 3. Приветственный бонус 50 DC (только если ещё не получал) ===
+    # === 3. Приветственный бонус 50 DC ===
     try:
         data = get_dc_cache(member.id)
         already_received = any(
@@ -483,8 +503,9 @@ async def on_member_join(member: disnake.Member):
             for h in data.get("history", [])
         )
         if not already_received:
-            await add_dc(member.id, WELCOME_BONUS_DC, "Приветственный бонус за регистрацию")
-            # ЛС с приветствием
+            await add_dc(member.id, WELCOME_BONUS_DC,
+                         "Приветственный бонус за регистрацию",
+                         notify=False, log=False)
             try:
                 embed1 = disnake.Embed(color=6776679)
                 embed1.set_image(url=IMG_WELCOME)
@@ -772,6 +793,7 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
+    # Автоназначение менеджера в тикетах
     if message.channel.category:
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
@@ -795,11 +817,13 @@ async def on_message(message: disnake.Message):
                     )
                     await reassign_ticket_permissions(message.channel, message.author)
 
+    # Счётчик сообщений (без начисления)
     from modules.dc import add_message_dc
     if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
         if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
             await add_message_dc(message.author.id)
 
+    # Обработка отзывов
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         user_id = message.author.id
         now = time.time()
@@ -838,7 +862,8 @@ async def on_message(message: disnake.Message):
         save_json(FILES["review_counts"], counts)
 
         try:
-            await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке")
+            await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке",
+                         notify=False, log=False)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
 
@@ -899,8 +924,4 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
             if duration > 60:
                 from modules.dc import add_voice_dc
                 await add_voice_dc(user_id, duration)
-                await log_discord(
-                    title="🎙️ Выход из голосового",
-                    description=f"> **Пользователь:** {member.mention}\n> **Время:** {duration//60} мин.",
-                    color=0x00aaff
-                )
+                # лог не пишем — иначе спам в канале
