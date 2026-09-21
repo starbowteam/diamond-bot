@@ -102,6 +102,7 @@ FILES = {
     "review_counts": os.path.join(DATA_DIR, "review_counts.json"),
     "shop_json": os.path.join(CATALOG_DIR, "menu_coins_shop.json"),
     "dc_data": os.path.join(ADD_DIR, "dc_data.json"),
+    "jackpot": os.path.join(DATA_DIR, "jackpot.json"),
 }
 
 # ============================================================
@@ -134,7 +135,6 @@ db.execute("PRAGMA synchronous=NORMAL")
 
 cur = db.cursor()
 
-# Таблицы
 cur.executescript("""
 CREATE TABLE IF NOT EXISTS invites_snapshot (
     invite_code TEXT PRIMARY KEY,
@@ -196,6 +196,16 @@ CREATE TABLE IF NOT EXISTS closed_orders (
     manager_id INTEGER NOT NULL,
     channel_id INTEGER NOT NULL,
     closed_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_items (
+    user_id      INTEGER NOT NULL,
+    item_key     TEXT NOT NULL,
+    item_type    TEXT NOT NULL,
+    value        REAL DEFAULT 0,
+    expires_at   INTEGER DEFAULT 0,
+    uses_left    INTEGER DEFAULT -1,
+    activated_at INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, item_key)
 );
 """)
 db.commit()
@@ -471,7 +481,6 @@ def reset_manager_stats():
     cur.execute("DELETE FROM manager_stats")
     db.commit()
 
-# Новые функции для закрытых заказов
 def add_closed_order(manager_id: int, channel_id: int):
     cur.execute("INSERT INTO closed_orders (manager_id, channel_id, closed_at) VALUES (?, ?, ?)",
                 (manager_id, channel_id, int(time.time())))
@@ -619,4 +628,102 @@ def remove_promo_code(code: str):
 
 def clear_promo_codes():
     cur.execute("DELETE FROM promo_codes")
+    db.commit()
+
+# ============================================================
+# USER ITEMS (бусты, казино-предметы, расходники)
+# ============================================================
+def activate_item(user_id: int, item_key: str, item_type: str,
+                  value: float = 0, duration_hours: int = 0, uses: int = -1):
+    """Активирует/обновляет предмет у юзера (одноразовый ключ)."""
+    now = int(time.time())
+    expires_at = (now + duration_hours * 3600) if duration_hours > 0 else 0
+    cur.execute("""
+        INSERT OR REPLACE INTO user_items
+        (user_id, item_key, item_type, value, expires_at, uses_left, activated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, item_key, item_type, value, expires_at, uses, now))
+    db.commit()
+
+
+def get_item(user_id: int, item_key: str) -> Optional[dict]:
+    """Возвращает активный предмет или None (с авто-проверкой протухания)."""
+    now = int(time.time())
+    row = cur.execute(
+        "SELECT * FROM user_items WHERE user_id=? AND item_key=?",
+        (user_id, item_key)
+    ).fetchone()
+    if not row:
+        return None
+    if row["expires_at"] > 0 and row["expires_at"] < now:
+        cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+        db.commit()
+        return None
+    if row["uses_left"] == 0:
+        cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+        db.commit()
+        return None
+    return dict(row)
+
+
+def get_active_items(user_id: int) -> list:
+    """Все активные предметы юзера."""
+    now = int(time.time())
+    rows = cur.execute("""
+        SELECT * FROM user_items
+        WHERE user_id=?
+          AND (expires_at = 0 OR expires_at > ?)
+          AND uses_left != 0
+    """, (user_id, now)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def consume_use(user_id: int, item_key: str) -> bool:
+    """Уменьшает счётчик использований на 1. Если стало 0 — удаляет."""
+    item = get_item(user_id, item_key)
+    if not item:
+        return False
+    if item["uses_left"] < 0:  # бесконечное
+        return True
+    new_uses = item["uses_left"] - 1
+    if new_uses <= 0:
+        cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+    else:
+        cur.execute("UPDATE user_items SET uses_left=? WHERE user_id=? AND item_key=?",
+                    (new_uses, user_id, item_key))
+    db.commit()
+    return True
+
+
+def clear_item(user_id: int, item_key: str):
+    cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+    db.commit()
+
+
+# ============================================================
+# JACKPOT (банк + билеты)
+# ============================================================
+def load_jackpot() -> dict:
+    return load_json(FILES["jackpot"], {"bank": 1000, "last_draw": 0, "last_winner": 0, "history": []})
+
+
+def save_jackpot(data: dict):
+    save_json(FILES["jackpot"], data)
+
+
+def add_jackpot_bank(amount: int):
+    data = load_jackpot()
+    data["bank"] = data.get("bank", 0) + amount
+    save_jackpot(data)
+
+
+def get_jackpot_participants() -> list:
+    rows = cur.execute(
+        "SELECT user_id FROM user_items WHERE item_key='casino_jackpot_ticket'"
+    ).fetchall()
+    return [r["user_id"] for r in rows]
+
+
+def clear_all_jackpot_tickets():
+    cur.execute("DELETE FROM user_items WHERE item_key='casino_jackpot_ticket'")
     db.commit()
