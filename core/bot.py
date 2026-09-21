@@ -66,7 +66,7 @@ WELCOME_BONUS_DC = 50
 MSK = timezone(timedelta(hours=3))
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
-IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
+IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1551605614839463977/image.png?ex=6ab294d6&is=6ab14356&hm=4bddf29fabcc31cf6d81f58d190276c64503a03f1b27fa66b35e465e68d54000&"
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1541805596842664017/image.png?ex=6a8eeddb&is=6a8d9c5b&hm=bd497621b27b7c095b9b6cd3af8fa2d5135f68ad247ca03a2e3305c4350107e7&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
