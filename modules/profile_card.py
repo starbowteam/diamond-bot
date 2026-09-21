@@ -14,7 +14,6 @@ FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
 _FONT_CACHE = {}
 _FA_CACHE = {}
 
-# ---- FA codes ----
 I_USER    = 0xf007
 I_CROWN   = 0xf521
 I_THUMBS  = 0xf164
@@ -28,10 +27,8 @@ I_SACK    = 0xf81d
 I_CART    = 0xf07a
 I_ROTATE  = 0xf1da
 I_PEOPLE  = 0xf0c0
-I_HASH    = 0xf292
 I_COINS   = 0xf51e
 
-# ---- Colors ----
 BG = (10, 10, 12)
 CARD_TOP = (26, 26, 31)
 CARD_BOT = (20, 20, 26)
@@ -97,6 +94,16 @@ def _draw_icon(d, cx, cy, code, size, color):
 def _tw(d, text, font):
     b = d.textbbox((0, 0), text, font=font)
     return b[2] - b[0]
+
+
+def _ellipsis(d, text, font, max_w):
+    """Обрезает текст с … если не влезает."""
+    if _tw(d, text, font) <= max_w:
+        return text
+    t = text
+    while t and _tw(d, t + "…", font) > max_w:
+        t = t[:-1]
+    return t + "…"
 
 
 def _fmt(n):
@@ -167,7 +174,7 @@ def generate_profile_card(
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    # === Карточка (без декоративных шаров) ===
+    # Карточка
     d.rounded_rectangle((M, M, W - M, H - M), radius=30, fill=CARD_BOT, outline=BORDER, width=3)
     d.rounded_rectangle((M + 1, M + 1, W - M - 1, H // 2), radius=30, fill=CARD_TOP)
 
@@ -227,7 +234,7 @@ def generate_profile_card(
               fill=GREEN, outline=INNER, width=4)
 
     un_x = av_x + av_size + 26
-    un_y = av_y + 8
+    un_y = body_y + 26
     uname = user_name
     max_w = left_x2 - un_x - 20
     if _tw(d, uname, _font(42)) > max_w:
@@ -236,21 +243,21 @@ def generate_profile_card(
         uname += "…"
     d.text((un_x, un_y), uname, font=_font(42), fill=TEXT)
 
-    _draw_icon(d, un_x + 8, un_y + 68, I_HASH, 14, MUTED)
-    d.text((un_x + 24, un_y + 60), str(user_id), font=_font(18), fill=MUTED)
-
+    # === БЕЙДЖ РОЛИ (без ID под ником) ===
     rn, rc = ROLE_INFO.get(role_key, ROLE_INFO["none"])
     rn_up = rn.upper()
     rn_f = _font(17)
     rn_w = _tw(d, rn_up, rn_f)
-    badge_w = rn_w + 56
     badge_h = 44
+    badge_w = 40 + rn_w + 22          # левый отступ иконки + текст + правый отступ
     badge_x = un_x
-    badge_y = un_y + 90
+    badge_y = un_y + 60
+    badge_cy = badge_y + badge_h // 2
+
     d.rounded_rectangle((badge_x, badge_y, badge_x + badge_w, badge_y + badge_h),
                         radius=14, fill=(40, 32, 22), outline=GOLD, width=2)
-    _draw_icon(d, badge_x + 22, badge_y + badge_h // 2 + 1, I_CROWN, 18, GOLD)
-    d.text((badge_x + 40, badge_y + 10), rn_up, font=rn_f, fill=GOLD)
+    _draw_icon(d, badge_x + 22, badge_cy + 1, I_CROWN, 18, GOLD)
+    d.text((badge_x + 40, badge_cy), rn_up, font=rn_f, fill=GOLD, anchor="lm")
 
     # --- METRICS ---
     metrics_y = body_y + ur_h + 20
@@ -258,25 +265,24 @@ def generate_profile_card(
     m_w = (left_w - 16) // 2
     icon_box = 54
 
-    # ---- metric 1: reviews ----
+    # metric 1: reviews
     m1x1 = left_x1
     m1x2 = m1x1 + m_w
     d.rounded_rectangle((m1x1, metrics_y, m1x2, metrics_y + metrics_h),
                         radius=20, fill=INNER, outline=INNER_BORDER, width=2)
 
     ibx = m1x1 + 26
-    iby = metrics_y + (metrics_h - icon_box) // 2   # центр иконки
+    iby = metrics_y + (metrics_h - icon_box) // 2
     d.rounded_rectangle((ibx, iby, ibx + icon_box, iby + icon_box), radius=15, fill=(40, 32, 18))
     _draw_icon(d, ibx + icon_box // 2, iby + icon_box // 2 + 1, I_THUMBS, 26, GOLD)
 
     text_x = ibx + icon_box + 18
-    # Лейбл и значение центрированы вертикально внутри метрики
     lbl_y = metrics_y + 16
     val_y = metrics_y + 36
     d.text((text_x, lbl_y), "ОТЗЫВОВ", font=_font(14), fill=MUTED)
     d.text((text_x, val_y), str(reviews), font=_font(44), fill=GOLD)
 
-    # ---- metric 2: balance ----
+    # metric 2: balance
     m2x1 = m1x2 + 16
     m2x2 = left_x2
     d.rounded_rectangle((m2x1, metrics_y, m2x2, metrics_y + metrics_h),
@@ -320,7 +326,7 @@ def generate_profile_card(
     d.rounded_rectangle((dp_x, dp_y, dp_x + dp_w, dp_y + dp_h),
                         radius=12, fill=(28, 28, 34), outline=(40, 40, 48), width=2)
     _draw_icon(d, dp_x + 22, dp_y + dp_h // 2 + 1, I_CLOCK, 20, (160, 160, 168))
-    d.text((dp_x + 40, dp_y + 8), days_str, font=_font(20), fill=(200, 200, 208))
+    d.text((dp_x + 40, dp_y + dp_h // 2), days_str, font=_font(20), fill=(200, 200, 208), anchor="lm")
 
     # --- HISTORY COL ---
     hist_h = since_y2 - body_y
@@ -356,7 +362,7 @@ def generate_profile_card(
         op_y = list_y1
         for op in ops:
             amt = op.get("amount", 0)
-            reason = (op.get("reason", "—") or "—")[:32]
+            reason_full = op.get("reason", "—") or "—"
             ts = op.get("date", 0)
             try:
                 dstr = datetime.fromtimestamp(ts).strftime("%d.%m.%Y · %H:%M")
@@ -377,15 +383,33 @@ def generate_profile_card(
             d.rounded_rectangle((ob_x, ob_y, ob_x + op_icon_size, ob_y + op_icon_size),
                                 radius=13, fill=accent_bg)
             _draw_icon(d, ob_x + op_icon_size // 2, ob_y + op_icon_size // 2 + 1,
-                       _op_icon(reason), 22, accent)
+                       _op_icon(reason_full), 22, accent)
 
             reason_x = ob_x + op_icon_size + 18
             reason_y = op_y + (op_h // 2) - 22
-            d.text((reason_x, reason_y), reason, font=_font(22), fill=TEXT)
-            d.text((reason_x, reason_y + 32), dstr, font=_font(16), fill=DIM)
 
+            # ширина под текст = до левого края амта минус 30
             amt_str = f"{sign}{abs(int(amt))} DC"
             amt_w = _tw(d, amt_str, _font(28))
+            max_reason_w = ih_x2 - 22 - amt_w - 30 - reason_x
+
+            # Автоуменьшение шрифта от 22 до 16, потом …
+            reason_font_size = 22
+            reason_shown = reason_full
+            while reason_font_size >= 16:
+                f = _font(reason_font_size)
+                if _tw(d, reason_full, f) <= max_reason_w:
+                    reason_shown = reason_full
+                    break
+                reason_font_size -= 2
+            else:
+                f = _font(reason_font_size)
+                reason_shown = _ellipsis(d, reason_full, f, max_reason_w)
+
+            reason_font = _font(reason_font_size)
+            d.text((reason_x, reason_y), reason_shown, font=reason_font, fill=TEXT)
+            d.text((reason_x, reason_y + 34), dstr, font=_font(16), fill=DIM)
+
             d.text((ih_x2 - 22 - amt_w, op_y + (op_h // 2) - 14),
                    amt_str, font=_font(28), fill=accent)
 
