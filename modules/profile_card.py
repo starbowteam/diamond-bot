@@ -167,11 +167,7 @@ def generate_profile_card(
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    # мягкие декоративные пятна
-    d.ellipse((W - 700, -280, W + 80, 500), fill=(24, 21, 18))
-    d.ellipse((-220, H - 320, 460, H + 180), fill=(14, 22, 28))
-
-    # карточка
+    # === Карточка (без декоративных шаров) ===
     d.rounded_rectangle((M, M, W - M, H - M), radius=30, fill=CARD_BOT, outline=BORDER, width=3)
     d.rounded_rectangle((M + 1, M + 1, W - M - 1, H // 2), radius=30, fill=CARD_TOP)
 
@@ -225,7 +221,6 @@ def generate_profile_card(
         _draw_icon(d, av_x + av_size // 2, av_y + av_size // 2 + 2, I_USER, 56, MUTED)
     d.ellipse((av_x - 2, av_y - 2, av_x + av_size + 2, av_y + av_size + 2),
               outline=GOLD, width=4)
-    # online dot
     od_cx = av_x + av_size - 16
     od_cy = av_y + av_size - 16
     d.ellipse((od_cx - 13, od_cy - 13, od_cx + 13, od_cy + 13),
@@ -263,31 +258,40 @@ def generate_profile_card(
     m_w = (left_w - 16) // 2
     icon_box = 54
 
-    # metric 1: reviews
+    # ---- metric 1: reviews ----
     m1x1 = left_x1
     m1x2 = m1x1 + m_w
     d.rounded_rectangle((m1x1, metrics_y, m1x2, metrics_y + metrics_h),
                         radius=20, fill=INNER, outline=INNER_BORDER, width=2)
+
     ibx = m1x1 + 26
-    iby = metrics_y + 22
+    iby = metrics_y + (metrics_h - icon_box) // 2   # центр иконки
     d.rounded_rectangle((ibx, iby, ibx + icon_box, iby + icon_box), radius=15, fill=(40, 32, 18))
     _draw_icon(d, ibx + icon_box // 2, iby + icon_box // 2 + 1, I_THUMBS, 26, GOLD)
-    d.text((ibx + icon_box + 18, iby - 2), "ОТЗЫВОВ", font=_font(14), fill=MUTED)
-    d.text((ibx + icon_box + 18, iby + 24), str(reviews), font=_font(44), fill=GOLD)
 
-    # metric 2: balance
+    text_x = ibx + icon_box + 18
+    # Лейбл и значение центрированы вертикально внутри метрики
+    lbl_y = metrics_y + 16
+    val_y = metrics_y + 36
+    d.text((text_x, lbl_y), "ОТЗЫВОВ", font=_font(14), fill=MUTED)
+    d.text((text_x, val_y), str(reviews), font=_font(44), fill=GOLD)
+
+    # ---- metric 2: balance ----
     m2x1 = m1x2 + 16
     m2x2 = left_x2
     d.rounded_rectangle((m2x1, metrics_y, m2x2, metrics_y + metrics_h),
                         radius=20, fill=INNER, outline=INNER_BORDER, width=2)
+
     ibx2 = m2x1 + 26
     d.rounded_rectangle((ibx2, iby, ibx2 + icon_box, iby + icon_box), radius=15, fill=(18, 44, 28))
     _draw_icon(d, ibx2 + icon_box // 2, iby + icon_box // 2 + 1, I_GEM, 26, GREEN)
-    d.text((ibx2 + icon_box + 18, iby - 2), "БАЛАНС", font=_font(14), fill=MUTED)
+
+    text2_x = ibx2 + icon_box + 18
+    d.text((text2_x, lbl_y), "БАЛАНС", font=_font(14), fill=MUTED)
     bal_str = _fmt(balance)
-    d.text((ibx2 + icon_box + 18, iby + 24), bal_str, font=_font(44), fill=GREEN)
+    d.text((text2_x, val_y), bal_str, font=_font(44), fill=GREEN)
     bw = _tw(d, bal_str, _font(44))
-    d.text((ibx2 + icon_box + 18 + bw + 10, iby + 46), "DC", font=_font(20), fill=DIM)
+    d.text((text2_x + bw + 10, val_y + 22), "DC", font=_font(20), fill=DIM)
 
     # --- SINCE ---
     since_y1 = metrics_y + metrics_h + 20
