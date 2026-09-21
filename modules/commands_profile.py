@@ -300,7 +300,7 @@ class ProfilePanelView(View):
         self.add_item(ProfilePanelSelect())
 
 
-PROFILE_CHANNEL_ID = 1540018373508348   # ← ВНИМАНИЕ: поменяй на свой реальный ID канала
+
 # В твоём коде было: 1540018373503483934 — оставь как было, если работает.
 PROFILE_CHANNEL_ID = 1540018373503483934
 
