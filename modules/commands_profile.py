@@ -3,8 +3,8 @@ import os, json, asyncio
 from datetime import datetime, timezone
 
 import disnake
-from disnake import ButtonStyle
-from disnake.ui import Button, Modal, TextInput, View
+from disnake import ButtonStyle, SelectOption
+from disnake.ui import Button, Modal, Select, TextInput, View
 
 from core.utils import (
     CONFIG, FILES, ADD_DIR, logger,
@@ -242,19 +242,44 @@ class DiscountModal(Modal):
 
 
 # ============================================================
-# ПАНЕЛЬ ПРОФИЛЯ (в канале)
+# ПАНЕЛЬ ПРОФИЛЯ — СЕЛЕКТ
 # ============================================================
+class ProfilePanelSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            SelectOption(
+                label="・Мой профиль",
+                description="Открыть карточку профиля",
+                emoji="<:people:1538395694648529009>",
+                value="profile"
+            ),
+            SelectOption(
+                label="・Расчёт скидки",
+                description="Посчитать итоговую цену со скидкой",
+                emoji="<:ckidsk:1538551877665427557>",
+                value="discount"
+            ),
+        ]
+        super().__init__(
+            placeholder="Выберите действие...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="profile_panel_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        value = inter.data.values[0]
+        if value == "profile":
+            await show_profile_card(inter, inter.author)
+        elif value == "discount":
+            await inter.response.send_modal(DiscountModal())
+
+
 class ProfilePanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
-
-    @disnake.ui.button(label="Мой профиль", style=ButtonStyle.gray, custom_id="ppanel:profile")
-    async def profile_btn(self, button, inter: disnake.MessageInteraction):
-        await show_profile_card(inter, inter.author)
-
-    @disnake.ui.button(label="Расчёт скидки", style=ButtonStyle.gray, custom_id="ppanel:discount")
-    async def discount_btn(self, button, inter: disnake.MessageInteraction):
-        await inter.response.send_modal(DiscountModal())
+        self.add_item(ProfilePanelSelect())
 
 
 PROFILE_CHANNEL_ID = 1540018373503483934
