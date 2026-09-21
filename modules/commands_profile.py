@@ -100,7 +100,7 @@ class ProfileCardView(View):
         await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
     @disnake.ui.button(
-        label="Кастомные роли",
+        label=f"{P}Кастомные роли",
         style=ButtonStyle.gray,
         custom_id="pcard:roles",
         emoji=PartialEmoji(name="image", id=1550869363266027641)
@@ -158,7 +158,7 @@ class ProfileCardView(View):
         await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
     @disnake.ui.button(
-        label="О валюте",
+        label=f"{P}О валюте",
         style=ButtonStyle.gray,
         custom_id="pcard:coin",
         emoji=PartialEmoji(name="pravil", id=1544388874497687622)
