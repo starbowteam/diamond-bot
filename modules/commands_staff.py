@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Объединённый модуль служебных панелей и админ-функций.
-Заменяет commands_admin.py + commands_panels.py.
 """
 import os
 import json
@@ -27,7 +26,6 @@ from core.utils import (
     get_promo_codes, add_promo_code, remove_promo_code, clear_promo_codes,
     reload_promo,
     get_closed_orders, remove_closed_order,
-    reset_manager_stats,
 )
 from modules.dc import (
     add_dc, remove_dc,
@@ -38,9 +36,6 @@ from modules.dc import (
 from modules.commands_profile import load_embed_from_file
 
 
-# ============================================================
-# КОНСТАНТЫ / КАНАЛЫ
-# ============================================================
 STAFF_PANEL_CHANNEL_ID  = 1551276116679860314
 HOME_CHANNEL_ID         = 1532398684074016870
 TAROLOGY_CHANNEL_ID     = 1536796929873420308
@@ -50,9 +45,6 @@ TICKET_PANEL_CHANNEL_ID = 1462136361711829053
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 
 
-# ============================================================
-# ПОМОЩНИКИ
-# ============================================================
 def load_board_embed() -> list:
     path = os.path.join(ADD_DIR, "board.json")
     if not os.path.exists(path):
@@ -71,7 +63,7 @@ def load_board_embed() -> list:
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 1: ЭКОНОМИКА (было в commands_admin.py) ═══
+# ═══ СЕКЦИЯ 1: ЭКОНОМИКА ═══
 # ============================================================
 promo_codes = get_promo_codes()
 
@@ -145,7 +137,7 @@ class GiveDcModal(Modal):
                 user_id = int(m.group(1))
         if not user_id:
             return await inter.response.send_message("❌ Не удалось определить пользователя.", ephemeral=True)
-        await add_dc(user_id, amount, reason)
+        await add_dc(user_id, amount, reason, notify=True)
         await inter.response.send_message(f"✅ Начислено {amount} DC пользователю <@{user_id}>.", ephemeral=True)
 
 
@@ -179,7 +171,7 @@ class TakeDcModal(Modal):
                 user_id = int(m.group(1))
         if not user_id:
             return await inter.response.send_message("❌ Не удалось определить пользователя.", ephemeral=True)
-        success = await remove_dc(user_id, amount, reason)
+        success = await remove_dc(user_id, amount, reason, notify=True)
         if success:
             await inter.response.send_message(f"✅ Снято {amount} DC у <@{user_id}>.", ephemeral=True)
         else:
@@ -457,7 +449,7 @@ async def recalc_reviews(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 4: СПРАВОЧНИК (Home) ═══
+# ═══ СЕКЦИЯ 4: СПРАВОЧНИК ═══
 # ============================================================
 class HomeSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -677,12 +669,14 @@ async def send_ticket_panel():
 class WorkSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
-            disnake.SelectOption(label="Зарплата", description="О заработной плате работников",
+            disnake.SelectOption(label="・Зарплата", description="О заработной плате работников",
                                  emoji="<:shopf:1541881304981966920>", value="salary"),
-            disnake.SelectOption(label="Топ Sales Manager", description="Статистика менеджеров продаж",
+            disnake.SelectOption(label="・Топ Sales Manager", description="Статистика менеджеров продаж",
                                  emoji="<:diagram:1541881258873983046>", value="top"),
-            disnake.SelectOption(label="Правила по тикетам", description="Строго для прочтения Sales-Manager-ам.",
+            disnake.SelectOption(label="・Правила по тикетам", description="Строго для прочтения Sales-Manager-ам.",
                                  emoji="<:banne1:1538551829246513312>", value="tickets"),
+            disnake.SelectOption(label="・Списать заказ в таблице", description="Убрать заказ из статистики менеджера",
+                                 emoji="<:12ss1:1551641380307337216>", value="spisat"),
         ]
         super().__init__(placeholder="Выберите раздел...", min_values=1, max_values=1,
                          options=options, custom_id="work_select")
@@ -700,6 +694,12 @@ class WorkSelect(disnake.ui.StringSelect):
             await self.send_top(inter)
         elif value == "tickets":
             await inter.response.send_message(embeds=load_embed_from_file("ticket.json"), ephemeral=True)
+        elif value == "spisat":
+            if not has_admin_command_roles(inter.author):
+                return await inter.response.send_message(
+                    "⛔ Списать заказ может только администратор.", ephemeral=True
+                )
+            await inter.response.send_modal(SpisatZakazModal())
 
     async def send_top(self, inter):
         guild = inter.guild
@@ -783,32 +783,8 @@ async def send_work_panel():
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 8: СБРОС СТАТИСТИКИ / СПИСАНИЕ ═══
+# ═══ СЕКЦИЯ 8: СПИСАНИЕ ЗАКАЗА ═══
 # ============================================================
-class ResetStatsView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
-    async def reset(self, button, inter):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        reset_manager_stats()
-        await send_work_panel()
-        await log_discord(
-            title="📊 Статистика сброшена",
-            description=f"> **Админ:** {inter.author.mention}\n> Статистика менеджеров обнулена.",
-            color=0xff6600
-        )
-        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
-
-    @disnake.ui.button(label="Списать заказ", style=ButtonStyle.secondary, custom_id="spisat_zakaz")
-    async def spisat(self, button, inter):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        await inter.response.send_modal(SpisatZakazModal())
-
-
 class SpisatZakazModal(Modal):
     def __init__(self):
         components = [
@@ -818,6 +794,8 @@ class SpisatZakazModal(Modal):
         super().__init__(title="Списание заказа", components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         if not inter.text_values["manager_id"].strip().isdigit():
             return await inter.response.send_message("❌ Введите ID цифрами.", ephemeral=True)
         manager_id = int(inter.text_values["manager_id"].strip())
@@ -856,31 +834,8 @@ class SpisatZakazModal(Modal):
         await inter.response.send_message("Выберите заказ:", ephemeral=True, view=view)
 
 
-async def send_manager_top():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    log_channel = bot.get_channel(1462418981825810535)
-    if log_channel:
-        async for msg in log_channel.history(limit=50):
-            if msg.author == bot.user and msg.components:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                break
-        embed_log = disnake.Embed(
-            title="🗑️ Управление статистикой менеджеров",
-            description="> Нажмите кнопку ниже, чтобы сбросить статистику (только для администраторов).",
-            color=0xff6600
-        )
-        embed_log.set_image(url=IMG_STRIPE)
-        await log_channel.send(embed=embed_log, view=ResetStatsView())
-    await log_discord(title="📊 Статистика менеджеров обновлена",
-                      description="> Панель работы и логи обновлены.", color=0x00ff00)
-
-
 # ============================================================
-# ═══ СЕКЦИЯ 9: ОТПРАВКА 3 СЛУЖЕБНЫХ ПАНЕЛЕЙ ═══
+# ═══ СЕКЦИЯ 9: СЛУЖЕБНЫЕ ПАНЕЛИ В КАНАЛ ═══
 # ============================================================
 async def send_staff_panels():
     from core.bot import bot
@@ -942,7 +897,7 @@ async def send_staff_panels():
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 10: СЛЭШ-КОМАНДЫ /say и /dc_file ═══
+# ═══ СЕКЦИЯ 10: СЛЭШ-КОМАНДЫ ═══
 # ============================================================
 @commands.slash_command(name="say", description="Отправить сообщение от бота (админ)")
 async def say(
@@ -1089,5 +1044,4 @@ def setup_commands_staff(bot):
     bot.add_slash_command(dc_file)
 
 
-# Совместимость со старым вызовом
 setup_commands_admin = setup_commands_staff
