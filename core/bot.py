@@ -320,7 +320,7 @@ async def on_ready():
         from modules.commands_staff import (
             send_home_panel, send_tarology_panel, send_ticket_panel,
             send_manager_top, send_work_panel, send_staff_panels,
-            ResetStatsView, HomeView, TarologyView, WorkView,
+            HomeView, TarologyView, WorkView,
             DCView, PromoView, AdminView,
         )
 
@@ -333,7 +333,6 @@ async def on_ready():
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
         bot.add_view(BuySelectView())
-        bot.add_view(ResetStatsView())
         bot.add_view(HomeView())
         bot.add_view(TarologyView())
         bot.add_view(ProfilePanelView())
