@@ -21,7 +21,9 @@ from core.utils import (
     get_dc_cache, save_dc_cache, sync_dc_to_json,
     assign_ticket_manager, get_ticket_manager, get_ticket_owner, clear_ticket_manager,
     increment_manager_closed, add_manager_rating,
-    add_closed_order
+    add_closed_order,
+    load_jackpot, save_jackpot,
+    get_jackpot_participants, clear_all_jackpot_tickets, add_jackpot_bank,
 )
 
 from modules.actions import (
@@ -35,6 +37,9 @@ from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
     daily_bonus
+)
+from modules.boosts import (
+    apply_boost, get_review_cooldown, try_daily_reset,
 )
 
 intents = disnake.Intents.default()
@@ -55,19 +60,62 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 _REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
-REVIEW_REWARD_DC = 15
 
-# Flash sale
+# 💎 Награды за отзыв по роли (после перехода)
+REVIEW_REWARDS_BY_ROLE = [
+    (1127430321214861395,  1, 15),
+    (1137721688683970643,  3, 25),
+    (1184886111722545232,  5, 35),
+    (1195799151783461016,  9, 45),
+    (1208442450373513277, 13, 55),
+    (1471005335111335957, 18, 65),
+    (1208442449425334372, 24, 75),
+    (1208442176321626162, 26, 80),
+]
+
 FLASH_SALE_ROLE_ID = 1127428607606796290
 FLASH_SALE_DURATION = FLASH_SALE_DURATION_HOURS * 3600
 FLASH_SALE_CHECK_MINUTES = 30
 
-# МСК (UTC+3)
 MSK = timezone(timedelta(hours=3))
+
+# Джекпот
+JACKPOT_DRAW_HOURS = 6
+JACKPOT_BASE_BANK = 1000
+
+
+def get_review_reward(new_review_count: int) -> int:
+    reward = 15
+    for _role_id, min_count, dc in REVIEW_REWARDS_BY_ROLE:
+        if new_review_count >= min_count:
+            reward = dc
+        else:
+            break
+    return reward
+
+
+def get_review_reward_role_name(new_review_count: int) -> str:
+    name = "Клуб"
+    map_names = {
+        1127430321214861395: "Bronze Buyer",
+        1137721688683970643: "Silver Buyer",
+        1184886111722545232: "Gold Buyer",
+        1195799151783461016: "Diamond Buyer",
+        1208442450373513277: "Emerald Buyer",
+        1471005335111335957: "Amethyst Buyer",
+        1208442449425334372: "Legendary Buyer",
+        1208442176321626162: "Покупатель Века",
+    }
+    for role_id, min_count, _ in REVIEW_REWARDS_BY_ROLE:
+        if new_review_count >= min_count:
+            name = map_names.get(role_id, name)
+        else:
+            break
+    return name
 
 
 # ============================================================
-# ЗАРПЛАТЫ И АВАНСЫ
+# ЗАРПЛАТЫ
 # ============================================================
 SALARY_ROLES = {
     1471844291595731016: {"advance": 70, "salary": 150},
@@ -147,7 +195,7 @@ async def process_salary(mode: str):
 
 
 # ============================================================
-# БАННЕР И СЧЁТЧИК ОТЗЫВОВ
+# БАННЕР
 # ============================================================
 _banner_last_update = 0.0
 
@@ -195,10 +243,8 @@ async def update_server_banner(review_count: int, silent: bool = False):
         font_path = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
 
         if not os.path.exists(base_path):
-            logger.warning("Banner file not found: %s", base_path)
             return
         if not os.path.exists(font_path):
-            logger.warning("Font file not found: %s", font_path)
             return
 
         img = Image.open(base_path).convert("RGBA")
@@ -210,7 +256,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if not guild:
-            logger.warning("update_server_banner: guild not found")
             return
         with open(output_path, "rb") as f:
             await guild.edit(banner=f.read())
@@ -223,12 +268,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
             )
     except Exception as e:
         logger.exception("Banner update error: %s", e)
-        if not silent:
-            await log_discord(
-                title="❌ Ошибка обновления баннера",
-                description=f"> **Ошибка:** `{str(e)}`",
-                color=0xff0000
-            )
 
 
 # ============================================================
@@ -248,7 +287,6 @@ async def daily_bonus_task():
 
 @tasks.loop(minutes=5)
 async def daily_deal_task():
-    """Обновляет товар дня + детектирует флеш-слоты."""
     await bot.wait_until_ready()
     try:
         before = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
@@ -267,7 +305,6 @@ async def daily_deal_task():
 
 @tasks.loop(minutes=FLASH_SALE_CHECK_MINUTES)
 async def flash_sale_task():
-    """Только удаление истёкшего флеша (запуск — в daily_deal_task)."""
     await bot.wait_until_ready()
     try:
         data = load_flash_sale()
@@ -283,7 +320,6 @@ async def flash_sale_task():
                         ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                         msg = await ch.fetch_message(msg_id)
                         await msg.delete()
-                        logger.info("Flash sale истёк — сообщение удалено")
                     except Exception as e:
                         logger.warning(f"Не удалось удалить flash-сообщение: {e}")
                 save_flash_sale({
@@ -297,6 +333,83 @@ async def flash_sale_task():
                 )
     except Exception as e:
         logger.exception(f"flash_sale_task error: {e}")
+
+
+@tasks.loop(hours=JACKPOT_DRAW_HOURS)
+async def jackpot_draw_task():
+    """Розыгрыш джекпота раз в N часов."""
+    await bot.wait_until_ready()
+    try:
+        participants = get_jackpot_participants()
+        if not participants:
+            logger.info("Jackpot: нет билетов — пропускаем")
+            return
+
+        jackpot = load_jackpot()
+        bank = jackpot.get("bank", 0)
+        if bank < 100:
+            logger.info(f"Jackpot: банк слишком мал ({bank}) — пропускаем")
+            return
+
+        winner_id = random.choice(participants)
+
+        try:
+            await add_dc(winner_id, bank, "🎰 Выигрыш в мега-джекпоте казино")
+        except Exception as e:
+            logger.exception(f"Jackpot: ошибка начисления {e}")
+            return
+
+        # Обновляем статистику
+        jackpot["bank"] = JACKPOT_BASE_BANK
+        jackpot["last_draw"] = int(time.time())
+        jackpot["last_winner"] = winner_id
+        jackpot["history"] = (jackpot.get("history", []) + [{
+            "winner": winner_id,
+            "amount": bank,
+            "date": int(time.time())
+        }])[-20:]
+        save_jackpot(jackpot)
+
+        clear_all_jackpot_tickets()
+
+        # Общий лог
+        await log_discord(
+            title="🎰 ДЖЕКПОТ РАЗЫГРАН!",
+            description=(
+                f"> **Победитель:** <@{winner_id}>\n"
+                f"> **Выигрыш:** `{bank} DC`\n"
+                f"> **Участников:** `{len(participants)}`\n\n"
+                f"> Билеты сброшены, банк обнулён до базового `{JACKPOT_BASE_BANK} DC`."
+            ),
+            color=0xff00aa,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
+        # Пинг победителя
+        try:
+            guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+            if guild:
+                winner = guild.get_member(winner_id)
+                if winner:
+                    dm_embed = disnake.Embed(
+                        title="🎉 ВЫ ВЫИГРАЛИ ДЖЕКПОТ!",
+                        description=(
+                            f"> Ваш билет выиграл мега-джекпот казино!\n\n"
+                            f"> **Выигрыш:** `{bank} DC`\n"
+                            f"> Заберите свой приз — он уже на балансе!"
+                        ),
+                        color=0xff00aa,
+                        timestamp=datetime.now(timezone.utc)
+                    )
+                    dm_embed.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&")
+                    await winner.send(embed=dm_embed)
+        except Exception as e:
+            logger.warning(f"Jackpot: не удалось отправить ЛС победителю: {e}")
+
+        logger.info(f"Jackpot разыгран: {winner_id} получил {bank} DC из {len(participants)} билетов")
+
+    except Exception as e:
+        logger.exception(f"jackpot_draw_task error: {e}")
 
 
 @tasks.loop(time=dt_time(hour=0, minute=0, tzinfo=MSK))
@@ -345,7 +458,6 @@ async def on_ready():
             TarologyView, WorkView
         )
         from modules.commands_profile import send_profile_panel, ProfileView
-        # === НОВОЕ: view для служебных панелей ===
         from modules.commands_admin import (
             DCView, PromoView, AdminView, send_staff_panels
         )
@@ -365,8 +477,6 @@ async def on_ready():
         bot.add_view(ProfileView())
         bot.add_view(WorkView())
         bot.add_view(QuestionTicketView())
-
-        # === НОВОЕ: регистрируем persistent-view для служебных панелей ===
         bot.add_view(DCView())
         bot.add_view(PromoView())
         bot.add_view(AdminView())
@@ -379,7 +489,6 @@ async def on_ready():
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_manager_top())
-        # === НОВОЕ: шлём служебные панели в канал ===
         bot.loop.create_task(send_staff_panels())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -411,6 +520,8 @@ async def on_ready():
             daily_deal_task.start()
         if not flash_sale_task.is_running():
             flash_sale_task.start()
+        if not jackpot_draw_task.is_running():
+            jackpot_draw_task.start()
         if not salary_advance_task.is_running():
             salary_advance_task.start()
         if not salary_main_task.is_running():
@@ -820,8 +931,11 @@ async def on_message(message: disnake.Message):
         now = time.time()
         text = (message.content or "").strip()
 
+        # Динамический кулдаун (учитывает буст review_cd)
+        review_cd = get_review_cooldown(user_id)
+
         last = _REVIEW_COOLDOWN.get(user_id, 0)
-        if now - last < REVIEW_COOLDOWN_SECONDS:
+        if now - last < review_cd:
             try:
                 await message.delete()
             except Exception:
@@ -850,28 +964,50 @@ async def on_message(message: disnake.Message):
             logger.warning(f"Не удалось поставить реакцию на отзыв: {e}")
 
         counts = load_json(FILES["review_counts"], {})
-        counts[str(user_id)] = counts.get(str(user_id), 0) + 1
+        new_count = counts.get(str(user_id), 0) + 1
+        counts[str(user_id)] = new_count
         save_json(FILES["review_counts"], counts)
 
+        # 💎 Награда по роли + буст
+        reward_dc_base = get_review_reward(new_count)
+        reward_dc = apply_boost(user_id, "review", reward_dc_base)
+        reward_role_name = get_review_reward_role_name(new_count)
+
+        reason = f"Отзыв о покупке (#{new_count}, {reward_role_name})"
+        if reward_dc != reward_dc_base:
+            reason += f" (буст x{reward_dc / reward_dc_base:.1f})"
+
         try:
-            await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке")
+            await add_dc(user_id, reward_dc, reason)
         except Exception as e:
             logger.exception(f"Ошибка начисления DC за отзыв: {e}")
 
         if isinstance(message.author, disnake.Member):
             try:
-                await update_user_roles(message.author, counts[str(user_id)], keep_pka=True)
+                await update_user_roles(message.author, new_count, keep_pka=True)
             except Exception as e:
                 logger.exception(f"Ошибка обновления ролей: {e}")
 
         try:
+            next_reward_hint = ""
+            for _rid, _min, _dc in REVIEW_REWARDS_BY_ROLE:
+                if _min > new_count:
+                    diff = _min - new_count
+                    next_reward_hint = f"\n> **До следующего уровня:** `{diff}` отз. → `+{_dc} DC`/отзыв"
+                    break
+            else:
+                next_reward_hint = "\n> 🏆 **Ты достиг максимального уровня!**"
+
             dm_embed = disnake.Embed(
                 title="✅ Отзыв принят!",
                 description=(
                     f"> Спасибо за отзыв!\n\n"
-                    f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
-                    f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
-                    f"> **Следующий отзыв:** можно оставить через 2 минуты"
+                    f"> **Всего отзывов:** `{new_count}`\n"
+                    f"> **Текущий уровень:** `{reward_role_name}`\n"
+                    f"> **Начислено:** `+{reward_dc} DC`"
+                    + (f" (буст x{reward_dc / reward_dc_base:.1f})" if reward_dc != reward_dc_base else "")
+                    + f"\n> **Следующий отзыв:** через {review_cd // 60} мин"
+                    f"{next_reward_hint}"
                 ),
                 color=0x2ecc71,
                 timestamp=datetime.now(timezone.utc)
@@ -885,8 +1021,9 @@ async def on_message(message: disnake.Message):
             title="📝 Отзыв принят",
             description=(
                 f"> **Пользователь:** {message.author.mention}\n"
-                f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
-                f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
+                f"> **Всего отзывов:** `{new_count}`\n"
+                f"> **Роль:** `{reward_role_name}`\n"
+                f"> **Начислено:** `+{reward_dc} DC`\n"
                 f"> **Текст:** {text[:200]}\n"
                 f"> **Ссылка:** [перейти]({message.jump_url})"
             ),
