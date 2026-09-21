@@ -2,7 +2,9 @@
 import os
 import json
 import time
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, Any, List
 import disnake
 from disnake.ext import commands
 from disnake.ui import View, Button, Select, Modal, TextInput
@@ -18,9 +20,9 @@ from core.utils import (
     get_dc_cache, save_dc_cache, sync_dc_to_json,
     update_user_roles
 )
-from modules.boosts import (
-    apply_boost, get_review_cooldown, get_multiplier,
-)
+
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
 # ============================================================
 # DC DATA
@@ -28,12 +30,15 @@ from modules.boosts import (
 def get_user_dc_data(user_id: int) -> dict:
     return get_dc_cache(user_id)
 
+
 def save_user_dc_data(user_id: int, user_data: dict):
     save_dc_cache(user_id, user_data)
     sync_dc_to_json()
 
+
 async def get_user_balance(user_id: int) -> int:
     return get_dc_cache(user_id)["balance"]
+
 
 async def set_user_balance(user_id: int, amount: int):
     data = get_dc_cache(user_id)
@@ -41,13 +46,14 @@ async def set_user_balance(user_id: int, amount: int):
     save_dc_cache(user_id, data)
     sync_dc_to_json()
 
+
 async def add_dc(user_id: int, amount: int, reason: str):
     data = get_dc_cache(user_id)
     data["balance"] += amount
     data["history"].append({
         "date": int(time.time()),
         "amount": amount,
-        "reason": reason
+        "reason": reason,
     })
     if len(data["history"]) > 50:
         data["history"] = data["history"][-50:]
@@ -59,6 +65,7 @@ async def add_dc(user_id: int, amount: int, reason: str):
         color=0x00ff00
     )
 
+
 async def remove_dc(user_id: int, amount: int, reason: str) -> bool:
     data = get_dc_cache(user_id)
     if data["balance"] < amount:
@@ -67,7 +74,7 @@ async def remove_dc(user_id: int, amount: int, reason: str) -> bool:
     data["history"].append({
         "date": int(time.time()),
         "amount": -amount,
-        "reason": reason
+        "reason": reason,
     })
     if len(data["history"]) > 50:
         data["history"] = data["history"][-50:]
@@ -80,6 +87,7 @@ async def remove_dc(user_id: int, amount: int, reason: str) -> bool:
     )
     return True
 
+
 async def add_purchase(user_id: int, item_type: str, item_value: str, from_action: bool = False):
     data = get_dc_cache(user_id)
     for p in data["purchases"]:
@@ -90,10 +98,11 @@ async def add_purchase(user_id: int, item_type: str, item_value: str, from_actio
         "value": item_value,
         "used": False,
         "from_action": from_action,
-        "date": int(time.time())
+        "date": int(time.time()),
     })
     save_dc_cache(user_id, data)
     sync_dc_to_json()
+
 
 async def get_user_purchases(user_id: int, only_unused: bool = False) -> list:
     data = get_dc_cache(user_id)
@@ -101,6 +110,7 @@ async def get_user_purchases(user_id: int, only_unused: bool = False) -> list:
     if only_unused:
         return [p for p in purchases if not p["used"]]
     return purchases
+
 
 async def remove_purchase(user_id: int, purchase_index: int):
     data = get_dc_cache(user_id)
@@ -111,11 +121,11 @@ async def remove_purchase(user_id: int, purchase_index: int):
         return True
     return False
 
+
 # ============================================================
-# Активность
+# АКТИВНОСТЬ
 # ============================================================
 async def check_and_reset_daily(user_id: int):
-    """Обнуляет счётчики раз в 24 часа. Бусты daily_reset не трогают этот код."""
     data = get_dc_cache(user_id)
     now = int(time.time())
     last_reset = data.get("last_reset_date", 0)
@@ -128,60 +138,38 @@ async def check_and_reset_daily(user_id: int):
         return True
     return False
 
-async def add_message_dc(user_id: int):
-    await check_and_reset_daily(user_id)
-    data = get_dc_cache(user_id)
-    data["messages_today"] = data.get("messages_today", 0) + 1
 
+async def add_message_dc(user_id: int):
+    data = get_dc_cache(user_id)
+    await check_and_reset_daily(user_id)
+    data["messages_today"] = data.get("messages_today", 0) + 1
     if data["messages_today"] % CONFIG["MESSAGE_BATCH"] == 0:
         max_dc = CONFIG["MAX_DAILY_MESSAGES"]
         current = data["messages_today"] // CONFIG["MESSAGE_BATCH"]
         if current <= max_dc:
-            base = CONFIG["MESSAGE_RATE"]
-            mult = get_multiplier(user_id, "messages")
-            reward = int(base * mult)
-
-            reason = f"За {CONFIG['MESSAGE_BATCH']} сообщений в чате"
-            if mult > 1.0:
-                reason += f" (x{mult:.1f} буст)"
-
-            await add_dc(user_id, reward, reason)
-
+            await add_dc(user_id, CONFIG["MESSAGE_RATE"],
+                         f"За {CONFIG['MESSAGE_BATCH']} сообщений в чате")
             data = get_dc_cache(user_id)
             data["messages_today"] = data.get("messages_today", 0)
-            save_dc_cache(user_id, data)
-            sync_dc_to_json()
-        else:
             save_dc_cache(user_id, data)
             sync_dc_to_json()
     else:
         save_dc_cache(user_id, data)
         sync_dc_to_json()
 
+
 async def add_voice_dc(user_id: int, seconds: int):
-    await check_and_reset_daily(user_id)
     data = get_dc_cache(user_id)
+    await check_and_reset_daily(user_id)
     data["voice_time_today"] = data.get("voice_time_today", 0) + seconds
     hours = data["voice_time_today"] // 3600
-
-    mult = get_multiplier(user_id, "voice")
-    base_rate = CONFIG["VOICE_RATE"]
     max_dc = CONFIG["MAX_DAILY_VOICE"]
-
-    if mult > 1.0:
-        target = min(int(hours * base_rate * mult), max_dc * 2)
-    else:
-        target = min(hours * base_rate, max_dc)
-
+    target = min(hours * CONFIG["VOICE_RATE"], max_dc)
     last_voice_dc = data.get("last_voice_dc", 0)
-
     if target > last_voice_dc:
         diff = target - last_voice_dc
         if diff > 0:
-            reason = f"За {hours} часов в голосовом канале"
-            if mult > 1.0:
-                reason += f" (x{mult:.1f} буст)"
-            await add_dc(user_id, diff, reason)
+            await add_dc(user_id, diff, f"За {hours} часов в голосовом канале")
             data["last_voice_dc"] = target
             save_dc_cache(user_id, data)
             sync_dc_to_json()
@@ -189,8 +177,9 @@ async def add_voice_dc(user_id: int, seconds: int):
         save_dc_cache(user_id, data)
         sync_dc_to_json()
 
+
 # ============================================================
-# Каталог
+# КАТАЛОГ
 # ============================================================
 def load_shop_catalog() -> dict:
     path = CONFIG["SHOP_CATALOG_PATH"]
@@ -199,95 +188,27 @@ def load_shop_catalog() -> dict:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
-                logger.error("Ошибка парсинга shop_catalog.json, создаю дефолтный")
+                logger.error("shop_catalog.json parse err")
                 return create_default_catalog()
-    else:
-        return create_default_catalog()
+    return create_default_catalog()
+
 
 def create_default_catalog() -> dict:
     catalog = {
-        "discounts": {
-            "label": "🛒 Скидки",
-            "description": "Скидки на заказы в магазине",
-            "items": {
-                "3":  {"name": "Скидка 3%",  "price": 120, "description": "Скидка 3% на любой заказ"},
-                "5":  {"name": "Скидка 5%",  "price": 200, "description": "Скидка 5% на любой заказ"},
-                "7":  {"name": "Скидка 7%",  "price": 280, "description": "Скидка 7% на любой заказ"},
-                "10": {"name": "Скидка 10%", "price": 420, "description": "Скидка 10% на любой заказ"},
-                "15": {"name": "Скидка 15%", "price": 650, "description": "Скидка 15% на любой заказ"},
-                "20": {"name": "Скидка 20%", "price": 850, "description": "Скидка 20% на любой заказ"}
-            }
-        },
-        "design": {
-            "label": "🎨 Дизайн от Diamond",
-            "description": "Услуги дизайнера",
-            "items": {
-                "avatar": {"name": "Аватарка", "price": 60, "description": "Уникальная аватарка"},
-                "banner": {"name": "Баннер",   "price": 120, "description": "Баннер для профиля"},
-                "logo":   {"name": "Логотип",  "price": 180, "description": "Логотип для бренда"}
-            }
-        },
-        "ads": {
-            "label": "📢 Реклама",
-            "description": "Продвижение в соцсетях и сервере",
-            "items": {
-                "ad_post": {"name": "Пост в канале",         "price": 90,  "description": "Рекламный пост в канале"},
-                "ad_pin":  {"name": "Закреп на 24ч",         "price": 120, "description": "Закреп сообщения на 24 часа"},
-                "ad_news": {"name": "Упоминание в новостях", "price": 150, "description": "Упоминание в новостной ленте"}
-            }
-        },
-        "roles": {
-            "label": "🎭 Особые роли",
-            "description": "Временные и постоянные роли",
-            "items": {
-                "role_active": {"name": "Роль «Активный»", "price": 40, "description": "Постоянная роль «Активный»", "role_id": 1533140263789395998},
-                "role_helper": {"name": "Роль «Помощник»", "price": 50, "description": "Роль «Помощник» (навсегда)", "role_id": 1536948551265812551},
-                "role_vip":    {"name": "Роль «VIP»",      "price": 60, "description": "VIP-роль на 30 дней",         "role_id": 1533549996790513685},
-                "role_mega":   {"name": "Роль «Мега-активный»", "price": 80, "description": "Роль «Мега-активный»", "role_id": 1536948737514151976},
-                "role_legend": {"name": "Роль «Легенда»", "price": 95, "description": "Легендарная роль", "role_id": 1535638212557541438},
-                "role_newbie": {"name": "Роль «Новичок месяца»", "price": 100, "description": "Роль для новичков", "role_id": 1536948841394212934}
-            }
-        },
-        "boosts": {
-            "label": "⚡ Бусты",
-            "description": "Временные усилители DC-заработка",
-            "items": {
-                "boost_messages_x2":   {"name": "x2 к DC за сообщения (24ч)",     "price": 120, "description": "Удвоение награды за 10 сообщений на сутки", "boost_type": "messages_mult", "value": 2.0, "duration_hours": 24},
-                "boost_voice_x2":      {"name": "x2 к DC за войс (24ч)",          "price": 120, "description": "Удвоение награды за час в войсе на сутки",  "boost_type": "voice_mult",    "value": 2.0, "duration_hours": 24},
-                "boost_all_x2":        {"name": "x2 ко всему DC-заработку (12ч)", "price": 280, "description": "Удвоение ЛЮБОГО заработка на 12 часов",     "boost_type": "all_mult",      "value": 2.0, "duration_hours": 12},
-                "boost_review_x2":     {"name": "x2 к DC за отзывы (7 дней)",     "price": 320, "description": "Удвоение награды за отзывы на неделю",       "boost_type": "review_mult",   "value": 2.0, "duration_hours": 168},
-                "boost_cooldown_half": {"name": "Кулдаун отзыва 60 сек (24ч)",    "price": 90,  "description": "Отзыв можно оставить через минуту вместо двух", "boost_type": "review_cd",  "value": 60,  "duration_hours": 24},
-                "boost_daily_reset":   {"name": "Сброс дневного лимита",          "price": 60,  "description": "Мгновенно обнуляет счётчики сообщений/войса", "boost_type": "daily_reset", "value": 0,   "duration_hours": 0}
-            }
-        },
-        "casino": {
-            "label": "🎲 Казино-предметы",
-            "description": "Усилители и бонусы для игр в казино",
-            "items": {
-                "casino_insurance":     {"name": "Страховка ставки",        "price": 90,  "description": "Возврат 50% при проигрыше",  "boost_type": "insurance",      "value": 0.5, "uses": 1},
-                "casino_boost_x2":      {"name": "x2 к следующему выигрышу", "price": 280, "description": "Удвоение любой выплаты в 1 партии", "boost_type": "next_mult", "value": 2.0, "uses": 1},
-                "casino_lucky_hour":    {"name": "Удачный час (60 мин)",    "price": 320, "description": "Все множители +20% на час",   "boost_type": "lucky_hour",     "value": 1.2, "duration_hours": 1},
-                "casino_jackpot_ticket":{"name": "Билет в мега-джекпот",   "price": 400, "description": "Участвует в розыгрыше банка казино", "boost_type": "jackpot_ticket", "value": 0, "uses": 1}
-            }
-        },
-        "gifts": {
-            "label": "🎁 Подарки",
-            "description": "Подарить Diamond Coins другому участнику",
-            "items": {
-                "gift_100":  {"name": "Подарить 100 DC",  "price": 105,  "description": "Отправка 100 DC другому юзеру (комиссия 5%)",  "gift_amount": 100},
-                "gift_500":  {"name": "Подарить 500 DC",  "price": 525,  "description": "Отправка 500 DC другому юзеру (комиссия 5%)",  "gift_amount": 500},
-                "gift_1000": {"name": "Подарить 1000 DC", "price": 1050, "description": "Отправка 1000 DC другому юзеру (комиссия 5%)", "gift_amount": 1000},
-                "gift_2500": {"name": "Подарить 2500 DC", "price": 2625, "description": "Отправка 2500 DC другому юзеру (комиссия 5%)", "gift_amount": 2500},
-                "gift_5000": {"name": "Подарить 5000 DC", "price": 5250, "description": "Отправка 5000 DC другому юзеру (комиссия 5%)", "gift_amount": 5000}
-            }
-        }
+        "discounts": {"label": "🛒 Скидки", "description": "Скидки на заказы", "items": {
+            "3": {"name": "3% скидка", "price": 30, "description": "Скидка 3%"},
+        }},
+        "design": {"label": "🎨 Дизайн", "description": "Услуги дизайнера", "items": {
+            "avatar": {"name": "Аватарка", "price": 40, "description": "Уникальная аватарка"},
+        }},
     }
     with open(CONFIG["SHOP_CATALOG_PATH"], "w", encoding="utf-8") as f:
         json.dump(catalog, f, ensure_ascii=False, indent=2)
     return catalog
 
+
 # ============================================================
-# Ежедневный бонус
+# ЕЖЕДНЕВНЫЙ БОНУС
 # ============================================================
 async def daily_bonus():
     from core.bot import bot
@@ -310,6 +231,117 @@ async def daily_bonus():
             save_dc_cache(member.id, data)
             sync_dc_to_json()
 
+
+# ============================================================
+# НАПОМИНАНИЯ О НЕИСПОЛЬЗОВАННЫХ ТОВАРАХ
+# ============================================================
+async def check_unused_purchases(bot):
+    """
+    Проходит по всем юзерам в dc_cache.
+    Если есть неиспользованный товар старше 7 дней — напоминаем в ЛС (эмбед).
+    Отправляем один раз в 7 дней (проверяем по last_reminder в purchases).
+    """
+    now = int(time.time())
+    week = 7 * 86400
+    month = 30 * 86400
+
+    rows = cur.execute("SELECT user_id, purchases FROM dc_cache").fetchall()
+    sent = 0
+    checked = 0
+
+    for row in rows:
+        uid = row["user_id"]
+        try:
+            purchases = json.loads(row["purchases"]) if row["purchases"] else []
+        except Exception:
+            continue
+        if not purchases:
+            continue
+
+        checked += 1
+        # отбираем неиспользованные старше 7 дней и не старше 60 дней
+        old_unused = []
+        for idx, p in enumerate(purchases):
+            if p.get("used"):
+                continue
+            d = p.get("date", 0)
+            if d == 0:
+                continue
+            age = now - d
+            if week <= age <= 60 * 86400:
+                # не чаще одного раза в 7 дней
+                last_rem = p.get("last_reminder", 0)
+                if now - last_rem >= week:
+                    old_unused.append((idx, p))
+
+        if not old_unused:
+            continue
+
+        user = bot.get_user(uid)
+        if user is None:
+            try:
+                user = await bot.fetch_user(uid)
+            except Exception:
+                continue
+
+        try:
+            items_lines = []
+            for _, p in old_unused[:10]:
+                v = p.get("value", "—")
+                t = p.get("type", "")
+                dstr = datetime.fromtimestamp(p.get("date", 0)).strftime("%d.%m.%Y")
+                items_lines.append(f"> 💎 **{v}** — `{t}` (куплен {dstr})")
+            items_text = "\n".join(items_lines)
+            more = ""
+            if len(old_unused) > 10:
+                more = f"\n\n> …и ещё **{len(old_unused) - 10}** товаров"
+
+            embed1 = disnake.Embed(color=6776679)
+            embed1.set_image(url=IMG_UNUSED)
+            embed2 = disnake.Embed(
+                title="🎁 У вас есть неиспользованные товары!",
+                description=(
+                    f"> Привет, **{user.display_name}**! Мы заметили, что у вас есть купленные товары, которые вы **ещё не активировали**.\n\n"
+                    f"**Товары:**\n{items_text}{more}\n\n"
+                    f"**Как активировать?**\n"
+                    f"> Перейдите в <#1462136361711829053>, нажмите кнопку **Купить** → выберите **Diamond Coins** → выберите нужный товар.\n\n"
+                    f"> Если возникли вопросы — обратитесь в поддержку.\n"
+                    f"> Приятных покупок! 💎"
+                ),
+                color=6776679,
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed2.set_image(url=IMG_STRIPE)
+            await user.send(embeds=[embed1, embed2])
+
+            # Обновляем last_reminder
+            for idx, p in old_unused:
+                purchases[idx]["last_reminder"] = now
+
+            dc_data = get_dc_cache(uid)
+            dc_data["purchases"] = purchases
+            save_dc_cache(uid, dc_data)
+            sent += 1
+
+            await asyncio.sleep(0.5)  # анти-ратэлимит
+        except disnake.Forbidden:
+            # ЛС закрыты — пропускаем
+            continue
+        except Exception as e:
+            logger.warning(f"unused reminder {uid}: {e}")
+            continue
+
+    try:
+        sync_dc_to_json()
+    except Exception:
+        pass
+
+    logger.info(f"check_unused_purchases: проверено {checked}, отправлено {sent}")
+
+
+# ============================================================
+# ПРОГРЕСС-БАР
+# ============================================================
 def get_progress_bar(count: int):
     thresholds = [
         (1, "club", "Клуб"),
@@ -320,7 +352,7 @@ def get_progress_bar(count: int):
         (17, "emerald", "Изумрудный покупатель"),
         (23, "amethyst", "Аметистовый покупатель"),
         (25, "legendary", "Легендарный покупатель"),
-        (float('inf'), "pka", "Покупатель века")
+        (float('inf'), "pka", "Покупатель века"),
     ]
     current_role = "Нет"
     next_role = "Клуб"
@@ -343,6 +375,7 @@ def get_progress_bar(count: int):
                 f"Следующая: **{next_role}** (нужно {next_threshold} отзывов)\n"
                 f"Прогресс: `{bar}` {int(progress*100)}%")
 
+
 def get_dc_cache_all() -> dict:
     rows = cur.execute("SELECT * FROM dc_cache").fetchall()
     data = {}
@@ -357,9 +390,14 @@ def get_dc_cache_all() -> dict:
             "messages_today": row["messages_today"],
             "voice_time_today": row["voice_time_today"],
             "last_reset_date": row["last_reset_date"],
-            "last_voice_dc": row["last_voice_dc"]
+            "last_voice_dc": row["last_voice_dc"],
         }
     return data
+
+
+# нужен для check_unused_purchases
+import asyncio
+
 
 def setup_dc(bot):
     pass
