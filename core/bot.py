@@ -386,7 +386,7 @@ async def on_ready():
             send_manager_top, send_work_panel, ResetStatsView, HomeView,
             TarologyView, WorkView
         )
-        from modules.commands_profile import send_profile_panel, ProfileView
+        from modules.commands_profile import send_profile_panel, ProfilePanelView
         from modules.commands_admin import DCView, PromoView, AdminView, send_staff_panels
 
         bot.add_view(TicketPanelView())
@@ -401,7 +401,7 @@ async def on_ready():
         bot.add_view(ResetStatsView())
         bot.add_view(HomeView())
         bot.add_view(TarologyView())
-        bot.add_view(ProfileView())
+        bot.add_view(ProfilePanelView())
         bot.add_view(WorkView())
         bot.add_view(QuestionTicketView())
         bot.add_view(DCView())
