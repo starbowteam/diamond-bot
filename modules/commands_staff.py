@@ -401,10 +401,6 @@ class GetJsonModal(Modal):
 class AdminSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
-            disnake.SelectOption(label="・Пересчет отзывов", description="Корректировка отзывов",
-                                 emoji="<:bannersc1:1538401325522489395>", value="recalc"),
-            disnake.SelectOption(label="・Обновление баннера", description="Корректировка баннера",
-                                 emoji="<:restart:1538401342391853118>", value="banner"),
             disnake.SelectOption(label="・Списать заказ в таблице", description="Убрать заказ из статистики менеджера",
                                  emoji="<:12ss1:1551641380307337216>", value="spisat"),
             disnake.SelectOption(label="・Выгрузка JSON", description="Сообщение - Скрипт",
@@ -422,14 +418,7 @@ class AdminSelect(disnake.ui.StringSelect):
             color=0x00aaff
         )
         value = inter.data.values[0]
-        if value == "recalc":
-            await inter.response.defer(ephemeral=True)
-            await recalc_reviews(inter)
-        elif value == "banner":
-            await inter.response.defer(ephemeral=True)
-            from core.bot import update_review_counter
-            await update_review_counter(silent=False)
-        elif value == "spisat":
+        if value == "spisat":
             if not has_admin_command_roles(inter.author):
                 return await inter.response.send_message(
                     "⛔ Списать заказ может только администратор.", ephemeral=True
@@ -445,15 +434,6 @@ class AdminView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(AdminSelect())
-
-
-async def recalc_reviews(inter: disnake.MessageInteraction):
-    try:
-        from core.bot import update_review_counter
-        await update_review_counter(silent=True)
-        await inter.edit_original_response(content="✅ Отзывы пересчитаны и роли обновлены!")
-    except Exception as e:
-        await inter.edit_original_response(content=f"❌ Ошибка: {e}")
 
 
 # ============================================================
