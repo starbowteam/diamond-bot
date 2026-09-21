@@ -50,7 +50,7 @@ async def set_user_balance(user_id: int, amount: int):
 
 
 async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: int):
-    """Отправляет ЛС при ручном изменении DC. Молча падает, если ЛС закрыты."""
+    """Отправляет ЛС при изменении DC. Молча падает, если ЛС закрыты."""
     try:
         from core.bot import bot
         user = bot.get_user(user_id)
@@ -86,8 +86,8 @@ async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: 
         logger.warning(f"_notify_dc_change {user_id}: {e}")
 
 
-async def add_dc(user_id: int, amount: int, reason: str, notify: bool = False):
-    """Начисляет DC. notify=True — отправит ЛС пользователю."""
+async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True):
+    """Начисляет DC. notify=True — ЛС пользователю. log=True — лог в канал."""
     data = get_dc_cache(user_id)
     data["balance"] += amount
     data["history"].append({
@@ -100,18 +100,19 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = False):
     save_dc_cache(user_id, data)
     sync_dc_to_json()
 
-    await log_discord(
-        title="💎 Начислены Diamond Coins",
-        description=f"> **Пользователь:** <@{user_id}>\n> **Количество:** `+{amount} DC`\n> **Причина:** {reason}\n> **Новый баланс:** `{data['balance']} DC`",
-        color=0x00ff00
-    )
+    if log:
+        await log_discord(
+            title="💎 Начислены Diamond Coins",
+            description=f"> **Пользователь:** <@{user_id}>\n> **Количество:** `+{amount} DC`\n> **Причина:** {reason}\n> **Новый баланс:** `{data['balance']} DC`",
+            color=0x00ff00
+        )
 
     if notify:
         await _notify_dc_change(user_id, amount, reason, data["balance"])
 
 
-async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = False) -> bool:
-    """Списывает DC. notify=True — отправит ЛС пользователю."""
+async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True) -> bool:
+    """Списывает DC. notify=True — ЛС пользователю. log=True — лог в канал."""
     data = get_dc_cache(user_id)
     if data["balance"] < amount:
         return False
@@ -126,11 +127,12 @@ async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = False
     save_dc_cache(user_id, data)
     sync_dc_to_json()
 
-    await log_discord(
-        title="💎 Списаны Diamond Coins",
-        description=f"> **Пользователь:** <@{user_id}>\n> **Количество:** `-{amount} DC`\n> **Причина:** {reason}\n> **Новый баланс:** `{data['balance']} DC`",
-        color=0xff6600
-    )
+    if log:
+        await log_discord(
+            title="💎 Списаны Diamond Coins",
+            description=f"> **Пользователь:** <@{user_id}>\n> **Количество:** `-{amount} DC`\n> **Причина:** {reason}\n> **Новый баланс:** `{data['balance']} DC`",
+            color=0xff6600
+        )
 
     if notify:
         await _notify_dc_change(user_id, -amount, reason, data["balance"])
@@ -173,59 +175,80 @@ async def remove_purchase(user_id: int, purchase_index: int):
 
 
 # ============================================================
-# АКТИВНОСТЬ
+# АКТИВНОСТЬ (счётчики, без выплаты)
 # ============================================================
-async def check_and_reset_daily(user_id: int):
-    data = get_dc_cache(user_id)
-    now = int(time.time())
-    last_reset = data.get("last_reset_date", 0)
-    if now - last_reset >= 86400:
-        data["messages_today"] = 0
-        data["voice_time_today"] = 0
-        data["last_reset_date"] = now
-        save_dc_cache(user_id, data)
-        sync_dc_to_json()
-        return True
-    return False
-
-
 async def add_message_dc(user_id: int):
+    """Просто увеличивает счётчик сообщений. Выплата — в daily_activity_payout."""
     data = get_dc_cache(user_id)
-    await check_and_reset_daily(user_id)
     data["messages_today"] = data.get("messages_today", 0) + 1
-    if data["messages_today"] % CONFIG["MESSAGE_BATCH"] == 0:
-        max_dc = CONFIG["MAX_DAILY_MESSAGES"]
-        current = data["messages_today"] // CONFIG["MESSAGE_BATCH"]
-        if current <= max_dc:
-            await add_dc(user_id, CONFIG["MESSAGE_RATE"],
-                         f"За {CONFIG['MESSAGE_BATCH']} сообщений в чате")
-            data = get_dc_cache(user_id)
-            data["messages_today"] = data.get("messages_today", 0)
-            save_dc_cache(user_id, data)
-            sync_dc_to_json()
-    else:
-        save_dc_cache(user_id, data)
-        sync_dc_to_json()
+    save_dc_cache(user_id, data)
 
 
 async def add_voice_dc(user_id: int, seconds: int):
+    """Просто увеличивает счётчик голосового времени. Выплата — в daily_activity_payout."""
     data = get_dc_cache(user_id)
-    await check_and_reset_daily(user_id)
     data["voice_time_today"] = data.get("voice_time_today", 0) + seconds
-    hours = data["voice_time_today"] // 3600
-    max_dc = CONFIG["MAX_DAILY_VOICE"]
-    target = min(hours * CONFIG["VOICE_RATE"], max_dc)
-    last_voice_dc = data.get("last_voice_dc", 0)
-    if target > last_voice_dc:
-        diff = target - last_voice_dc
-        if diff > 0:
-            await add_dc(user_id, diff, f"За {hours} часов в голосовом канале")
-            data["last_voice_dc"] = target
-            save_dc_cache(user_id, data)
-            sync_dc_to_json()
-    else:
-        save_dc_cache(user_id, data)
+    save_dc_cache(user_id, data)
+
+
+async def daily_activity_payout():
+    """
+    Раз в день в 00:00 МСК — выплачивает всем за активность одним платежом.
+    Формат: "Активность за день (чат: X DC, голос: Y DC)"
+    """
+    rows = cur.execute("SELECT user_id, messages_today, voice_time_today FROM dc_cache").fetchall()
+    paid_users = 0
+    total_paid = 0
+
+    for row in rows:
+        uid = row["user_id"]
+        msgs = row["messages_today"] or 0
+        voice_sec = row["voice_time_today"] or 0
+
+        msg_batches = msgs // CONFIG["MESSAGE_BATCH"]
+        msg_dc = min(msg_batches * CONFIG["MESSAGE_RATE"], CONFIG["MAX_DAILY_MESSAGES"])
+
+        voice_hours = voice_sec // 3600
+        voice_dc = min(voice_hours * CONFIG["VOICE_RATE"], CONFIG["MAX_DAILY_VOICE"])
+
+        total = msg_dc + voice_dc
+
+        # Сначала сбрасываем счётчики
+        data = get_dc_cache(uid)
+        data["messages_today"] = 0
+        data["voice_time_today"] = 0
+        data["last_voice_dc"] = 0
+        save_dc_cache(uid, data)
+
+        if total > 0:
+            parts = []
+            if msg_dc > 0:
+                parts.append(f"чат: {msg_dc} DC")
+            if voice_dc > 0:
+                parts.append(f"голос: {voice_dc} DC")
+            reason = "Активность за день (" + ", ".join(parts) + ")"
+
+            await add_dc(uid, total, reason, notify=True, log=False)
+            paid_users += 1
+            total_paid += total
+            await asyncio.sleep(0.4)  # rate limit
+
+    try:
         sync_dc_to_json()
+    except Exception:
+        pass
+
+    logger.info(f"daily_activity_payout: {paid_users} юзеров, {total_paid} DC")
+
+    if paid_users > 0:
+        await log_discord(
+            title="💎 Ежедневная выплата за активность",
+            description=(
+                f"> **Получателей:** `{paid_users}`\n"
+                f"> **Всего выдано:** `{total_paid} DC`"
+            ),
+            color=0x00ff00
+        )
 
 
 # ============================================================
@@ -258,7 +281,7 @@ def create_default_catalog() -> dict:
 
 
 # ============================================================
-# ЕЖЕДНЕВНЫЙ БОНУС
+# ЕЖЕДНЕВНЫЙ БОНУС (для Клуб)
 # ============================================================
 async def daily_bonus():
     from core.bot import bot
@@ -276,10 +299,15 @@ async def daily_bonus():
             continue
         data = get_dc_cache(member.id)
         if data["last_bonus"] < now - 86400:
-            await add_dc(member.id, 3, "Ежедневный бонус (Клуб)")
+            await add_dc(member.id, 3, "Ежедневный бонус (Клуб)", notify=True, log=False)
+            data = get_dc_cache(member.id)
             data["last_bonus"] = now
             save_dc_cache(member.id, data)
-            sync_dc_to_json()
+            await asyncio.sleep(0.4)
+    try:
+        sync_dc_to_json()
+    except Exception:
+        pass
 
 
 # ============================================================
