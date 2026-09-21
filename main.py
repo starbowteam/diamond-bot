@@ -3,17 +3,15 @@
 import os
 import sys
 
-# Добавляем пути к модулям (чтобы import core и modules работали)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from core.bot import bot, CONFIG, log_discord
+from core.bot import bot, CONFIG
 from core.utils import logger
-from modules.commands_admin import setup_commands_admin
+from modules.commands_staff import setup_commands_staff
 
 if __name__ == "__main__":
-    # Регистрируем команды из модуля админ
-    setup_commands_admin(bot)
+    setup_commands_staff(bot)
 
     if not CONFIG["BOT_TOKEN"]:
         logger.error("BOT_TOKEN не установлен в переменных окружения")
