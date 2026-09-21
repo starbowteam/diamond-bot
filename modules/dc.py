@@ -3,6 +3,7 @@ import os
 import json
 import time
 import random
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 import disnake
@@ -23,6 +24,7 @@ from core.utils import (
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
+
 
 # ============================================================
 # DC DATA
@@ -47,7 +49,45 @@ async def set_user_balance(user_id: int, amount: int):
     sync_dc_to_json()
 
 
-async def add_dc(user_id: int, amount: int, reason: str):
+async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: int):
+    """Отправляет ЛС при ручном изменении DC. Молча падает, если ЛС закрыты."""
+    try:
+        from core.bot import bot
+        user = bot.get_user(user_id)
+        if user is None:
+            try:
+                user = await bot.fetch_user(user_id)
+            except Exception:
+                return
+        if user is None:
+            return
+
+        if delta >= 0:
+            title = f"💎 Вам начислено {abs(delta)} DC"
+            color = 0x2ecc71
+        else:
+            title = f"💎 У вас списано {abs(delta)} DC"
+            color = 0xff6600
+
+        embed = disnake.Embed(
+            title=title,
+            description=(
+                f"> **Причина:** {reason}\n"
+                f"> **Новый баланс:** `{new_balance} DC`"
+            ),
+            color=color,
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_image(url=IMG_STRIPE)
+        await user.send(embed=embed)
+    except disnake.Forbidden:
+        logger.debug(f"ЛС закрыты у {user_id}")
+    except Exception as e:
+        logger.warning(f"_notify_dc_change {user_id}: {e}")
+
+
+async def add_dc(user_id: int, amount: int, reason: str, notify: bool = False):
+    """Начисляет DC. notify=True — отправит ЛС пользователю."""
     data = get_dc_cache(user_id)
     data["balance"] += amount
     data["history"].append({
@@ -59,14 +99,19 @@ async def add_dc(user_id: int, amount: int, reason: str):
         data["history"] = data["history"][-50:]
     save_dc_cache(user_id, data)
     sync_dc_to_json()
+
     await log_discord(
         title="💎 Начислены Diamond Coins",
         description=f"> **Пользователь:** <@{user_id}>\n> **Количество:** `+{amount} DC`\n> **Причина:** {reason}\n> **Новый баланс:** `{data['balance']} DC`",
         color=0x00ff00
     )
 
+    if notify:
+        await _notify_dc_change(user_id, amount, reason, data["balance"])
 
-async def remove_dc(user_id: int, amount: int, reason: str) -> bool:
+
+async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = False) -> bool:
+    """Списывает DC. notify=True — отправит ЛС пользователю."""
     data = get_dc_cache(user_id)
     if data["balance"] < amount:
         return False
@@ -80,11 +125,16 @@ async def remove_dc(user_id: int, amount: int, reason: str) -> bool:
         data["history"] = data["history"][-50:]
     save_dc_cache(user_id, data)
     sync_dc_to_json()
+
     await log_discord(
         title="💎 Списаны Diamond Coins",
         description=f"> **Пользователь:** <@{user_id}>\n> **Количество:** `-{amount} DC`\n> **Причина:** {reason}\n> **Новый баланс:** `{data['balance']} DC`",
         color=0xff6600
     )
+
+    if notify:
+        await _notify_dc_change(user_id, -amount, reason, data["balance"])
+
     return True
 
 
@@ -236,14 +286,8 @@ async def daily_bonus():
 # НАПОМИНАНИЯ О НЕИСПОЛЬЗОВАННЫХ ТОВАРАХ
 # ============================================================
 async def check_unused_purchases(bot):
-    """
-    Проходит по всем юзерам в dc_cache.
-    Если есть неиспользованный товар старше 7 дней — напоминаем в ЛС (эмбед).
-    Отправляем один раз в 7 дней (проверяем по last_reminder в purchases).
-    """
     now = int(time.time())
     week = 7 * 86400
-    month = 30 * 86400
 
     rows = cur.execute("SELECT user_id, purchases FROM dc_cache").fetchall()
     sent = 0
@@ -259,7 +303,6 @@ async def check_unused_purchases(bot):
             continue
 
         checked += 1
-        # отбираем неиспользованные старше 7 дней и не старше 60 дней
         old_unused = []
         for idx, p in enumerate(purchases):
             if p.get("used"):
@@ -269,7 +312,6 @@ async def check_unused_purchases(bot):
                 continue
             age = now - d
             if week <= age <= 60 * 86400:
-                # не чаще одного раза в 7 дней
                 last_rem = p.get("last_reminder", 0)
                 if now - last_rem >= week:
                     old_unused.append((idx, p))
@@ -314,7 +356,6 @@ async def check_unused_purchases(bot):
             embed2.set_image(url=IMG_STRIPE)
             await user.send(embeds=[embed1, embed2])
 
-            # Обновляем last_reminder
             for idx, p in old_unused:
                 purchases[idx]["last_reminder"] = now
 
@@ -323,9 +364,8 @@ async def check_unused_purchases(bot):
             save_dc_cache(uid, dc_data)
             sent += 1
 
-            await asyncio.sleep(0.5)  # анти-ратэлимит
+            await asyncio.sleep(0.5)
         except disnake.Forbidden:
-            # ЛС закрыты — пропускаем
             continue
         except Exception as e:
             logger.warning(f"unused reminder {uid}: {e}")
@@ -393,10 +433,6 @@ def get_dc_cache_all() -> dict:
             "last_voice_dc": row["last_voice_dc"],
         }
     return data
-
-
-# нужен для check_unused_purchases
-import asyncio
 
 
 def setup_dc(bot):
