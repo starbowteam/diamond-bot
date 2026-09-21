@@ -63,7 +63,7 @@ class ProfileCardView(View):
         super().__init__(timeout=300)
 
     @disnake.ui.button(
-        label=f"{P}Инвентарь DC{P}",
+        label="Инвентарь DC",
         style=ButtonStyle.gray,
         custom_id="pcard:inv",
         emoji=PartialEmoji(name="prize", id=1539657202170859561)
@@ -100,7 +100,7 @@ class ProfileCardView(View):
         await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
     @disnake.ui.button(
-        label=f"{P}Кастомные роли{P}",
+        label="Кастомные роли",
         style=ButtonStyle.gray,
         custom_id="pcard:roles",
         emoji=PartialEmoji(name="image", id=1550869363266027641)
@@ -158,7 +158,7 @@ class ProfileCardView(View):
         await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
     @disnake.ui.button(
-        label=f"{P}О валюте{P}",
+        label="О валюте",
         style=ButtonStyle.gray,
         custom_id="pcard:coin",
         emoji=PartialEmoji(name="pravil", id=1544388874497687622)
@@ -166,7 +166,6 @@ class ProfileCardView(View):
     async def coin_btn(self, button, inter: disnake.MessageInteraction):
         embeds = load_embed_from_file("vallue.json")
         await inter.response.send_message(embeds=embeds, ephemeral=True)
-
 
 async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
     await inter.response.defer(with_message=True, ephemeral=True)
