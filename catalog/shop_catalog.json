@@ -43,5 +43,38 @@
       "custom_role":       {"name": "Кастомная роль",                  "price": 140, "description": "Создание индивидуальной роли (выдача вручную)"},
       "custom_role_emoji": {"name": "Кастомная роль с эмодзи в списке", "price": 170, "description": "Создание индивидуальной роли и эмодзи к ней (выдача вручную)"}
     }
+  },
+  "boosts": {
+    "label": "⚡ Бусты",
+    "description": "Временные усилители DC-заработка",
+    "items": {
+      "boost_messages_x2":   {"name": "x2 к DC за сообщения (24ч)",     "price": 120, "description": "Удвоение награды за 10 сообщений на сутки", "boost_type": "messages_mult", "value": 2.0, "duration_hours": 24},
+      "boost_voice_x2":      {"name": "x2 к DC за войс (24ч)",          "price": 120, "description": "Удвоение награды за час в войсе на сутки",  "boost_type": "voice_mult",    "value": 2.0, "duration_hours": 24},
+      "boost_all_x2":        {"name": "x2 ко всему DC-заработку (12ч)", "price": 280, "description": "Удвоение ЛЮБОГО заработка на 12 часов",     "boost_type": "all_mult",      "value": 2.0, "duration_hours": 12},
+      "boost_review_x2":     {"name": "x2 к DC за отзывы (7 дней)",     "price": 320, "description": "Удвоение награды за отзывы на неделю",       "boost_type": "review_mult",   "value": 2.0, "duration_hours": 168},
+      "boost_cooldown_half": {"name": "Кулдаун отзыва 60 сек (24ч)",    "price": 90,  "description": "Отзыв можно оставить через минуту вместо двух", "boost_type": "review_cd",  "value": 60,  "duration_hours": 24},
+      "boost_daily_reset":   {"name": "Сброс дневного лимита",          "price": 60,  "description": "Обнуляет счётчики сообщений/войса на сегодня", "boost_type": "daily_reset", "value": 0,   "duration_hours": 0}
+    }
+  },
+  "casino": {
+    "label": "🎲 Казино-предметы",
+    "description": "Усилители и бонусы для игр в казино",
+    "items": {
+      "casino_insurance":     {"name": "Страховка ставки",       "price": 90,  "description": "Возврат 50% при проигрыше в следующей игре",  "boost_type": "insurance",      "value": 0.5, "uses": 1},
+      "casino_boost_x2":      {"name": "x2 к следующему выигрышу","price": 280, "description": "Удвоение любой выплаты в 1 партии",            "boost_type": "next_mult",      "value": 2.0, "uses": 1},
+      "casino_lucky_hour":    {"name": "Удачный час (60 мин)",    "price": 320, "description": "Все множители +20% на час",                    "boost_type": "lucky_hour",     "value": 1.2, "duration_hours": 1},
+      "casino_jackpot_ticket":{"name": "Билет в мега-джекпот",   "price": 400, "description": "Участвует в розыгрыше общего банка казино",    "boost_type": "jackpot_ticket", "value": 0,   "uses": 1}
+    }
+  },
+  "gifts": {
+    "label": "🎁 Подарки",
+    "description": "Подарить Diamond Coins другому участнику",
+    "items": {
+      "gift_100":  {"name": "Подарить 100 DC",  "price": 105,  "description": "Отправка 100 DC другому юзеру (комиссия 5%)",  "gift_amount": 100},
+      "gift_500":  {"name": "Подарить 500 DC",  "price": 525,  "description": "Отправка 500 DC другому юзеру (комиссия 5%)",  "gift_amount": 500},
+      "gift_1000": {"name": "Подарить 1000 DC", "price": 1050, "description": "Отправка 1000 DC другому юзеру (комиссия 5%)", "gift_amount": 1000},
+      "gift_2500": {"name": "Подарить 2500 DC", "price": 2625, "description": "Отправка 2500 DC другому юзеру (комиссия 5%)", "gift_amount": 2500},
+      "gift_5000": {"name": "Подарить 5000 DC", "price": 5250, "description": "Отправка 5000 DC другому юзеру (комиссия 5%)", "gift_amount": 5000}
+    }
   }
 }
