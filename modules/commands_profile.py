@@ -64,7 +64,7 @@ IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 
 class ProfileCardView(View):
     def __init__(self):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
 
     @disnake.ui.button(
         label="Инвентарь DC",
