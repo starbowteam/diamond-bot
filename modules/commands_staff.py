@@ -405,6 +405,8 @@ class AdminSelect(disnake.ui.StringSelect):
                                  emoji="<:bannersc1:1538401325522489395>", value="recalc"),
             disnake.SelectOption(label="・Обновление баннера", description="Корректировка баннера",
                                  emoji="<:restart:1538401342391853118>", value="banner"),
+            disnake.SelectOption(label="・Списать заказ в таблице", description="Убрать заказ из статистики менеджера",
+                                 emoji="<:12ss1:1551641380307337216>", value="spisat"),
             disnake.SelectOption(label="・Выгрузка JSON", description="Сообщение - Скрипт",
                                  emoji="<:jsons:1538401299459080263>", value="json"),
             disnake.SelectOption(label="・Очистка", description="Удаление сообщений в чате",
@@ -427,6 +429,12 @@ class AdminSelect(disnake.ui.StringSelect):
             await inter.response.defer(ephemeral=True)
             from core.bot import update_review_counter
             await update_review_counter(silent=False)
+        elif value == "spisat":
+            if not has_admin_command_roles(inter.author):
+                return await inter.response.send_message(
+                    "⛔ Списать заказ может только администратор.", ephemeral=True
+                )
+            await inter.response.send_modal(SpisatZakazModal())
         elif value == "json":
             await inter.response.send_modal(GetJsonModal())
         elif value == "clear":
@@ -675,8 +683,6 @@ class WorkSelect(disnake.ui.StringSelect):
                                  emoji="<:diagram:1541881258873983046>", value="top"),
             disnake.SelectOption(label="・Правила по тикетам", description="Строго для прочтения Sales-Manager-ам.",
                                  emoji="<:banne1:1538551829246513312>", value="tickets"),
-            disnake.SelectOption(label="・Списать заказ в таблице", description="Убрать заказ из статистики менеджера",
-                                 emoji="<:12ss1:1551641380307337216>", value="spisat"),
         ]
         super().__init__(placeholder="Выберите раздел...", min_values=1, max_values=1,
                          options=options, custom_id="work_select")
@@ -694,12 +700,6 @@ class WorkSelect(disnake.ui.StringSelect):
             await self.send_top(inter)
         elif value == "tickets":
             await inter.response.send_message(embeds=load_embed_from_file("ticket.json"), ephemeral=True)
-        elif value == "spisat":
-            if not has_admin_command_roles(inter.author):
-                return await inter.response.send_message(
-                    "⛔ Списать заказ может только администратор.", ephemeral=True
-                )
-            await inter.response.send_modal(SpisatZakazModal())
 
     async def send_top(self, inter):
         guild = inter.guild
