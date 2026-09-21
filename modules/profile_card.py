@@ -1,341 +1,393 @@
 # -*- coding: utf-8 -*-
-"""Рендер карточки профиля через htmlcsstoimage.com — 1 в 1 как HTML в браузере.
-Шрифт Proxima Nova Extra Bold встраивается в HTML через base64."""
-
+"""Рендер карточки профиля на PIL + FA (без HTML и HCTI)."""
 import io
 import os
-import base64
-import random
-import time
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
-import aiohttp
-
+from PIL import Image, ImageDraw, ImageFont
 from core.utils import ADD_DIR, logger
 
-TEMPLATE_PATH = os.path.join(ADD_DIR, "profile_template.html")
-FONT_PATH     = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
+FONT_BOLD = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
+FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
 
-# ============================================================
-# API КЛЮЧИ HTMLCSSTOIMAGE
-# ============================================================
-HCTI_USER_ID = "01M2FJ7BRZVNDREJ2KGRATD127"
-HCTI_API_KEY = "h1-afotTIvPTxWvnvKAw1iTfA10-b698a91b"
+_FONT_CACHE = {}
+_FA_CACHE = {}
 
-# ============================================================
-# КЕШ (10 минут)
-# ============================================================
-_RENDER_CACHE = {}
-_CACHE_TTL = 600
+# ---- FA codes ----
+I_USER    = 0xf007
+I_CROWN   = 0xf521
+I_THUMBS  = 0xf164
+I_GEM     = 0xf3a5
+I_CAL     = 0xf073
+I_CLOCK   = 0xf017
+I_TROPHY  = 0xf091
+I_DICE    = 0xf522
+I_STAR    = 0xf005
+I_SACK    = 0xf81d
+I_CART    = 0xf07a
+I_ROTATE  = 0xf1da
+I_PEOPLE  = 0xf0c0
+I_HASH    = 0xf292
+I_COINS   = 0xf51e
 
-# ============================================================
-# ШРИФТ В BASE64 (читается один раз при импорте модуля)
-# ============================================================
-_FONT_B64 = None
+# ---- Colors ----
+BG = (10, 10, 12)
+CARD_TOP = (26, 26, 31)
+CARD_BOT = (20, 20, 26)
+BORDER = (74, 74, 79)
+INNER = (15, 15, 20)
+INNER_BORDER = (42, 42, 47)
+OP_BG = (20, 20, 26)
+OP_BORDER = (31, 31, 36)
+TEXT = (255, 255, 255)
+MUTED = (136, 136, 136)
+DIM = (102, 102, 102)
+GOLD = (247, 201, 145)
+GREEN = (46, 204, 113)
+RED = (255, 107, 107)
 
-
-def _load_font_b64() -> str:
-    global _FONT_B64
-    if _FONT_B64 is not None:
-        return _FONT_B64
-    try:
-        with open(FONT_PATH, "rb") as f:
-            _FONT_B64 = base64.b64encode(f.read()).decode("ascii")
-        logger.info(f"Шрифт Proxima Nova загружен в base64, размер={len(_FONT_B64)} символов")
-    except Exception as e:
-        logger.error(f"Не удалось прочитать шрифт {FONT_PATH}: {e}")
-        _FONT_B64 = ""
-    return _FONT_B64
-
-
-# ---- Стили ролей ----
-ROLE_STYLES = {
-    "none":      {"name": "НЕТ РОЛИ",        "color": "#888",    "bg": "rgba(136,136,136,0.12)", "border": "rgba(136,136,136,0.4)",  "gradient": "linear-gradient(90deg, #888, #555)",       "glow": "rgba(136,136,136,0.3)",  "header": "Без роли"},
-    "bronze":    {"name": "BRONZE BUYER",    "color": "#e78f67", "bg": "rgba(209,86,64,0.12)",   "border": "rgba(209,86,64,0.45)",   "gradient": "linear-gradient(90deg, #e78f67, #d15640)", "glow": "rgba(209,86,64,0.4)",    "header": "Bronze Buyer"},
-    "silver":    {"name": "SILVER BUYER",    "color": "#e0e0e0", "bg": "rgba(176,176,176,0.12)", "border": "rgba(176,176,176,0.45)", "gradient": "linear-gradient(90deg, #ffffff, #979797)", "glow": "rgba(176,176,176,0.4)",  "header": "Silver Buyer"},
-    "gold":      {"name": "GOLD BUYER",      "color": "#f7c991", "bg": "rgba(174,121,17,0.12)",  "border": "rgba(174,121,17,0.45)",  "gradient": "linear-gradient(90deg, #f7c991, #ae7911)", "glow": "rgba(174,121,17,0.4)",   "header": "Gold Buyer"},
-    "diamond":   {"name": "DIAMOND BUYER",   "color": "#ddf0ef", "bg": "rgba(20,155,208,0.12)",  "border": "rgba(20,155,208,0.45)",  "gradient": "linear-gradient(90deg, #ddf0ef, #149bd0)", "glow": "rgba(20,155,208,0.4)",   "header": "Diamond Buyer"},
-    "emerald":   {"name": "EMERALD BUYER",   "color": "#eff3d3", "bg": "rgba(61,158,8,0.12)",    "border": "rgba(61,158,8,0.45)",    "gradient": "linear-gradient(90deg, #eff3d3, #3d9e08)", "glow": "rgba(61,158,8,0.4)",     "header": "Emerald Buyer"},
-    "amethyst":  {"name": "AMETHYST BUYER",  "color": "#9fc1ff", "bg": "rgba(216,142,223,0.12)", "border": "rgba(216,142,223,0.45)", "gradient": "linear-gradient(90deg, #9fc1ff, #d88edf)", "glow": "rgba(216,142,223,0.4)",  "header": "Amethyst Buyer"},
-    "legendary": {"name": "LEGENDARY BUYER", "color": "#e68585", "bg": "rgba(197,28,178,0.12)",  "border": "rgba(197,28,178,0.45)",  "gradient": "linear-gradient(90deg, #e68585, #c51cb2)", "glow": "rgba(197,28,178,0.4)",   "header": "Legendary Buyer"},
-    "pka":       {"name": "ПОКУПАТЕЛЬ ВЕКА", "color": "#d4bfff", "bg": "rgba(179,217,255,0.12)", "border": "rgba(179,217,255,0.45)", "gradient": "linear-gradient(90deg, #b3d9ff, #d4bfff)", "glow": "rgba(179,217,255,0.4)",  "header": "Покупатель Века"},
+ROLE_INFO = {
+    "none":      ("Клуб",            GOLD),
+    "bronze":    ("Bronze Buyer",    (231, 143, 103)),
+    "silver":    ("Silver Buyer",    (224, 224, 224)),
+    "gold":      ("Gold Buyer",      GOLD),
+    "diamond":   ("Diamond Buyer",   (221, 240, 239)),
+    "emerald":   ("Emerald Buyer",   (239, 243, 211)),
+    "amethyst":  ("Amethyst Buyer",  (216, 142, 223)),
+    "legendary": ("Legendary Buyer", (230, 133, 133)),
+    "pka":       ("Покупатель Века", (212, 191, 255)),
 }
 
-ROLE_ICON_POOL = [
-    "fa-star", "fa-heart", "fa-crown", "fa-gem", "fa-bolt", "fa-fire",
-    "fa-rocket", "fa-robot", "fa-paw", "fa-dragon", "fa-cat", "fa-dove",
-    "fa-frog", "fa-user-astronaut", "fa-user-ninja", "fa-user-secret",
-    "fa-hat-wizard", "fa-magic", "fa-ice-cream", "fa-hamburger",
-    "fa-wine-glass", "fa-umbrella", "fa-anchor", "fa-plane", "fa-bomb",
-    "fa-feather", "fa-skull", "fa-moon", "fa-sun", "fa-snowflake",
-    "fa-leaf", "fa-shield", "fa-ghost", "fa-car", "fa-motorcycle",
-    "fa-bicycle", "fa-chess", "fa-chess-king", "fa-chess-queen",
-    "fa-fish", "fa-horse",
-]
+
+def _font(size: int):
+    if size in _FONT_CACHE:
+        return _FONT_CACHE[size]
+    try:
+        f = ImageFont.truetype(FONT_BOLD, size)
+    except Exception:
+        f = ImageFont.load_default()
+    _FONT_CACHE[size] = f
+    return f
 
 
-def _pick_role_icon(role_id: int) -> str:
-    return random.Random(int(role_id) & 0xFFFFFFFF).choice(ROLE_ICON_POOL)
+def _fa(size: int):
+    if size in _FA_CACHE:
+        return _FA_CACHE[size]
+    f = None
+    if os.path.exists(FONT_FA):
+        try:
+            f = ImageFont.truetype(FONT_FA, size)
+        except Exception:
+            pass
+    _FA_CACHE[size] = f
+    return f
 
 
-def _rgb_to_hex(rgb) -> str:
-    if isinstance(rgb, str):
-        return rgb
-    r, g, b = rgb[:3]
-    return f"#{r:02x}{g:02x}{b:02x}"
+def _draw_icon(d, cx, cy, code, size, color):
+    f = _fa(size)
+    if f is None:
+        return
+    try:
+        d.text((cx, cy), chr(code), font=f, fill=color, anchor="mm")
+    except Exception:
+        pass
 
 
-def _fmt_num(n: int) -> str:
+def _tw(d, text, font):
+    b = d.textbbox((0, 0), text, font=font)
+    return b[2] - b[0]
+
+
+def _fmt(n):
     try:
         return f"{int(n):,}".replace(",", " ")
     except Exception:
         return str(n)
 
 
-def _esc(s) -> str:
-    s = str(s)
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def _avatar_img(ab, size):
+    try:
+        img = Image.open(io.BytesIO(ab)).convert("RGBA")
+        img = img.resize((size, size), Image.LANCZOS)
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+        out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        out.paste(img, (0, 0), mask)
+        return out
+    except Exception as e:
+        logger.warning(f"Avatar err: {e}")
+        return None
 
 
-# ============================================================
-# СБОРКА HTML ИЗ ШАБЛОНА
-# ============================================================
-def _build_html(
-    user_name: str,
-    user_id: int,
-    avatar_url: str,
-    role_key: str,
-    reviews: int,
-    next_role_name: str,
-    progress_pct: int,
-    progress_text: str,
-    balance: int,
-    total_earned: int,
-    earned_month: int,
-    spent_month: int,
-    purchases_count: int,
-    inventory: List[Dict],
-    history: List[Dict],
-    custom_roles: List[Dict],
-) -> str:
-    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        html = f.read()
-
-    st = ROLE_STYLES.get(role_key, ROLE_STYLES["none"])
-
-    # ---- кастомные роли ----
-    if custom_roles:
-        parts = []
-        for r in custom_roles:
-            icon_cls = _pick_role_icon(r.get("id", 0))
-            rc = _rgb_to_hex(r.get("color", (20, 155, 208)))
-            name = _esc(r.get("name", "—"))
-            pos = _esc(r.get("pos", ""))
-            parts.append(
-                '<div class="role-item" style="--role-item-color:{rc};">'
-                '<div class="dot" style="background:{rc};box-shadow:0 0 13px {rc};"></div>'
-                '<i class="fa-solid {icon}" style="color:{rc};font-size:20px;width:24px;text-align:center;flex-shrink:0;"></i>'
-                '<div class="name">{name}</div>'
-                '<div class="pos">{pos}</div>'
-                '</div>'.format(rc=rc, icon=icon_cls, name=name, pos=pos)
-            )
-        roles_html = '<div class="roles-list">' + "".join(parts) + '</div>'
+def _since_days(dt):
+    if not dt:
+        return "—"
+    d = (datetime.now(timezone.utc) - dt).days
+    if d < 0:
+        d = 0
+    last = d % 10
+    last2 = d % 100
+    if last == 1 and last2 != 11:
+        suf = "день"
+    elif 2 <= last <= 4 and not (12 <= last2 <= 14):
+        suf = "дня"
     else:
-        roles_html = (
-            '<div class="empty-roles">'
-            '<div class="empty-icon"><i class="fa-solid fa-user-slash"></i></div>'
-            '<div class="empty-text">Нету кастомных ролей</div>'
-            '<div class="empty-sub">Приобретите в магазине</div>'
-            '</div>'
-        )
-
-    # ---- инвентарь ----
-    icon_map = {
-        "roles": "fa-user-tie",
-        "discounts": "fa-percent",
-        "design": "fa-image",
-        "design_avatar": "fa-image",
-        "design_banner": "fa-image",
-        "ads": "fa-bolt",
-        "custom": "fa-gift",
-    }
-    inv_items = []
-    for i in range(3):
-        if i < len(inventory):
-            it = inventory[i]
-            accent = _rgb_to_hex(it.get("accent", (20, 155, 208)))
-            ptype = it.get("_ptype", "")
-            icon_cls = icon_map.get(ptype, "fa-gem")
-            name = _esc(it.get("name", ""))
-            qty = _esc(it.get("qty", ""))
-            inv_items.append(
-                '<div class="inv-item filled">'
-                '<div class="inv-icon" style="color:{accent};"><i class="fa-solid {icon}"></i></div>'
-                '<div class="inv-body">'
-                '<div class="inv-name">{name}</div>'
-                '<div class="inv-qty">{qty}</div>'
-                '</div></div>'.format(accent=accent, icon=icon_cls, name=name, qty=qty)
-            )
-        else:
-            inv_items.append('<div class="inv-item empty"></div>')
-    inv_items_html = "".join(inv_items)
-
-    inv_total = len(inventory)
-    if inv_total > 3:
-        inv_more_html = f'<i class="fa-solid fa-circle-plus"></i> +{inv_total - 3} ещё'
-    elif inv_total > 0:
-        inv_more_html = f'всего {inv_total}'
-    else:
-        inv_more_html = ""
-
-    # ---- история ----
-    hist_parts = []
-    for h in history[:6]:
-        amt = h.get("amount", 0)
-        if amt >= 0:
-            cls, s = "plus", f"+{amt} DC"
-        else:
-            cls, s = "minus", f"−{abs(amt)} DC"
-        hist_parts.append(
-            '<div class="history-item">'
-            '<span class="date">{d}</span>'
-            '<span class="amount {c}">{a}</span>'
-            '</div>'.format(d=_esc(h.get("date", "")), c=cls, a=s)
-        )
-    history_html = "".join(hist_parts)
-
-    # ---- шрифт ----
-    font_b64 = _load_font_b64()
-
-    # ---- подстановки ----
-    repl = {
-        "FONT_FACE_B64_PLACEHOLDER": font_b64,
-        "ROLE_GLOW_PLACEHOLDER": st["glow"],
-        "ROLE_GRADIENT_PLACEHOLDER": st["gradient"],
-        "ROLE_BORDER_PLACEHOLDER": st["border"],
-        "ROLE_BG_PLACEHOLDER": st["bg"],
-        "ROLE_COLOR_PLACEHOLDER": st["color"],
-        "ROLE_HEADER_PLACEHOLDER": _esc(st["header"]),
-        "ROLE_BADGE_PLACEHOLDER": _esc(st["name"]),
-        "AVATAR_URL_PLACEHOLDER": avatar_url,
-        "USERNAME_PLACEHOLDER": _esc(user_name[:22]),
-        "USER_ID_PLACEHOLDER": str(user_id),
-        "NEXT_ROLE_PLACEHOLDER": _esc(next_role_name),
-        "PROGRESS_PCT_PLACEHOLDER": str(int(progress_pct)),
-        "PROGRESS_TEXT_PLACEHOLDER": _esc(progress_text),
-        "REVIEWS_PLACEHOLDER": str(reviews),
-        "PURCHASES_COUNT_PLACEHOLDER": str(purchases_count),
-        "TOTAL_EARNED_PLACEHOLDER": _fmt_num(total_earned),
-        "BALANCE_PLACEHOLDER": _fmt_num(balance),
-        "EARNED_MONTH_PLACEHOLDER": _fmt_num(earned_month),
-        "SPENT_MONTH_PLACEHOLDER": _fmt_num(spent_month),
-        "ROLES_COUNT_PLACEHOLDER": str(len(custom_roles)),
-        "ROLES_HTML_PLACEHOLDER": roles_html,
-        "INV_MORE_PLACEHOLDER": inv_more_html,
-        "INV_ITEMS_PLACEHOLDER": inv_items_html,
-        "HISTORY_PLACEHOLDER": history_html,
-    }
-    for k, v in repl.items():
-        html = html.replace(k, v)
-    return html
+        suf = "дней"
+    return f"{d} {suf}"
 
 
-# ============================================================
-# ОТПРАВКА В HTMLCSSTOIMAGE API
-# ============================================================
-async def _render_via_api(html: str) -> bytes:
-    auth = base64.b64encode(f"{HCTI_USER_ID}:{HCTI_API_KEY}".encode()).decode()
-    payload = {
-        "html": html,
-        "viewport_width": 1800,
-        "viewport_height": 1200,
-        "device_scale_factor": 1,
-    }
-    headers = {
-        "Authorization": f"Basic {auth}",
-        "Content-Type": "application/json",
-    }
-
-    timeout = aiohttp.ClientTimeout(total=60)
-
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post("https://hcti.io/v1/image", json=payload, headers=headers) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                logger.error(f"HCTI create error {resp.status}: {body}")
-                raise RuntimeError(f"HCTI error {resp.status}: {body}")
-            data = await resp.json()
-            image_url = data.get("url")
-            if not image_url:
-                raise RuntimeError(f"HCTI: no url in response: {data}")
-
-        async with session.get(image_url) as img_resp:
-            if img_resp.status != 200:
-                raise RuntimeError(f"HCTI download error {img_resp.status}")
-            return await img_resp.read()
+def _op_icon(reason: str):
+    r = reason.lower()
+    if "рулетк" in r: return I_TROPHY
+    if "блэкдж" in r: return I_DICE
+    if "монет" in r: return I_COINS
+    if "отзыв" in r: return I_STAR
+    if "зарплат" in r or "аванс" in r: return I_SACK
+    if "покупк" in r: return I_CART
+    if "акци" in r: return I_TROPHY
+    return I_COINS
 
 
-# ============================================================
-# ГЛАВНАЯ ФУНКЦИЯ
-# ============================================================
-async def generate_profile_card(
+def generate_profile_card(
     user_name: str,
     user_id: int,
     avatar_bytes: Optional[bytes],
     role_key: str,
     reviews: int,
-    next_role_name: str,
-    progress_pct: int,
-    progress_text: str,
     balance: int,
-    total_earned: int,
-    earned_month: int,
-    spent_month: int,
-    purchases_count: int,
-    streak: int,
-    inventory: List[Dict],
+    joined_at: Optional[datetime],
     history: List[Dict],
-    custom_roles: List[Dict],
 ) -> io.BytesIO:
-    now = time.time()
-    cached = _RENDER_CACHE.get(user_id)
-    if cached and now - cached[0] < _CACHE_TTL:
-        logger.info(f"Profile card from cache for user {user_id}")
-        return io.BytesIO(cached[1])
+    W, H = 1800, 1000
+    M = 20
+    PX = 48
+    PY = 36
 
-    if avatar_bytes:
-        b64 = base64.b64encode(avatar_bytes).decode()
-        avatar_url = f"data:image/png;base64,{b64}"
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+
+    # мягкие декоративные пятна
+    d.ellipse((W - 700, -280, W + 80, 500), fill=(24, 21, 18))
+    d.ellipse((-220, H - 320, 460, H + 180), fill=(14, 22, 28))
+
+    # карточка
+    d.rounded_rectangle((M, M, W - M, H - M), radius=30, fill=CARD_BOT, outline=BORDER, width=3)
+    d.rounded_rectangle((M + 1, M + 1, W - M - 1, H // 2), radius=30, fill=CARD_TOP)
+
+    # ---------------- ШАПКА ----------------
+    cy_top = M + PY
+    logo_size = 76
+    d.rounded_rectangle((M + PX, cy_top, M + PX + logo_size, cy_top + logo_size),
+                        radius=20, fill=(74, 74, 79))
+    _draw_icon(d, M + PX + logo_size // 2, cy_top + logo_size // 2 + 2,
+               I_PEOPLE, 36, (224, 224, 224))
+
+    d.text((M + PX + logo_size + 20, cy_top + 2), "DIAMOND", font=_font(38), fill=TEXT)
+    d.text((M + PX + logo_size + 22, cy_top + 50), "SHOP & ECOSYSTEM", font=_font(15), fill=MUTED)
+
+    lbl = "ПРОФИЛЬ ПОКУПАТЕЛЯ"
+    id_str = f"#{user_id}"
+    w1 = _tw(d, lbl, _font(16))
+    w2 = _tw(d, id_str, _font(26))
+    d.text((W - M - PX - w1, cy_top + 12), lbl, font=_font(16), fill=MUTED)
+    d.text((W - M - PX - w2, cy_top + 38), id_str, font=_font(26), fill=TEXT)
+
+    yline = cy_top + logo_size + 24
+    d.line((M + PX, yline, W - M - PX, yline), fill=INNER_BORDER, width=2)
+
+    # ---------------- BODY ----------------
+    body_y = yline + 30
+    body_x1 = M + PX
+    body_x2 = W - M - PX
+    gap = 32
+    total_w = body_x2 - body_x1
+    left_w = int((total_w - gap) / 2.3)
+    right_w = (total_w - gap) - left_w
+    left_x1 = body_x1
+    left_x2 = left_x1 + left_w
+    right_x1 = left_x2 + gap
+    right_x2 = right_x1 + right_w
+
+    # --- USER ROW ---
+    ur_h = 174
+    d.rounded_rectangle((left_x1, body_y, left_x2, body_y + ur_h),
+                        radius=22, fill=INNER, outline=INNER_BORDER, width=2)
+
+    av_size = 130
+    av_x = left_x1 + 26
+    av_y = body_y + 22
+    av_img = _avatar_img(avatar_bytes, av_size) if avatar_bytes else None
+    if av_img:
+        img.paste(av_img, (av_x, av_y), av_img)
     else:
-        avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png"
+        d.ellipse((av_x, av_y, av_x + av_size, av_y + av_size), fill=(60, 60, 66))
+        _draw_icon(d, av_x + av_size // 2, av_y + av_size // 2 + 2, I_USER, 56, MUTED)
+    d.ellipse((av_x - 2, av_y - 2, av_x + av_size + 2, av_y + av_size + 2),
+              outline=GOLD, width=4)
+    # online dot
+    od_cx = av_x + av_size - 16
+    od_cy = av_y + av_size - 16
+    d.ellipse((od_cx - 13, od_cy - 13, od_cx + 13, od_cy + 13),
+              fill=GREEN, outline=INNER, width=4)
 
-    html = _build_html(
-        user_name=user_name,
-        user_id=user_id,
-        avatar_url=avatar_url,
-        role_key=role_key,
-        reviews=reviews,
-        next_role_name=next_role_name,
-        progress_pct=progress_pct,
-        progress_text=progress_text,
-        balance=balance,
-        total_earned=total_earned,
-        earned_month=earned_month,
-        spent_month=spent_month,
-        purchases_count=purchases_count,
-        inventory=inventory,
-        history=history,
-        custom_roles=custom_roles,
-    )
+    un_x = av_x + av_size + 26
+    un_y = av_y + 8
+    uname = user_name
+    max_w = left_x2 - un_x - 20
+    if _tw(d, uname, _font(42)) > max_w:
+        while uname and _tw(d, uname + "…", _font(42)) > max_w:
+            uname = uname[:-1]
+        uname += "…"
+    d.text((un_x, un_y), uname, font=_font(42), fill=TEXT)
 
-    png_bytes = await _render_via_api(html)
-    _RENDER_CACHE[user_id] = (now, png_bytes)
+    _draw_icon(d, un_x + 8, un_y + 68, I_HASH, 14, MUTED)
+    d.text((un_x + 24, un_y + 60), str(user_id), font=_font(18), fill=MUTED)
 
-    buf = io.BytesIO(png_bytes)
+    rn, rc = ROLE_INFO.get(role_key, ROLE_INFO["none"])
+    rn_up = rn.upper()
+    rn_f = _font(17)
+    rn_w = _tw(d, rn_up, rn_f)
+    badge_w = rn_w + 56
+    badge_h = 44
+    badge_x = un_x
+    badge_y = un_y + 90
+    d.rounded_rectangle((badge_x, badge_y, badge_x + badge_w, badge_y + badge_h),
+                        radius=14, fill=(40, 32, 22), outline=GOLD, width=2)
+    _draw_icon(d, badge_x + 22, badge_y + badge_h // 2 + 1, I_CROWN, 18, GOLD)
+    d.text((badge_x + 40, badge_y + 10), rn_up, font=rn_f, fill=GOLD)
+
+    # --- METRICS ---
+    metrics_y = body_y + ur_h + 20
+    metrics_h = 98
+    m_w = (left_w - 16) // 2
+    icon_box = 54
+
+    # metric 1: reviews
+    m1x1 = left_x1
+    m1x2 = m1x1 + m_w
+    d.rounded_rectangle((m1x1, metrics_y, m1x2, metrics_y + metrics_h),
+                        radius=20, fill=INNER, outline=INNER_BORDER, width=2)
+    ibx = m1x1 + 26
+    iby = metrics_y + 22
+    d.rounded_rectangle((ibx, iby, ibx + icon_box, iby + icon_box), radius=15, fill=(40, 32, 18))
+    _draw_icon(d, ibx + icon_box // 2, iby + icon_box // 2 + 1, I_THUMBS, 26, GOLD)
+    d.text((ibx + icon_box + 18, iby - 2), "ОТЗЫВОВ", font=_font(14), fill=MUTED)
+    d.text((ibx + icon_box + 18, iby + 24), str(reviews), font=_font(44), fill=GOLD)
+
+    # metric 2: balance
+    m2x1 = m1x2 + 16
+    m2x2 = left_x2
+    d.rounded_rectangle((m2x1, metrics_y, m2x2, metrics_y + metrics_h),
+                        radius=20, fill=INNER, outline=INNER_BORDER, width=2)
+    ibx2 = m2x1 + 26
+    d.rounded_rectangle((ibx2, iby, ibx2 + icon_box, iby + icon_box), radius=15, fill=(18, 44, 28))
+    _draw_icon(d, ibx2 + icon_box // 2, iby + icon_box // 2 + 1, I_GEM, 26, GREEN)
+    d.text((ibx2 + icon_box + 18, iby - 2), "БАЛАНС", font=_font(14), fill=MUTED)
+    bal_str = _fmt(balance)
+    d.text((ibx2 + icon_box + 18, iby + 24), bal_str, font=_font(44), fill=GREEN)
+    bw = _tw(d, bal_str, _font(44))
+    d.text((ibx2 + icon_box + 18 + bw + 10, iby + 46), "DC", font=_font(20), fill=DIM)
+
+    # --- SINCE ---
+    since_y1 = metrics_y + metrics_h + 20
+    since_y2 = H - M - PY
+    d.rounded_rectangle((left_x1, since_y1, left_x2, since_y2),
+                        radius=20, fill=INNER, outline=INNER_BORDER, width=2)
+
+    big_box = 100
+    bb_x = left_x1 + 34
+    bb_y = (since_y1 + since_y2 - big_box) // 2
+    d.rounded_rectangle((bb_x, bb_y, bb_x + big_box, bb_y + big_box),
+                        radius=22, fill=(24, 24, 30), outline=(40, 40, 48), width=2)
+    _draw_icon(d, bb_x + big_box // 2, bb_y + big_box // 2 + 2, I_CAL, 46, (200, 200, 208))
+
+    tx = bb_x + big_box + 32
+    ty = bb_y + 4
+    d.text((tx, ty), "В DIAMOND С", font=_font(16), fill=(106, 106, 114))
+    date_str = joined_at.strftime("%d.%m.%Y") if joined_at else "—"
+    d.text((tx, ty + 34), date_str, font=_font(42), fill=(240, 240, 245))
+
+    days_str = _since_days(joined_at)
+    dp_w = 52 + _tw(d, days_str, _font(20))
+    dp_h = 42
+    dp_x = tx
+    dp_y = ty + 90
+    d.rounded_rectangle((dp_x, dp_y, dp_x + dp_w, dp_y + dp_h),
+                        radius=12, fill=(28, 28, 34), outline=(40, 40, 48), width=2)
+    _draw_icon(d, dp_x + 22, dp_y + dp_h // 2 + 1, I_CLOCK, 20, (160, 160, 168))
+    d.text((dp_x + 40, dp_y + 8), days_str, font=_font(20), fill=(200, 200, 208))
+
+    # --- HISTORY COL ---
+    hist_h = since_y2 - body_y
+    d.rounded_rectangle((right_x1, body_y, right_x2, body_y + hist_h),
+                        radius=22, fill=INNER, outline=INNER_BORDER, width=2)
+
+    inner_px = 28
+    ih_x1 = right_x1 + inner_px
+    ih_x2 = right_x2 - inner_px
+    header_y = body_y + 24
+    _draw_icon(d, ih_x1 + 12, header_y + 16, I_ROTATE, 22, GOLD)
+    d.text((ih_x1 + 34, header_y + 4), "ПОСЛЕДНИЕ ОПЕРАЦИИ", font=_font(18), fill=MUTED)
+
+    sep_y = header_y + 46
+    d.line((ih_x1, sep_y, ih_x2, sep_y), fill=INNER_BORDER, width=2)
+
+    list_y1 = sep_y + 18
+    list_y2 = body_y + hist_h - 24
+    list_h = list_y2 - list_y1
+
+    ops = (history or [])[-5:]
+    if not ops:
+        _draw_icon(d, (ih_x1 + ih_x2) // 2, (list_y1 + list_y2) // 2 - 20,
+                   I_ROTATE, 72, (37, 37, 48))
+        t = "НЕТ ОПЕРАЦИЙ"
+        tw = _tw(d, t, _font(22))
+        d.text(((ih_x1 + ih_x2) // 2 - tw // 2, (list_y1 + list_y2) // 2 + 30),
+               t, font=_font(22), fill=(51, 51, 56))
+    else:
+        n = len(ops)
+        gap_op = 12
+        op_h = (list_h - (n - 1) * gap_op) // n
+        op_y = list_y1
+        for op in ops:
+            amt = op.get("amount", 0)
+            reason = (op.get("reason", "—") or "—")[:32]
+            ts = op.get("date", 0)
+            try:
+                dstr = datetime.fromtimestamp(ts).strftime("%d.%m.%Y · %H:%M")
+            except Exception:
+                dstr = "—"
+
+            is_plus = amt >= 0
+            accent = GREEN if is_plus else RED
+            accent_bg = (18, 44, 28) if is_plus else (44, 20, 20)
+            sign = "+" if is_plus else "−"
+
+            d.rounded_rectangle((ih_x1, op_y, ih_x2, op_y + op_h),
+                                radius=14, fill=OP_BG, outline=OP_BORDER, width=2)
+
+            op_icon_size = 48
+            ob_x = ih_x1 + 22
+            ob_y = op_y + (op_h - op_icon_size) // 2
+            d.rounded_rectangle((ob_x, ob_y, ob_x + op_icon_size, ob_y + op_icon_size),
+                                radius=13, fill=accent_bg)
+            _draw_icon(d, ob_x + op_icon_size // 2, ob_y + op_icon_size // 2 + 1,
+                       _op_icon(reason), 22, accent)
+
+            reason_x = ob_x + op_icon_size + 18
+            reason_y = op_y + (op_h // 2) - 22
+            d.text((reason_x, reason_y), reason, font=_font(22), fill=TEXT)
+            d.text((reason_x, reason_y + 32), dstr, font=_font(16), fill=DIM)
+
+            amt_str = f"{sign}{abs(int(amt))} DC"
+            amt_w = _tw(d, amt_str, _font(28))
+            d.text((ih_x2 - 22 - amt_w, op_y + (op_h // 2) - 14),
+                   amt_str, font=_font(28), fill=accent)
+
+            op_y += op_h + gap_op
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
     buf.seek(0)
-    logger.info(f"Profile card generated (HCTI) for user {user_id}, size={len(png_bytes)}")
     return buf
-
-
-def generate_profile_id() -> str:
-    return f"P-{int(time.time())}-{random.randint(100, 999)}"
