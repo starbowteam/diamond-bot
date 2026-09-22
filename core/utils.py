@@ -39,7 +39,8 @@ CONFIG = {
         1530822331188903966
     ],
     "ADMIN_USER_IDS": [1415191217179856967],
-    "REVIEW_MODERATION_ROLES": [1154757071330365490, 1513935883475226796, 1127428607606796294, 1471844291595731016],
+    # ⬇️ Убрана роль 1513935883475226796 из модерации отзывов
+    "REVIEW_MODERATION_ROLES": [1154757071330365490, 1127428607606796294, 1471844291595731016],
     "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1471844291595731016, 1127428607606796294],
     "LOG_CHANNEL_ID": 1462418981825810535,
@@ -206,6 +207,13 @@ CREATE TABLE IF NOT EXISTS user_items (
     uses_left    INTEGER DEFAULT -1,
     activated_at INTEGER DEFAULT 0,
     PRIMARY KEY (user_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS ticket_reviews (
+    channel_id INTEGER PRIMARY KEY,
+    user_id    INTEGER,
+    manager_id INTEGER,
+    rating     INTEGER,
+    rated_at   INTEGER
 );
 """)
 db.commit()
@@ -493,6 +501,28 @@ def get_closed_orders(manager_id: int) -> List[dict]:
 
 def remove_closed_order(order_id: int):
     cur.execute("DELETE FROM closed_orders WHERE id = ?", (order_id,))
+    db.commit()
+
+# ============================================================
+# Отзывы в тикетах (оценка менеджера через кнопку)
+# ============================================================
+def save_ticket_review(channel_id: int, user_id: int, manager_id: int, rating: int):
+    cur.execute(
+        "INSERT OR REPLACE INTO ticket_reviews (channel_id, user_id, manager_id, rating, rated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (channel_id, user_id, manager_id, rating, int(time.time()))
+    )
+    db.commit()
+
+def get_ticket_review(channel_id: int) -> Optional[dict]:
+    row = cur.execute(
+        "SELECT channel_id, user_id, manager_id, rating, rated_at FROM ticket_reviews WHERE channel_id = ?",
+        (channel_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+def clear_ticket_review(channel_id: int):
+    cur.execute("DELETE FROM ticket_reviews WHERE channel_id = ?", (channel_id,))
     db.commit()
 
 # ============================================================
