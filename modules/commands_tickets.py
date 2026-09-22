@@ -21,7 +21,8 @@ from core.utils import (
     assign_ticket_manager, get_ticket_manager, clear_ticket_manager,
     increment_manager_closed, add_manager_rating,
     add_closed_order,
-    get_promo_codes
+    get_promo_codes,
+    save_ticket_review, get_ticket_review, clear_ticket_review,
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
@@ -39,6 +40,12 @@ IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/155
 
 # Запрос отзыва при закрытии тикета
 IMG_RATING = "https://cdn.discordapp.com/attachments/1527006158282555412/1551636456403894383/image.png?ex=6ab2b18f&is=6ab1600f&hm=b735a4db21085a96326573718f9c397d574fd2d6690c5c55a22e7bc33f4da67a&"
+
+# ⬇️ Роль, которая НЕ должна видеть тикеты и модерировать
+HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
+
+# ⬇️ Задержка до подтверждения оплаты
+PAY_CONFIRM_DELAY_SECONDS = 60
 
 
 # ============================================================
@@ -92,6 +99,120 @@ def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
     return channel.category.id == CONFIG["PAID_CATEGORY_ID"]
 
 
+def _build_ticket_overwrites(guild: disnake.Guild, user: disnake.Member) -> dict:
+    """
+    Единая сборка overwrites для тикета.
+    Явно скрывает HIDDEN_FROM_TICKETS_ROLE_ID.
+    """
+    overwrites = {
+        guild.default_role: disnake.PermissionOverwrite(view_channel=False),
+        user: disnake.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True
+        ),
+    }
+    # ⬇️ Явный запрет для скрытой роли
+    hidden_role = guild.get_role(HIDDEN_FROM_TICKETS_ROLE_ID)
+    if hidden_role:
+        overwrites[hidden_role] = disnake.PermissionOverwrite(view_channel=False)
+
+    for rid in CONFIG["TICKET_VIEW_ROLES"]:
+        role = guild.get_role(rid)
+        if role:
+            overwrites[role] = disnake.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True
+            )
+    for rid in CONFIG["TICKET_MANAGE_ROLES"]:
+        role = guild.get_role(rid)
+        if role:
+            overwrites[role] = disnake.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True
+            )
+    return overwrites
+
+
+async def _has_review_in_channel(channel: disnake.TextChannel, user_id: int) -> bool:
+    """
+    Проверяет: оставил ли user_id сообщение в канале отзывов
+    ПОСЛЕ создания этого тикета.
+    """
+    review_channel = channel.guild.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
+    if not review_channel:
+        return False
+    try:
+        created_at = channel.created_at
+        async for msg in review_channel.history(after=created_at, limit=200):
+            if msg.author.bot:
+                continue
+            if msg.author.id == user_id:
+                return True
+    except Exception as e:
+        logger.warning(f"_has_review_in_channel err: {e}")
+    return False
+
+
+async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: bool = True):
+    """
+    Единая логика закрытия тикета с проверкой отзывов.
+    check_reviews=True — требует оценку менеджера + отзыв в канале.
+    """
+    channel = inter.channel
+
+    if check_reviews:
+        owner_id = get_ticket_owner(channel.id)
+        if owner_id:
+            manager_id = get_ticket_manager(channel.id)
+
+            # 1. Проверка оценки менеджера (если он назначен)
+            if manager_id:
+                review = get_ticket_review(channel.id)
+                if not review:
+                    return await inter.response.send_message(
+                        content=(
+                            "❌ **Сначала оставьте отзыв о менеджере.**\n"
+                            "> Нажмите кнопку **«Оценить работу менеджера»** выше."
+                        ),
+                        ephemeral=True
+                    )
+
+            # 2. Проверка отзыва в канале отзывов
+            has_review = await _has_review_in_channel(channel, owner_id)
+            if not has_review:
+                return await inter.response.send_message(
+                    content=(
+                        "❌ **Необходимо оставить отзыв в канале.**\n"
+                        f"> Перейдите в <#{CONFIG['REVIEW_COUNT_CHANNEL']}> и напишите отзыв о заказе.\n"
+                        f"> После этого сможете закрыть тикет."
+                    ),
+                    ephemeral=True
+                )
+
+    await inter.response.send_message("Тикет закрывается...", ephemeral=True)
+    await asyncio.sleep(3)
+
+    try:
+        manager_id = get_ticket_manager(channel.id)
+        if manager_id and _is_paid_ticket(channel):
+            increment_manager_closed(manager_id)
+            add_closed_order(manager_id, channel.id)
+
+        clear_ticket_owner(channel)
+        clear_ticket_manager(channel.id)
+        clear_ticket_review(channel.id)
+
+        await channel.delete()
+
+        await log_discord(
+            title="🗑️ Тикет закрыт",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {channel.name}",
+            color=0xff6600,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+        from modules.commands_staff import send_manager_top
+        await send_manager_top()
+    except Exception as e:
+        logger.error(f"Ошибка закрытия тикета: {e}")
+
+
 # ============================================================
 # СОЗДАНИЕ ТИКЕТА — РЕАЛЬНЫЕ ДЕНЬГИ
 # ============================================================
@@ -109,18 +230,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     raw = re.sub(r"[^a-zа-яё0-9\-_]", "", raw)
     channel_name = raw[:80] or f"order-{user.id}"
 
-    overwrites = {
-        guild.default_role: disnake.PermissionOverwrite(view_channel=False),
-        user: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-    }
-    for rid in CONFIG["TICKET_VIEW_ROLES"]:
-        role = guild.get_role(rid)
-        if role:
-            overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-    for rid in CONFIG["TICKET_MANAGE_ROLES"]:
-        role = guild.get_role(rid)
-        if role:
-            overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    overwrites = _build_ticket_overwrites(guild, user)
 
     try:
         await inter.response.edit_message(content="⏳ Создаём тикет...", embeds=[], view=None)
@@ -177,9 +287,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     try:
         await inter.edit_original_response(
-            content=(
-                f"> {user.mention}   ᶻ 𝘇 𐰁, тикет создан — {ticket_channel.mention}"
-            )
+            content=f"> {user.mention}   ᶻ 𝘇 𐰁, тикет создан — {ticket_channel.mention}"
         )
     except Exception:
         try:
@@ -219,18 +327,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     raw = re.sub(r"[^a-zа-яё0-9\-_]", "", raw)
     channel_name = raw[:80] or f"item-{user.id}"
 
-    overwrites = {
-        guild.default_role: disnake.PermissionOverwrite(view_channel=False),
-        user: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-    }
-    for rid in CONFIG["TICKET_VIEW_ROLES"]:
-        role = guild.get_role(rid)
-        if role:
-            overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-    for rid in CONFIG["TICKET_MANAGE_ROLES"]:
-        role = guild.get_role(rid)
-        if role:
-            overwrites[role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    overwrites = _build_ticket_overwrites(guild, user)
 
     try:
         await inter.response.edit_message(content="⏳ Создаём тикет...", embeds=[], view=None)
@@ -869,13 +966,23 @@ class TicketRatingView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        btn_rate = Button(label="ㅤОценить работу менеджераㅤ", style=ButtonStyle.gray, custom_id="ticket:rate_manager",
-                          emoji=PartialEmoji(name="Otziv", id=1541808692314243172), row=0)
+        btn_rate = Button(
+            label="ㅤОценить работу менеджераㅤ",
+            style=ButtonStyle.gray,
+            custom_id="ticket:rate_manager",
+            emoji=PartialEmoji(name="Otziv", id=1541808692314243172),
+            row=0
+        )
         btn_rate.callback = self.rate_callback
         self.add_item(btn_rate)
 
-        btn_close = Button(label="ㅤЗакрыть заказㅤ", style=ButtonStyle.gray, custom_id="ticket:close_order",
-                           emoji=PartialEmoji(name="OffTicket", id=1539657125716824185), row=0)
+        btn_close = Button(
+            label="ㅤЗакрыть заказㅤ",
+            style=ButtonStyle.gray,
+            custom_id="ticket:close_order",
+            emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
+            row=0
+        )
         btn_close.callback = self.close_callback
         self.add_item(btn_close)
 
@@ -887,6 +994,12 @@ class TicketRatingView(View):
         manager_id = get_ticket_manager(channel.id)
         if not manager_id:
             return await inter.response.send_message("❌ Менеджер не назначен.", ephemeral=True)
+        # Проверка: не оценивал ли уже
+        existing = get_ticket_review(channel.id)
+        if existing:
+            return await inter.response.send_message(
+                "⛔ Вы уже оценили этого менеджера.", ephemeral=True
+            )
         await inter.response.send_modal(RatingModal(channel, manager_id))
 
     async def close_callback(self, inter: disnake.MessageInteraction):
@@ -894,29 +1007,8 @@ class TicketRatingView(View):
         user_id = get_ticket_owner(channel.id)
         if user_id and inter.author.id != user_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Только владелец или админ.", ephemeral=True)
-        await self.close_ticket(inter)
-
-    async def close_ticket(self, inter: disnake.MessageInteraction):
-        channel = inter.channel
-        await inter.response.send_message("Тикет закрывается...", ephemeral=True)
-        await asyncio.sleep(3)
-        try:
-            manager_id = get_ticket_manager(channel.id)
-            if manager_id and _is_paid_ticket(channel):
-                increment_manager_closed(manager_id)
-                add_closed_order(manager_id, channel.id)
-            clear_ticket_owner(channel)
-            await channel.delete()
-            await log_discord(
-                title="🗑️ Тикет закрыт (после выполнения)",
-                description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {channel.name}",
-                color=0xff6600,
-                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-            )
-            from modules.commands_staff import send_manager_top
-            await send_manager_top()
-        except Exception as e:
-            logger.error(f"Ошибка при закрытии тикета: {e}")
+        # ⬇️ Проверка отзывов перед закрытием
+        await _do_close_ticket(inter, check_reviews=True)
 
 
 class RatingModal(Modal):
@@ -933,19 +1025,50 @@ class RatingModal(Modal):
         if not rating_str.isdigit() or int(rating_str) < 1 or int(rating_str) > 5:
             return await inter.response.send_message("❌ Оценка 1-5.", ephemeral=True)
         rating = int(rating_str)
-        if self.manager_id:
-            add_manager_rating(self.manager_id, rating)
-            await log_discord(
-                title="⭐ Оценка менеджера",
-                description=f"> **Менеджер:** <@{self.manager_id}>\n> **Оценка:** {rating}/5\n> **Тикет:** {self.channel.mention}",
-                color=0xffaa00,
-                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-            )
-            await inter.response.send_message(f"✅ Спасибо! Оценка {rating}/5 сохранена.", ephemeral=True)
-            from modules.commands_staff import send_manager_top
-            await send_manager_top()
-        else:
-            await inter.response.send_message("❌ Менеджер не назначен.", ephemeral=True)
+        if not self.manager_id:
+            return await inter.response.send_message("❌ Менеджер не назначен.", ephemeral=True)
+
+        # 1. Общая статистика менеджера
+        add_manager_rating(self.manager_id, rating)
+
+        # 2. Сохраняем оценку для этого тикета
+        save_ticket_review(self.channel.id, inter.author.id, self.manager_id, rating)
+
+        # 3. Логируем
+        await log_discord(
+            title="⭐ Оценка менеджера",
+            description=f"> **Менеджер:** <@{self.manager_id}>\n> **Оценка:** {rating}/5\n> **Тикет:** {self.channel.mention}",
+            color=0xffaa00,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        )
+
+        # 4. Пишем в тикет (embed2, без embed1)
+        embed = disnake.Embed(
+            title="⭐ Спасибо за оценку!",
+            description=(
+                f"> **Менеджер:** <@{self.manager_id}>\n"
+                f"> **Оценка:** `{rating}/5`\n\n"
+                f"> Осталось написать отзыв в <#{CONFIG['REVIEW_COUNT_CHANNEL']}> "
+                f"и можно **закрыть тикет**."
+            ),
+            color=0x2ecc71,
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_image(url=_IMG_STRIPE)
+        try:
+            await self.channel.send(embed=embed)
+        except Exception as e:
+            logger.warning(f"Не удалось отправить оценку в тикет: {e}")
+
+        # 5. Ephemeral юзеру
+        await inter.response.send_message(
+            f"✅ Спасибо! Оценка **{rating}/5** сохранена.\n"
+            f"> Осталось написать отзыв в <#{CONFIG['REVIEW_COUNT_CHANNEL']}>.",
+            ephemeral=True
+        )
+
+        from modules.commands_staff import send_manager_top
+        await send_manager_top()
 
 
 # ============================================================
@@ -979,10 +1102,13 @@ class TicketView(View):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
+            # нет владельца — просто закрываем
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
             await asyncio.sleep(3)
             try:
                 clear_ticket_owner(channel)
+                clear_ticket_manager(channel.id)
+                clear_ticket_review(channel.id)
                 await channel.delete()
                 await log_discord(
                     title="🗑️ Тикет закрыт",
@@ -1006,7 +1132,6 @@ class TicketView(View):
         user_mention = owner.mention if owner else f"<@{owner_id}>"
         manager_mention = manager.mention if manager else "Не назначен"
 
-        # ⬇️ IMG_RATING — это картинка для запроса отзыва
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url=IMG_RATING)
         embed2 = disnake.Embed(
@@ -1029,6 +1154,24 @@ class TicketView(View):
         if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
             return await inter.response.send_message("⛔ Нет прав на подтверждение оплаты.", ephemeral=True)
         channel = inter.channel
+
+        # ⬇️ Проверка: прошло ли 60 секунд с создания тикета
+        try:
+            age = _time.time() - channel.created_at.timestamp()
+        except Exception:
+            age = PAY_CONFIRM_DELAY_SECONDS  # если не смогли получить — пропускаем
+        if age < PAY_CONFIRM_DELAY_SECONDS:
+            left = int(PAY_CONFIRM_DELAY_SECONDS - age)
+            return await inter.response.send_message(
+                content=(
+                    f"⏳ **Слишком рано.**\n"
+                    f"> Подтвердить оплату можно через **{left} сек** "
+                    f"после создания тикета.\n"
+                    f"> Это защита от ошибочных нажатий."
+                ),
+                ephemeral=True
+            )
+
         manager_id = get_ticket_manager(channel.id)
         if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
@@ -1064,7 +1207,8 @@ class TicketView(View):
         embed.set_image(url=_IMG_STRIPE)
         await channel.send(embed=embed)
 
-        # ⬇️ ЛС клиенту — картинка IMG_ORDER_PAID
+        # ЛС клиенту
+        owner_id_here = None
         try:
             owner_id_here = get_ticket_owner(channel.id)
             owner_member = inter.guild.get_member(owner_id_here) if owner_id_here else None
@@ -1233,14 +1377,13 @@ class TicketPaidView(View):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
+            # нет владельца — просто закрываем
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
             await asyncio.sleep(3)
             try:
-                manager_id = get_ticket_manager(channel.id)
-                if manager_id and _is_paid_ticket(channel):
-                    increment_manager_closed(manager_id)
-                    add_closed_order(manager_id, channel.id)
                 clear_ticket_owner(channel)
+                clear_ticket_manager(channel.id)
+                clear_ticket_review(channel.id)
                 await channel.delete()
                 await log_discord(
                     title="🗑️ Тикет закрыт (оплаченный)",
@@ -1253,23 +1396,8 @@ class TicketPaidView(View):
             except Exception as e:
                 logger.error(f"Ошибка при закрытии: {e}")
         else:
-            manager_id = get_ticket_manager(channel.id)
-            owner = channel.guild.get_member(owner_id)
-            manager = channel.guild.get_member(manager_id) if manager_id else None
-            user_mention = owner.mention if owner else f"<@{owner_id}>"
-            manager_mention = manager.mention if manager else "Не назначен"
-            # ⬇️ IMG_RATING — для запроса отзыва
-            embed1 = disnake.Embed(color=6776679)
-            embed1.set_image(url=IMG_RATING)
-            embed2 = disnake.Embed(
-                title="Отзыв после выполнения товара.\n",
-                description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
-                            f"> Также, ваш тикет обработал менеджер {manager_mention}. Вы можете дать ему оценку по кнопке ниже. После успешного выполнения действий - менеджер закроет тикет.",
-                color=6776679
-            )
-            embed2.set_image(url=_IMG_STRIPE)
-            view = TicketRatingView()
-            await channel.send(embeds=[embed1, embed2], view=view)
+            # владелец есть — проверяем отзывы
+            await _do_close_ticket(inter, check_reviews=True)
 
 
 # ============================================================
@@ -1326,6 +1454,8 @@ class CoinsTicketButtons(View):
             await asyncio.sleep(3)
             try:
                 clear_ticket_owner(channel)
+                clear_ticket_manager(channel.id)
+                clear_ticket_review(channel.id)
                 await channel.delete()
                 await log_discord(
                     title="🗑️ Тикет закрыт (DC)",
@@ -1338,23 +1468,7 @@ class CoinsTicketButtons(View):
             except Exception as e:
                 logger.error(f"Ошибка закрытия: {e}")
         else:
-            manager_id = get_ticket_manager(channel.id)
-            owner = channel.guild.get_member(owner_id)
-            manager = channel.guild.get_member(manager_id) if manager_id else None
-            user_mention = owner.mention if owner else f"<@{owner_id}>"
-            manager_mention = manager.mention if manager else "Не назначен"
-            # ⬇️ IMG_RATING — для запроса отзыва
-            embed1 = disnake.Embed(color=6776679)
-            embed1.set_image(url=IMG_RATING)
-            embed2 = disnake.Embed(
-                title="Отзыв после выполнения товара.\n",
-                description=f"> {user_mention}, заказ выполнен! Оставьте отзыв в канале - <#1462074763437543435>.\n\n"
-                            f"> Также, ваш тикет обработал менеджер {manager_mention}. Вы можете дать ему оценку по кнопке ниже. После успешного выполнения действий - менеджер закроет тикет.",
-                color=6776679
-            )
-            embed2.set_image(url=_IMG_STRIPE)
-            view = TicketRatingView()
-            await channel.send(embeds=[embed1, embed2], view=view)
+            await _do_close_ticket(inter, check_reviews=True)
 
 
 # ============================================================
