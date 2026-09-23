@@ -70,21 +70,22 @@ IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/155160
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
-# защита от повторного запуска daily_activity_payout в тот же день
+# защита от повторного запуска
 _LAST_PAYOUT_DATE = None
 _LAST_SALARY_ADVANCE_DATE = None
 _LAST_SALARY_MAIN_MONTH = None
+_LAST_REMINDER_DATE = None
 
 
 # ============================================================
 # ЗАРПЛАТЫ И АВАНСЫ
 # ============================================================
 SALARY_ROLES = {
-    1471844291595731016: {"advance": 70, "salary": 150},
-    1513935883475226796: {"advance": 50, "salary": 110},
-    1154757071330365490: {"advance": 50, "salary": 110},
-    1471190371181789234: {"advance": 45, "salary": 90},
-    1457964854441672806: {"advance": 40, "salary": 80},
+    1471844291595731016: {"advance": 300, "salary": 700},
+    1513935883475226796: {"advance": 220, "salary": 500},
+    1154757071330365490: {"advance": 220, "salary": 500},
+    1471190371181789234: {"advance": 180, "salary": 400},
+    1457964854441672806: {"advance": 150, "salary": 350},
 }
 SALARY_ROLE_ORDER = [
     1471844291595731016, 1513935883475226796, 1154757071330365490,
@@ -147,7 +148,7 @@ async def process_salary(mode: str):
     await log_discord(
         title=f"💰 Авто-выдача {'зарплаты' if mode == 'salary' else 'аванса'}",
         description=(
-            f"> **Тип:** {'Зарплата (31 число)' if mode == 'salary' else 'Аванс (15 число)'}\n"
+            f"> **Тип:** {'Зарплата (29 число)' if mode == 'salary' else 'Аванс (15 число)'}\n"
             f"> **Сотрудников:** {awarded}\n"
             f"> **Всего выдано:** {total} DC\n"
             f"> **Ошибок:** {errors}\n"
@@ -289,7 +290,6 @@ async def salary_advance_task():
     await bot.wait_until_ready()
     try:
         now_msk = datetime.now(MSK)
-        # проверка: 15 число, ровно 00:00 МСК
         if now_msk.day != 15 or now_msk.hour != 0 or now_msk.minute != 0:
             return
         today = now_msk.date()
@@ -302,7 +302,7 @@ async def salary_advance_task():
         logger.exception(f"salary_advance_task: {e}")
 
 
-# === ЗАРПЛАТА: последний день месяца, 00:00 МСК ===
+# === ЗАРПЛАТА: 29 число каждого месяца, 00:00 МСК ===
 @tasks.loop(minutes=1)
 async def salary_main_task():
     global _LAST_SALARY_MAIN_MONTH
@@ -311,14 +311,13 @@ async def salary_main_task():
         now_msk = datetime.now(MSK)
         if now_msk.hour != 0 or now_msk.minute != 0:
             return
-        tomorrow = now_msk + timedelta(days=1)
-        if tomorrow.day != 1:
-            return  # сегодня не последний день месяца
+        if now_msk.day != 29:
+            return
         month_key = (now_msk.year, now_msk.month)
         if _LAST_SALARY_MAIN_MONTH == month_key:
             return
         _LAST_SALARY_MAIN_MONTH = month_key
-        logger.info("Авто-выдача зарплаты: последний день месяца, 00:00 МСК")
+        logger.info("Авто-выдача зарплаты: 29 число месяца, 00:00 МСК")
         await process_salary("salary")
     except Exception as e:
         logger.exception(f"salary_main_task: {e}")
@@ -334,9 +333,9 @@ async def unused_purchase_reminder_task():
         if now_msk.hour != 12 or now_msk.minute != 0:
             return
         today = now_msk.date()
-        if globals().get("_LAST_REMINDER_DATE") == today:
+        if _LAST_REMINDER_DATE == today:
             return
-        globals()["_LAST_REMINDER_DATE"] = today
+        _LAST_REMINDER_DATE = today
         await check_unused_purchases(bot)
     except Exception as e:
         logger.exception(f"unused_purchase_reminder_task: {e}")
@@ -519,14 +518,12 @@ async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: dis
 # ============================================================
 @bot.event
 async def on_member_join(member: disnake.Member):
-    # === 1. Лог о входе ===
     await log_discord(
         title="👤 Участник зашёл",
         description=f"> **{member.mention}** (`{member}`) присоединился.\n> ID: `{member.id}`",
         color=0x00ff00
     )
 
-    # === 2. Роль по умолчанию ===
     role = member.guild.get_role(1127428607606796290)
     if role:
         try:
@@ -534,7 +531,7 @@ async def on_member_join(member: disnake.Member):
         except Exception as e:
             logger.error(f"Не удалось выдать роль: {e}")
 
-    # === 3. Приветственный бонус 50 DC ===
+    # Приветственный бонус 50 DC
     try:
         data = get_dc_cache(member.id)
         already_received = any(
@@ -584,7 +581,7 @@ async def on_member_join(member: disnake.Member):
     except Exception as e:
         logger.exception(f"welcome bonus err: {e}")
 
-    # === 4. Инвайты ===
+    # Инвайты
     guild = member.guild
     snapshot_before = {row["invite_code"]: row for row in db.execute(
         "SELECT * FROM invites_snapshot WHERE guild_id=?", (guild.id,)).fetchall()}
@@ -673,7 +670,6 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
 
 @bot.event
 async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
-    # не считаем счётчик если удалили из канала отзывов (бот сам удаляет по cooldown)
     if payload.channel_id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         asyncio.create_task(schedule_banner_update())
 
@@ -682,7 +678,6 @@ async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
 async def on_message_delete(message: disnake.Message):
     if message.author.bot:
         return
-    # не логируем удаления из канала отзывов (это работа бота, не модерация)
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         return
     content = message.content or "[Нет текста]"
@@ -700,7 +695,6 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
     if not messages:
         return
     channel = messages[0].channel
-    # не логируем массовые удаления из канала отзывов
     if channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         asyncio.create_task(schedule_banner_update())
         return
@@ -715,7 +709,6 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
 async def on_message_edit(before: disnake.Message, after: disnake.Message):
     if before.author.bot or before.content == after.content:
         return
-    # не логируем редактирования в канале отзывов
     if before.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         return
     b = (before.content or "[Нет]")[:500]
@@ -843,10 +836,8 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
-    # защита от DM/Group DM — там нет .category
     is_guild_text = isinstance(message.channel, disnake.TextChannel)
 
-    # Автоназначение менеджера в тикетах
     if is_guild_text and message.channel.category:
         cat_id = message.channel.category.id
         if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
@@ -870,7 +861,6 @@ async def on_message(message: disnake.Message):
                     )
                     await reassign_ticket_permissions(message.channel, message.author)
 
-    # Счётчик сообщений (без начисления) — только в гильдейских каналах
     if is_guild_text:
         from modules.dc import add_message_dc
         if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
@@ -883,7 +873,6 @@ async def on_message(message: disnake.Message):
         now = time.time()
         text = (message.content or "").strip()
 
-        # cooldown
         last = _REVIEW_COOLDOWN.get(user_id, 0)
         if now - last < REVIEW_COOLDOWN_SECONDS:
             left = int(REVIEW_COOLDOWN_SECONDS - (now - last))
@@ -891,7 +880,6 @@ async def on_message(message: disnake.Message):
                 await message.delete()
             except Exception:
                 pass
-            # уведомим юзера в ЛС, чтобы не было вопросов "куда делся отзыв"
             try:
                 await message.author.send(
                     f"⏳ **Слишком часто.**\n"
@@ -902,7 +890,6 @@ async def on_message(message: disnake.Message):
                 pass
             return
 
-        # фильтр вложений и эмбедов
         if message.attachments or message.stickers or message.embeds:
             try:
                 await message.delete()
@@ -910,7 +897,6 @@ async def on_message(message: disnake.Message):
                 pass
             return
 
-        # слишком коротко
         if len(text) < REVIEW_MIN_LENGTH:
             try:
                 await message.delete()
