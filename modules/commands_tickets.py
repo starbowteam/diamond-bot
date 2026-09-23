@@ -23,6 +23,7 @@ from core.utils import (
     add_closed_order,
     get_promo_codes,
     save_ticket_review, get_ticket_review, clear_ticket_review,
+    set_ticket_cooldown, get_ticket_cooldown, get_ticket_cooldown_info,
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
@@ -46,6 +47,12 @@ HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
 
 # ⬇️ Задержка до подтверждения оплаты
 PAY_CONFIRM_DELAY_SECONDS = 60
+
+# ⬇️ Время блокировки при предупредительном закрытии (2 часа)
+WARN_CLOSE_COOLDOWN_SECONDS = 2 * 60 * 60
+
+# ⬇️ Категория вопросов (не блокируется)
+QUESTIONS_CATEGORY_ID = 1544363672128987196
 
 
 # ============================================================
@@ -110,7 +117,6 @@ def _build_ticket_overwrites(guild: disnake.Guild, user: disnake.Member) -> dict
             view_channel=True, send_messages=True, read_message_history=True
         ),
     }
-    # ⬇️ Явный запрет для скрытой роли
     hidden_role = guild.get_role(HIDDEN_FROM_TICKETS_ROLE_ID)
     if hidden_role:
         overwrites[hidden_role] = disnake.PermissionOverwrite(view_channel=False)
@@ -131,10 +137,7 @@ def _build_ticket_overwrites(guild: disnake.Guild, user: disnake.Member) -> dict
 
 
 async def _has_review_in_channel(channel: disnake.TextChannel, user_id: int) -> bool:
-    """
-    Проверяет: оставил ли user_id сообщение в канале отзывов
-    ПОСЛЕ создания этого тикета.
-    """
+    """Проверяет: оставил ли user_id сообщение в канале отзывов после создания тикета."""
     review_channel = channel.guild.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
     if not review_channel:
         return False
@@ -150,6 +153,44 @@ async def _has_review_in_channel(channel: disnake.TextChannel, user_id: int) -> 
     return False
 
 
+async def _check_ticket_blocked(inter: disnake.MessageInteraction) -> bool:
+    """
+    Проверка блокировки. Возвращает True если юзер ЗАБЛОКИРОВАН (и уже отправил сообщение).
+    """
+    user_id = inter.author.id
+    until_ts = get_ticket_cooldown(user_id)
+    if until_ts > 0:
+        info = get_ticket_cooldown_info(user_id)
+        reason = info.get("reason", "—") if info else "—"
+        left_min = max(1, (until_ts - int(_time.time())) // 60)
+        try:
+            await inter.response.edit_message(
+                content=(
+                    f"⚠️ **Вам запрещено создавать тикеты.**\n"
+                    f"> **Причина:** {reason}\n"
+                    f"> **Осталось:** ~`{left_min} мин`\n"
+                    f"> **Разблокировка:** <t:{until_ts}:R>\n\n"
+                    f"> Тикеты в категории вопросов — по-прежнему доступны."
+                ),
+                embeds=[], view=None
+            )
+        except Exception:
+            try:
+                await inter.followup.send(
+                    content=(
+                        f"⚠️ **Вам запрещено создавать тикеты.**\n"
+                        f"> **Причина:** {reason}\n"
+                        f"> **Осталось:** ~`{left_min} мин`\n"
+                        f"> **Разблокировка:** <t:{until_ts}:R>"
+                    ),
+                    ephemeral=True
+                )
+            except Exception:
+                pass
+        return True
+    return False
+
+
 async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: bool = True):
     """
     Единая логика закрытия тикета с проверкой отзывов.
@@ -162,7 +203,7 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
         if owner_id:
             manager_id = get_ticket_manager(channel.id)
 
-            # 1. Проверка оценки менеджера (если он назначен)
+            # 1. Проверка оценки менеджера
             if manager_id:
                 review = get_ticket_review(channel.id)
                 if not review:
@@ -213,12 +254,120 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
         logger.error(f"Ошибка закрытия тикета: {e}")
 
 
+async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
+    """
+    Предупредительное закрытие тикета.
+    Закрывает тикет + блокирует юзеру создание тикетов на 2 часа.
+    """
+    channel = inter.channel
+    owner_id = get_ticket_owner(channel.id)
+
+    if not owner_id:
+        return await inter.response.send_message(
+            "❌ У тикета нет владельца.", ephemeral=True
+        )
+
+    owner = inter.guild.get_member(owner_id)
+    if not owner:
+        try:
+            owner = await inter.guild.fetch_member(owner_id)
+        except Exception:
+            owner = None
+
+    # 1. Устанавливаем кулдаун
+    until_ts = set_ticket_cooldown(
+        owner_id,
+        seconds=WARN_CLOSE_COOLDOWN_SECONDS,
+        reason=reason,
+        set_by=inter.author.id
+    )
+
+    # 2. Уведомляем юзера в ЛС (embed2 — маленький, без картинки-шапки)
+    if owner:
+        try:
+            dm_embed = disnake.Embed(
+                title="⚠️ Предупредительное закрытие тикета",
+                description=(
+                    f"> Ваш тикет был закрыт менеджером **{inter.author.display_name}**.\n\n"
+                    f"> **Причина:** {reason}\n\n"
+                    f"> **Вам запрещено создавать новые тикеты на 2 часа.**\n"
+                    f"> **Разблокировка:** <t:{until_ts}:R>\n\n"
+                    f"> Тикеты в категории **вопросов** — по-прежнему доступны."
+                ),
+                color=0xff6600,
+                timestamp=datetime.now(timezone.utc)
+            )
+            dm_embed.set_image(url=_IMG_STRIPE)
+            await owner.send(embed=dm_embed)
+        except disnake.Forbidden:
+            logger.warning(f"ЛС закрыты у {owner_id} — уведомление не отправлено")
+        except Exception as e:
+            logger.warning(f"Ошибка ЛС при warn-close: {e}")
+
+    # 3. Лог в канал
+    await log_discord(
+        title="⚠️ Предупредительное закрытие",
+        description=(
+            f"> **Менеджер:** {inter.author.mention}\n"
+            f"> **Нарушитель:** <@{owner_id}>\n"
+            f"> **Канал:** `{channel.name}`\n"
+            f"> **Причина:** {reason}\n"
+            f"> **Блокировка до:** <t:{until_ts}:f>"
+        ),
+        color=0xff6600,
+        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+    )
+
+    # 4. Сообщение в тикет (не эфемерно) — чтобы менеджер видел
+    try:
+        notify_embed = disnake.Embed(
+            title="⚠️ Тикет закрыт с предупреждением",
+            description=(
+                f"> **Менеджер:** {inter.author.mention}\n"
+                f"> **Причина:** {reason}\n"
+                f"> **Юзеру запрещено создавать тикеты до:** <t:{until_ts}:f>"
+            ),
+            color=0xff6600,
+            timestamp=datetime.now(timezone.utc)
+        )
+        notify_embed.set_image(url=_IMG_STRIPE)
+        await channel.send(embed=notify_embed)
+    except Exception:
+        pass
+
+    # 5. Чистим БД
+    clear_ticket_owner(channel)
+    clear_ticket_manager(channel.id)
+    clear_ticket_review(channel.id)
+
+    # 6. Ответ юзеру-менеджеру (эфемерно)
+    await inter.response.send_message(
+        content=(
+            f"✅ Тикет закрыт предупредительно.\n"
+            f"> **Нарушитель:** <@{owner_id}>\n"
+            f"> **Блокировка до:** <t:{until_ts}:R>"
+        ),
+        ephemeral=True
+    )
+
+    # 7. Удаляем канал
+    await asyncio.sleep(2)
+    try:
+        await channel.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить канал {channel.name}: {e}")
+
+
 # ============================================================
 # СОЗДАНИЕ ТИКЕТА — РЕАЛЬНЫЕ ДЕНЬГИ
 # ============================================================
 async def create_real_ticket(inter: disnake.MessageInteraction):
     user = inter.author
     guild = inter.guild
+
+    # ⬇️ Проверка блокировки
+    if await _check_ticket_blocked(inter):
+        return
 
     cat = guild.get_channel(CONFIG["TICKET_CATEGORY_ID"])
     if not cat:
@@ -275,9 +424,10 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         view=view
     )
 
+    # ⬇️ Изменённое описание
     select_embed = disnake.Embed(
         title="Что именно нужно посмотреть?",
-        description="Ниже, выбор - просмотр политики по заказу, либо - создать счет  \n\nВыберите нужный пункт.",
+        description="Ниже, выбор - политика, счет, имя, варны.  \n\nВыберите нужный пункт.",
         color=6776679
     )
     select_embed.set_image(url=_IMG_STRIPE)
@@ -314,6 +464,10 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict, purchase_index: int):
     user = inter.author
     guild = inter.guild
+
+    # ⬇️ Проверка блокировки
+    if await _check_ticket_blocked(inter):
+        return
 
     cat = guild.get_channel(CONFIG["COINS_CATEGORY_ID"])
     if not cat:
@@ -391,7 +545,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         try:
             await inter.followup.send(
                 content=(
-                    f"> {user.mention}   ᶻ 𝘇 𐰁, тикет на DC — создан.\n"
+                    f"> {user.mention}   ᶻ 𝖟 𐰁, тикет на DC — создан.\n"
                     f"> Перейти: {ticket_channel.mention}"
                 ),
                 ephemeral=True
@@ -574,7 +728,7 @@ class QuestionModal(Modal):
         question = inter.text_values["question"]
         guild = inter.guild
 
-        cat = guild.get_channel(1544363672128987196)
+        cat = guild.get_channel(QUESTIONS_CATEGORY_ID)
         if not cat:
             return await inter.edit_original_response(content="❌ Категория не найдена.")
 
@@ -748,6 +902,37 @@ class RenameTicketModal(Modal):
 
 
 # ============================================================
+# МОДАЛКА ПРЕДУПРЕДИТЕЛЬНОГО ЗАКРЫТИЯ
+# ============================================================
+class WarnCloseModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="Причина предупреждения",
+                placeholder="Опишите причину (увидит нарушитель и лог)",
+                custom_id="warn_reason",
+                min_length=3,
+                max_length=200
+            )
+        ]
+        super().__init__(title="⚠️ Предупредительное закрытие", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        if not has_admin_command_roles(inter.author) and not any(
+            r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles
+        ):
+            return await inter.response.send_message(
+                "⛔ Нет прав на предупредительное закрытие.", ephemeral=True
+            )
+        reason = inter.text_values["warn_reason"].strip()
+        if not reason:
+            return await inter.response.send_message("❌ Причина обязательна.", ephemeral=True)
+
+        await inter.response.defer(ephemeral=True)
+        await _do_warn_close_ticket(inter, reason)
+
+
+# ============================================================
 # СЕЛЕКТ-МЕНЮ ДЛЯ ТИКЕТОВ
 # ============================================================
 class TicketActionSelect(disnake.ui.StringSelect):
@@ -774,7 +959,13 @@ class TicketActionSelect(disnake.ui.StringSelect):
                     description="Изменения для удобства выполнения.",
                     emoji="<:image:1550869363266027641>",
                     value="rename"
-                )
+                ),
+                disnake.SelectOption(
+                    label="Предупредительное закрытие",
+                    description="Закрыть тикет с блокировкой юзера на 2 часа.",
+                    emoji="<:warn:1552325395171381388>",
+                    value="warn_close"
+                ),
             ],
             custom_id="ticket_action_select"
         )
@@ -812,6 +1003,14 @@ class TicketActionSelect(disnake.ui.StringSelect):
                         ephemeral=True
                     )
             await inter.response.send_modal(RenameTicketModal())
+        elif value == "warn_close":
+            if not has_admin_command_roles(inter.author) and not any(
+                r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles
+            ):
+                return await inter.response.send_message(
+                    "⛔ Нет прав на предупредительное закрытие.", ephemeral=True
+                )
+            await inter.response.send_modal(WarnCloseModal())
 
     async def send_policy(self, inter: disnake.MessageInteraction):
         policy_path = os.path.join(CATALOG_DIR, "menu_policy.json")
@@ -994,7 +1193,6 @@ class TicketRatingView(View):
         manager_id = get_ticket_manager(channel.id)
         if not manager_id:
             return await inter.response.send_message("❌ Менеджер не назначен.", ephemeral=True)
-        # Проверка: не оценивал ли уже
         existing = get_ticket_review(channel.id)
         if existing:
             return await inter.response.send_message(
@@ -1007,7 +1205,6 @@ class TicketRatingView(View):
         user_id = get_ticket_owner(channel.id)
         if user_id and inter.author.id != user_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Только владелец или админ.", ephemeral=True)
-        # ⬇️ Проверка отзывов перед закрытием
         await _do_close_ticket(inter, check_reviews=True)
 
 
@@ -1028,13 +1225,9 @@ class RatingModal(Modal):
         if not self.manager_id:
             return await inter.response.send_message("❌ Менеджер не назначен.", ephemeral=True)
 
-        # 1. Общая статистика менеджера
         add_manager_rating(self.manager_id, rating)
-
-        # 2. Сохраняем оценку для этого тикета
         save_ticket_review(self.channel.id, inter.author.id, self.manager_id, rating)
 
-        # 3. Логируем
         await log_discord(
             title="⭐ Оценка менеджера",
             description=f"> **Менеджер:** <@{self.manager_id}>\n> **Оценка:** {rating}/5\n> **Тикет:** {self.channel.mention}",
@@ -1042,7 +1235,6 @@ class RatingModal(Modal):
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-        # 4. Пишем в тикет (embed2, без embed1)
         embed = disnake.Embed(
             title="⭐ Спасибо за оценку!",
             description=(
@@ -1060,7 +1252,6 @@ class RatingModal(Modal):
         except Exception as e:
             logger.warning(f"Не удалось отправить оценку в тикет: {e}")
 
-        # 5. Ephemeral юзеру
         await inter.response.send_message(
             f"✅ Спасибо! Оценка **{rating}/5** сохранена.\n"
             f"> Осталось написать отзыв в <#{CONFIG['REVIEW_COUNT_CHANNEL']}>.",
@@ -1102,7 +1293,6 @@ class TicketView(View):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
-            # нет владельца — просто закрываем
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
             await asyncio.sleep(3)
             try:
@@ -1155,11 +1345,11 @@ class TicketView(View):
             return await inter.response.send_message("⛔ Нет прав на подтверждение оплаты.", ephemeral=True)
         channel = inter.channel
 
-        # ⬇️ Проверка: прошло ли 60 секунд с создания тикета
+        # Проверка: прошло ли 60 секунд с создания тикета
         try:
             age = _time.time() - channel.created_at.timestamp()
         except Exception:
-            age = PAY_CONFIRM_DELAY_SECONDS  # если не смогли получить — пропускаем
+            age = PAY_CONFIRM_DELAY_SECONDS
         if age < PAY_CONFIRM_DELAY_SECONDS:
             left = int(PAY_CONFIRM_DELAY_SECONDS - age)
             return await inter.response.send_message(
@@ -1207,7 +1397,6 @@ class TicketView(View):
         embed.set_image(url=_IMG_STRIPE)
         await channel.send(embed=embed)
 
-        # ЛС клиенту
         owner_id_here = None
         try:
             owner_id_here = get_ticket_owner(channel.id)
@@ -1377,7 +1566,6 @@ class TicketPaidView(View):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
-            # нет владельца — просто закрываем
             await inter.response.send_message("Тикет закрывается...", ephemeral=True)
             await asyncio.sleep(3)
             try:
@@ -1396,7 +1584,6 @@ class TicketPaidView(View):
             except Exception as e:
                 logger.error(f"Ошибка при закрытии: {e}")
         else:
-            # владелец есть — проверяем отзывы
             await _do_close_ticket(inter, check_reviews=True)
 
 
