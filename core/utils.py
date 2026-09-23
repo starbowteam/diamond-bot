@@ -39,7 +39,6 @@ CONFIG = {
         1530822331188903966
     ],
     "ADMIN_USER_IDS": [1415191217179856967],
-    # ⬇️ Убрана роль 1513935883475226796 из модерации
     "REVIEW_MODERATION_ROLES": [1154757071330365490, 1127428607606796294, 1471844291595731016],
     "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1471844291595731016, 1127428607606796294],
@@ -107,9 +106,17 @@ FILES = {
 }
 
 # ============================================================
-# СПИСОК ИСКЛЮЧЕНИЙ (всегда Покупатель века)
+# СПИСКИ ИСКЛЮЧЕНИЙ
 # ============================================================
 EXEMPT_USERS = [562318422982262793, 1168943921171288135, 796293832751972352]
+
+# ⬇️ VIP — "Великий из Великих": все ограничения обходят
+SUPREME_USERS = [796293832751972352]
+
+
+def is_supreme(user_id: int) -> bool:
+    """True — если юзер полностью неприкосновенен (не блокируется, не ограничивается)."""
+    return user_id in SUPREME_USERS
 
 # ============================================================
 # Logging
@@ -536,7 +543,13 @@ def clear_ticket_review(channel_id: int):
 # КУЛДАУН НА СОЗДАНИЕ ТИКЕТОВ (предупредительное закрытие)
 # ============================================================
 def set_ticket_cooldown(user_id: int, seconds: int = 7200, reason: str = "", set_by: int = 0):
-    """Блокирует юзеру создание тикетов на N секунд (по умолчанию 2 часа)."""
+    """
+    Блокирует юзеру создание тикетов на N секунд.
+    Supreme-юзеры НЕ блокируются (возвращает 0).
+    """
+    if is_supreme(user_id):
+        logger.info(f"set_ticket_cooldown: {user_id} — supreme, блокировка пропущена")
+        return 0
     until_ts = int(time.time()) + seconds
     cur.execute(
         "INSERT OR REPLACE INTO ticket_cooldowns (user_id, until_ts, reason, set_by, set_at) "
@@ -547,7 +560,12 @@ def set_ticket_cooldown(user_id: int, seconds: int = 7200, reason: str = "", set
     return until_ts
 
 def get_ticket_cooldown(user_id: int) -> int:
-    """Возвращает until_ts или 0, если не заблокирован. Авто-чистит истёкшие."""
+    """
+    Возвращает until_ts или 0, если не заблокирован.
+    Supreme-юзеры всегда возвращают 0.
+    """
+    if is_supreme(user_id):
+        return 0
     row = cur.execute("SELECT until_ts FROM ticket_cooldowns WHERE user_id = ?", (user_id,)).fetchone()
     if not row:
         return 0
@@ -560,6 +578,8 @@ def get_ticket_cooldown(user_id: int) -> int:
 
 def get_ticket_cooldown_info(user_id: int) -> Optional[dict]:
     """Полная инфа о кулдауне (или None)."""
+    if is_supreme(user_id):
+        return None
     row = cur.execute(
         "SELECT user_id, until_ts, reason, set_by, set_at FROM ticket_cooldowns WHERE user_id = ?",
         (user_id,)
