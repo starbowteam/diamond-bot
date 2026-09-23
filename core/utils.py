@@ -39,7 +39,7 @@ CONFIG = {
         1530822331188903966
     ],
     "ADMIN_USER_IDS": [1415191217179856967],
-    # ⬇️ Убрана роль 1513935883475226796 из модерации отзывов
+    # ⬇️ Убрана роль 1513935883475226796 из модерации
     "REVIEW_MODERATION_ROLES": [1154757071330365490, 1127428607606796294, 1471844291595731016],
     "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],
     "TICKET_MANAGE_ROLES": [1154757071330365490, 1471844291595731016, 1127428607606796294],
@@ -214,6 +214,13 @@ CREATE TABLE IF NOT EXISTS ticket_reviews (
     manager_id INTEGER,
     rating     INTEGER,
     rated_at   INTEGER
+);
+CREATE TABLE IF NOT EXISTS ticket_cooldowns (
+    user_id   INTEGER PRIMARY KEY,
+    until_ts  INTEGER NOT NULL,
+    reason    TEXT,
+    set_by    INTEGER,
+    set_at    INTEGER
 );
 """)
 db.commit()
@@ -524,6 +531,53 @@ def get_ticket_review(channel_id: int) -> Optional[dict]:
 def clear_ticket_review(channel_id: int):
     cur.execute("DELETE FROM ticket_reviews WHERE channel_id = ?", (channel_id,))
     db.commit()
+
+# ============================================================
+# КУЛДАУН НА СОЗДАНИЕ ТИКЕТОВ (предупредительное закрытие)
+# ============================================================
+def set_ticket_cooldown(user_id: int, seconds: int = 7200, reason: str = "", set_by: int = 0):
+    """Блокирует юзеру создание тикетов на N секунд (по умолчанию 2 часа)."""
+    until_ts = int(time.time()) + seconds
+    cur.execute(
+        "INSERT OR REPLACE INTO ticket_cooldowns (user_id, until_ts, reason, set_by, set_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, until_ts, reason, set_by, int(time.time()))
+    )
+    db.commit()
+    return until_ts
+
+def get_ticket_cooldown(user_id: int) -> int:
+    """Возвращает until_ts или 0, если не заблокирован. Авто-чистит истёкшие."""
+    row = cur.execute("SELECT until_ts FROM ticket_cooldowns WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        return 0
+    until_ts = row["until_ts"]
+    if until_ts <= int(time.time()):
+        cur.execute("DELETE FROM ticket_cooldowns WHERE user_id = ?", (user_id,))
+        db.commit()
+        return 0
+    return until_ts
+
+def get_ticket_cooldown_info(user_id: int) -> Optional[dict]:
+    """Полная инфа о кулдауне (или None)."""
+    row = cur.execute(
+        "SELECT user_id, until_ts, reason, set_by, set_at FROM ticket_cooldowns WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return None
+    if row["until_ts"] <= int(time.time()):
+        cur.execute("DELETE FROM ticket_cooldowns WHERE user_id = ?", (user_id,))
+        db.commit()
+        return None
+    return dict(row)
+
+def clear_ticket_cooldown(user_id: int):
+    cur.execute("DELETE FROM ticket_cooldowns WHERE user_id = ?", (user_id,))
+    db.commit()
+
+def is_ticket_blocked(user_id: int) -> bool:
+    return get_ticket_cooldown(user_id) > 0
 
 # ============================================================
 # Промокоды и курсы
