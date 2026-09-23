@@ -19,12 +19,12 @@ from core.utils import (
     has_admin_command_roles,
     clean_embed_for_discohook,
     get_dc_cache, save_dc_cache, sync_dc_to_json,
-    update_user_roles
+    update_user_roles,
+    activate_item, get_item, clear_item,
 )
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
-
 
 # ============================================================
 # DC DATA
@@ -194,7 +194,6 @@ async def add_voice_dc(user_id: int, seconds: int):
 async def daily_activity_payout():
     """
     Раз в день в 00:00 МСК — выплачивает всем за активность одним платежом.
-    Формат: "Активность за день (чат: X DC, голос: Y DC)"
     """
     rows = cur.execute("SELECT user_id, messages_today, voice_time_today FROM dc_cache").fetchall()
     paid_users = 0
@@ -213,7 +212,6 @@ async def daily_activity_payout():
 
         total = msg_dc + voice_dc
 
-        # Сначала сбрасываем счётчики
         data = get_dc_cache(uid)
         data["messages_today"] = 0
         data["voice_time_today"] = 0
@@ -231,7 +229,7 @@ async def daily_activity_payout():
             await add_dc(uid, total, reason, notify=True, log=False)
             paid_users += 1
             total_paid += total
-            await asyncio.sleep(0.4)  # rate limit
+            await asyncio.sleep(0.4)
 
     try:
         sync_dc_to_json()
@@ -249,6 +247,67 @@ async def daily_activity_payout():
             ),
             color=0x00ff00
         )
+
+
+# ============================================================
+# ЕЖЕДНЕВНЫЙ ПОДАРОК
+# ============================================================
+DAILY_GIFT_ITEM_KEY = "daily_gift"
+DAILY_GIFT_MIN = 10
+DAILY_GIFT_MAX = 30
+DAILY_GIFT_COOLDOWN_HOURS = 24
+
+
+def get_daily_gift_status(user_id: int) -> dict:
+    """
+    Проверяет статус ежедневного подарка.
+    Возвращает {'ready': bool, 'next_ts': int}.
+    """
+    item = get_item(user_id, DAILY_GIFT_ITEM_KEY)
+    if item is None:
+        return {"ready": True, "next_ts": 0}
+    return {"ready": False, "next_ts": item["expires_at"]}
+
+
+async def claim_daily_gift(user_id: int) -> dict:
+    """
+    Пытается выдать ежедневный подарок.
+    Возвращает {'ok': bool, 'amount': int, 'next_ts': int, 'error': str}.
+    """
+    status = get_daily_gift_status(user_id)
+    if not status["ready"]:
+        return {
+            "ok": False,
+            "amount": 0,
+            "next_ts": status["next_ts"],
+            "error": "not_ready",
+        }
+
+    amount = random.randint(DAILY_GIFT_MIN, DAILY_GIFT_MAX)
+
+    # Начисляем
+    await add_dc(user_id, amount, "Ежедневный подарок", notify=False, log=False)
+
+    # Ставим 24ч кулдаун
+    activate_item(
+        user_id,
+        DAILY_GIFT_ITEM_KEY,
+        "gift",
+        value=amount,
+        duration_hours=DAILY_GIFT_COOLDOWN_HOURS,
+        uses=-1,
+    )
+
+    # Получаем новый expires
+    item = get_item(user_id, DAILY_GIFT_ITEM_KEY)
+    next_ts = item["expires_at"] if item else 0
+
+    return {
+        "ok": True,
+        "amount": amount,
+        "next_ts": next_ts,
+        "error": "",
+    }
 
 
 # ============================================================
