@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-import os, json, asyncio
+import os
+import json
+import asyncio
 from datetime import datetime, timezone
 
 import disnake
@@ -75,11 +77,9 @@ class ProfileCardView(View):
     async def inv_btn(self, button, inter: disnake.MessageInteraction):
         purchases = await get_user_purchases(inter.author.id, only_unused=True)
 
-        # embed1 — шапка с картинкой
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url=IMG_INV_TOP)
 
-        # embed2 — данные
         if not purchases:
             desc = (
                 "> У вас пока нет купленных товаров за **Diamond Coin**.\n"
@@ -136,11 +136,9 @@ class ProfileCardView(View):
                 continue
             custom.append(r)
 
-        # embed1 — шапка с картинкой
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url=IMG_ROLES_TOP)
 
-        # embed2 — данные
         if not custom:
             desc = (
                 "> У вас нет кастомных ролей.\n"
@@ -175,7 +173,21 @@ class ProfileCardView(View):
         embeds = load_embed_from_file("vallue.json")
         await inter.response.send_message(embeds=embeds, ephemeral=True)
 
-async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Member):
+
+# ============================================================
+# ГЕНЕРАЦИЯ КАРТОЧКИ
+# ============================================================
+async def show_profile_card(
+    inter: disnake.MessageInteraction,
+    user: disnake.Member,
+    show_view: bool = True,
+    viewer: disnake.Member = None,
+):
+    """
+    Генерирует и отправляет карточку профиля.
+    show_view=False — карточка без кнопок внизу.
+    viewer — кто смотрит (для логирования чужого профиля).
+    """
     await inter.response.defer(with_message=True, ephemeral=True)
 
     from modules.profile_card import generate_profile_card
@@ -218,17 +230,34 @@ async def show_profile_card(inter: disnake.MessageInteraction, user: disnake.Mem
         embed = disnake.Embed(color=6776679)
         embed.set_image(url=f"attachment://{filename}")
 
+        view = ProfileCardView() if show_view else None
+
         await inter.edit_original_response(
             content=None, embed=embed, file=file,
-            view=ProfileCardView()
+            view=view
         )
 
-        asyncio.create_task(log_discord(
-            title="📇 Карточка профиля",
-            description=f"> **Пользователь:** {user.mention}",
-            color=0x00aaff,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        ))
+        # Логирование
+        if viewer and viewer.id != user.id:
+            # чужой профиль
+            asyncio.create_task(log_discord(
+                title="👁️ Просмотр чужого профиля",
+                description=(
+                    f"> **Кто смотрел:** {viewer.mention} (`{viewer}`)\n"
+                    f"> **Чей профиль:** {user.mention} (`{user}`)\n"
+                    f"> **ID цели:** `{user.id}`"
+                ),
+                color=0xf7c991,
+                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            ))
+        else:
+            # свой профиль
+            asyncio.create_task(log_discord(
+                title="📇 Карточка профиля",
+                description=f"> **Пользователь:** {user.mention}",
+                color=0x00aaff,
+                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            ))
     except Exception as e:
         logger.exception(f"profile card err: {e}")
         try:
@@ -267,6 +296,62 @@ class DiscountModal(Modal):
 
 
 # ============================================================
+# МОДАЛКА ЧУЖОГО ПРОФИЛЯ
+# ============================================================
+class OtherProfileModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label="ID пользователя",
+                placeholder="Введите ID (например, 123456789012345678)",
+                custom_id="target_id",
+                min_length=1,
+                max_length=30
+            )
+        ]
+        super().__init__(
+            title="👤 Профиль другого пользователя",
+            components=components,
+            custom_id="other_profile_modal"
+        )
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        raw = inter.text_values["target_id"].strip()
+
+        if not raw.isdigit():
+            return await inter.response.send_message(
+                "❌ ID должен состоять только из цифр.", ephemeral=True
+            )
+
+        target_id = int(raw)
+
+        if target_id == inter.author.id:
+            return await inter.response.send_message(
+                "❌ Это ваш ID. Используйте пункт **«Мой профиль»**.", ephemeral=True
+            )
+
+        member = inter.guild.get_member(target_id)
+        if not member:
+            return await inter.response.send_message(
+                f"❌ Пользователь с ID `{target_id}` не найден на сервере.",
+                ephemeral=True
+            )
+
+        if member.bot:
+            return await inter.response.send_message(
+                "❌ Нельзя смотреть профиль бота.", ephemeral=True
+            )
+
+        # Генерируем карточку без view
+        await show_profile_card(
+            inter,
+            member,
+            show_view=False,
+            viewer=inter.author
+        )
+
+
+# ============================================================
 # ПАНЕЛЬ ПРОФИЛЯ — СЕЛЕКТ
 # ============================================================
 class ProfilePanelSelect(disnake.ui.StringSelect):
@@ -277,6 +362,12 @@ class ProfilePanelSelect(disnake.ui.StringSelect):
                 description="Открыть карточку профиля",
                 emoji="<:people:1538395694648529009>",
                 value="profile"
+            ),
+            SelectOption(
+                label="・Чужой профиль",
+                description="Карточка профиля другого пользователя.",
+                emoji="<:wmore:1552330925684162580>",
+                value="other_profile"
             ),
             SelectOption(
                 label="・Расчёт скидки",
@@ -296,7 +387,9 @@ class ProfilePanelSelect(disnake.ui.StringSelect):
     async def callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0]
         if value == "profile":
-            await show_profile_card(inter, inter.author)
+            await show_profile_card(inter, inter.author, show_view=True)
+        elif value == "other_profile":
+            await inter.response.send_modal(OtherProfileModal())
         elif value == "discount":
             await inter.response.send_modal(DiscountModal())
 
@@ -307,8 +400,6 @@ class ProfilePanelView(View):
         self.add_item(ProfilePanelSelect())
 
 
-
-# В твоём коде было: 1540018373503483934 — оставь как было, если работает.
 PROFILE_CHANNEL_ID = 1540018373503483934
 
 
@@ -332,7 +423,7 @@ async def send_profile_panel():
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
     embed2 = disnake.Embed(
         title="Твой профиль на сервере Diamond Shop",
-        description="> Здесь можно увидеть свой профиль, инвентарь, кастомные роли и рассчитать скидку.",
+        description="> Здесь можно увидеть свой профиль, чужой профиль, инвентарь, кастомные роли и рассчитать скидку.",
         color=6776679
     )
     embed2.set_image(url=_IMG_STRIPE)
