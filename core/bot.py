@@ -70,11 +70,23 @@ IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/155160
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
-# защита от повторного запуска
+# Файл состояния зарплат (защита от повторной выдачи + catch-up)
+SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
+
+# защита от повторного запуска daily_activity_payout
 _LAST_PAYOUT_DATE = None
-_LAST_SALARY_ADVANCE_DATE = None
-_LAST_SALARY_MAIN_MONTH = None
 _LAST_REMINDER_DATE = None
+
+
+# ============================================================
+# СОСТОЯНИЕ ЗАРПЛАТ (JSON)
+# ============================================================
+def load_salary_state() -> dict:
+    return load_json(SALARY_STATE_FILE, {"advance": "", "salary": ""})
+
+
+def save_salary_state(state: dict):
+    save_json(SALARY_STATE_FILE, state)
 
 
 # ============================================================
@@ -156,6 +168,69 @@ async def process_salary(mode: str):
         ),
         color=0x00ff00
     )
+
+
+# ============================================================
+# CATCH-UP: ДОГОНЯЮЩИЕ ВЫПЛАТЫ
+# ============================================================
+async def try_pay_advance() -> bool:
+    """
+    Аванс — 15 число.
+    Окно срабатывания: 15-19 числа текущего месяца (5 дней grace).
+    Если бот был оффлайн в 00:00 15-го — при запуске в этом окне выплата всё равно пройдёт.
+    Возвращает True, если выплата прошла.
+    """
+    state = load_salary_state()
+    now = datetime.now(MSK)
+    month_key = now.strftime("%Y-%m")
+
+    # Уже платили в этом месяце?
+    if state.get("advance") == month_key:
+        return False
+
+    # Окно: с 15 по 19 число включительно
+    if now.day < 15 or now.day > 19:
+        return False
+
+    logger.info(f"💰 Авто-выдача аванса (month={month_key}, day={now.day})")
+    await process_salary("advance")
+
+    state["advance"] = month_key
+    save_salary_state(state)
+    return True
+
+
+async def try_pay_salary() -> bool:
+    """
+    Зарплата — 29 число.
+    Окно срабатывания: 29-31 текущего месяца + 1-3 следующего (boundary).
+    Если бот был оффлайн — при запуске выплата всё равно пройдёт.
+    """
+    state = load_salary_state()
+    now = datetime.now(MSK)
+
+    # Определяем, за какой месяц должна была пройти выплата
+    if now.day >= 29:
+        # конец текущего месяца
+        month_key = now.strftime("%Y-%m")
+    elif now.day <= 3:
+        # первые дни следующего месяца — считаем, что это прошедший месяц
+        prev = now.replace(day=1) - timedelta(days=1)
+        month_key = prev.strftime("%Y-%m")
+    else:
+        # середина месяца — не окно зарплаты
+        return False
+
+    # Уже платили за этот месяц?
+    if state.get("salary") == month_key:
+        return False
+
+    logger.info(f"💰 Авто-выдача зарплаты (month={month_key}, day={now.day})")
+    await process_salary("salary")
+
+    state["salary"] = month_key
+    save_salary_state(state)
+    return True
 
 
 # ============================================================
@@ -283,42 +358,22 @@ async def flash_sale_task():
         logger.exception(f"flash_sale_task error: {e}")
 
 
-# === АВАНС: 15 число каждого месяца, 00:00 МСК ===
+# === АВАНС: проверка раз в минуту, окно 15-19 ===
 @tasks.loop(minutes=1)
 async def salary_advance_task():
-    global _LAST_SALARY_ADVANCE_DATE
     await bot.wait_until_ready()
     try:
-        now_msk = datetime.now(MSK)
-        if now_msk.day != 15 or now_msk.hour != 0 or now_msk.minute != 0:
-            return
-        today = now_msk.date()
-        if _LAST_SALARY_ADVANCE_DATE == today:
-            return
-        _LAST_SALARY_ADVANCE_DATE = today
-        logger.info("Авто-выдача аванса: 15 число, 00:00 МСК")
-        await process_salary("advance")
+        await try_pay_advance()
     except Exception as e:
         logger.exception(f"salary_advance_task: {e}")
 
 
-# === ЗАРПЛАТА: 29 число каждого месяца, 00:00 МСК ===
+# === ЗАРПЛАТА: проверка раз в минуту, окно 29-31 / 1-3 ===
 @tasks.loop(minutes=1)
 async def salary_main_task():
-    global _LAST_SALARY_MAIN_MONTH
     await bot.wait_until_ready()
     try:
-        now_msk = datetime.now(MSK)
-        if now_msk.hour != 0 or now_msk.minute != 0:
-            return
-        if now_msk.day != 29:
-            return
-        month_key = (now_msk.year, now_msk.month)
-        if _LAST_SALARY_MAIN_MONTH == month_key:
-            return
-        _LAST_SALARY_MAIN_MONTH = month_key
-        logger.info("Авто-выдача зарплаты: 29 число месяца, 00:00 МСК")
-        await process_salary("salary")
+        await try_pay_salary()
     except Exception as e:
         logger.exception(f"salary_main_task: {e}")
 
@@ -430,6 +485,22 @@ async def on_ready():
 
         await update_review_counter(silent=False)
 
+        # ⬇️ CATCH-UP: догоняем пропущенные выплаты
+        try:
+            paid_advance = await try_pay_advance()
+            if paid_advance:
+                logger.info("Catch-up: аванс выдан")
+        except Exception as e:
+            logger.exception(f"catch-up advance err: {e}")
+
+        try:
+            paid_salary = await try_pay_salary()
+            if paid_salary:
+                logger.info("Catch-up: зарплата выдана")
+        except Exception as e:
+            logger.exception(f"catch-up salary err: {e}")
+
+        # Запуск тасок
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
