@@ -14,10 +14,21 @@ from core.utils import (
     get_dc_cache,
     clean_embed_for_discohook,
 )
-from modules.dc import get_user_purchases
+from modules.dc import (
+    get_user_purchases,
+    claim_daily_gift,
+    get_daily_gift_status,
+)
 
-# Padding-символ (Hangul Filler) — занимает место, но невидим
+# Padding-символ (Hangul Filler)
 P = "\u3164"
+
+
+# ============================================================
+# ИЗОБРАЖЕНИЯ ПОДАРКА
+# ============================================================
+GIFT_IMG_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1552379792311975956/image.png?ex=6ab565d8&is=6ab41458&hm=299a632c1ee124df327afdf7e401e91463dddba89aa36c30cdcc2fafd86dc5f6&"
+GIFT_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1532434728056131695/pisk.png?ex=6a8f1d8e&is=6a8dcc0e&hm=2ae99e47c47afa88c941afcfd1c827370f8c0f3ab08c69a00820bd4da8ac78f1&"
 
 
 def load_embed_from_file(filename: str):
@@ -237,9 +248,7 @@ async def show_profile_card(
             view=view
         )
 
-        # Логирование
         if viewer and viewer.id != user.id:
-            # чужой профиль
             asyncio.create_task(log_discord(
                 title="👁️ Просмотр чужого профиля",
                 description=(
@@ -251,7 +260,6 @@ async def show_profile_card(
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
             ))
         else:
-            # свой профиль
             asyncio.create_task(log_discord(
                 title="📇 Карточка профиля",
                 description=f"> **Пользователь:** {user.mention}",
@@ -264,6 +272,63 @@ async def show_profile_card(
             await inter.edit_original_response(content=f"❌ Ошибка: `{str(e)[:200]}`")
         except Exception:
             pass
+
+
+# ============================================================
+# ЕЖЕДНЕВНЫЙ ПОДАРОК
+# ============================================================
+async def show_daily_gift(inter: disnake.MessageInteraction):
+    """
+    Показывает эмбед ежедневного подарка.
+    Если кулдаун истёк — выдаёт DC (10-30) и ставит новый кулдаун 24ч.
+    Если нет — показывает, когда следующий.
+    """
+    user_id = inter.author.id
+    result = await claim_daily_gift(user_id)
+
+    embed1 = disnake.Embed(color=6776679)
+    embed1.set_image(url=GIFT_IMG_TOP)
+
+    if result["ok"]:
+        amount = result["amount"]
+        next_ts = result["next_ts"]
+        desc = (
+            f"> Возвращайся каждый день — и получай подарок в виде Diamond Coins, "
+            f"каждый раз — разные подарки каждый день! Итого:\n\n"
+            f">  🔥 **Сегодня тебе выпало: {amount} DC**\n\n"
+            f">  📅 **Возвращайся <t:{next_ts}:R>** — ровно 24 часа с момента получения."
+        )
+    else:
+        next_ts = result["next_ts"]
+        desc = (
+            f"> Возвращайся каждый день — и получай подарок в виде Diamond Coins, "
+            f"каждый раз — разные подарки каждый день! Итого:\n\n"
+            f">  ⏳ **Ты уже забрал подарок сегодня.**\n\n"
+            f">  📅 **Следующий подарок будет доступен <t:{next_ts}:R>**"
+        )
+
+    embed2 = disnake.Embed(
+        title="Ежедневный подарок в DC!",
+        description=desc,
+        color=6776679,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed2.set_image(url=GIFT_IMG_STRIPE)
+
+    await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
+
+    # Логирование
+    if result["ok"]:
+        asyncio.create_task(log_discord(
+            title="🎁 Ежедневный подарок",
+            description=(
+                f"> **Пользователь:** {inter.author.mention} (`{inter.author}`)\n"
+                f"> **Начислено:** `+{result['amount']} DC`\n"
+                f"> **Следующий через 24ч:** <t:{result['next_ts']}:f>"
+            ),
+            color=0xffaa00,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+        ))
 
 
 # ============================================================
@@ -342,7 +407,6 @@ class OtherProfileModal(Modal):
                 "❌ Нельзя смотреть профиль бота.", ephemeral=True
             )
 
-        # Генерируем карточку без view
         await show_profile_card(
             inter,
             member,
@@ -370,6 +434,12 @@ class ProfilePanelSelect(disnake.ui.StringSelect):
                 value="other_profile"
             ),
             SelectOption(
+                label="・Ежедневный подарок",
+                description="Забери свой подарок в DC и возвращайся каждый день.",
+                emoji="<:S21:1552381035092648026>",
+                value="daily_gift"
+            ),
+            SelectOption(
                 label="・Расчёт скидки",
                 description="Посчитать итоговую цену со скидкой",
                 emoji="<:ckidsk:1538551877665427557>",
@@ -390,6 +460,8 @@ class ProfilePanelSelect(disnake.ui.StringSelect):
             await show_profile_card(inter, inter.author, show_view=True)
         elif value == "other_profile":
             await inter.response.send_modal(OtherProfileModal())
+        elif value == "daily_gift":
+            await show_daily_gift(inter)
         elif value == "discount":
             await inter.response.send_modal(DiscountModal())
 
@@ -423,7 +495,7 @@ async def send_profile_panel():
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
     embed2 = disnake.Embed(
         title="Твой профиль на сервере Diamond Shop",
-        description="> Здесь можно увидеть свой профиль, чужой профиль, инвентарь, кастомные роли и рассчитать скидку.",
+        description="> Здесь можно увидеть свой профиль, чужой профиль, забрать ежедневный подарок, посмотреть инвентарь, кастомные роли и рассчитать скидку.",
         color=6776679
     )
     embed2.set_image(url=_IMG_STRIPE)
