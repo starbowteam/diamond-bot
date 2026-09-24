@@ -27,7 +27,6 @@ async def process_gift_dc(
     recipient = guild.get_member(recipient_id)
 
     if not recipient:
-        # Возврат средств
         await add_dc(sender.id, price_paid, "Возврат — получатель не найден")
         return False, "Получатель не найден на сервере"
 
@@ -46,6 +45,13 @@ async def process_gift_dc(
         logger.exception(f"gift: add_dc error: {e}")
         await add_dc(sender.id, price_paid, "Возврат — ошибка начисления")
         return False, f"Ошибка начисления: {e}"
+
+    # 👇 Хук квестов клан-лиги (щедрость)
+    try:
+        from clan.quests import on_gift_quest_hook
+        await on_gift_quest_hook(sender.id, amount)
+    except Exception as e:
+        logger.warning(f"clan gift hook: {e}")
 
     # ЛС получателю
     try:
