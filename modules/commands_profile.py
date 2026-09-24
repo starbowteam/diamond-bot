@@ -20,13 +20,8 @@ from modules.dc import (
     get_daily_gift_status,
 )
 
-# Padding-символ (Hangul Filler)
 P = "\u3164"
 
-
-# ============================================================
-# ИЗОБРАЖЕНИЯ ПОДАРКА
-# ============================================================
 GIFT_IMG_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1552379792311975956/image.png?ex=6ab565d8&is=6ab41458&hm=299a632c1ee124df327afdf7e401e91463dddba89aa36c30cdcc2fafd86dc5f6&"
 GIFT_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1532434728056131695/pisk.png?ex=6a8f1d8e&is=6a8dcc0e&hm=2ae99e47c47afa88c941afcfd1c827370f8c0f3ab08c69a00820bd4da8ac78f1&"
 
@@ -44,6 +39,7 @@ def load_embed_from_file(filename: str):
         return [disnake.Embed(title="❌ Ошибка", description=str(e), color=0xff0000)]
 
 
+# ⬇️ 13-25 → crystalis, 26+ → pka
 def _role_info(count: int):
     thresholds = [
         (0,  "none",      "Клуб"),
@@ -51,9 +47,7 @@ def _role_info(count: int):
         (3,  "silver",    "Gold Buyer"),
         (5,  "gold",      "Diamond Buyer"),
         (9,  "diamond",   "Emerald Buyer"),
-        (13, "emerald",   "Amethyst Buyer"),
-        (18, "amethyst",  "Legendary Buyer"),
-        (24, "legendary", "Покупатель Века"),
+        (13, "crystalis", "Crystalis Buyer"),
         (26, "pka",       "Покупатель Века"),
     ]
     cur = thresholds[0]
@@ -67,10 +61,6 @@ def _role_info(count: int):
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 
-
-# ============================================================
-# КАРТОЧКА ПРОФИЛЯ + 3 КНОПКИ
-# ============================================================
 IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
@@ -133,6 +123,7 @@ class ProfileCardView(View):
             1127428607606796290, 1154757071330365490, 1471844291595731016,
             1471190371181789234, 1457964854441672806, 1423360115335106570,
             1539523399611580476,
+            1208442450373513277, 1208442449425334372,
         })
         limit_role = guild.get_role(1127428607606796290)
         max_pos = limit_role.position if limit_role else 9999
@@ -185,20 +176,12 @@ class ProfileCardView(View):
         await inter.response.send_message(embeds=embeds, ephemeral=True)
 
 
-# ============================================================
-# ГЕНЕРАЦИЯ КАРТОЧКИ
-# ============================================================
 async def show_profile_card(
     inter: disnake.MessageInteraction,
     user: disnake.Member,
     show_view: bool = True,
     viewer: disnake.Member = None,
 ):
-    """
-    Генерирует и отправляет карточку профиля.
-    show_view=False — карточка без кнопок внизу.
-    viewer — кто смотрит (для логирования чужого профиля).
-    """
     await inter.response.defer(with_message=True, ephemeral=True)
 
     from modules.profile_card import generate_profile_card
@@ -274,15 +257,7 @@ async def show_profile_card(
             pass
 
 
-# ============================================================
-# ЕЖЕДНЕВНЫЙ ПОДАРОК
-# ============================================================
 async def show_daily_gift(inter: disnake.MessageInteraction):
-    """
-    Показывает эмбед ежедневного подарка.
-    Если кулдаун истёк — выдаёт DC (10-30) и ставит новый кулдаун 24ч.
-    Если нет — показывает, когда следующий.
-    """
     user_id = inter.author.id
     result = await claim_daily_gift(user_id)
 
@@ -317,7 +292,6 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
 
     await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
 
-    # Логирование
     if result["ok"]:
         asyncio.create_task(log_discord(
             title="🎁 Ежедневный подарок",
@@ -331,9 +305,6 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
         ))
 
 
-# ============================================================
-# МОДАЛКА СКИДКИ
-# ============================================================
 class DiscountModal(Modal):
     def __init__(self):
         components = [
@@ -360,9 +331,6 @@ class DiscountModal(Modal):
         await inter.response.send_message(embed=embed, ephemeral=True)
 
 
-# ============================================================
-# МОДАЛКА ЧУЖОГО ПРОФИЛЯ
-# ============================================================
 class OtherProfileModal(Modal):
     def __init__(self):
         components = [
@@ -415,9 +383,6 @@ class OtherProfileModal(Modal):
         )
 
 
-# ============================================================
-# ПАНЕЛЬ ПРОФИЛЯ — СЕЛЕКТ
-# ============================================================
 class ProfilePanelSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
