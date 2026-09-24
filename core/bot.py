@@ -482,10 +482,12 @@ async def on_ready():
         try:
             from clan import init_clan_league
             from clan.panels import (
-                send_clan_pool_panel, send_clan_games_panel, send_clan_admin_panel
+                send_clan_pool_panel, send_clan_season_panel,
+                send_clan_games_panel, send_clan_admin_panel
             )
             init_clan_league(bot)
             bot.loop.create_task(send_clan_pool_panel(bot))
+            bot.loop.create_task(send_clan_season_panel(bot))
             bot.loop.create_task(send_clan_games_panel(bot))
             bot.loop.create_task(send_clan_admin_panel(bot))
             logger.info("Клан-лига инициализирована")
