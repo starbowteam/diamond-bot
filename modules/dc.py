@@ -26,9 +26,7 @@ from core.utils import (
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
-# ============================================================
-# DC DATA
-# ============================================================
+
 def get_user_dc_data(user_id: int) -> dict:
     return get_dc_cache(user_id)
 
@@ -50,7 +48,6 @@ async def set_user_balance(user_id: int, amount: int):
 
 
 async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: int):
-    """Отправляет ЛС при изменении DC. Молча падает, если ЛС закрыты."""
     try:
         from core.bot import bot
         user = bot.get_user(user_id)
@@ -87,7 +84,6 @@ async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: 
 
 
 async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True):
-    """Начисляет DC. notify=True — ЛС пользователю. log=True — лог в канал."""
     data = get_dc_cache(user_id)
     data["balance"] += amount
     data["history"].append({
@@ -112,7 +108,6 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
 
 
 async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True) -> bool:
-    """Списывает DC. notify=True — ЛС пользователю. log=True — лог в канал."""
     data = get_dc_cache(user_id)
     if data["balance"] < amount:
         return False
@@ -174,27 +169,19 @@ async def remove_purchase(user_id: int, purchase_index: int):
     return False
 
 
-# ============================================================
-# АКТИВНОСТЬ (счётчики, без выплаты)
-# ============================================================
 async def add_message_dc(user_id: int):
-    """Просто увеличивает счётчик сообщений. Выплата — в daily_activity_payout."""
     data = get_dc_cache(user_id)
     data["messages_today"] = data.get("messages_today", 0) + 1
     save_dc_cache(user_id, data)
 
 
 async def add_voice_dc(user_id: int, seconds: int):
-    """Просто увеличивает счётчик голосового времени. Выплата — в daily_activity_payout."""
     data = get_dc_cache(user_id)
     data["voice_time_today"] = data.get("voice_time_today", 0) + seconds
     save_dc_cache(user_id, data)
 
 
 async def daily_activity_payout():
-    """
-    Раз в день в 00:00 МСК — выплачивает всем за активность одним платежом.
-    """
     rows = cur.execute("SELECT user_id, messages_today, voice_time_today FROM dc_cache").fetchall()
     paid_users = 0
     total_paid = 0
@@ -259,10 +246,6 @@ DAILY_GIFT_COOLDOWN_HOURS = 24
 
 
 def get_daily_gift_status(user_id: int) -> dict:
-    """
-    Проверяет статус ежедневного подарка.
-    Возвращает {'ready': bool, 'next_ts': int}.
-    """
     item = get_item(user_id, DAILY_GIFT_ITEM_KEY)
     if item is None:
         return {"ready": True, "next_ts": 0}
@@ -270,10 +253,6 @@ def get_daily_gift_status(user_id: int) -> dict:
 
 
 async def claim_daily_gift(user_id: int) -> dict:
-    """
-    Пытается выдать ежедневный подарок.
-    Возвращает {'ok': bool, 'amount': int, 'next_ts': int, 'error': str}.
-    """
     status = get_daily_gift_status(user_id)
     if not status["ready"]:
         return {
@@ -285,10 +264,8 @@ async def claim_daily_gift(user_id: int) -> dict:
 
     amount = random.randint(DAILY_GIFT_MIN, DAILY_GIFT_MAX)
 
-    # Начисляем
     await add_dc(user_id, amount, "Ежедневный подарок", notify=False, log=False)
 
-    # Ставим 24ч кулдаун
     activate_item(
         user_id,
         DAILY_GIFT_ITEM_KEY,
@@ -298,7 +275,6 @@ async def claim_daily_gift(user_id: int) -> dict:
         uses=-1,
     )
 
-    # Получаем новый expires
     item = get_item(user_id, DAILY_GIFT_ITEM_KEY)
     next_ts = item["expires_at"] if item else 0
 
@@ -310,9 +286,6 @@ async def claim_daily_gift(user_id: int) -> dict:
     }
 
 
-# ============================================================
-# КАТАЛОГ
-# ============================================================
 def load_shop_catalog() -> dict:
     path = CONFIG["SHOP_CATALOG_PATH"]
     if os.path.exists(path):
@@ -339,9 +312,6 @@ def create_default_catalog() -> dict:
     return catalog
 
 
-# ============================================================
-# ЕЖЕДНЕВНЫЙ БОНУС (для Клуб)
-# ============================================================
 async def daily_bonus():
     from core.bot import bot
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -369,9 +339,6 @@ async def daily_bonus():
         pass
 
 
-# ============================================================
-# НАПОМИНАНИЯ О НЕИСПОЛЬЗОВАННЫХ ТОВАРАХ
-# ============================================================
 async def check_unused_purchases(bot):
     now = int(time.time())
     week = 7 * 86400
@@ -466,19 +433,15 @@ async def check_unused_purchases(bot):
     logger.info(f"check_unused_purchases: проверено {checked}, отправлено {sent}")
 
 
-# ============================================================
-# ПРОГРЕСС-БАР
-# ============================================================
+# ⬇️ emerald/amethyst/legendary → crystalis (13-25)
 def get_progress_bar(count: int):
     thresholds = [
         (1, "club", "Клуб"),
-        (2, "bronze", "Бронзовый покупатель"),
-        (4, "silver", "Серебряный покупатель"),
-        (8, "gold", "Золотой покупатель"),
-        (12, "diamond", "Алмазный покупатель"),
-        (17, "emerald", "Изумрудный покупатель"),
-        (23, "amethyst", "Аметистовый покупатель"),
-        (25, "legendary", "Легендарный покупатель"),
+        (2, "bronze", "Bronze Buyer"),
+        (4, "silver", "Silver Buyer"),
+        (8, "gold", "Gold Buyer"),
+        (12, "diamond", "Diamond Buyer"),
+        (25, "crystalis", "Crystalis Buyer"),
         (float('inf'), "pka", "Покупатель века"),
     ]
     current_role = "Нет"
