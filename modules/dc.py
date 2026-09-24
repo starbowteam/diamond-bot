@@ -433,14 +433,20 @@ async def check_unused_purchases(bot):
     logger.info(f"check_unused_purchases: проверено {checked}, отправлено {sent}")
 
 
-# ⬇️ emerald/amethyst/legendary → crystalis (13-25)
+# Новая сетка:
+#   Bronze   1-5
+#   Silver   6-10
+#   Gold     11-15
+#   Diamond  16-20
+#   Crystalis 21-25
+#   PKA      26+
 def get_progress_bar(count: int):
     thresholds = [
         (1, "club", "Клуб"),
-        (2, "bronze", "Bronze Buyer"),
-        (4, "silver", "Silver Buyer"),
-        (8, "gold", "Gold Buyer"),
-        (12, "diamond", "Diamond Buyer"),
+        (5, "bronze", "Bronze Buyer"),
+        (10, "silver", "Silver Buyer"),
+        (15, "gold", "Gold Buyer"),
+        (20, "diamond", "Diamond Buyer"),
         (25, "crystalis", "Crystalis Buyer"),
         (float('inf'), "pka", "Покупатель века"),
     ]
