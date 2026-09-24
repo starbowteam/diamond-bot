@@ -66,7 +66,6 @@ CONFIG = {
     "VOICE_CHANNEL_ID": 1464699044751478815,
     "MANAGER_ROLE_ID": 1154757071330365490,
     "PAID_NOTIFY_CHANNEL_ID": 1462418981825810535,
-    # ⬇️ emerald и legendary упразднены, amethyst → crystalis
     "ROLE_IDS": {
         "club": 1284697274655576186,
         "bronze": 1127430321214861395,
@@ -115,10 +114,10 @@ def is_supreme(user_id: int) -> bool:
     return user_id in SUPREME_USERS
 
 
-# ⬇️ УСТАРЕВШИЕ РОЛИ — снимаются при пересчёте
+# Устаревшие роли (снимаются при пересчёте)
 DEPRECATED_ROLE_IDS = [
-    1208442450373513277,  # emerald (упразднена)
-    1208442449425334372,  # legendary (упразднена)
+    1208442450373513277,  # emerald
+    1208442449425334372,  # legendary
 ]
 
 # ============================================================
@@ -361,26 +360,28 @@ def log_command(func):
 
 # ============================================================
 # Система ролей по отзывам
+# Новая сетка:
+#   Bronze   1-5
+#   Silver   6-10
+#   Gold     11-15
+#   Diamond  16-20
+#   Crystalis 21-25
+#   PKA      26+
 # ============================================================
 def get_roles_for_count(count: int) -> list[int]:
-    """
-    Возвращает список целевых ролей по количеству отзывов.
-    13-25 → crystalis (emerald + amethyst + legendary объединены)
-    26+   → pka
-    """
     roles = []
     role_ids = CONFIG["ROLE_IDS"]
     if count >= 1:
         roles.append(role_ids["club"])
-    if 1 <= count <= 2:
+    if 1 <= count <= 5:
         roles.append(role_ids["bronze"])
-    elif 3 <= count <= 4:
+    elif 6 <= count <= 10:
         roles.append(role_ids["silver"])
-    elif 5 <= count <= 8:
+    elif 11 <= count <= 15:
         roles.append(role_ids["gold"])
-    elif 9 <= count <= 12:
+    elif 16 <= count <= 20:
         roles.append(role_ids["diamond"])
-    elif 13 <= count <= 25:
+    elif 21 <= count <= 25:
         roles.append(role_ids["crystalis"])
     elif count >= 26:
         roles.append(role_ids["pka"])
@@ -388,7 +389,7 @@ def get_roles_for_count(count: int) -> list[int]:
 
 
 async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool = False):
-    # ⬇️ Сначала снимаем устаревшие роли (emerald, legendary)
+    # Снимаем устаревшие роли
     dep_to_remove = [r for r in member.roles if r.id in DEPRECATED_ROLE_IDS]
     for role in dep_to_remove:
         try:
@@ -401,7 +402,6 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
         except Exception as e:
             logger.warning(f"Не удалось снять deprecated {role.id} у {member.id}: {e}")
 
-    # EXEMPT-юзеры всегда Клуб + PKA
     if member.id in EXEMPT_USERS:
         role_ids = CONFIG["ROLE_IDS"]
         club_role_id = role_ids["club"]
@@ -454,7 +454,7 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
             )
 
 # ============================================================
-# Функции для работы с инвайтами
+# Инвайты / владельцы / менеджеры / отзывы / cooldown
 # ============================================================
 async def sync_invites(guild: disnake.Guild):
     try:
@@ -466,9 +466,7 @@ async def sync_invites(guild: disnake.Guild):
                     (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
     db.commit()
 
-# ============================================================
-# Функции для работы с владельцами тикетов
-# ============================================================
+
 def add_ticket_owner(channel_id: int, user_id: int, category_id: int):
     cur.execute("INSERT OR REPLACE INTO ticket_owners (channel_id, user_id, category_id) VALUES (?, ?, ?)",
                 (channel_id, user_id, category_id))
@@ -490,9 +488,7 @@ def get_user_tickets_count_in_category(user_id: int, category_id: int) -> int:
     row = cur.execute("SELECT COUNT(*) FROM ticket_owners WHERE user_id = ? AND category_id = ?", (user_id, category_id)).fetchone()
     return row[0] if row else 0
 
-# ============================================================
-# Функции для работы с менеджерами и закрытыми заказами
-# ============================================================
+
 def assign_ticket_manager(channel_id: int, manager_id: int):
     cur.execute("INSERT OR REPLACE INTO ticket_managers (channel_id, manager_id) VALUES (?, ?)",
                 (channel_id, manager_id))
@@ -536,9 +532,7 @@ def remove_closed_order(order_id: int):
     cur.execute("DELETE FROM closed_orders WHERE id = ?", (order_id,))
     db.commit()
 
-# ============================================================
-# Отзывы в тикетах
-# ============================================================
+
 def save_ticket_review(channel_id: int, user_id: int, manager_id: int, rating: int):
     cur.execute(
         "INSERT OR REPLACE INTO ticket_reviews (channel_id, user_id, manager_id, rating, rated_at) "
@@ -558,9 +552,7 @@ def clear_ticket_review(channel_id: int):
     cur.execute("DELETE FROM ticket_reviews WHERE channel_id = ?", (channel_id,))
     db.commit()
 
-# ============================================================
-# КУЛДАУН НА СОЗДАНИЕ ТИКЕТОВ
-# ============================================================
+
 def set_ticket_cooldown(user_id: int, seconds: int = 7200, reason: str = "", set_by: int = 0):
     if is_supreme(user_id):
         logger.info(f"set_ticket_cooldown: {user_id} — supreme, пропуск")
