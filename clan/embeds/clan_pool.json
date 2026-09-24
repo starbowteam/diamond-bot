@@ -1,0 +1,18 @@
+{
+  "embeds": [
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1552716150863827045/image.png?ex=6ab69f1a&is=6ab54d9a&hm=eda31782441e4db2131a7de9fd296a8d8ef8a6b3532de326c612b8be20ac524e&"
+      },
+      "color": 6776679
+    },
+    {
+      "title": "Клубная лига между покупателями Diamond",
+      "description": "> Копилка клуба, где каждый вклад решает исход сезона.\n\n> **Сезон длится 28 дней**, 28-го числа — выплата.\n> Топ-3 участника получают бонус ×1.75, ×1.50, ×1.30\n\n",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab5efe3&is=6ab49e63&hm=d1b48b6ea98c9662564b5a77012797024de47fbc9444922b72184d6d0a6d5a2a&"
+      }
+    }
+  ]
+}
