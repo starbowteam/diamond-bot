@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Рендер карточки профиля на PIL + FA (без HTML и HCTI)."""
+"""Рендер карточки профиля на PIL + FA."""
 import io
 import os
 from datetime import datetime, timezone
@@ -44,15 +44,15 @@ GOLD = (247, 201, 145)
 GREEN = (46, 204, 113)
 RED = (255, 107, 107)
 
+
+# ⬇️ amethyst → crystalis, emerald и legendary убраны
 ROLE_INFO = {
     "none":      ("Клуб",            GOLD),
     "bronze":    ("Bronze Buyer",    (231, 143, 103)),
     "silver":    ("Silver Buyer",    (224, 224, 224)),
     "gold":      ("Gold Buyer",      GOLD),
     "diamond":   ("Diamond Buyer",   (221, 240, 239)),
-    "emerald":   ("Emerald Buyer",   (239, 243, 211)),
-    "amethyst":  ("Amethyst Buyer",  (216, 142, 223)),
-    "legendary": ("Legendary Buyer", (230, 133, 133)),
+    "crystalis": ("Crystalis Buyer", (216, 142, 223)),
     "pka":       ("Покупатель Века", (212, 191, 255)),
 }
 
@@ -97,7 +97,6 @@ def _tw(d, text, font):
 
 
 def _ellipsis(d, text, font, max_w):
-    """Обрезает текст с … если не влезает."""
     if _tw(d, text, font) <= max_w:
         return text
     t = text
@@ -153,6 +152,7 @@ def _op_icon(reason: str):
     if "зарплат" in r or "аванс" in r: return I_SACK
     if "покупк" in r: return I_CART
     if "акци" in r: return I_TROPHY
+    if "подарок" in r: return I_STAR
     return I_COINS
 
 
@@ -174,7 +174,6 @@ def generate_profile_card(
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    # Карточка
     d.rounded_rectangle((M, M, W - M, H - M), radius=30, fill=CARD_BOT, outline=BORDER, width=3)
     d.rounded_rectangle((M + 1, M + 1, W - M - 1, H // 2), radius=30, fill=CARD_TOP)
 
@@ -243,13 +242,12 @@ def generate_profile_card(
         uname += "…"
     d.text((un_x, un_y), uname, font=_font(42), fill=TEXT)
 
-    # === БЕЙДЖ РОЛИ (без ID под ником) ===
     rn, rc = ROLE_INFO.get(role_key, ROLE_INFO["none"])
     rn_up = rn.upper()
     rn_f = _font(17)
     rn_w = _tw(d, rn_up, rn_f)
     badge_h = 44
-    badge_w = 40 + rn_w + 22          # левый отступ иконки + текст + правый отступ
+    badge_w = 40 + rn_w + 22
     badge_x = un_x
     badge_y = un_y + 60
     badge_cy = badge_y + badge_h // 2
@@ -265,7 +263,6 @@ def generate_profile_card(
     m_w = (left_w - 16) // 2
     icon_box = 54
 
-    # metric 1: reviews
     m1x1 = left_x1
     m1x2 = m1x1 + m_w
     d.rounded_rectangle((m1x1, metrics_y, m1x2, metrics_y + metrics_h),
@@ -282,7 +279,6 @@ def generate_profile_card(
     d.text((text_x, lbl_y), "ОТЗЫВОВ", font=_font(14), fill=MUTED)
     d.text((text_x, val_y), str(reviews), font=_font(44), fill=GOLD)
 
-    # metric 2: balance
     m2x1 = m1x2 + 16
     m2x2 = left_x2
     d.rounded_rectangle((m2x1, metrics_y, m2x2, metrics_y + metrics_h),
@@ -388,12 +384,10 @@ def generate_profile_card(
             reason_x = ob_x + op_icon_size + 18
             reason_y = op_y + (op_h // 2) - 22
 
-            # ширина под текст = до левого края амта минус 30
             amt_str = f"{sign}{abs(int(amt))} DC"
             amt_w = _tw(d, amt_str, _font(28))
             max_reason_w = ih_x2 - 22 - amt_w - 30 - reason_x
 
-            # Автоуменьшение шрифта от 22 до 16, потом …
             reason_font_size = 22
             reason_shown = reason_full
             while reason_font_size >= 16:
