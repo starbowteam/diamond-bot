@@ -21,20 +21,26 @@ from core.utils import (
 MSK = timezone(timedelta(hours=3))
 
 CLUB_ROLE_ID    = 1284697274655576186     # Клуб покупателей
-MIN_BALANCE     = 25                       # Мин. баланс для входа
+MIN_BALANCE     = 0                        # Мин. баланс для входа (>=0)
 
-CLAN_CYCLE_DAYS = 28                       # Длина цикла
-PAYOUT_DAY      = 28                       # Число месяца финала
-PAYOUT_HOUR_MSK = 20                       # Час МСК
+# 👇 Юзеры, которых НЕ трогаем при распределении
+EXCLUDE_FROM_CLAN = {
+    1124040555240898631,
+    796293832751972352,
+}
+
+CLAN_CYCLE_DAYS = 28
+PAYOUT_DAY      = 28
+PAYOUT_HOUR_MSK = 20
 PAYOUT_MINUTE   = 0
 
-TAX_NORMAL      = 0.60                     # Налог в банк со всего (60%)
-TAX_QUEST       = 1.00                     # Квесты — 100%
-TAX_CASINO      = 0.60                     # Казино — 60% от выплаты
+TAX_NORMAL      = 0.60
+TAX_QUEST       = 1.00
+TAX_CASINO      = 0.60
 
-TOP_BONUSES = [1.75, 1.50, 1.30]           # Топ-3 множители
+TOP_BONUSES = [1.75, 1.50, 1.30]
 
-REPORT_DM_USER_ID = 796293832751972352     # Кому слать отчёт
+REPORT_DM_USER_ID = 796293832751972352
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
               "1537851307757539390/image.png?ex=6ab5efe3&is=6ab49e63&"
@@ -42,7 +48,6 @@ IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
-# 3 клана
 CLANS_DATA = [
     {
         "id": 1,
@@ -50,7 +55,7 @@ CLANS_DATA = [
         "emoji": "🪨",
         "role_id": 1552707675257831525,
         "color": 0x8B7355,
-        "fa_icon": "🪨",  # для profile_card
+        "fa_icon": "🪨",
         "description": "Стойкие, как камень. Непоколебимая воля и вековая мудрость.",
     },
     {
@@ -78,7 +83,6 @@ CLANS_DATA = [
 # ИНИЦИАЛИЗАЦИЯ
 # ============================================================
 def init_clan_core():
-    """Заполняет таблицу clans при первом запуске."""
     for c in CLANS_DATA:
         cur.execute(
             "INSERT OR IGNORE INTO clans (id, name, emoji, role_id, color, description) "
@@ -123,31 +127,12 @@ def is_club_member(guild: disnake.Guild, user_id: int) -> bool:
     return any(r.id == CLUB_ROLE_ID for r in member.roles)
 
 
-def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
+def _get_clan_stats() -> List[Tuple[dict, int, int]]:
     """
-    Автораскид юзера в наименее заполненный клан.
-    Возвращает данные клана или None если не подходит.
+    Возвращает список (clan, count, total_bal) для всех 3 кланов.
+    total_bal — сумма балансов активных участников.
     """
-    if get_user_clan(user_id):
-        return None  # уже в клане
-
-    member = guild.get_member(user_id)
-    if not member:
-        return None
-
-    if not any(r.id == CLUB_ROLE_ID for r in member.roles):
-        return None  # нет роли Клуб
-
-    # Баланс ≥ 25
-    from modules.dc import get_user_balance
-    # Синхронная проверка через dc_cache
-    row = cur.execute("SELECT balance FROM dc_cache WHERE user_id=?", (user_id,)).fetchone()
-    balance = row["balance"] if row else 0
-    if balance < MIN_BALANCE:
-        return None
-
-    # Считаем «вес» каждого клана: кол-во * 10_000 + сумма балансов
-    stats = []
+    result = []
     for c in get_all_clans():
         members = cur.execute(
             "SELECT user_id FROM clan_members WHERE clan_id=? AND left_at IS NULL",
@@ -159,11 +144,38 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
             b = cur.execute("SELECT balance FROM dc_cache WHERE user_id=?", (m["user_id"],)).fetchone()
             if b:
                 total_bal += b["balance"]
-        score = count * 10_000 + total_bal
-        stats.append((c, score))
+        result.append((c, count, total_bal))
+    return result
 
-    # Куда меньше score — туда идём
-    stats.sort(key=lambda x: x[1])
+
+def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
+    """
+    Автораскид юзера в клан с наименьшим количеством участников.
+    Тайбрейк: суммарный баланс клана (кто беднее — туда).
+    Исключения: EXCLUDE_FROM_CLAN.
+    """
+    if user_id in EXCLUDE_FROM_CLAN:
+        return None
+
+    if get_user_clan(user_id):
+        return None
+
+    member = guild.get_member(user_id)
+    if not member:
+        return None
+
+    if not any(r.id == CLUB_ROLE_ID for r in member.roles):
+        return None
+
+    row = cur.execute("SELECT balance FROM dc_cache WHERE user_id=?", (user_id,)).fetchone()
+    balance = row["balance"] if row else 0
+    if balance < MIN_BALANCE:
+        return None
+
+    # 👇 Новый алгоритм: сначала по количеству, потом по сумме балансов
+    stats = _get_clan_stats()
+    # Сортируем по (count, total_bal) — самый пустой и бедный первый
+    stats.sort(key=lambda x: (x[1], x[2]))
     target_clan = stats[0][0]
 
     cycle = get_current_cycle()
@@ -176,7 +188,6 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
     )
     db.commit()
 
-    # Выдаём роль на сервере
     role = guild.get_role(target_clan["role_id"])
     if role and role not in member.roles:
         try:
@@ -184,10 +195,8 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
         except Exception as e:
             logger.warning(f"assign role {role.id}: {e}")
 
-    # ЛС приветствие
     asyncio.create_task(send_welcome_dm(member, target_clan))
 
-    # Лог
     asyncio.create_task(log_discord(
         title=f"{target_clan['emoji']} Новый участник клана",
         description=(
@@ -202,13 +211,24 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
 
 
 def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
-    """Массовое распределение всех клубных без клана. Возвращает статистику."""
+    """
+    Массовое распределение всех клубных без клана.
+    Работает в 2 прохода:
+    1. Раскидываем всех без клана по самому пустому.
+    2. РЕБАЛАНСИРУЕМ — если кто-то остался вне клана (были исключены, но потом добавлены).
+    """
     assigned = 0
     skipped = 0
+    excluded = 0
+
+    # Проход 1: раскидываем тех, кого нет в клане
     for member in guild.members:
         if member.bot:
             continue
         if not any(r.id == CLUB_ROLE_ID for r in member.roles):
+            continue
+        if member.id in EXCLUDE_FROM_CLAN:
+            excluded += 1
             continue
         if get_user_clan(member.id):
             skipped += 1
@@ -216,7 +236,60 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
         result = assign_user_to_clan(member.id, guild)
         if result:
             assigned += 1
-    return {"assigned": assigned, "skipped": skipped}
+
+    # 👇 Проход 2: РЕБАЛАНС — если где-то > max + 1 участников, перекидываем
+    # Это исправляет ситуацию 46/6/1
+    max_iter = 200  # защита от бесконечного цикла
+    while max_iter > 0:
+        max_iter -= 1
+        stats = _get_clan_stats()
+        stats.sort(key=lambda x: x[1])  # по кол-ву
+        smallest = stats[0]
+        largest = stats[-1]
+        diff = largest[1] - smallest[1]
+        if diff <= 1:
+            break  # уже сбалансировано
+
+        # Перекидываем одного из самого большого в самый маленький
+        # Берём последнего вступившего из самого большого (или случайного)
+        members_big = cur.execute(
+            "SELECT user_id FROM clan_members WHERE clan_id=? AND left_at IS NULL "
+            "ORDER BY joined_at DESC LIMIT 1",
+            (largest[0]["id"],)
+        ).fetchone()
+        if not members_big:
+            break
+        moved_uid = members_big["user_id"]
+
+        cur.execute(
+            "UPDATE clan_members SET clan_id=? WHERE user_id=?",
+            (smallest[0]["id"], moved_uid)
+        )
+        db.commit()
+
+        # Меняем роли на сервере
+        moved_member = guild.get_member(moved_uid)
+        if moved_member:
+            # снять старые роли всех кланов
+            for c in get_all_clans():
+                r = guild.get_role(c["role_id"])
+                if r and r in moved_member.roles:
+                    try:
+                        asyncio.create_task(moved_member.remove_roles(r, reason="Клан-лига: ребаланс"))
+                    except Exception:
+                        pass
+            # выдать новую
+            new_role = guild.get_role(smallest[0]["role_id"])
+            if new_role:
+                try:
+                    asyncio.create_task(moved_member.add_roles(new_role, reason="Клан-лига: ребаланс"))
+                except Exception:
+                    pass
+
+        assigned += 1
+
+    logger.info(f"Распределение кланов: assigned={assigned}, skipped={skipped}, excluded={excluded}")
+    return {"assigned": assigned, "skipped": skipped, "excluded": excluded}
 
 
 # ============================================================
@@ -239,12 +312,10 @@ def _msk_now() -> datetime:
 
 
 def _next_payout_ts(from_dt: Optional[datetime] = None) -> int:
-    """Возвращает ts ближайшего 28-го числа 20:00 МСК (если уже прошло — следующего месяца)."""
     now = from_dt or _msk_now()
     target = now.replace(day=PAYOUT_DAY, hour=PAYOUT_HOUR_MSK, minute=PAYOUT_MINUTE,
                          second=0, microsecond=0)
     if target <= now:
-        # переносим на следующий месяц
         if now.month == 12:
             target = target.replace(year=now.year + 1, month=1)
         else:
@@ -253,14 +324,9 @@ def _next_payout_ts(from_dt: Optional[datetime] = None) -> int:
 
 
 def start_new_cycle(force_short: bool = False) -> dict:
-    """
-    Создаёт новый активный цикл.
-    force_short=True — сразу короткий до ближайшего 28-го (для первого запуска).
-    """
     now_ts = int(time.time())
     ends_at = _next_payout_ts()
 
-    # Определяем номер
     last = get_any_last_cycle()
     number = (last["number"] + 1) if last else 1
 
@@ -277,15 +343,10 @@ def start_new_cycle(force_short: bool = False) -> dict:
 
 
 def close_cycle_and_pay(bot) -> bool:
-    """
-    Закрывает текущий цикл, начисляет выплаты, шлёт отчёт.
-    Возвращает True если выплата прошла.
-    """
     cycle = get_current_cycle()
     if not cycle:
         return False
 
-    # Лочим
     cur.execute("UPDATE clan_cycle SET state='payout' WHERE id=?", (cycle["id"],))
     db.commit()
 
@@ -302,7 +363,6 @@ def close_cycle_and_pay(bot) -> bool:
         ).fetchone()
         bank = bank_row["s"] or 0
 
-        # Участники клана
         members = cur.execute(
             "SELECT user_id, joined_at FROM clan_members WHERE clan_id=? AND left_at IS NULL",
             (c["id"],)
@@ -315,14 +375,12 @@ def close_cycle_and_pay(bot) -> bool:
             })
             continue
 
-        # Считаем eff_i для каждого
         cycle_len_sec = max(cycle["ends_at"] - cycle["started_at"], 1)
         members_list = []
         for m in members:
             user_id = m["user_id"]
             joined_at = m["joined_at"]
 
-            # Вклад юзера за цикл
             contrib_row = cur.execute(
                 "SELECT COALESCE(SUM(amount), 0) AS s FROM clan_contributions "
                 "WHERE cycle_id=? AND user_id=?",
@@ -330,7 +388,6 @@ def close_cycle_and_pay(bot) -> bool:
             ).fetchone()
             contrib = contrib_row["s"] or 0
 
-            # Вес по времени
             days_inside = max(cycle["ends_at"] - max(joined_at, cycle["started_at"]), 0)
             weight = days_inside / cycle_len_sec
 
@@ -340,11 +397,9 @@ def close_cycle_and_pay(bot) -> bool:
                 "weight": weight,
             })
 
-        # Топ-3 по вкладу
         sorted_members = sorted(members_list, key=lambda x: -x["contrib"])
         top_ids = [m["user_id"] for m in sorted_members[:3]]
 
-        # Присваиваем бонусы
         for m in members_list:
             if m["user_id"] in top_ids:
                 idx = top_ids.index(m["user_id"])
@@ -357,7 +412,6 @@ def close_cycle_and_pay(bot) -> bool:
 
         total_eff = sum(m["eff"] for m in members_list)
 
-        # Начисляем
         clan_paid = 0
         top_report = []
         for m in members_list:
@@ -369,10 +423,9 @@ def close_cycle_and_pay(bot) -> bool:
             clan_paid += payout
 
             if payout > 0:
-                # Начисляем через add_dc с clan_share=0 (не уходит обратно в банк)
                 try:
                     from modules.dc import add_dc
-                    await_ = bot.loop.create_task(add_dc(
+                    bot.loop.create_task(add_dc(
                         m["user_id"], payout,
                         f"Клановая лига: выплата за сезон #{cycle['number']}",
                         notify=True, log=False, clan_share=0.0
@@ -380,7 +433,6 @@ def close_cycle_and_pay(bot) -> bool:
                 except Exception as e:
                     logger.exception(f"clan payout add_dc {m['user_id']}: {e}")
 
-                # Сохраняем в историю
                 cur.execute(
                     "INSERT INTO clan_payouts (cycle_id, clan_id, user_id, weight, bonus_mult, final_amount, paid_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -409,18 +461,13 @@ def close_cycle_and_pay(bot) -> bool:
 
     report["total"] = total_paid
 
-    # Обновляем цикл
     cur.execute("UPDATE clan_cycle SET state='finished', total_paid=? WHERE id=?",
                 (total_paid, cycle_id))
     db.commit()
 
-    # Отчёт в ЛС админу
     asyncio.create_task(send_payout_report_dm(bot, report))
-
-    # Пост в канал копилки
     asyncio.create_task(post_payout_results(bot, report))
 
-    # Лог
     asyncio.create_task(log_discord(
         title=f"🏁 Клановая лига: сезон #{cycle['number']} завершён",
         description=(
@@ -434,11 +481,9 @@ def close_cycle_and_pay(bot) -> bool:
 
     logger.info(f"Клан-лига: цикл #{cycle['number']} закрыт, выплачено {total_paid} DC")
 
-    # Автостарт нового цикла через 5 минут
     async def _delayed_start():
         await asyncio.sleep(300)
         start_new_cycle()
-        # Обновляем эмбед копилки
         from clan.panels import update_clan_pool_embed
         await update_clan_pool_embed(bot)
 
@@ -451,10 +496,6 @@ def close_cycle_and_pay(bot) -> bool:
 # ВКЛАДЫ
 # ============================================================
 async def add_clan_contribution(user_id: int, amount: int, reason: str):
-    """
-    Добавляет вклад в банк клана юзера.
-    Возвращает True если удалось (юзер в клане, активный цикл есть).
-    """
     if amount <= 0:
         return False
 
@@ -472,44 +513,16 @@ async def add_clan_contribution(user_id: int, amount: int, reason: str):
         (cycle["id"], clan["id"], user_id, amount, reason, int(time.time()))
     )
     db.commit()
-
-    # ЛС о вкладе (тихо, без спама — опционально)
-    # Раскомментируй если хочешь:
-    # asyncio.create_task(_notify_contribution(user_id, clan, amount, reason))
-
     return True
 
 
-async def _notify_contribution(user_id: int, clan: dict, amount: int, reason: str):
-    try:
-        from core.bot import bot
-        user = bot.get_user(user_id) or await bot.fetch_user(user_id)
-        if not user:
-            return
-        embed = disnake.Embed(
-            title=f"{clan['emoji']} Вклад в копилку клана",
-            description=(
-                f"> **Клан:** {clan['emoji']} **{clan['name']}**\n"
-                f"> **Вклад:** `+{amount} DC`\n"
-                f"> **За что:** {reason}"
-            ),
-            color=clan["color"]
-        )
-        embed.set_image(url=IMG_STRIPE)
-        await user.send(embed=embed)
-    except Exception:
-        pass
-
-
 async def send_welcome_dm(member: disnake.Member, clan: dict):
-    """ЛС приветствие при вступлении в клан."""
     try:
         data = load_json(os.path.join(EMBEDS_DIR, "welcome.json"), {})
         embeds = []
         for e in data.get("embeds", []):
             embeds.append(disnake.Embed.from_dict(e))
 
-        # embed2 — текст
         e2 = disnake.Embed(
             title=f"Добро пожаловать в клан {clan['emoji']} {clan['name']}!",
             description=(
@@ -520,7 +533,7 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
                 f"> • Топ-3 по вкладу получат бонус ×1.75 / ×1.50 / ×1.30\n"
                 f"> • В конце цикла банк делится между всеми участниками\n\n"
                 f"**Где смотреть:**\n"
-                f"> 📊 Копилка — <#1552700960474800128>\n"
+                f"> 📊 Копилка — <#1552700989465956403>\n"
                 f"> 🎮 Игры и квесты — <#1552700973753827509>\n\n"
                 f"> Удачи, воин!"
             ),
@@ -603,7 +616,6 @@ def get_recent_contributions_all(limit: int = 5) -> List[dict]:
 # ОТЧЁТЫ
 # ============================================================
 async def send_payout_report_dm(bot, report: dict):
-    """Большой отчёт в ЛС админу."""
     try:
         user = bot.get_user(REPORT_DM_USER_ID)
         if not user:
@@ -646,7 +658,6 @@ async def send_payout_report_dm(bot, report: dict):
 
 
 async def post_payout_results(bot, report: dict):
-    """Пост итогов в канал копилки."""
     try:
         ch = bot.get_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
         if not ch:
@@ -687,7 +698,6 @@ async def post_payout_results(bot, report: dict):
 # ВСПОМОГАТЕЛЬНОЕ
 # ============================================================
 def make_progress_bar(percent: float, length: int = 10) -> str:
-    """▰▰▰▱▱▱▱▱▱▱"""
     percent = max(0.0, min(1.0, percent))
     filled = int(round(percent * length))
     return "▰" * filled + "▱" * (length - filled)
