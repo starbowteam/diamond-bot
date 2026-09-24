@@ -174,10 +174,6 @@ async def process_salary(mode: str):
 # CATCH-UP: ДОГОНЯЮЩИЕ ВЫПЛАТЫ
 # ============================================================
 async def try_pay_advance() -> bool:
-    """
-    Аванс — 15 число.
-    Окно срабатывания: 15-19 числа текущего месяца (5 дней grace).
-    """
     state = load_salary_state()
     now = datetime.now(MSK)
     month_key = now.strftime("%Y-%m")
@@ -197,10 +193,6 @@ async def try_pay_advance() -> bool:
 
 
 async def try_pay_salary() -> bool:
-    """
-    Зарплата — 29 число.
-    Окно срабатывания: 29-31 текущего + 1-3 следующего.
-    """
     state = load_salary_state()
     now = datetime.now(MSK)
 
@@ -348,7 +340,6 @@ async def flash_sale_task():
         logger.exception(f"flash_sale_task error: {e}")
 
 
-# === АВАНС: проверка раз в минуту, окно 15-19 ===
 @tasks.loop(minutes=1)
 async def salary_advance_task():
     await bot.wait_until_ready()
@@ -358,7 +349,6 @@ async def salary_advance_task():
         logger.exception(f"salary_advance_task: {e}")
 
 
-# === ЗАРПЛАТА: проверка раз в минуту, окно 29-31 / 1-3 ===
 @tasks.loop(minutes=1)
 async def salary_main_task():
     await bot.wait_until_ready()
@@ -368,7 +358,6 @@ async def salary_main_task():
         logger.exception(f"salary_main_task: {e}")
 
 
-# === НАПОМИНАНИЯ о неиспользованных товарах: 12:00 МСК ===
 @tasks.loop(minutes=1)
 async def unused_purchase_reminder_task():
     global _LAST_REMINDER_DATE
@@ -386,7 +375,6 @@ async def unused_purchase_reminder_task():
         logger.exception(f"unused_purchase_reminder_task: {e}")
 
 
-# === ВЫПЛАТА ЗА АКТИВНОСТЬ: 00:00 МСК, раз в день ===
 @tasks.loop(minutes=1)
 async def daily_activity_payout_task():
     global _LAST_PAYOUT_DATE
@@ -489,6 +477,30 @@ async def on_ready():
                 logger.info("Catch-up: зарплата выдана")
         except Exception as e:
             logger.exception(f"catch-up salary err: {e}")
+
+        # ⬇️ КЛАНОВАЯ ЛИГА — инициализация + панели
+        try:
+            from clan import init_clan_league
+            from clan.panels import (
+                send_clan_pool_panel, send_clan_games_panel, send_clan_admin_panel
+            )
+            init_clan_league(bot)
+            bot.loop.create_task(send_clan_pool_panel(bot))
+            bot.loop.create_task(send_clan_games_panel(bot))
+            bot.loop.create_task(send_clan_admin_panel(bot))
+            logger.info("Клан-лига инициализирована")
+
+            # Автораспределение клубных без клана
+            try:
+                from clan.core import distribute_all_club_members
+                guild_for_clan = bot.get_guild(int(CONFIG["GUILD_ID"]))
+                if guild_for_clan:
+                    result = distribute_all_club_members(guild_for_clan)
+                    logger.info(f"Автораспределение кланов: assigned={result['assigned']}, skipped={result['skipped']}")
+            except Exception as e:
+                logger.exception(f"auto-distribute clan err: {e}")
+        except Exception as e:
+            logger.exception(f"clan league init err: {e}")
 
         # Запуск тасок
         if not review_counter_task.is_running():
@@ -720,6 +732,13 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in added)}",
                 color=0x00ff00
             )
+            # 👇 Автораспределение в клан при получении роли Клуб
+            try:
+                from clan.core import CLUB_ROLE_ID, assign_user_to_clan, get_user_clan
+                if any(r.id == CLUB_ROLE_ID for r in added) and not get_user_clan(after.id):
+                    assign_user_to_clan(after.id, after.guild)
+            except Exception as e:
+                logger.warning(f"clan auto-assign on role: {e}")
         if removed:
             await log_discord(
                 title="➖ Снята роль",
@@ -895,6 +914,12 @@ async def on_interaction(inter: disnake.MessageInteraction):
     from modules.commands_tickets import handle_interaction
     await handle_interaction(inter)
     await handle_flash_interaction(inter)
+    # Клан-лига
+    try:
+        from clan.panels import handle_clan_interaction
+        await handle_clan_interaction(inter)
+    except Exception as e:
+        logger.warning(f"clan interaction err: {e}")
 
 
 @bot.event
@@ -981,10 +1006,18 @@ async def on_message(message: disnake.Message):
         save_json(FILES["review_counts"], counts)
 
         try:
+            # 👇 60% в банк клана
             await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке",
-                         notify=False, log=False)
+                         notify=False, log=False, clan_share=0.6)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
+
+        # 👇 Хук квестов клан-лиги
+        try:
+            from clan.quests import on_review_quest_hook
+            await on_review_quest_hook(user_id)
+        except Exception as e:
+            logger.warning(f"clan review hook: {e}")
 
         if isinstance(message.author, disnake.Member):
             try:
@@ -1023,6 +1056,14 @@ async def on_message(message: disnake.Message):
         await update_review_counter(silent=False)
         return
 
+    # 👇 Хук клан-квестов (сообщения)
+    if is_guild_text:
+        try:
+            from clan.quests import on_message_quest_hook
+            await on_message_quest_hook(message)
+        except Exception as e:
+            logger.warning(f"clan quest hook msg: {e}")
+
     await bot.process_commands(message)
 
 
@@ -1043,4 +1084,10 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
             if duration > 60:
                 from modules.dc import add_voice_dc
                 await add_voice_dc(user_id, duration)
+                # 👇 Хук квестов клан-лиги
+                try:
+                    from clan.quests import on_voice_quest_hook
+                    await on_voice_quest_hook(user_id, duration)
+                except Exception as e:
+                    logger.warning(f"clan voice hook: {e}")
                 # лог не пишем — иначе спам в канале
