@@ -140,13 +140,7 @@ async def _has_review_in_channel(channel: disnake.TextChannel, user_id: int) -> 
 
 
 async def _check_ticket_blocked(inter: disnake.MessageInteraction) -> bool:
-    """
-    Проверка блокировки. Supreme-юзеры не блокируются.
-    Возвращает True если юзер ЗАБЛОКИРОВАН (и уже отправил сообщение).
-    """
     user_id = inter.author.id
-
-    # ⬇️ Supreme-юзеры не блокируются
     if is_supreme(user_id):
         return False
 
@@ -184,7 +178,6 @@ async def _check_ticket_blocked(inter: disnake.MessageInteraction) -> bool:
 
 
 async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: bool = True):
-    """Закрытие тикета с проверкой отзывов."""
     channel = inter.channel
 
     if check_reviews:
@@ -242,10 +235,6 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
 
 
 async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
-    """
-    Предупредительное закрытие тикета.
-    Закрывает тикет + блокирует юзера на 2 часа (кроме supreme).
-    """
     channel = inter.channel
     owner_id = get_ticket_owner(channel.id)
 
@@ -263,7 +252,6 @@ async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
 
     owner_is_supreme = is_supreme(owner_id)
 
-    # 1. Ставим кулдаун (для supreme вернёт 0 — не блокируем)
     until_ts = set_ticket_cooldown(
         owner_id,
         seconds=WARN_CLOSE_COOLDOWN_SECONDS,
@@ -271,7 +259,6 @@ async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
         set_by=inter.author.id
     )
 
-    # 2. ЛС нарушителю (или supreme-юзеру без блока)
     if owner:
         try:
             if owner_is_supreme:
@@ -301,7 +288,6 @@ async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
         except Exception as e:
             logger.warning(f"Ошибка ЛС при warn-close: {e}")
 
-    # 3. Лог в канал
     if owner_is_supreme:
         log_desc = (
             f"> **Менеджер:** {inter.author.mention}\n"
@@ -325,7 +311,6 @@ async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
     )
 
-    # 4. Сообщение в тикет (не эфемерно)
     try:
         if owner_is_supreme:
             notify_desc = (
@@ -350,13 +335,10 @@ async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
     except Exception:
         pass
 
-    # 5. Чистим БД
     clear_ticket_owner(channel)
     clear_ticket_manager(channel.id)
     clear_ticket_review(channel.id)
 
-    # 6. Ответ юзеру-менеджеру — через edit_original_response,
-    #    т.к. в WarnCloseModal.callback уже был defer
     try:
         if owner_is_supreme:
             resp = (
@@ -377,7 +359,6 @@ async def _do_warn_close_ticket(inter: disnake.ModalInteraction, reason: str):
         except Exception:
             pass
 
-    # 7. Удаляем канал
     await asyncio.sleep(2)
     try:
         await channel.delete()
@@ -952,7 +933,6 @@ class WarnCloseModal(Modal):
         if not reason:
             return await inter.response.send_message("❌ Причина обязательна.", ephemeral=True)
 
-        # ⬇️ Сразу defer — весь дальнейший ответ идёт через edit_original_response/followup
         await inter.response.defer(ephemeral=True)
         await _do_warn_close_ticket(inter, reason)
 
@@ -1959,6 +1939,13 @@ class BuySelectView(View):
         target_id = recipient_id if recipient_id else user_id
         await add_purchase(target_id, category, item["name"])
 
+        # 👇 Хук квестов клан-лиги (покупка)
+        try:
+            from clan.quests import on_purchase_quest_hook
+            await on_purchase_quest_hook(user_id, price)
+        except Exception as e:
+            logger.warning(f"clan purchase hook: {e}")
+
         if category == "roles" and item.get("role_id"):
             role = inter.guild.get_role(item["role_id"])
             if role:
@@ -2041,6 +2028,14 @@ class BuySelectView(View):
         if not success:
             return await inter.followup.send(content="❌ Не удалось списать DC.", ephemeral=True)
         await add_purchase(recipient_id, category, item["name"])
+
+        # 👇 Хук покупки
+        try:
+            from clan.quests import on_purchase_quest_hook
+            await on_purchase_quest_hook(user_id, price)
+        except Exception as e:
+            logger.warning(f"clan purchase hook gift: {e}")
+
         if category == "roles" and item.get("role_id"):
             role = inter.guild.get_role(item["role_id"])
             if role:
