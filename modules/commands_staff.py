@@ -407,7 +407,7 @@ class AdminSelect(disnake.ui.StringSelect):
             disnake.SelectOption(label="・Списать заказ в таблице", description="Убрать заказ из статистики менеджера",
                                  emoji="<:12ss1:1551641380307337216>", value="spisat"),
             disnake.SelectOption(label="・Пересчёт отзывов и ролей", description="Применить актуальные роли и снять устаревшие",
-                                 emoji="<:restart:1538401342391853118>", value="recalc_roles"),
+                                 value="recalc_roles"),
             disnake.SelectOption(label="・Выгрузка JSON", description="Сообщение - Скрипт",
                                  emoji="<:jsons:1538401299459080263>", value="json"),
             disnake.SelectOption(label="・Очистка", description="Удаление сообщений в чате",
