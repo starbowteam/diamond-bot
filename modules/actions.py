@@ -25,6 +25,13 @@ from modules.boosts import (
     apply_casino_win, has_insurance, try_insurance, get_casino_multiplier,
 )
 
+# 👇 Клан-хуки (мягкий импорт — если модуль не загружен, не падаем)
+try:
+    from clan.quests import on_casino_quest_hook, on_casino_win_hook
+except Exception:
+    on_casino_quest_hook = None
+    on_casino_win_hook = None
+
 ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 
 DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
@@ -83,7 +90,6 @@ def save_daily_deal(data: dict):
 def generate_random_deal(discount: int):
     catalog = load_shop_catalog()
     items = []
-    # Берём только товары, которые можно выдавать через тикет/акцию
     for cat_key, cat_data in catalog.items():
         if cat_key in ("boosts", "casino", "gifts"):
             continue
@@ -369,6 +375,13 @@ class RouletteModal(Modal):
         result = roll_roulette()
         mult = result["mult"]
 
+        # 👇 Хук квестов — партия сыграна
+        if on_casino_quest_hook:
+            try:
+                await on_casino_quest_hook(user_id)
+            except Exception as e:
+                logger.warning(f"casino_quest_hook roulette: {e}")
+
         if mult > 0:
             payout = bet + int(bet * mult)
             payout, used = apply_casino_win(user_id, payout)
@@ -376,7 +389,14 @@ class RouletteModal(Modal):
             reason = f"Выигрыш в рулетке: {result['name']}"
             if used:
                 reason += f" ({', '.join(used)})"
-            await add_dc(user_id, payout, reason)
+            # 👇 60% в банк клана
+            await add_dc(user_id, payout, reason, clan_share=0.6)
+            # 👇 Хук выигрыша
+            if on_casino_win_hook:
+                try:
+                    await on_casino_win_hook(user_id, payout, bet)
+                except Exception as e:
+                    logger.warning(f"casino_win_hook roulette: {e}")
             new_balance = await get_user_balance(user_id)
             view = RouletteRetryView(bet)
             await inter.edit_original_response(
@@ -471,6 +491,13 @@ class RouletteRetryView(View):
         await asyncio.sleep(2.2)
         result = roll_roulette()
         mult = result["mult"]
+
+        if on_casino_quest_hook:
+            try:
+                await on_casino_quest_hook(user_id)
+            except Exception as e:
+                logger.warning(f"casino_quest_hook roulette dbl: {e}")
+
         if mult > 0:
             payout = new_bet + int(new_bet * mult)
             payout, used = apply_casino_win(user_id, payout)
@@ -478,7 +505,12 @@ class RouletteRetryView(View):
             reason = f"Выигрыш в рулетке: {result['name']} (двойная)"
             if used:
                 reason += f" ({', '.join(used)})"
-            await add_dc(user_id, payout, reason)
+            await add_dc(user_id, payout, reason, clan_share=0.6)
+            if on_casino_win_hook:
+                try:
+                    await on_casino_win_hook(user_id, payout, new_bet)
+                except Exception as e:
+                    logger.warning(f"casino_win_hook roulette dbl: {e}")
             new_balance = await get_user_balance(user_id)
             view = RouletteRetryView(new_bet)
             await inter.edit_original_response(
@@ -629,6 +661,13 @@ class BlackjackBetModal(Modal):
             "doubled": False,
             "finished": False,
         }
+
+        # Хук партии
+        if on_casino_quest_hook:
+            try:
+                await on_casino_quest_hook(user_id)
+            except Exception:
+                pass
 
         await inter.edit_original_response(
             embeds=_build_bj_embeds(game, hide_dealer=True),
@@ -782,7 +821,13 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
         payout, used = apply_casino_win(user_id, payout)
         if used:
             reason += f" ({', '.join(used)})"
-        await add_dc(user_id, payout, reason)
+        # 👇 60% в банк клана
+        await add_dc(user_id, payout, reason, clan_share=0.6)
+        if on_casino_win_hook:
+            try:
+                await on_casino_win_hook(user_id, payout, total_bet)
+            except Exception as e:
+                logger.warning(f"casino_win_hook bj: {e}")
     else:
         refund = try_insurance(user_id, total_bet)
         if refund > 0:
@@ -882,6 +927,13 @@ class BlackjackRetryView(View):
             "doubled": False,
             "finished": False,
         }
+
+        if on_casino_quest_hook:
+            try:
+                await on_casino_quest_hook(user_id)
+            except Exception:
+                pass
+
         await inter.edit_original_response(
             embeds=_build_bj_embeds(game, hide_dealer=True),
             view=BlackjackView(game)
@@ -1045,13 +1097,25 @@ class CoinflipChoiceView(View):
         payout = 0
         refund = 0
 
+        if on_casino_quest_hook:
+            try:
+                await on_casino_quest_hook(user_id)
+            except Exception:
+                pass
+
         if won:
             payout = int(bet * COINFLIP_WIN_MULT)
             payout, used = apply_casino_win(user_id, payout)
             reason = f"Монетка ({result_side})"
             if used:
                 reason += f" ({', '.join(used)})"
-            await add_dc(user_id, payout, reason)
+            # 👇 60% в банк клана
+            await add_dc(user_id, payout, reason, clan_share=0.6)
+            if on_casino_win_hook:
+                try:
+                    await on_casino_win_hook(user_id, payout, bet)
+                except Exception as e:
+                    logger.warning(f"casino_win_hook coin: {e}")
         else:
             refund = try_insurance(user_id, bet)
             if refund > 0:
@@ -1137,7 +1201,7 @@ class CoinflipRetryView(View):
         )
 
 # ============================================================
-# СЕЛЕКТ ДЛЯ ACTIONS
+# СЕЛЕКТ ДЛЯ ACTIONS (только акции, игры убраны)
 # ============================================================
 class ActionSelect(Select):
     def __init__(self):
@@ -1147,24 +1211,6 @@ class ActionSelect(Select):
                 description="Неимоверные скидки на товары!",
                 emoji="<:box:1536972791432220712>",
                 value="deals"
-            ),
-            SelectOption(
-                label="・Рулетка монет",
-                description="Поставь Diamond Coins на удачу!",
-                emoji="<:ropulet:1550563615675781282>",
-                value="roulette"
-            ),
-            SelectOption(
-                label="・Блэкджек",
-                description="21 очко — классика казино!",
-                emoji="<:joke:1551288467659428020>",
-                value="blackjack"
-            ),
-            SelectOption(
-                label="・Монетка",
-                description="Орёл или решка? Быстрая игра!",
-                emoji="<:coins:1539649259245408340>",
-                value="coinflip"
             ),
         ]
         super().__init__(
@@ -1248,33 +1294,6 @@ class ActionSelect(Select):
                 color=0x00aaff
             )
 
-        elif value == "roulette":
-            balance = await get_user_balance(inter.author.id)
-            if balance < 1:
-                return await inter.response.send_message(
-                    "❌ У тебя нет DC для игры. Сначала заработай их активностью.",
-                    ephemeral=True
-                )
-            await inter.response.send_modal(RouletteModal())
-
-        elif value == "blackjack":
-            balance = await get_user_balance(inter.author.id)
-            if balance < BLACKJACK_MIN_BET:
-                return await inter.response.send_message(
-                    f"❌ Минимум для блэкджека — **{BLACKJACK_MIN_BET} DC**. Твой баланс: **{balance} DC**.",
-                    ephemeral=True
-                )
-            await inter.response.send_modal(BlackjackBetModal())
-
-        elif value == "coinflip":
-            balance = await get_user_balance(inter.author.id)
-            if balance < COINFLIP_MIN_BET:
-                return await inter.response.send_message(
-                    f"❌ Минимум для монетки — **{COINFLIP_MIN_BET} DC**. Твой баланс: **{balance} DC**.",
-                    ephemeral=True
-                )
-            await inter.response.send_modal(CoinflipBetModal())
-
 class ActionView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1308,7 +1327,6 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     except ValueError:
         return
 
-    # Бусты/казино/подарки через акцию не продаются
     if cat_key in ("boosts", "casino", "gifts"):
         return await inter.response.send_message(
             "❌ Данный товар нельзя купить по акции.", ephemeral=True
