@@ -33,7 +33,7 @@ P = "\u3164"
 
 
 # ============================================================
-# ЭМОДЗИ КНОПОК / СЕЛЕКТОВ
+# ЭМОДЗИ
 # ============================================================
 EMOJI_BANK   = PartialEmoji.from_str("<:1d1ds:1552730624572391584>")
 EMOJI_TOP    = PartialEmoji.from_str("<:d1edf:1552730601155596348>")
@@ -42,19 +42,31 @@ EMOJI_HOWTO  = PartialEmoji.from_str("<:infor:1552730394795970621>")
 EMOJI_QUESTS = PartialEmoji.from_str("<:d11d1:1552732333394763776>")
 EMOJI_SLOTS  = PartialEmoji.from_str("<:game1:1552732315606589460>")
 
-# 👇 Оригинальные эмодзи игр (восстановил)
+EMOJI_DEPOSITS = PartialEmoji.from_str("<:Otziv:1541808692314243172>")
+EMOJI_LAST     = PartialEmoji.from_str("<:warn:1552325395171381388>")
+EMOJI_TOTAL    = PartialEmoji.from_str("<:Politic:1539657020695650384>")
+
+# Оригинальные эмодзи игр
 EMOJI_ROULETTE  = "<:ropulet:1550563615675781282>"
 EMOJI_BLACKJACK = "<:joke:1551288467659428020>"
 EMOJI_COINFLIP  = "<:coins:1539649259245408340>"
 
-# 👇 Картинка embed1 при клике на «Игровые автоматы DC»
+# Картинки
 IMG_SLOTS_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
                  "1552731239398768711/image.png?ex=6ab6ad27&is=6ab55ba7&"
                  "hm=60031b3eef30f7e7448875045e47612b869469755e50801f3819ae2dfbbb8913&")
 
+IMG_SEASON_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
+                  "1552734704120238080/image.png?ex=6ab6b061&is=6ab55ee1&"
+                  "hm=39d4ed4a6b4d2162fd5a8931b5ddc0c0a0bb9d216ce7503e968aafab94b8f8a5&")
+
+IMG_NEWS_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
+                "1552733874444959824/image.png?ex=6ab6af9c&is=6ab55e1c&"
+                "hm=18b6186e463332b0a9ce258825a1be6592353df0d6ddb346b3e3455eae5206af&")
+
 
 # ============================================================
-# СТАТИЧНЫЕ ЭМБЕДЫ КОПИЛКИ (clan_pool.json)
+# 1. КОПИЛКА — СТАТИЧНЫЙ ЭМБЕД (канал 1552700960474800128)
 # ============================================================
 def _build_static_pool_embeds() -> List[disnake.Embed]:
     data = load_json(os.path.join(EMBEDS_DIR, "clan_pool.json"), {})
@@ -67,88 +79,255 @@ def _build_static_pool_embeds() -> List[disnake.Embed]:
 
 
 # ============================================================
-# ДИНАМИЧЕСКИЙ ЭМБЕД СЕЗОНА — ЧИСТЫЙ, БЕЗ ЛИШНИХ ЭМОДЗИ
+# 2. СЕЗОН — СТАТИЧНЫЙ ЭМБЕД (канал 1552700989465956403)
 # ============================================================
-def _build_season_embeds() -> List[disnake.Embed]:
+def _build_season_static_embeds() -> List[disnake.Embed]:
     cycle = get_current_cycle()
+    season_num = cycle["number"] if cycle else "?"
 
-    blocks = []
-    top_clan = None
-    top_bank = -1
-    total_bank = 0
+    e1 = disnake.Embed(color=6776679)
+    e1.set_image(url=IMG_SEASON_TOP)
+
+    if cycle:
+        ends_ts = cycle["ends_at"]
+        desc = (
+            f"> В данный момент, участвуют 3 клана — "
+            f"<@&1552707675257831525> | <@&1552707025723465838> | <@&1551280425312194650>.\n"
+            f"> О каждом связующем — можно узнать по кнопкам ниже.\n\n"
+            f"**Конец сезона:** <t:{ends_ts}:f>"
+        )
+    else:
+        desc = (
+            f"> В данный момент, участвуют 3 клана — "
+            f"<@&1552707675257831525> | <@&1552707025723465838> | <@&1551280425312194650>.\n"
+            f"> О каждом связующем — можно узнать по кнопкам ниже.\n\n"
+            f"**Конец сезона:** — (сезон ещё не запущен)"
+        )
+
+    e2 = disnake.Embed(
+        title=f"Клубная лига - сезон {season_num}!",
+        description=desc,
+        color=6776679
+    )
+    e2.set_image(url=IMG_STRIPE)
+
+    return [e1, e2]
+
+
+# ============================================================
+# 3. ВКЛАДЫ — эфемерный эмбед (кнопка)
+# ============================================================
+def _build_contributions_embed() -> disnake.Embed:
+    e = disnake.Embed(
+        title="Вклады кланов",
+        description="> О том, какой клан, сколько внёс в копилку, и о лидерах внутри кланов.\n",
+        color=6776679
+    )
+    e.set_image(url=IMG_STRIPE)
 
     for c in get_all_clans():
         bank = get_clan_bank(c["id"])
         members = get_clan_members_count(c["id"])
         top = get_clan_top(c["id"], limit=1)
-        total_bank += bank
+        if top:
+            leader = f"<@{top[0]['user_id']}> — {top[0]['total']} DC"
+        else:
+            leader = "—"
+        e.add_field(
+            name=f"{c['emoji']} {c['name'].upper()}",
+            value=f"{members} чел. · вклад {bank} DC\nЛидер: {leader}",
+            inline=True
+        )
+    return e
 
+
+# ============================================================
+# 4. ПОСЛЕДНЕЕ — эфемерный эмбед (кнопка)
+# ============================================================
+def _build_last_embed() -> disnake.Embed:
+    recent = get_recent_contributions_all(limit=5)
+    lines = []
+    for r in recent:
+        clan = get_clan(r["clan_id"])
+        emoji = clan["emoji"] if clan else "·"
+        lines.append(
+            f"· <@{r['user_id']}> → +{r['amount']} DC ({emoji} · {r['reason'][:60]})"
+        )
+    if not lines:
+        lines = ["· Пока нет вкладов"]
+
+    e = disnake.Embed(
+        title="Последнее",
+        description=(
+            "> Последние вклады участников в свои кланы\n\n"
+            "**Последние вклады:**\n" + "\n".join(lines) + "\n"
+        ),
+        color=6776679
+    )
+    e.set_image(url=IMG_STRIPE)
+    return e
+
+
+# ============================================================
+# 5. ОБЩИЙ ПУЛ — эфемерный эмбед (кнопка)
+# ============================================================
+def _build_total_pool_embed() -> disnake.Embed:
+    total_bank = 0
+    top_clan = None
+    top_bank = -1
+    for c in get_all_clans():
+        bank = get_clan_bank(c["id"])
+        total_bank += bank
         if bank > top_bank:
             top_bank = bank
             top_clan = c
 
-        if top:
-            leader_line = f"Лидер: <@{top[0]['user_id']}> — {top[0]['total']} DC"
-        else:
-            leader_line = "Лидер: —"
-
-        blocks.append(
-            f"{c['emoji']}  **{c['name'].upper()}**\n"
-            f"{members} чел. · вклад {bank} DC\n"
-            f"{leader_line}"
-        )
-
-    body = "\n\n".join(blocks)
-
-    # Последние вклады — без лишних эмодзи
-    recent = get_recent_contributions_all(limit=5)
-    recent_lines = []
-    for r in recent:
-        clan = get_clan(r["clan_id"])
-        emoji = clan["emoji"] if clan else "·"
-        recent_lines.append(
-            f"· <@{r['user_id']}> → +{r['amount']} DC ({emoji} · {r['reason'][:40]})"
-        )
-    if not recent_lines:
-        recent_lines = ["· пока нет вкладов"]
-
-    recent_block = "\n".join(recent_lines)
-
-    # Шапка
-    head_title = f"КЛУБНАЯ ЛИГА — СЕЗОН #{cycle['number'] if cycle else '?'}"
-
-    # Собираем описание аккуратно
-    desc = body
-    desc += "\n\n────────────────────"
-    desc += f"\nОбщий пул: **{total_bank} DC**"
     if top_clan:
-        desc += f"\nВ лидерах: {top_clan['emoji']} **{top_clan['name'].upper()}**"
+        leader_line = f"{top_clan['emoji']} {top_clan['name'].upper()}"
+    else:
+        leader_line = "—"
 
-    desc += "\n\n**Последние вклады:**\n" + recent_block
-
-    # Футер через footer, не через описание
-    e_stats = disnake.Embed(
-        title=head_title,
-        description=desc,
-        color=0x9b59b6
+    e = disnake.Embed(
+        title="Общий пул",
+        description=(
+            "> Общий охват копилки со всех кланов\n\n"
+            ">>> Общий пул: **{} DC**\n"
+            "В лидерах: — {}".format(total_bank, leader_line)
+        ),
+        color=6776679
     )
-
-    if cycle:
-        ends_at = cycle["ends_at"]
-        e_stats.add_field(
-            name="До конца сезона",
-            value=f"<t:{ends_at}:R>  ·  <t:{ends_at}:f>",
-            inline=False
-        )
-
-    e_stats.set_footer(text="Топ обновляется каждый час")
-    e_stats.timestamp = datetime.now(timezone.utc)
-
-    return [e_stats]
+    e.set_image(url=IMG_STRIPE)
+    return e
 
 
 # ============================================================
-# КНОПКИ КОПИЛКИ
+# 6. БАНК КЛАНА — эфемерный эмбед (кнопка)
+# ============================================================
+def _build_clan_bank_embed(user_id: int) -> Optional[disnake.Embed]:
+    user_clan = get_user_clan(user_id)
+    if not user_clan:
+        return None
+
+    bank = get_clan_bank(user_clan["id"])
+    members = get_clan_members_count(user_clan["id"])
+    my_contrib = get_user_contribution(user_id)
+
+    all_top = get_clan_top(user_clan["id"], limit=1000)
+    my_rank = None
+    for i, t in enumerate(all_top, 1):
+        if t["user_id"] == user_id:
+            my_rank = i
+            break
+
+    rank_line = f"#{my_rank}" if my_rank else "—"
+
+    e = disnake.Embed(
+        title=f"Банк клана {user_clan['emoji']} {user_clan['name']}",
+        description=(
+            f"***💎 Банк клана \"{user_clan['name']}\"***\n\n"
+            f"> Банк клана: {bank} DC\n"
+            f"> Участников: {members}\n"
+            f"> Твой вклад: {my_contrib} DC\n"
+            f"> Твоё место: {rank_line}\n"
+        ),
+        color=user_clan["color"]
+    )
+    e.set_image(url=IMG_STRIPE)
+    return e
+
+
+# ============================================================
+# 7. ТОП КЛАНА — эфемерный эмбед (кнопка)
+# ============================================================
+def _build_clan_top_embed(user_id: int) -> Optional[disnake.Embed]:
+    user_clan = get_user_clan(user_id)
+    if not user_clan:
+        return None
+
+    top = get_clan_top(user_clan["id"], limit=10)
+    my_contrib = get_user_contribution(user_id)
+
+    all_top = get_clan_top(user_clan["id"], limit=1000)
+    my_rank = None
+    for i, t in enumerate(all_top, 1):
+        if t["user_id"] == user_id:
+            my_rank = i
+            break
+
+    medals = ["🥇", "🥈", "🥉"]
+    if not top:
+        lines = ["Пока никто не вложил DC в копилку клана."]
+    else:
+        lines = []
+        for i, t in enumerate(top, 1):
+            prefix = medals[i - 1] if i <= 3 else f"`{i}.`"
+            lines.append(f"{prefix} <@{t['user_id']}> — {t['total']} DC")
+
+    rank_line = f"#{my_rank}" if my_rank else "—"
+
+    desc = (
+        f"***💎 Топ клана \"{user_clan['name']}\"***\n\n"
+        + "\n".join(lines)
+        + f"\n\n***Твой вклад: {my_contrib} DC · место {rank_line}***"
+    )
+
+    e = disnake.Embed(
+        title=f"Топ клана {user_clan['emoji']} {user_clan['name']}",
+        description=desc,
+        color=user_clan["color"]
+    )
+    e.set_image(url=IMG_STRIPE)
+    return e
+
+
+# ============================================================
+# 8. КАК ЭТО РАБОТАЕТ — эфемерный эмбед (кнопка)
+# ============================================================
+def _build_howto_embed() -> disnake.Embed:
+    e = disnake.Embed(
+        title="Как работает Клановая лига",
+        description=(
+            "> Сезон длится **28 дней**. Финал — **28 числа в 20:00 МСК**.\n"
+            "> По итогам сезона, весь банк клана распределяется между участниками.\n\n"
+            "**Как копится банк**\n"
+            ">>> · Каждый заработанный DC — **60%** в копилку клана\n"
+            "· Выполнение квестов — **100%** награды в копилку\n"
+            "· Победа в казино — **60%** от выплаты в копилку\n\n"
+            "**Как делится пул**\n"
+            ">>> · Весь банк клана делится между всеми участниками\n"
+            "· Вес участника = время в клане × бонус\n"
+            "· Топ-3 по вкладу получают бонусы ×1.75 / ×1.50 / ×1.30\n\n"
+            "**Квесты**\n"
+            ">>> · Ежедневные — сброс в 00:00 МСК\n"
+            "· Недельные — сброс в пн 00:00 МСК\n"
+            "· Разовые — на весь сезон\n\n"
+            "**Где смотреть**\n"
+            ">>> · Копилка — <#1552700960474800128>\n"
+            "· Сезон — <#1552700989465956403>\n"
+            "· Игры и квесты — <#1552700973753827509>\n"
+            "· Новости — <#1552700701128400979>"
+        ),
+        color=6776679
+    )
+    e.set_image(url=IMG_STRIPE)
+    return e
+
+
+# ============================================================
+# 9. ИГРЫ — статичный эмбед (канал 1552700973753827509)
+# ============================================================
+def _build_games_embeds() -> List[disnake.Embed]:
+    data = load_json(os.path.join(EMBEDS_DIR, "clan_games.json"), {})
+    embeds = []
+    for e in data.get("embeds", []):
+        embeds.append(disnake.Embed.from_dict(e))
+    if not embeds:
+        embeds = [disnake.Embed(color=6776679)]
+    return embeds
+
+
+# ============================================================
+# 10. КНОПКИ КОПИЛКИ (Банк / Топ / Как это работает)
 # ============================================================
 class ClanPoolView(View):
     def __init__(self):
@@ -162,7 +341,10 @@ class ClanPoolView(View):
     )
     async def bank(self, button, inter: disnake.MessageInteraction):
         await on_panel_click_quest_hook(inter.author.id)
-        await _show_clan_bank(inter)
+        e = _build_clan_bank_embed(inter.author.id)
+        if not e:
+            return await inter.response.send_message("Ты не в клане.", ephemeral=True)
+        await inter.response.send_message(embed=e, ephemeral=True)
 
     @disnake.ui.button(
         label=f"{P}Топ{P}",
@@ -172,7 +354,10 @@ class ClanPoolView(View):
     )
     async def top(self, button, inter: disnake.MessageInteraction):
         await on_panel_click_quest_hook(inter.author.id)
-        await _show_clan_top(inter)
+        e = _build_clan_top_embed(inter.author.id)
+        if not e:
+            return await inter.response.send_message("Ты не в клане.", ephemeral=True)
+        await inter.response.send_message(embed=e, ephemeral=True)
 
     @disnake.ui.button(
         label=f"{P}Как это работает{P}",
@@ -182,129 +367,50 @@ class ClanPoolView(View):
     )
     async def howto(self, button, inter: disnake.MessageInteraction):
         await on_panel_click_quest_hook(inter.author.id)
-        await _show_howto(inter)
-
-
-async def _show_clan_bank(inter: disnake.MessageInteraction):
-    user_clan = get_user_clan(inter.author.id)
-    if not user_clan:
-        return await inter.response.send_message(
-            "Ты не в клане. Обратись к администрации.", ephemeral=True
-        )
-
-    bank = get_clan_bank(user_clan["id"])
-    members = get_clan_members_count(user_clan["id"])
-    top = get_clan_top(user_clan["id"], limit=3)
-    my_contrib = get_user_contribution(inter.author.id)
-
-    all_top = get_clan_top(user_clan["id"], limit=1000)
-    my_rank = None
-    for i, t in enumerate(all_top, 1):
-        if t["user_id"] == inter.author.id:
-            my_rank = i
-            break
-
-    lines = [f"Банк клана: **{bank} DC**",
-             f"Участников: **{members}**",
-             f"Твой вклад: **{my_contrib} DC**"]
-    if my_rank:
-        lines.append(f"Твоё место: **#{my_rank}**")
-
-    if top:
-        lines.append("\n**Топ-3 клана:**")
-        medals = ["🥇", "🥈", "🥉"]
-        for i, t in enumerate(top, 1):
-            lines.append(f"{medals[i-1]} <@{t['user_id']}> — {t['total']} DC")
-
-    e = disnake.Embed(
-        title=f"{user_clan['emoji']} Банк клана {user_clan['name']}",
-        description="\n".join(lines),
-        color=user_clan["color"]
-    )
-    e.set_footer(text="Клановая лига Diamond")
-    await inter.response.send_message(embed=e, ephemeral=True)
-
-
-async def _show_clan_top(inter: disnake.MessageInteraction):
-    user_clan = get_user_clan(inter.author.id)
-    if not user_clan:
-        return await inter.response.send_message(
-            "Ты не в клане.", ephemeral=True
-        )
-
-    top = get_clan_top(user_clan["id"], limit=10)
-    my_contrib = get_user_contribution(inter.author.id)
-
-    all_top = get_clan_top(user_clan["id"], limit=1000)
-    my_rank = None
-    for i, t in enumerate(all_top, 1):
-        if t["user_id"] == inter.author.id:
-            my_rank = i
-            break
-
-    if not top:
-        desc = "Пока никто не вложил DC в копилку клана."
-    else:
-        lines = []
-        for i, t in enumerate(top, 1):
-            prefix = f"{['🥇','🥈','🥉'][i-1]}" if i <= 3 else f"`{i}.`"
-            lines.append(f"{prefix} <@{t['user_id']}> — **{t['total']} DC**")
-        desc = "\n".join(lines)
-
-    desc += "\n\n────────────────────"
-    desc += f"\nТвой вклад: **{my_contrib} DC**"
-    if my_rank:
-        desc += f" · место **#{my_rank}**"
-
-    e = disnake.Embed(
-        title=f"Топ клана {user_clan['emoji']} {user_clan['name']}",
-        description=desc,
-        color=user_clan["color"]
-    )
-    e.set_footer(text="Обновляется каждый час")
-    await inter.response.send_message(embed=e, ephemeral=True)
-
-
-async def _show_howto(inter: disnake.MessageInteraction):
-    e = disnake.Embed(
-        title="Как работает Клановая лига",
-        description=(
-            "Сезон длится **28 дней**, финал — **28 числа в 20:00 МСК**.\n\n"
-            "**Как копится банк**\n"
-            "· каждый заработанный DC — **60%** в копилку клана\n"
-            "· выполнение квестов — **100%** награды в копилку\n"
-            "· выигрыш в казино — **60%** от выплаты в копилку\n\n"
-            "**Как делится**\n"
-            "· весь банк клана делится между участниками\n"
-            "· вес участника = время в клане × бонус\n"
-            "· Топ-3 по вкладу получают ×1.75 / ×1.50 / ×1.30\n\n"
-            "**Квесты**\n"
-            "· ежедневные — сброс в 00:00 МСК\n"
-            "· недельные — сброс в пн 00:00 МСК\n"
-            "· разовые — на весь сезон\n\n"
-            "**Где смотреть**\n"
-            "· Копилка — <#1552700960474800128>\n"
-            "· Сезон — <#1552700989465956403>\n"
-            "· Игры и квесты — <#1552700973753827509>"
-        ),
-        color=6776679
-    )
-    await inter.response.send_message(embed=e, ephemeral=True)
+        await inter.response.send_message(embed=_build_howto_embed(), ephemeral=True)
 
 
 # ============================================================
-# ЭМБЕД ИГР И КВЕСТОВ
+# 11. КНОПКИ СЕЗОНА (Вклады / Последнее / Общий пул)
 # ============================================================
-def _build_games_embeds() -> List[disnake.Embed]:
-    data = load_json(os.path.join(EMBEDS_DIR, "clan_games.json"), {})
-    embeds = []
-    for e in data.get("embeds", []):
-        embeds.append(disnake.Embed.from_dict(e))
-    if not embeds:
-        embeds = [disnake.Embed(color=6776679)]
-    return embeds
+class ClanSeasonView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(
+        label=f"{P}Вклады{P}",
+        style=ButtonStyle.gray,
+        custom_id="clan_season:deposits",
+        emoji=EMOJI_DEPOSITS
+    )
+    async def deposits(self, button, inter: disnake.MessageInteraction):
+        await on_panel_click_quest_hook(inter.author.id)
+        await inter.response.send_message(embed=_build_contributions_embed(), ephemeral=True)
+
+    @disnake.ui.button(
+        label=f"{P}Последнее{P}",
+        style=ButtonStyle.gray,
+        custom_id="clan_season:last",
+        emoji=EMOJI_LAST
+    )
+    async def last(self, button, inter: disnake.MessageInteraction):
+        await on_panel_click_quest_hook(inter.author.id)
+        await inter.response.send_message(embed=_build_last_embed(), ephemeral=True)
+
+    @disnake.ui.button(
+        label=f"{P}Общий пул{P}",
+        style=ButtonStyle.gray,
+        custom_id="clan_season:total",
+        emoji=EMOJI_TOTAL
+    )
+    async def total(self, button, inter: disnake.MessageInteraction):
+        await on_panel_click_quest_hook(inter.author.id)
+        await inter.response.send_message(embed=_build_total_pool_embed(), ephemeral=True)
 
 
+# ============================================================
+# 12. КНОПКИ ИГР (Квесты / Игровые автоматы DC)
+# ============================================================
 class ClanGamesView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -329,15 +435,14 @@ class ClanGamesView(View):
     async def slots(self, button, inter: disnake.MessageInteraction):
         await on_panel_click_quest_hook(inter.author.id)
 
-        # 👇 embed1 — картинка из IMG_SLOTS_TOP
         e1 = disnake.Embed(color=6776679)
         e1.set_image(url=IMG_SLOTS_TOP)
 
         e2 = disnake.Embed(
             title="Игровые автоматы DC",
             description=(
-                "Выбери игру, чтобы сыграть.\n"
-                "Все выигрыши — **60%** в копилку клана."
+                "> Выбери игру, чтобы сыграть.\n"
+                "> Все выигрыши — **60%** в копилку клана."
             ),
             color=6776679
         )
@@ -385,10 +490,10 @@ async def _clan_games_select_callback(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# ОТПРАВКА ПАНЕЛЕЙ
+# 13. ОТПРАВКА ПАНЕЛЕЙ
 # ============================================================
 async def send_clan_pool_panel(bot):
-    """Канал 1552700960474800128 — статичный."""
+    """Канал копилки — статичная панель."""
     ch = bot.get_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
     if not ch:
         ch = await bot.fetch_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
@@ -405,11 +510,11 @@ async def send_clan_pool_panel(bot):
 
     embeds = _build_static_pool_embeds()
     await ch.send(embeds=embeds, view=ClanPoolView())
-    logger.info("Клан-копилка: статичная панель отправлена")
+    logger.info("Клан-копилка: панель отправлена")
 
 
 async def send_clan_season_panel(bot):
-    """Канал 1552700989465956403 — динамический эмбед сезона."""
+    """Канал сезона — статичный эмбед + кнопки."""
     ch = bot.get_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
     if not ch:
         ch = await bot.fetch_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
@@ -417,29 +522,20 @@ async def send_clan_season_panel(bot):
         logger.warning("Clan season channel not found")
         return
 
-    # Ищем прошлое сообщение бота и редактируем, если есть
-    old_msg = None
-    async for msg in ch.history(limit=20):
-        if msg.author == bot.user and msg.embeds:
-            old_msg = msg
+    async for msg in ch.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
             break
 
-    embeds = _build_season_embeds()
-
-    if old_msg:
-        try:
-            await old_msg.edit(embeds=embeds)
-            logger.info("Клан-сезон: эмбед обновлён (edit)")
-            return
-        except Exception:
-            pass
-
-    await ch.send(embeds=embeds)
-    logger.info("Клан-сезон: эмбед отправлен (new)")
+    embeds = _build_season_static_embeds()
+    await ch.send(embeds=embeds, view=ClanSeasonView())
+    logger.info("Клан-сезон: панель отправлена")
 
 
 async def send_clan_games_panel(bot):
-    """Канал 1552700973753827509 — игры + квесты."""
     ch = bot.get_channel(CONFIG["CLAN_GAMES_CHANNEL_ID"])
     if not ch:
         ch = await bot.fetch_channel(CONFIG["CLAN_GAMES_CHANNEL_ID"])
@@ -460,13 +556,139 @@ async def send_clan_games_panel(bot):
 
 
 async def update_clan_pool_embed(bot):
-    """Обновляет и копилку, и сезон."""
+    """Обновляет все панели лиги."""
     await send_clan_pool_panel(bot)
     await send_clan_season_panel(bot)
+    await send_clan_games_panel(bot)
 
 
 # ============================================================
-# АДМИН-ПАНЕЛЬ (селект)
+# 14. НОВОСТИ ЛИГИ (канал 1552700701128400979)
+# ============================================================
+async def _post_clan_news(bot, title: str, news: str, description: str):
+    """Отправляет новость в канал новостей по шаблону."""
+    try:
+        ch = bot.get_channel(CONFIG["CLAN_NEWS_CHANNEL_ID"])
+        if not ch:
+            ch = await bot.fetch_channel(CONFIG["CLAN_NEWS_CHANNEL_ID"])
+        if not ch:
+            logger.warning("Clan news channel not found")
+            return
+
+        e1 = disnake.Embed(color=6776679)
+        e1.set_image(url=IMG_NEWS_TOP)
+
+        e2 = disnake.Embed(
+            title=title,
+            description=f"> Новость: {news}\n\n> Описание: {description}\n",
+            color=6776679
+        )
+        e2.set_image(url=IMG_STRIPE)
+
+        await ch.send(embeds=[e1, e2])
+        logger.info(f"Клан-новость отправлена: {title}")
+    except Exception as e:
+        logger.exception(f"_post_clan_news: {e}")
+
+
+async def post_news_season_start(bot):
+    """Новость о старте нового сезона."""
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+    news = "Стартует новый сезон клубной лиги."
+    desc = (
+        f"Сезон #{cycle['number']} официально открыт. "
+        f"Копилки кланов обнулены, отсчёт пошёл. "
+        f"Участники могут зарабатывать DC, выполнять квесты и вносить вклад в банк клана. "
+        f"Финал — **28 числа в 20:00 МСК**."
+    )
+    await _post_clan_news(bot, "Старт нового сезона клубной лиги", news, desc)
+
+
+async def post_news_season_3days(bot):
+    """Новость за 3 дня до конца."""
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+    news = "До финала сезона осталось 3 дня."
+    desc = (
+        f"Самое время увеличить свой вклад в банк клана. "
+        f"Топ-3 участника получат бонусы ×1.75 / ×1.50 / ×1.30. "
+        f"Финал — **28 числа в 20:00 МСК**."
+    )
+    await _post_clan_news(bot, "До финала клубной лиги 3 дня", news, desc)
+
+
+async def post_news_season_1hour(bot):
+    """Новость за 1 час до конца."""
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+    news = "Остался последний час до финала сезона."
+    desc = (
+        f"Успей внести последний вклад в свой клан. "
+        f"После 20:00 МСК банк будет распределён между участниками. "
+        f"Топ-3 забирают бонусы ×1.75 / ×1.50 / ×1.30."
+    )
+    await _post_clan_news(bot, "Час до финала клубной лиги", news, desc)
+
+
+async def post_news_season_end(bot, report: dict):
+    """Новость по итогам сезона."""
+    cycle = report["cycle"]
+    total = sum(c["bank"] for c in report["clans"])
+    top_clan = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
+
+    news = f"Сезон #{cycle['number']} официально завершён."
+    winner_line = ""
+    if top_clan:
+        winner_line = (
+            f"Победитель сезона — "
+            f"{top_clan['clan']['emoji']} **{top_clan['clan']['name'].upper()}** "
+            f"с банком {top_clan['bank']} DC. "
+        )
+    desc = (
+        winner_line +
+        f"Общий пул всех кланов составил {total} DC. "
+        f"Выплаты произведены всем участникам, "
+        f"топ-3 по вкладу получили повышенные коэффициенты. "
+        f"Новый сезон стартует через 5 минут."
+    )
+    await _post_clan_news(bot, "Сезон клубной лиги завершён", news, desc)
+
+
+async def post_news_weekly(bot):
+    """Еженедельный отчёт по воскресеньям."""
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+
+    total_bank = 0
+    top_clan = None
+    top_bank = -1
+    for c in get_all_clans():
+        bank = get_clan_bank(c["id"])
+        total_bank += bank
+        if bank > top_bank:
+            top_bank = bank
+            top_clan = c
+
+    news = "Еженедельный отчёт по клубной лиге."
+    if top_clan:
+        desc = (
+            f"В лидерах — {top_clan['emoji']} **{top_clan['name'].upper()}** "
+            f"с банком {top_clan['bank'] if hasattr(top_clan, 'bank') else top_bank} DC. "
+            f"Общий пул всех кланов составляет {total_bank} DC. "
+            f"До конца сезона осталось совсем немного — успей поддержать свой клан."
+        )
+    else:
+        desc = f"Общий пул кланов: {total_bank} DC. Успей поддержать свой клан."
+    await _post_clan_news(bot, "Итоги недели в клубной лиге", news, desc)
+
+
+# ============================================================
+# 15. АДМИН-ПАНЕЛЬ (селект в стафф-канале)
 # ============================================================
 class ClanAdminSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -526,6 +748,7 @@ class ClanAdminSelect(disnake.ui.StringSelect):
             start_new_cycle()
             await inter.response.send_message("✅ Новый цикл запущен.", ephemeral=True)
             await update_clan_pool_embed(inter.bot)
+            await post_news_season_start(inter.bot)
 
         elif value == "force_pay":
             await inter.response.defer(ephemeral=True)
@@ -613,7 +836,6 @@ async def send_clan_admin_panel(bot):
     if not ch:
         return
 
-    # Чистим только прошлые панели лиги
     async for msg in ch.history(limit=30):
         if msg.author == bot.user and msg.embeds:
             for e in msg.embeds:
@@ -642,19 +864,24 @@ async def send_clan_admin_panel(bot):
 
 
 # ============================================================
-# ХЕНДЛЕР ИНТЕРАКЦИЙ
+# 16. ХЕНДЛЕР
 # ============================================================
 async def handle_clan_interaction(inter: disnake.MessageInteraction):
     pass
 
 
 # ============================================================
-# ТАСКИ
+# 17. ТАСКИ
 # ============================================================
 from disnake.ext import tasks
 
 
 _last_payout_date = None
+_news_sent = {
+    "3days": None,
+    "1hour": None,
+    "weekly": None,
+}
 
 
 def start_clan_tasks(bot):
@@ -664,8 +891,8 @@ def start_clan_tasks(bot):
         _clan_daily_reset_task.start(bot)
     if not _clan_weekly_reset_task.is_running():
         _clan_weekly_reset_task.start(bot)
-    if not _clan_season_update_task.is_running():
-        _clan_season_update_task.start(bot)
+    if not _clan_news_task.is_running():
+        _clan_news_task.start(bot)
 
 
 @tasks.loop(minutes=1)
@@ -682,12 +909,14 @@ async def _clan_cycle_task(bot):
         if now.day == 28 and now.hour == 20 and now.minute < 2:
             start_new_cycle()
             await update_clan_pool_embed(bot)
+            await post_news_season_start(bot)
         return
 
     if cycle["ends_at"] <= int(time.time()):
         if _last_payout_date == today:
             return
         _last_payout_date = today
+        # Собираем отчёт до закрытия (для новости)
         await close_cycle_and_pay(bot)
 
 
@@ -707,15 +936,36 @@ async def _clan_weekly_reset_task(bot):
         reset_weekly_quests()
 
 
-# 👇 Обновление сезонного эмбеда раз в час
-@tasks.loop(hours=1)
-async def _clan_season_update_task(bot):
+# 👇 Новости: за 3 дня, за 1 час, еженедельно
+@tasks.loop(minutes=1)
+async def _clan_news_task(bot):
     await bot.wait_until_ready()
     try:
-        await send_clan_season_panel(bot)
-        logger.info("Клан-сезон: авто-обновление раз в час")
+        now = datetime.now(MSK)
+        today = now.date()
+        cycle = get_current_cycle()
+        if not cycle:
+            return
+
+        # За 3 дня до финала — 25 число 20:00 МСК
+        if now.day == 25 and now.hour == 20 and now.minute < 2:
+            if _news_sent["3days"] != today:
+                _news_sent["3days"] = today
+                await post_news_season_3days(bot)
+
+        # За 1 час до финала — 28 число 19:00 МСК
+        if now.day == 28 and now.hour == 19 and now.minute < 2:
+            if _news_sent["1hour"] != today:
+                _news_sent["1hour"] = today
+                await post_news_season_1hour(bot)
+
+        # Еженедельно — воскресенье 20:00 МСК
+        if now.weekday() == 6 and now.hour == 20 and now.minute < 2:
+            if _news_sent["weekly"] != today:
+                _news_sent["weekly"] = today
+                await post_news_weekly(bot)
     except Exception as e:
-        logger.exception(f"clan season update: {e}")
+        logger.exception(f"clan news task: {e}")
 
 
 def init_clan_panels():
