@@ -43,11 +43,11 @@ def load_embed_from_file(filename: str):
 def _role_info(count: int):
     thresholds = [
         (0,  "none",      "Клуб"),
-        (1,  "bronze",    "Silver Buyer"),
-        (3,  "silver",    "Gold Buyer"),
-        (5,  "gold",      "Diamond Buyer"),
-        (9,  "diamond",   "Emerald Buyer"),
-        (13, "crystalis", "Crystalis Buyer"),
+        (1,  "bronze",    "Bronze Buyer"),
+        (6,  "silver",    "Silver Buyer"),
+        (11, "gold",      "Gold Buyer"),
+        (16, "diamond",   "Diamond Buyer"),
+        (21, "crystalis", "Crystalis Buyer"),
         (26, "pka",       "Покупатель Века"),
     ]
     cur = thresholds[0]
