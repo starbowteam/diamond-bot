@@ -83,7 +83,11 @@ async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: 
         logger.warning(f"_notify_dc_change {user_id}: {e}")
 
 
-async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True):
+async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True, clan_share: float = 0.0):
+    """
+    Начисляет DC.
+    clan_share — доля, уходящая в банк клана (0.0 — не уходит; 0.6 — 60%).
+    """
     data = get_dc_cache(user_id)
     data["balance"] += amount
     data["history"].append({
@@ -95,6 +99,16 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
         data["history"] = data["history"][-50:]
     save_dc_cache(user_id, data)
     sync_dc_to_json()
+
+    # 👇 Клан-вклад
+    if clan_share > 0 and amount > 0:
+        try:
+            from clan.core import add_clan_contribution
+            bank_amount = int(amount * clan_share)
+            if bank_amount > 0:
+                await add_clan_contribution(user_id, bank_amount, reason)
+        except Exception as e:
+            logger.warning(f"clan_share add_dc err: {e}")
 
     if log:
         await log_discord(
@@ -213,7 +227,8 @@ async def daily_activity_payout():
                 parts.append(f"голос: {voice_dc} DC")
             reason = "Активность за день (" + ", ".join(parts) + ")"
 
-            await add_dc(uid, total, reason, notify=True, log=False)
+            # 👇 60% в банк клана
+            await add_dc(uid, total, reason, notify=True, log=False, clan_share=0.6)
             paid_users += 1
             total_paid += total
             await asyncio.sleep(0.4)
@@ -328,7 +343,8 @@ async def daily_bonus():
             continue
         data = get_dc_cache(member.id)
         if data["last_bonus"] < now - 86400:
-            await add_dc(member.id, 3, "Ежедневный бонус (Клуб)", notify=True, log=False)
+            # 👇 60% в банк клана
+            await add_dc(member.id, 3, "Ежедневный бонус (Клуб)", notify=True, log=False, clan_share=0.6)
             data = get_dc_cache(member.id)
             data["last_bonus"] = now
             save_dc_cache(member.id, data)
