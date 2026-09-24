@@ -1,0 +1,18 @@
+{
+  "embeds": [
+    {
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1552720060471316551/image.png?ex=6ab6a2be&is=6ab5513e&hm=e08bd504c7934f0c8885cddf69d6c3e26665ffabf5054ed6082a57346079b534&"
+      },
+      "color": 6776679
+    },
+    {
+      "title": "Игромания ",
+      "description": "> Отдел, где можно и поиграть, и получить DC для вклада в клан, и в свой личный карман, быстрее опробуй, просмотри квесты и  игры!\n\n",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab5efe3&is=6ab49e63&hm=d1b48b6ea98c9662564b5a77012797024de47fbc9444922b72184d6d0a6d5a2a&"
+      }
+    }
+  ]
+}
