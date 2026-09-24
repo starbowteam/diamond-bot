@@ -7,6 +7,7 @@ import json
 import io
 import re
 import time
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -26,6 +27,8 @@ from core.utils import (
     get_promo_codes, add_promo_code, remove_promo_code, clear_promo_codes,
     reload_promo,
     get_closed_orders, remove_closed_order,
+    update_user_roles,
+    DEPRECATED_ROLE_IDS,
 )
 from modules.dc import (
     add_dc, remove_dc,
@@ -403,6 +406,8 @@ class AdminSelect(disnake.ui.StringSelect):
         options = [
             disnake.SelectOption(label="・Списать заказ в таблице", description="Убрать заказ из статистики менеджера",
                                  emoji="<:12ss1:1551641380307337216>", value="spisat"),
+            disnake.SelectOption(label="・Пересчёт отзывов и ролей", description="Применить актуальные роли и снять устаревшие",
+                                 emoji="<:restart:1538401342391853118>", value="recalc_roles"),
             disnake.SelectOption(label="・Выгрузка JSON", description="Сообщение - Скрипт",
                                  emoji="<:jsons:1538401299459080263>", value="json"),
             disnake.SelectOption(label="・Очистка", description="Удаление сообщений в чате",
@@ -424,6 +429,13 @@ class AdminSelect(disnake.ui.StringSelect):
                     "⛔ Списать заказ может только администратор.", ephemeral=True
                 )
             await inter.response.send_modal(SpisatZakazModal())
+        elif value == "recalc_roles":
+            if not has_admin_command_roles(inter.author):
+                return await inter.response.send_message(
+                    "⛔ Пересчёт доступен только администратору.", ephemeral=True
+                )
+            await inter.response.defer(ephemeral=True)
+            await recalc_all_roles(inter)
         elif value == "json":
             await inter.response.send_modal(GetJsonModal())
         elif value == "clear":
@@ -434,6 +446,82 @@ class AdminView(disnake.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(AdminSelect())
+
+
+async def recalc_all_roles(inter: disnake.MessageInteraction):
+    """
+    Пересчёт отзывов и ролей:
+    - пробегает по всем участникам сервера
+    - снимает устаревшие роли (emerald, legendary)
+    - применяет актуальные роли по количеству отзывов
+    """
+    guild = inter.guild
+    counts = load_json(FILES["review_counts"], {})
+
+    total = 0
+    dep_removed = 0
+    role_updated = 0
+    errors = 0
+
+    for member in guild.members:
+        if member.bot:
+            continue
+
+        # Снять deprecated
+        dep_to_remove = [r for r in member.roles if r.id in DEPRECATED_ROLE_IDS]
+        if dep_to_remove:
+            try:
+                await member.remove_roles(*dep_to_remove)
+                dep_removed += len(dep_to_remove)
+            except Exception as e:
+                logger.warning(f"remove deprecated {member.id}: {e}")
+                errors += 1
+
+        cnt = counts.get(str(member.id), 0)
+        try:
+            await update_user_roles(member, cnt, keep_pka=True)
+            role_updated += 1
+        except Exception as e:
+            logger.error(f"recalc roles {member.id}: {e}")
+            errors += 1
+
+        total += 1
+        await asyncio.sleep(0.05)  # анти-ратэлимит
+
+    try:
+        await inter.edit_original_response(content=(
+            f"✅ **Пересчёт завершён**\n"
+            f"> **Проверено:** `{total}` юзеров\n"
+            f"> **Обновлено ролей:** `{role_updated}`\n"
+            f"> **Снято устаревших:** `{dep_removed}`\n"
+            f"> **Ошибок:** `{errors}`"
+        ))
+    except Exception:
+        try:
+            await inter.followup.send(
+                content=(
+                    f"✅ **Пересчёт завершён**\n"
+                    f"> **Проверено:** `{total}`\n"
+                    f"> **Обновлено:** `{role_updated}`\n"
+                    f"> **Снято устаревших:** `{dep_removed}`\n"
+                    f"> **Ошибок:** `{errors}`"
+                ),
+                ephemeral=True
+            )
+        except Exception:
+            pass
+
+    await log_discord(
+        title="🔄 Пересчёт отзывов и ролей",
+        description=(
+            f"> **Админ:** {inter.author.mention}\n"
+            f"> **Проверено:** {total}\n"
+            f"> **Обновлено:** {role_updated}\n"
+            f"> **Снято устаревших:** {dep_removed}\n"
+            f"> **Ошибок:** {errors}"
+        ),
+        color=0x00aaff
+    )
 
 
 # ============================================================
