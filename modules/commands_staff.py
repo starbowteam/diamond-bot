@@ -467,7 +467,6 @@ async def recalc_all_roles(inter: disnake.MessageInteraction):
         if member.bot:
             continue
 
-        # Снять deprecated
         dep_to_remove = [r for r in member.roles if r.id in DEPRECATED_ROLE_IDS]
         if dep_to_remove:
             try:
@@ -486,7 +485,7 @@ async def recalc_all_roles(inter: disnake.MessageInteraction):
             errors += 1
 
         total += 1
-        await asyncio.sleep(0.05)  # анти-ратэлимит
+        await asyncio.sleep(0.05)
 
     try:
         await inter.edit_original_response(content=(
@@ -957,9 +956,16 @@ async def send_staff_panels():
     admin_embed2.set_image(url=IMG_STRIPE)
     await channel.send(embeds=[admin_embed1, admin_embed2], view=AdminView())
 
+    # 👇 Панель клановой лиги
+    try:
+        from clan.panels import send_clan_admin_panel
+        await send_clan_admin_panel(bot)
+    except Exception as e:
+        logger.warning(f"clan admin panel err: {e}")
+
     await log_discord(
         title="🛠️ Служебные панели обновлены",
-        description=f"> Панели (Экономика DC / Промокоды / Админ) отправлены в {channel.mention}",
+        description=f"> Панели (Экономика DC / Промокоды / Админ / Клан-лига) отправлены в {channel.mention}",
         color=0x00ff00
     )
 
@@ -1102,6 +1108,56 @@ async def dc_file(
             await ctx.edit_original_response(content=f"❌ Ошибка: {e}")
         except Exception:
             pass
+
+
+# ============================================================
+# ═══ СЕКЦИЯ 11: ТОП МЕНЕДЖЕРОВ (лог-канал) ═══
+# ============================================================
+class ResetStatsView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
+    async def reset(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
+        from core.utils import reset_manager_stats
+        reset_manager_stats()
+        await send_work_panel()
+        await log_discord(
+            title="📊 Статистика сброшена",
+            description=f"> **Админ:** {inter.author.mention}\n> Статистика менеджеров обнулена.",
+            color=0xff6600
+        )
+        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
+
+
+async def send_manager_top():
+    from core.bot import bot
+    await bot.wait_until_ready()
+
+    log_channel = bot.get_channel(1462418981825810535)
+    if log_channel:
+        async for msg in log_channel.history(limit=50):
+            if msg.author == bot.user and msg.components:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                break
+        embed_log = disnake.Embed(
+            title="🗑️ Управление статистикой менеджеров",
+            description="> Нажмите кнопку ниже, чтобы сбросить статистику менеджеров (только для администраторов).",
+            color=0xff6600
+        )
+        embed_log.set_image(url=IMG_STRIPE)
+        await log_channel.send(embed=embed_log, view=ResetStatsView())
+
+    await log_discord(
+        title="📊 Статистика менеджеров обновлена",
+        description="> Панель работы и логи обновлены.",
+        color=0x00ff00
+    )
 
 
 # ============================================================
