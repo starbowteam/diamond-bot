@@ -29,14 +29,13 @@ from clan.quests import (
     on_panel_click_quest_hook,
 )
 
-P = "\u3164"  # невидимый пробел
+P = "\u3164"
 
 
 # ============================================================
 # ЭМБЕД КОПИЛКИ
 # ============================================================
 def _build_pool_embeds() -> List[disnake.Embed]:
-    """Главный эмбед копилки."""
     cycle = get_current_cycle()
 
     data = load_json(os.path.join(EMBEDS_DIR, "clan_pool.json"), {})
@@ -47,7 +46,6 @@ def _build_pool_embeds() -> List[disnake.Embed]:
     if not embeds:
         embeds = [disnake.Embed(color=6776679)]
 
-    # embed2 — статистика
     lines = []
     top_clan = None
     top_bank = -1
@@ -65,7 +63,6 @@ def _build_pool_embeds() -> List[disnake.Embed]:
 
         leader = f"<@{top[0]['user_id']}> — {top[0]['total']} DC" if top else "—"
 
-        # Прогресс-бар: максимальный банк = 100%
         pct = bank / max(top_bank, 1) if top_bank > 0 else 0
         bar = make_progress_bar(pct, 10)
 
@@ -76,7 +73,6 @@ def _build_pool_embeds() -> List[disnake.Embed]:
             f"> {bar}"
         )
 
-    # Последние вклады (5)
     recent = get_recent_contributions_all(limit=5)
     recent_lines = []
     for r in recent:
@@ -103,7 +99,6 @@ def _build_pool_embeds() -> List[disnake.Embed]:
     )
     e_stats.set_image(url=IMG_STRIPE)
 
-    # Доп. инфо
     if cycle:
         ends_at = cycle["ends_at"]
         e_stats.add_field(
@@ -166,7 +161,6 @@ async def _show_clan_bank(inter: disnake.MessageInteraction):
     top = get_clan_top(user_clan["id"], limit=3)
     my_contrib = get_user_contribution(inter.author.id)
 
-    # Ранг юзера в клане
     all_top = get_clan_top(user_clan["id"], limit=1000)
     my_rank = None
     for i, t in enumerate(all_top, 1):
@@ -207,7 +201,6 @@ async def _show_clan_top(inter: disnake.MessageInteraction):
     top = get_clan_top(user_clan["id"], limit=10)
     my_contrib = get_user_contribution(inter.author.id)
 
-    # Ранг
     all_top = get_clan_top(user_clan["id"], limit=1000)
     my_rank = None
     for i, t in enumerate(all_top, 1):
@@ -266,7 +259,7 @@ async def _show_howto(inter: disnake.MessageInteraction):
             "> • Недельные — сброс в пн 00:00 МСК\n"
             "> • Разовые — на весь сезон\n\n"
             "**🎮 Где играть**\n"
-            "> • Копилка — <#1552700960474800128>\n"
+            "> • Копилка — <#1552700989465956403>\n"
             "> • Игры и квесты — <#1552700973753827509>"
         ),
         color=6776679
@@ -358,7 +351,6 @@ async def send_clan_pool_panel(bot):
         logger.warning("Clan pool channel not found")
         return
 
-    # Удаляем старые сообщения бота
     async for msg in ch.history(limit=50):
         if msg.author == bot.user:
             try:
@@ -392,7 +384,6 @@ async def send_clan_games_panel(bot):
 
 
 async def update_clan_pool_embed(bot):
-    """Пересоздаёт эмбед копилки."""
     await send_clan_pool_panel(bot)
 
 
@@ -449,7 +440,8 @@ class ClanAdminView(View):
         result = distribute_all_club_members(inter.guild)
         await inter.edit_original_response(
             content=f"✅ Распределено: **{result['assigned']}**\n"
-                    f"> Пропущено (уже в клане): **{result['skipped']}**"
+                    f"> Уже в клане: **{result['skipped']}**\n"
+                    f"> Исключены: **{result.get('excluded', 0)}**"
         )
 
     @disnake.ui.button(
@@ -489,7 +481,6 @@ class _KickModal(disnake.ui.Modal):
             (int(time.time()), uid)
         )
         db.commit()
-        # Снимаем роль
         from clan.core import get_all_clans
         for c in get_all_clans():
             role = inter.guild.get_role(c["role_id"])
@@ -509,7 +500,7 @@ class _KickModal(disnake.ui.Modal):
 
 
 async def send_clan_admin_panel(bot):
-    """Отправляет админ-панель лиги в стаф-канал."""
+    """Отправляет админ-панель лиги в стаф-канал + красивая шапка с картинкой."""
     STAFF_CHANNEL = 1551276116679860314
     ch = bot.get_channel(STAFF_CHANNEL)
     if not ch:
@@ -517,15 +508,18 @@ async def send_clan_admin_panel(bot):
     if not ch:
         return
 
+    # 👇 Красивый embed1 + инфо
     e1 = disnake.Embed(color=6776679)
-    e1.set_image(url=IMG_STRIPE)
+    e1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1552726263758585956/image.png?ex=6ab6a885&is=6ab55705&hm=a7418d5c6f38288a8518eee61d765e21c019bdf3a160bc0df960ea074b69de0b&")
     e2 = disnake.Embed(
         title="🏛 Управление клановой лигой",
         description=(
             "> **Старт нового цикла** — принудительно запустить сезон.\n"
             "> **Форс-конец и выплата** — закрыть сезон с расчётом.\n"
-            "> **Автораспределение** — раскидать всех клубных без клана.\n"
-            "> **Кик из клана** — исключить юзера (вклад остаётся в банке)."
+            "> **Автораспределение** — раскидать всех клубных без клана (с ребалансом).\n"
+            "> **Кик из клана** — исключить юзера (вклад остаётся в банке).\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "> ⚠️ **Исключения:** `1124040555240898631`, `796293832751972352` не распределяются."
         ),
         color=6776679
     )
@@ -537,15 +531,13 @@ async def send_clan_admin_panel(bot):
 # ХЕНДЛЕР ИНТЕРАКЦИЙ
 # ============================================================
 async def handle_clan_interaction(inter: disnake.MessageInteraction):
-    """Вызывается из bot.on_interaction. Тут можно ловить специфичные вещи."""
-    pass  # всё уже через View-колбэки
+    pass
 
 
 # ============================================================
 # ТАСКИ
 # ============================================================
 def start_clan_tasks(bot):
-    """Регистрирует таски клан-лиги."""
     if not _clan_cycle_task.is_running():
         _clan_cycle_task.start(bot)
     if not _clan_daily_reset_task.is_running():
@@ -562,7 +554,6 @@ _last_payout_date = None
 
 @tasks.loop(minutes=1)
 async def _clan_cycle_task(bot):
-    """Проверяет необходимость старта/финиша цикла."""
     global _last_payout_date
     await bot.wait_until_ready()
 
@@ -571,15 +562,12 @@ async def _clan_cycle_task(bot):
 
     cycle = get_current_cycle()
 
-    # Старт цикла если нет
     if not cycle:
-        # Проверяем — не сегодня ли день старта (28 в 20:00) или первый запуск
         if now.day == 28 and now.hour == 20 and now.minute < 2:
             start_new_cycle()
             await update_clan_pool_embed(bot)
         return
 
-    # Финиш цикла
     if cycle["ends_at"] <= int(time.time()):
         if _last_payout_date == today:
             return
@@ -589,7 +577,6 @@ async def _clan_cycle_task(bot):
 
 @tasks.loop(minutes=1)
 async def _clan_daily_reset_task(bot):
-    """Сброс daily в 00:00 МСК."""
     await bot.wait_until_ready()
     now = datetime.now(MSK)
     if now.hour == 0 and now.minute == 0:
@@ -598,7 +585,6 @@ async def _clan_daily_reset_task(bot):
 
 @tasks.loop(minutes=1)
 async def _clan_weekly_reset_task(bot):
-    """Сброс weekly в пн 00:00 МСК."""
     await bot.wait_until_ready()
     now = datetime.now(MSK)
     if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
@@ -606,5 +592,4 @@ async def _clan_weekly_reset_task(bot):
 
 
 def init_clan_panels():
-    """Заглушка для симметрии."""
     pass
