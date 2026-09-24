@@ -88,7 +88,11 @@ CONFIG = {
         "real_created": 1539668621981257809,
         "real_paid": 1539668675530072175,
         "coins_created": 1539669323185131570,
-    }
+    },
+    # 👇 Клановая лига
+    "CLAN_POOL_CHANNEL_ID": 1552700960474800128,
+    "CLAN_GAMES_CHANNEL_ID": 1552700973753827509,
+    "CLAN_NEWS_CHANNEL_ID": 1552700701128400979,
 }
 
 FILES = {
@@ -231,6 +235,75 @@ CREATE TABLE IF NOT EXISTS ticket_cooldowns (
     set_by    INTEGER,
     set_at    INTEGER
 );
+
+-- ============================================================
+-- КЛАНОВАЯ ЛИГА
+-- ============================================================
+CREATE TABLE IF NOT EXISTS clans (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT,
+    emoji       TEXT,
+    role_id     INTEGER,
+    color       INTEGER,
+    description TEXT
+);
+CREATE TABLE IF NOT EXISTS clan_members (
+    user_id      INTEGER PRIMARY KEY,
+    clan_id      INTEGER,
+    joined_at    INTEGER,
+    left_at      INTEGER DEFAULT NULL,
+    cycle_joined INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS clan_cycle (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    number      INTEGER,
+    started_at  INTEGER,
+    ends_at     INTEGER,
+    state       TEXT DEFAULT 'active',
+    total_paid  INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS clan_contributions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id    INTEGER,
+    clan_id     INTEGER,
+    user_id     INTEGER,
+    amount      INTEGER,
+    reason      TEXT,
+    ts          INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_clan_contrib_cycle_clan
+    ON clan_contributions (cycle_id, clan_id);
+CREATE INDEX IF NOT EXISTS idx_clan_contrib_cycle_user
+    ON clan_contributions (cycle_id, user_id);
+CREATE TABLE IF NOT EXISTS quests (
+    key         TEXT PRIMARY KEY,
+    title       TEXT,
+    description TEXT,
+    reward      INTEGER,
+    goal        INTEGER,
+    type        TEXT,
+    emoji       TEXT,
+    active      INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS quest_progress (
+    user_id      INTEGER,
+    quest_key    TEXT,
+    cycle_id     INTEGER,
+    progress     INTEGER DEFAULT 0,
+    completed_at INTEGER DEFAULT NULL,
+    claimed      INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, quest_key, cycle_id)
+);
+CREATE TABLE IF NOT EXISTS clan_payouts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id     INTEGER,
+    clan_id      INTEGER,
+    user_id      INTEGER,
+    weight       REAL,
+    bonus_mult   REAL,
+    final_amount INTEGER,
+    paid_at      INTEGER
+);
 """)
 db.commit()
 
@@ -360,13 +433,6 @@ def log_command(func):
 
 # ============================================================
 # Система ролей по отзывам
-# Новая сетка:
-#   Bronze   1-5
-#   Silver   6-10
-#   Gold     11-15
-#   Diamond  16-20
-#   Crystalis 21-25
-#   PKA      26+
 # ============================================================
 def get_roles_for_count(count: int) -> list[int]:
     roles = []
