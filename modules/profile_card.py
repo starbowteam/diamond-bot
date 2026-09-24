@@ -8,6 +8,12 @@ from typing import Optional, List, Dict
 from PIL import Image, ImageDraw, ImageFont
 from core.utils import ADD_DIR, logger
 
+# 👇 Мягкий импорт — если клан-лига не загружена, карточка работает
+try:
+    from clan.core import get_user_clan
+except Exception:
+    get_user_clan = None
+
 FONT_BOLD = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
 FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
 
@@ -28,6 +34,7 @@ I_CART    = 0xf07a
 I_ROTATE  = 0xf1da
 I_PEOPLE  = 0xf0c0
 I_COINS   = 0xf51e
+I_SHIELD  = 0xf3ed
 
 BG = (10, 10, 12)
 CARD_TOP = (26, 26, 31)
@@ -45,7 +52,6 @@ GREEN = (46, 204, 113)
 RED = (255, 107, 107)
 
 
-# ⬇️ amethyst → crystalis, emerald и legendary убраны
 ROLE_INFO = {
     "none":      ("Клуб",            GOLD),
     "bronze":    ("Bronze Buyer",    (231, 143, 103)),
@@ -153,6 +159,7 @@ def _op_icon(reason: str):
     if "покупк" in r: return I_CART
     if "акци" in r: return I_TROPHY
     if "подарок" in r: return I_STAR
+    if "клан" in r or "копилк" in r: return I_SHIELD
     return I_COINS
 
 
@@ -212,7 +219,7 @@ def generate_profile_card(
     right_x2 = right_x1 + right_w
 
     # --- USER ROW ---
-    ur_h = 174
+    ur_h = 210  # 👈 увеличено под 2 бейджа
     d.rounded_rectangle((left_x1, body_y, left_x2, body_y + ur_h),
                         radius=22, fill=INNER, outline=INNER_BORDER, width=2)
 
@@ -256,6 +263,33 @@ def generate_profile_card(
                         radius=14, fill=(40, 32, 22), outline=GOLD, width=2)
     _draw_icon(d, badge_x + 22, badge_cy + 1, I_CROWN, 18, GOLD)
     d.text((badge_x + 40, badge_cy), rn_up, font=rn_f, fill=GOLD, anchor="lm")
+
+    # 👇 Бейдж клана (под бейджем роли)
+    clan = None
+    if get_user_clan:
+        try:
+            clan = get_user_clan(user_id)
+        except Exception:
+            clan = None
+
+    if clan:
+        clan_y = badge_y + badge_h + 8
+        clan_emoji = clan.get("emoji", "🛡")
+        clan_name = clan.get("name", "—").upper()
+        clan_txt = f"{clan_emoji} {clan_name}"
+        clan_f = _font(15)
+        clan_w = _tw(d, clan_txt, clan_f)
+        clan_badge_w = 20 + clan_w + 20
+        clan_badge_h = 36
+        clan_color = clan.get("color", 0xF7C991)
+        clan_r = (clan_color >> 16) & 0xFF
+        clan_g = (clan_color >> 8) & 0xFF
+        clan_b = clan_color & 0xFF
+        d.rounded_rectangle((badge_x, clan_y, badge_x + clan_badge_w, clan_y + clan_badge_h),
+                            radius=12, fill=(28, 24, 40),
+                            outline=(clan_r, clan_g, clan_b), width=2)
+        d.text((badge_x + 16, clan_y + clan_badge_h // 2), clan_txt,
+               font=clan_f, fill=(clan_r, clan_g, clan_b), anchor="lm")
 
     # --- METRICS ---
     metrics_y = body_y + ur_h + 20
