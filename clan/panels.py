@@ -33,18 +33,25 @@ P = "\u3164"
 
 
 # ============================================================
-# ЭМБЕД КОПИЛКИ
+# СТАТИЧНЫЕ ЭМБЕДЫ КОПИЛКИ (clan_pool.json)
 # ============================================================
-def _build_pool_embeds() -> List[disnake.Embed]:
-    cycle = get_current_cycle()
-
+def _build_static_pool_embeds() -> List[disnake.Embed]:
+    """Эмбеды из clan_pool.json — статичный текст о лиге."""
     data = load_json(os.path.join(EMBEDS_DIR, "clan_pool.json"), {})
     embeds = []
     for e in data.get("embeds", []):
         embeds.append(disnake.Embed.from_dict(e))
-
     if not embeds:
         embeds = [disnake.Embed(color=6776679)]
+    return embeds
+
+
+# ============================================================
+# ДИНАМИЧЕСКИЙ ЭМБЕД СЕЗОНА
+# ============================================================
+def _build_season_embeds() -> List[disnake.Embed]:
+    """Эмбед сезона: статистика кланов, банки, топы, последние вклады."""
+    cycle = get_current_cycle()
 
     lines = []
     top_clan = None
@@ -107,8 +114,7 @@ def _build_pool_embeds() -> List[disnake.Embed]:
             inline=False
         )
 
-    embeds.append(e_stats)
-    return embeds
+    return [e_stats]
 
 
 # ============================================================
@@ -259,7 +265,8 @@ async def _show_howto(inter: disnake.MessageInteraction):
             "> • Недельные — сброс в пн 00:00 МСК\n"
             "> • Разовые — на весь сезон\n\n"
             "**🎮 Где играть**\n"
-            "> • Копилка — <#1552700989465956403>\n"
+            "> • Копилка — <#1552700960474800128>\n"
+            "> • Сезон — <#1552700989465956403>\n"
             "> • Игры и квесты — <#1552700973753827509>"
         ),
         color=6776679
@@ -344,6 +351,7 @@ async def _clan_games_select_callback(inter: disnake.MessageInteraction):
 # ОТПРАВКА ПАНЕЛЕЙ
 # ============================================================
 async def send_clan_pool_panel(bot):
+    """Канал 1552700960474800128 — СТАТИЧНЫЙ (clan_pool.json + кнопки)."""
     ch = bot.get_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
     if not ch:
         ch = await bot.fetch_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
@@ -358,12 +366,34 @@ async def send_clan_pool_panel(bot):
             except Exception:
                 pass
 
-    embeds = _build_pool_embeds()
+    embeds = _build_static_pool_embeds()
     await ch.send(embeds=embeds, view=ClanPoolView())
-    logger.info("Клан-копилка: панель отправлена")
+    logger.info("Клан-копилка: статичная панель отправлена")
+
+
+async def send_clan_season_panel(bot):
+    """Канал 1552700989465956403 — ДИНАМИЧЕСКИЙ эмбед сезона."""
+    ch = bot.get_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
+    if not ch:
+        ch = await bot.fetch_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
+    if not ch:
+        logger.warning("Clan season channel not found")
+        return
+
+    async for msg in ch.history(limit=50):
+        if msg.author == bot.user:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+    embeds = _build_season_embeds()
+    await ch.send(embeds=embeds)
+    logger.info("Клан-сезон: динамический эмбед отправлен")
 
 
 async def send_clan_games_panel(bot):
+    """Канал 1552700973753827509 — игры + квесты."""
     ch = bot.get_channel(CONFIG["CLAN_GAMES_CHANNEL_ID"])
     if not ch:
         ch = await bot.fetch_channel(CONFIG["CLAN_GAMES_CHANNEL_ID"])
@@ -384,75 +414,105 @@ async def send_clan_games_panel(bot):
 
 
 async def update_clan_pool_embed(bot):
+    """Обновляет оба — статичную и динамическую панели."""
     await send_clan_pool_panel(bot)
+    await send_clan_season_panel(bot)
 
 
 # ============================================================
-# АДМИН-ПАНЕЛЬ (в стаф-канале)
+# АДМИН-ПАНЕЛЬ (селект в стаф-канале)
 # ============================================================
+class ClanAdminSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            SelectOption(
+                label="・Старт нового цикла",
+                description="Принудительно запустить новый сезон",
+                emoji="🔄",
+                value="new_cycle"
+            ),
+            SelectOption(
+                label="・Форс-конец и выплата",
+                description="Закрыть сезон с расчётом пула",
+                emoji="⏹",
+                value="force_pay"
+            ),
+            SelectOption(
+                label="・Автораспределение",
+                description="Раскидать всех клубных без клана (с ребалансом)",
+                emoji="🚀",
+                value="distribute"
+            ),
+            SelectOption(
+                label="・Кик из клана",
+                description="Исключить юзера из клана (вклад остаётся)",
+                emoji="👤",
+                value="kick"
+            ),
+            SelectOption(
+                label="・Обновить панели",
+                description="Пересобрать эмбеды копилки и сезона",
+                emoji="🖼",
+                value="refresh"
+            ),
+        ]
+        super().__init__(
+            placeholder="Выберите действие...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="clan_admin_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        if not _is_admin(inter):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+
+        value = inter.data.values[0]
+
+        if value == "new_cycle":
+            cycle = get_current_cycle()
+            if cycle:
+                return await inter.response.send_message(
+                    f"❌ Уже есть активный цикл #{cycle['number']}. Сначала заверши.",
+                    ephemeral=True
+                )
+            start_new_cycle()
+            await inter.response.send_message("✅ Новый цикл запущен.", ephemeral=True)
+            await update_clan_pool_embed(inter.bot)
+
+        elif value == "force_pay":
+            await inter.response.defer(ephemeral=True)
+            result = await close_cycle_and_pay(inter.bot)
+            if result:
+                await inter.edit_original_response(content="✅ Цикл закрыт, выплаты произведены.")
+            else:
+                await inter.edit_original_response(content="❌ Нет активного цикла.")
+
+        elif value == "distribute":
+            await inter.response.defer(ephemeral=True)
+            from clan.core import distribute_all_club_members
+            result = distribute_all_club_members(inter.guild)
+            await inter.edit_original_response(
+                content=f"✅ Распределено: **{result['assigned']}**\n"
+                        f"> Уже в клане: **{result['skipped']}**\n"
+                        f"> Исключены: **{result.get('excluded', 0)}**"
+            )
+            await update_clan_pool_embed(inter.bot)
+
+        elif value == "kick":
+            await inter.response.send_modal(_KickModal())
+
+        elif value == "refresh":
+            await inter.response.defer(ephemeral=True)
+            await update_clan_pool_embed(inter.bot)
+            await inter.edit_original_response(content="✅ Панели обновлены.")
+
+
 class ClanAdminView(View):
     def __init__(self):
         super().__init__(timeout=None)
-
-    @disnake.ui.button(
-        label="🔄 Старт нового цикла",
-        style=ButtonStyle.gray,
-        custom_id="clan_admin:new_cycle"
-    )
-    async def new_cycle(self, button, inter: disnake.MessageInteraction):
-        if not _is_admin(inter):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        cycle = get_current_cycle()
-        if cycle:
-            return await inter.response.send_message(
-                f"❌ Уже есть активный цикл #{cycle['number']}. Сначала заверши.",
-                ephemeral=True
-            )
-        start_new_cycle()
-        await inter.response.send_message("✅ Новый цикл запущен.", ephemeral=True)
-        await update_clan_pool_embed(inter.bot)
-
-    @disnake.ui.button(
-        label="⏹ Форс-конец и выплата",
-        style=ButtonStyle.danger,
-        custom_id="clan_admin:force_pay"
-    )
-    async def force_pay(self, button, inter: disnake.MessageInteraction):
-        if not _is_admin(inter):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        await inter.response.defer(ephemeral=True)
-        result = await close_cycle_and_pay(inter.bot)
-        if result:
-            await inter.edit_original_response(content="✅ Цикл закрыт, выплаты произведены.")
-        else:
-            await inter.edit_original_response(content="❌ Нет активного цикла.")
-
-    @disnake.ui.button(
-        label="🚀 Автораспределение",
-        style=ButtonStyle.gray,
-        custom_id="clan_admin:distribute"
-    )
-    async def distribute(self, button, inter: disnake.MessageInteraction):
-        if not _is_admin(inter):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        await inter.response.defer(ephemeral=True)
-        from clan.core import distribute_all_club_members
-        result = distribute_all_club_members(inter.guild)
-        await inter.edit_original_response(
-            content=f"✅ Распределено: **{result['assigned']}**\n"
-                    f"> Уже в клане: **{result['skipped']}**\n"
-                    f"> Исключены: **{result.get('excluded', 0)}**"
-        )
-
-    @disnake.ui.button(
-        label="👤 Кик из клана",
-        style=ButtonStyle.gray,
-        custom_id="clan_admin:kick"
-    )
-    async def kick(self, button, inter: disnake.MessageInteraction):
-        if not _is_admin(inter):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        await inter.response.send_modal(_KickModal())
+        self.add_item(ClanAdminSelect())
 
 
 def _is_admin(inter: disnake.MessageInteraction) -> bool:
@@ -500,7 +560,7 @@ class _KickModal(disnake.ui.Modal):
 
 
 async def send_clan_admin_panel(bot):
-    """Отправляет админ-панель лиги в стаф-канал + красивая шапка с картинкой."""
+    """Отправляет админ-панель лиги с СЕЛЕКТОМ в стаф-канал."""
     STAFF_CHANNEL = 1551276116679860314
     ch = bot.get_channel(STAFF_CHANNEL)
     if not ch:
@@ -508,23 +568,34 @@ async def send_clan_admin_panel(bot):
     if not ch:
         return
 
-    # 👇 Красивый embed1 + инфо
-    e1 = disnake.Embed(color=6776679)
-    e1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1552726263758585956/image.png?ex=6ab6a885&is=6ab55705&hm=a7418d5c6f38288a8518eee61d765e21c019bdf3a160bc0df960ea074b69de0b&")
+    # Чистим старые сообщения бота (только панель лиги, без картинок)
+    async for msg in ch.history(limit=30):
+        if msg.author == bot.user and msg.embeds:
+            # Удаляем только те, где заголовок про клановую лигу
+            for e in msg.embeds:
+                if e.title and "клановой лигой" in e.title.lower():
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                    break
+
+    # 👇 Только один embed2, без картинки-шапки
     e2 = disnake.Embed(
         title="🏛 Управление клановой лигой",
         description=(
             "> **Старт нового цикла** — принудительно запустить сезон.\n"
             "> **Форс-конец и выплата** — закрыть сезон с расчётом.\n"
             "> **Автораспределение** — раскидать всех клубных без клана (с ребалансом).\n"
-            "> **Кик из клана** — исключить юзера (вклад остаётся в банке).\n\n"
+            "> **Кик из клана** — исключить юзера (вклад остаётся в банке).\n"
+            "> **Обновить панели** — пересобрать эмбеды копилки и сезона.\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "> ⚠️ **Исключения:** `1124040555240898631`, `796293832751972352` не распределяются."
         ),
         color=6776679
     )
     e2.set_image(url=IMG_STRIPE)
-    await ch.send(embeds=[e1, e2], view=ClanAdminView())
+    await ch.send(embed=e2, view=ClanAdminView())
 
 
 # ============================================================
