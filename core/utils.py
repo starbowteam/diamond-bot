@@ -66,15 +66,14 @@ CONFIG = {
     "VOICE_CHANNEL_ID": 1464699044751478815,
     "MANAGER_ROLE_ID": 1154757071330365490,
     "PAID_NOTIFY_CHANNEL_ID": 1462418981825810535,
+    # ⬇️ emerald и legendary упразднены, amethyst → crystalis
     "ROLE_IDS": {
         "club": 1284697274655576186,
         "bronze": 1127430321214861395,
         "silver": 1137721688683970643,
         "gold": 1184886111722545232,
         "diamond": 1195799151783461016,
-        "emerald": 1208442450373513277,
-        "amethyst": 1471005335111335957,
-        "legendary": 1208442449425334372,
+        "crystalis": 1471005335111335957,
         "pka": 1208442176321626162
     },
     "DC_RECALC_IGNORE": [796293832751972352, 1168943921171288135],
@@ -109,14 +108,18 @@ FILES = {
 # СПИСКИ ИСКЛЮЧЕНИЙ
 # ============================================================
 EXEMPT_USERS = [562318422982262793, 1168943921171288135, 796293832751972352]
-
-# ⬇️ VIP — "Великий из Великих": все ограничения обходят
 SUPREME_USERS = [796293832751972352]
 
 
 def is_supreme(user_id: int) -> bool:
-    """True — если юзер полностью неприкосновенен (не блокируется, не ограничивается)."""
     return user_id in SUPREME_USERS
+
+
+# ⬇️ УСТАРЕВШИЕ РОЛИ — снимаются при пересчёте
+DEPRECATED_ROLE_IDS = [
+    1208442450373513277,  # emerald (упразднена)
+    1208442449425334372,  # legendary (упразднена)
+]
 
 # ============================================================
 # Logging
@@ -360,6 +363,11 @@ def log_command(func):
 # Система ролей по отзывам
 # ============================================================
 def get_roles_for_count(count: int) -> list[int]:
+    """
+    Возвращает список целевых ролей по количеству отзывов.
+    13-25 → crystalis (emerald + amethyst + legendary объединены)
+    26+   → pka
+    """
     roles = []
     role_ids = CONFIG["ROLE_IDS"]
     if count >= 1:
@@ -372,17 +380,28 @@ def get_roles_for_count(count: int) -> list[int]:
         roles.append(role_ids["gold"])
     elif 9 <= count <= 12:
         roles.append(role_ids["diamond"])
-    elif 13 <= count <= 17:
-        roles.append(role_ids["emerald"])
-    elif 18 <= count <= 23:
-        roles.append(role_ids["amethyst"])
-    elif 24 <= count <= 25:
-        roles.append(role_ids["legendary"])
+    elif 13 <= count <= 25:
+        roles.append(role_ids["crystalis"])
     elif count >= 26:
         roles.append(role_ids["pka"])
     return roles
 
+
 async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool = False):
+    # ⬇️ Сначала снимаем устаревшие роли (emerald, legendary)
+    dep_to_remove = [r for r in member.roles if r.id in DEPRECATED_ROLE_IDS]
+    for role in dep_to_remove:
+        try:
+            await member.remove_roles(role)
+            await log_discord(
+                title="🔄 Снята устаревшая роль",
+                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention} (`{role.id}`)",
+                color=0xff6600
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось снять deprecated {role.id} у {member.id}: {e}")
+
+    # EXEMPT-юзеры всегда Клуб + PKA
     if member.id in EXEMPT_USERS:
         role_ids = CONFIG["ROLE_IDS"]
         club_role_id = role_ids["club"]
@@ -518,7 +537,7 @@ def remove_closed_order(order_id: int):
     db.commit()
 
 # ============================================================
-# Отзывы в тикетах (оценка менеджера через кнопку)
+# Отзывы в тикетах
 # ============================================================
 def save_ticket_review(channel_id: int, user_id: int, manager_id: int, rating: int):
     cur.execute(
@@ -540,15 +559,11 @@ def clear_ticket_review(channel_id: int):
     db.commit()
 
 # ============================================================
-# КУЛДАУН НА СОЗДАНИЕ ТИКЕТОВ (предупредительное закрытие)
+# КУЛДАУН НА СОЗДАНИЕ ТИКЕТОВ
 # ============================================================
 def set_ticket_cooldown(user_id: int, seconds: int = 7200, reason: str = "", set_by: int = 0):
-    """
-    Блокирует юзеру создание тикетов на N секунд.
-    Supreme-юзеры НЕ блокируются (возвращает 0).
-    """
     if is_supreme(user_id):
-        logger.info(f"set_ticket_cooldown: {user_id} — supreme, блокировка пропущена")
+        logger.info(f"set_ticket_cooldown: {user_id} — supreme, пропуск")
         return 0
     until_ts = int(time.time()) + seconds
     cur.execute(
@@ -560,10 +575,6 @@ def set_ticket_cooldown(user_id: int, seconds: int = 7200, reason: str = "", set
     return until_ts
 
 def get_ticket_cooldown(user_id: int) -> int:
-    """
-    Возвращает until_ts или 0, если не заблокирован.
-    Supreme-юзеры всегда возвращают 0.
-    """
     if is_supreme(user_id):
         return 0
     row = cur.execute("SELECT until_ts FROM ticket_cooldowns WHERE user_id = ?", (user_id,)).fetchone()
@@ -577,7 +588,6 @@ def get_ticket_cooldown(user_id: int) -> int:
     return until_ts
 
 def get_ticket_cooldown_info(user_id: int) -> Optional[dict]:
-    """Полная инфа о кулдауне (или None)."""
     if is_supreme(user_id):
         return None
     row = cur.execute(
@@ -621,7 +631,7 @@ def reload_promo():
 reload_promo()
 
 # ============================================================
-# Кеширование DC в SQLite
+# Кеширование DC
 # ============================================================
 def init_dc_cache_from_json():
     data = load_json(FILES["dc_data"], {})
@@ -735,11 +745,10 @@ def clear_promo_codes():
     db.commit()
 
 # ============================================================
-# USER ITEMS (бусты, казино-предметы, расходники)
+# USER ITEMS
 # ============================================================
 def activate_item(user_id: int, item_key: str, item_type: str,
                   value: float = 0, duration_hours: int = 0, uses: int = -1):
-    """Активирует/обновляет предмет у юзера (одноразовый ключ)."""
     now = int(time.time())
     expires_at = (now + duration_hours * 3600) if duration_hours > 0 else 0
     cur.execute("""
@@ -749,9 +758,7 @@ def activate_item(user_id: int, item_key: str, item_type: str,
     """, (user_id, item_key, item_type, value, expires_at, uses, now))
     db.commit()
 
-
 def get_item(user_id: int, item_key: str) -> Optional[dict]:
-    """Возвращает активный предмет или None (с авто-проверкой протухания)."""
     now = int(time.time())
     row = cur.execute(
         "SELECT * FROM user_items WHERE user_id=? AND item_key=?",
@@ -769,9 +776,7 @@ def get_item(user_id: int, item_key: str) -> Optional[dict]:
         return None
     return dict(row)
 
-
 def get_active_items(user_id: int) -> list:
-    """Все активные предметы юзера."""
     now = int(time.time())
     rows = cur.execute("""
         SELECT * FROM user_items
@@ -781,13 +786,11 @@ def get_active_items(user_id: int) -> list:
     """, (user_id, now)).fetchall()
     return [dict(r) for r in rows]
 
-
 def consume_use(user_id: int, item_key: str) -> bool:
-    """Уменьшает счётчик использований на 1. Если стало 0 — удаляет."""
     item = get_item(user_id, item_key)
     if not item:
         return False
-    if item["uses_left"] < 0:  # бесконечное
+    if item["uses_left"] < 0:
         return True
     new_uses = item["uses_left"] - 1
     if new_uses <= 0:
@@ -798,35 +801,29 @@ def consume_use(user_id: int, item_key: str) -> bool:
     db.commit()
     return True
 
-
 def clear_item(user_id: int, item_key: str):
     cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
     db.commit()
 
-
 # ============================================================
-# JACKPOT (банк + билеты)
+# JACKPOT
 # ============================================================
 def load_jackpot() -> dict:
     return load_json(FILES["jackpot"], {"bank": 1000, "last_draw": 0, "last_winner": 0, "history": []})
 
-
 def save_jackpot(data: dict):
     save_json(FILES["jackpot"], data)
-
 
 def add_jackpot_bank(amount: int):
     data = load_jackpot()
     data["bank"] = data.get("bank", 0) + amount
     save_jackpot(data)
 
-
 def get_jackpot_participants() -> list:
     rows = cur.execute(
         "SELECT user_id FROM user_items WHERE item_key='casino_jackpot_ticket'"
     ).fetchall()
     return [r["user_id"] for r in rows]
-
 
 def clear_all_jackpot_tickets():
     cur.execute("DELETE FROM user_items WHERE item_key='casino_jackpot_ticket'")
