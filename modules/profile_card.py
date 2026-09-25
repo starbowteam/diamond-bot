@@ -2,13 +2,13 @@
 """Рендер карточки профиля на PIL + FA. Дизайн 1800×1000 под Diamond Shop."""
 import io
 import os
+import math
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 from core.utils import ADD_DIR, logger, EXEMPT_USERS
 
-# Мягкий импорт — если клан-лига не загружена
 try:
     from clan.core import get_user_clan, CLANS_DATA
 except Exception:
@@ -48,6 +48,20 @@ RED_BG    = (44, 20, 20)
 BLUE_BG   = (20, 30, 44)
 
 CARD_BRD  = (74, 74, 79)
+
+# ============================================================
+# ГРАДИЕНТЫ РОЛЕЙ (c1 → c2)
+# ============================================================
+ROLE_GRADIENTS = {
+    "bronze":    ((0xe7, 0x8f, 0x67), (0xd1, 0x56, 0x40)),
+    "silver":    ((0xff, 0xff, 0xff), (0x97, 0x97, 0x97)),
+    "gold":      ((0xf7, 0xc9, 0x91), (0xae, 0x79, 0x11)),
+    "diamond":   ((0xdd, 0xf0, 0xef), (0x14, 0x9b, 0xd0)),
+    "crystalis": ((0x9f, 0xc1, 0xff), (0xd8, 0x8e, 0xdf)),
+    "pka":       ((0xad, 0xad, 0xad), (0x69, 0x69, 0x69)),
+    "club":      ((0xf7, 0xc9, 0x91), (0xae, 0x79, 0x11)),
+    "none":      ((0x66, 0x66, 0x66), (0x44, 0x44, 0x44)),
+}
 
 # FA-иконки
 I_USERS   = 0xf0c0
@@ -136,8 +150,62 @@ def _fmt(n):
         return str(n)
 
 
+# ============================================================
+# САНИТАЙЗЕР НИКА — выкидываем непонятные символы
+# ============================================================
+def _sanitize_name(text: str, fallback: str = "Пользователь") -> str:
+    """
+    Оставляет только:
+      - ASCII printable (0x20-0x7E)
+      - Кириллица (0x0400-0x04FF)
+      - Расширенная латиница (0x00C0-0x017F) — Ä, ö, ü, ñ и т.д.
+      - Безопасная пунктуация: — – “ ” « » „ ‘ ’ …
+    Всё остальное (эмодзи, математические буквы ᶻ 𝘇 и т.д.) — скипается.
+    """
+    if not text:
+        return fallback
+
+    allowed_special = set("—–‑‒―“”«»„‘’…№")
+
+    out_chars = []
+    for ch in text:
+        cp = ord(ch)
+        if 0x20 <= cp <= 0x7E:           # ASCII printable
+            out_chars.append(ch)
+            continue
+        if 0x0400 <= cp <= 0x04FF:       # Кириллица
+            out_chars.append(ch)
+            continue
+        if 0x00C0 <= cp <= 0x017F:       # Расширенная латиница
+            out_chars.append(ch)
+            continue
+        if ch in allowed_special:
+            out_chars.append(ch)
+            continue
+        # всё остальное — выкидываем
+
+    result = "".join(out_chars).strip()
+    # Чистим двойные пробелы
+    while "  " in result:
+        result = result.replace("  ", " ")
+    if not result:
+        return fallback
+    return result
+
+
+# ============================================================
+# Утилиты рисования
+# ============================================================
 def _hex_to_rgb(h: int) -> Tuple[int, int, int]:
     return ((h >> 16) & 0xFF, (h >> 8) & 0xFF, h & 0xFF)
+
+
+def _lerp_color(c1, c2, t):
+    return (
+        int(c1[0] * (1 - t) + c2[0] * t),
+        int(c1[1] * (1 - t) + c2[1] * t),
+        int(c1[2] * (1 - t) + c2[2] * t),
+    )
 
 
 def _alpha_fill(base_img: Image.Image, box, color, alpha=30, radius=0):
@@ -170,15 +238,49 @@ def _gradient_box(base_img, box, c1, c2, alpha=30, radius=0):
     if radius > 0:
         mask = Image.new("L", (w, h), 0)
         ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
-        # Применяем маску
         alpha_ch = layer.split()[3]
         alpha_ch = Image.composite(alpha_ch, Image.new("L", (w, h), 0), mask)
         layer.putalpha(alpha_ch)
     base_img.paste(layer, (x1, y1), layer)
 
 
+def _draw_gradient_ring(d, cx, cy, r, width, c1, c2, steps=180):
+    """Градиентное кольцо вокруг аватара. c1 сверху → c2 снизу по часовой."""
+    for i in range(steps):
+        t = i / steps
+        a1 = -90 + (i * 360 / steps)
+        a2 = -90 + ((i + 1) * 360 / steps)
+        col = _lerp_color(c1, c2, t)
+        d.arc((cx - r, cy - r, cx + r, cy + r), a1, a2, fill=col, width=width)
+
+
+def _draw_gradient_border_rect(d, x1, y1, x2, y2, radius, c1, c2, width=2):
+    """Градиентная рамка прямоугольника: c1 слева → c2 справа."""
+    w = x2 - x1
+    h = y2 - y1
+
+    # Верх и низ (прямые участки, без углов)
+    for i in range(radius, w - radius):
+        t = i / max(w - 1, 1)
+        col = _lerp_color(c1, c2, t)
+        d.line([(x1 + i, y1), (x1 + i, y1 + width)], fill=col)
+        d.line([(x1 + i, y2 - width), (x1 + i, y2)], fill=col)
+
+    # Левая и правая стороны
+    for i in range(radius, h - radius):
+        d.line([(x1, y1 + i), (x1 + width, y1 + i)], fill=c1)
+        d.line([(x2 - width, y1 + i), (x2, y1 + i)], fill=c2)
+
+    # Углы (дуги)
+    d.arc((x1, y1, x1 + 2 * radius, y1 + 2 * radius), 180, 270, fill=c1, width=width)
+    d.arc((x2 - 2 * radius, y1, x2, y1 + 2 * radius), 270, 360,
+          fill=_lerp_color(c1, c2, 0.95), width=width)
+    d.arc((x1, y2 - 2 * radius, x1 + 2 * radius, y2), 90, 180, fill=c1, width=width)
+    d.arc((x2 - 2 * radius, y2 - 2 * radius, x2, y2), 0, 90,
+          fill=_lerp_color(c1, c2, 0.95), width=width)
+
+
 def _dashed_rounded_rect(draw, box, radius, color, dash=8, gap=6, width=2):
-    import math
     x1, y1, x2, y2 = box
     r = radius
 
@@ -285,43 +387,95 @@ def _draw_stack_panel(img, d, box, radius=24):
                         outline=STACK_BRD + (255,), width=2)
 
 
-def _draw_badge(d, img, x, y, w, h, icon, text,
-                text_color, border_color,
-                bg_gradient=None, bg_solid=None,
-                dashed=False):
-    if bg_gradient:
-        _gradient_box(img, (x, y, x + w, y + h),
-                      bg_gradient[0], bg_gradient[1], alpha=30, radius=14)
-    elif bg_solid:
-        _alpha_fill(img, (x, y, x + w, y + h), bg_solid, alpha=22, radius=14)
+def _draw_role_badge(d, img, x, y, w, h, role_key: str):
+    """Бейдж роли — градиентная рамка + градиентная заливка + текст."""
+    has_role = role_key not in ("none", "")
+    c1, c2 = ROLE_GRADIENTS.get(role_key, ROLE_GRADIENTS["none"])
+    label = ROLE_INFO.get(role_key, ROLE_INFO["none"]).upper()
 
-    if dashed:
-        _dashed_rounded_rect(d, (x, y, x + w, y + h), 14, border_color,
-                             dash=8, gap=5, width=2)
+    if has_role:
+        # Заливка — градиент с низкой alpha
+        _gradient_box(img, (x, y, x + w, y + h), c1, c2, alpha=25, radius=14)
+        # Градиентная рамка
+        _draw_gradient_border_rect(d, x, y, x + w, y + h, 14, c1, c2, width=2)
+        # Цвет текста — усреднённый
+        text_color = _lerp_color(c1, c2, 0.5)
+        icon_code = I_CROWN
     else:
-        d.rounded_rectangle((x, y, x + w, y + h), radius=14,
-                            outline=border_color + (255,), width=2)
+        # Нет роли — пунктирный серый
+        _dashed_rounded_rect(d, (x, y, x + w, y + h), 14, (51, 51, 51),
+                             dash=8, gap=5, width=2)
+        text_color = DARK
+        icon_code = I_CIRCLE_M
 
-    # Центрированный блок: icon + gap + text
+    # Центрированный контент
     icon_size = 16
     gap = 10
-    tw_ = _tw(d, text, _font(13))
+    tw_ = _tw(d, label, _font(13))
     total_w = icon_size + gap + tw_
     start_x = x + (w - total_w) // 2
     cy = y + h // 2
 
-    _draw_icon(d, start_x + icon_size // 2, cy + 1, icon, 15, text_color)
-    d.text((start_x + icon_size + gap, cy), text, font=_font(13),
+    _draw_icon(d, start_x + icon_size // 2, cy + 1, icon_code, 15, text_color)
+    d.text((start_x + icon_size + gap, cy), label, font=_font(13),
+           fill=text_color, anchor="lm")
+
+
+def _draw_clan_badge(d, img, x, y, w, h, clan: Optional[dict]):
+    """Бейдж клана."""
+    if not clan:
+        _dashed_rounded_rect(d, (x, y, x + w, y + h), 14, (51, 51, 51),
+                             dash=8, gap=5, width=2)
+        label = "БЕЗ КЛАНА"
+        icon_code = I_CIRCLE_M
+        text_color = DARK
+        icon_size = 16
+        gap = 10
+        tw_ = _tw(d, label, _font(13))
+        total_w = icon_size + gap + tw_
+        start_x = x + (w - total_w) // 2
+        cy = y + h // 2
+        _draw_icon(d, start_x + icon_size // 2, cy + 1, icon_code, 15, text_color)
+        d.text((start_x + icon_size + gap, cy), label, font=_font(13),
+               fill=text_color, anchor="lm")
+        return
+
+    clan_data = next((c for c in CLANS_DATA if c["id"] == clan["id"]), None)
+    if clan_data:
+        c1 = _hex_to_rgb(clan_data.get("color", 0xb3e1b9))
+        c2 = _hex_to_rgb(clan_data.get("color_dark", clan_data.get("color", 0xb3e1b9)))
+        clan_icon = I_STAR if clan_data["name"] == "Сияние" else I_GEM
+    else:
+        c1 = _hex_to_rgb(clan.get("color", 0xb3e1b9))
+        c2 = c1
+        clan_icon = I_GEM
+
+    label = clan["name"].upper()
+
+    # Заливка градиентом
+    _gradient_box(img, (x, y, x + w, y + h), c1, c2, alpha=30, radius=14)
+    # Градиентная рамка
+    _draw_gradient_border_rect(d, x, y, x + w, y + h, 14, c1, c2, width=2)
+
+    text_color = _lerp_color(c1, c2, 0.5)
+
+    icon_size = 16
+    gap = 10
+    tw_ = _tw(d, label, _font(13))
+    total_w = icon_size + gap + tw_
+    start_x = x + (w - total_w) // 2
+    cy = y + h // 2
+
+    _draw_icon(d, start_x + icon_size // 2, cy + 1, clan_icon, 15, text_color)
+    d.text((start_x + icon_size + gap, cy), label, font=_font(13),
            fill=text_color, anchor="lm")
 
 
 def _draw_stat(d, x, y, w, h, icon_code, icon_bg, icon_color,
                lbl, val, val_color, val_suffix=None):
-    """Стат-плитка: иконка сверху, метка, значение."""
     d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                         fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
 
-    # Иконка
     ib_size = 46
     ib_x = x + 22
     ib_y = y + 18
@@ -330,15 +484,13 @@ def _draw_stat(d, x, y, w, h, icon_code, icon_bg, icon_color,
     _draw_icon(d, ib_x + ib_size // 2, ib_y + ib_size // 2 + 1,
                icon_code, 20, icon_color)
 
-    # Метка (под иконкой)
     lbl_y = ib_y + ib_size + 12
     d.text((x + 22, lbl_y), lbl, font=_font(10), fill=MUTED)
 
-    # Значение (под меткой)
     val_y = lbl_y + 16
     val_f = _font(32)
     val_str = val
-    max_val_w = w - 44 - 40  # запас под суффикс
+    max_val_w = w - 44 - 40
     while _tw(d, val_str, val_f) > max_val_w and val_f.size > 18:
         val_f = _font(val_f.size - 2)
     d.text((x + 22, val_y), val_str, font=val_f, fill=val_color)
@@ -368,10 +520,8 @@ def _draw_operation_row(d, x, y, w, h, op: Optional[dict]):
     accent_bg = GREEN_BG if is_plus else RED_BG
     sign = "+" if is_plus else "−"
 
-    # Левый бордер
     d.rounded_rectangle((x, y, x + 4, y + h), radius=4, fill=accent + (255,))
 
-    # Иконка
     op_icon_size = 52
     ib_x = x + 18
     ib_y = y + (h - op_icon_size) // 2
@@ -380,12 +530,10 @@ def _draw_operation_row(d, x, y, w, h, op: Optional[dict]):
     _draw_icon(d, ib_x + op_icon_size // 2, ib_y + op_icon_size // 2 + 1,
                _op_icon(reason), 22, accent)
 
-    # Название + время
     text_x = ib_x + op_icon_size + 18
     name_f = _font(17)
     time_f = _font(12)
 
-    # Правый блок
     amt_str = f"{sign}{abs(int(amt))} DC"
     amt_f = _font(22)
     amt_w = _tw(d, amt_str, amt_f)
@@ -424,9 +572,15 @@ def generate_profile_card(
     history: List[Dict],
 ) -> io.BytesIO:
 
-    # 👇 EXEMPT-юзеры → всегда PKA
+    # EXEMPT → PKA
     if user_id in EXEMPT_USERS:
         role_key = "pka"
+
+    # 👇 Санитайзим ник
+    user_name = _sanitize_name(user_name, fallback=f"User {user_id}")
+
+    # Цвета роли
+    c1, c2 = ROLE_GRADIENTS.get(role_key, ROLE_GRADIENTS["none"])
 
     W, H = 1800, 1000
     M = 0
@@ -436,7 +590,6 @@ def generate_profile_card(
     img = Image.new("RGBA", (W, H), BG + (255,))
     d = ImageDraw.Draw(img)
 
-    # КАРТОЧКА
     d.rounded_rectangle((M, M, W - 1, H - 1), radius=30, fill=CARD_TOP + (255,),
                         outline=CARD_BRD + (255,), width=3)
 
@@ -484,66 +637,47 @@ def generate_profile_card(
     lp_x2, lp_y2 = left_x2 - 14, body_y + body_h - 14
     lp_cx = (lp_x1 + lp_x2) // 2
 
-    # --- Считаем высоту группы для центрирования ---
+    # Размеры группы
     av_size = 240
+    ring_width = 5
     badge_w = 280
     badge_h = 50
     badge_gap = 12
-    badges_total_h = badge_h * 2 + badge_gap  # 2 бейджа
+    badges_total_h = badge_h * 2 + badge_gap
     gap_av_badge = 36
     gap_badge_uid = 22
     uid_h = 14
 
     group_h = av_size + gap_av_badge + badges_total_h + gap_badge_uid + uid_h
-    # Доступное пространство внутри панели (отступы 28 сверху/снизу)
     inner_h = (lp_y2 - lp_y1) - 56
     group_start_y = lp_y1 + 28 + max((inner_h - group_h) // 2, 0)
 
-    # --- Аватар с glow ---
+    # Аватар
     av_x = lp_cx - av_size // 2
     av_y = group_start_y
 
-    # Glow
-    glow_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(glow_layer)
-    for r in range(45, 0, -4):
-        alpha = int(10 + (45 - r) * 0.7)
-        gd.ellipse((av_x - r, av_y - r, av_x + av_size + r, av_y + av_size + r),
-                   fill=GOLD + (max(0, min(alpha, 40)),))
-    img.alpha_composite(glow_layer)
-    d = ImageDraw.Draw(img)
-
-    # Сам аватар
+    # Аватар
     av_img = _avatar_img(avatar_bytes, av_size) if avatar_bytes else None
     if av_img:
-        d.ellipse((av_x - 5, av_y - 5, av_x + av_size + 5, av_y + av_size + 5),
-                  outline=GOLD + (255,), width=5)
+        # Сначала градиентное кольцо, потом аватар поверх
+        _draw_gradient_ring(d, lp_cx, av_y + av_size // 2,
+                            av_size // 2 + ring_width // 2,
+                            ring_width, c1, c2, steps=240)
+        # Пастим аватар, обрезая чуть внутрь
         img.paste(av_img, (av_x, av_y), av_img)
     else:
         d.ellipse((av_x, av_y, av_x + av_size, av_y + av_size), fill=(60, 60, 66))
         _draw_icon(d, lp_cx, av_y + av_size // 2 + 2, I_USERS, 90, MUTED)
-        d.ellipse((av_x - 5, av_y - 5, av_x + av_size + 5, av_y + av_size + 5),
-                  outline=GOLD + (255,), width=5)
+        _draw_gradient_ring(d, lp_cx, av_y + av_size // 2,
+                            av_size // 2 + ring_width // 2,
+                            ring_width, c1, c2, steps=240)
 
-    # --- Бейдж роли ---
+    # Бейдж роли
     badge_x = lp_cx - badge_w // 2
     role_y = av_y + av_size + gap_av_badge
+    _draw_role_badge(d, img, badge_x, role_y, badge_w, badge_h, role_key)
 
-    role_label = ROLE_INFO.get(role_key, ROLE_INFO["none"]).upper()
-    has_role = role_key not in ("none", "")
-
-    _draw_badge(
-        d, img,
-        x=badge_x, y=role_y, w=badge_w, h=badge_h,
-        icon=I_CROWN if has_role else I_CIRCLE_M,
-        text=role_label,
-        text_color=GOLD if has_role else DARK,
-        border_color=GOLD if has_role else (51, 51, 51),
-        bg_solid=GOLD if has_role else None,
-        dashed=not has_role,
-    )
-
-    # --- Бейдж клана ---
+    # Бейдж клана
     clan_y = role_y + badge_h + badge_gap
     clan = None
     if get_user_clan:
@@ -551,41 +685,9 @@ def generate_profile_card(
             clan = get_user_clan(user_id)
         except Exception:
             clan = None
+    _draw_clan_badge(d, img, badge_x, clan_y, badge_w, badge_h, clan)
 
-    if clan:
-        # 👇 Берём цвет из CLANS_DATA (новые цвета)
-        clan_data = next((c for c in CLANS_DATA if c["id"] == clan["id"]), None)
-        if clan_data:
-            c1 = _hex_to_rgb(clan_data.get("color", 0xb3e1b9))
-            c2 = _hex_to_rgb(clan_data.get("color_dark", clan_data.get("color", 0xb3e1b9)))
-            clan_icon = I_STAR if clan_data["name"] == "Сияние" else I_GEM
-        else:
-            c1 = _hex_to_rgb(clan.get("color", 0xb3e1b9))
-            c2 = c1
-            clan_icon = I_GEM
-
-        _draw_badge(
-            d, img,
-            x=badge_x, y=clan_y, w=badge_w, h=badge_h,
-            icon=clan_icon,
-            text=clan["name"].upper(),
-            text_color=c1,
-            border_color=c1,
-            bg_gradient=(c1, c2),
-            dashed=False,
-        )
-    else:
-        _draw_badge(
-            d, img,
-            x=badge_x, y=clan_y, w=badge_w, h=badge_h,
-            icon=I_CIRCLE_M,
-            text="БЕЗ КЛАНА",
-            text_color=DARK,
-            border_color=(51, 51, 51),
-            dashed=True,
-        )
-
-    # --- UID ---
+    # UID
     uid_text = f"UID · {user_id}"
     uid_f = _font(13)
     uid_w = _tw(d, uid_text, uid_f)
@@ -602,7 +704,7 @@ def generate_profile_card(
     rp_x2 = right_x2 - 14 - 32
     rp_y = body_y + 28
 
-    # --- Ник ---
+    # Ник
     uname = user_name
     max_w = rp_x2 - rp_x1
     if _tw(d, uname, _font(44)) > max_w:
@@ -624,47 +726,35 @@ def generate_profile_card(
     x_cursor += _tw(d, part2, _font(16))
     d.text((x_cursor, sub_y), part3, font=sub_f, fill=MUTED)
 
-    # Разделитель
     sep2_y = sub_y + 40
     d.line((rp_x1 - 32, sep2_y, rp_x2 + 32, sep2_y), fill=STACK_HDR + (255,), width=2)
 
-    # Section: Статистика
+    # Статистика
     st_y = sep2_y + 22
     _draw_icon(d, rp_x1 + 7, st_y + 8, I_CHART, 14, GOLD)
     d.text((rp_x1 + 22, st_y), "СТАТИСТИКА", font=_font(11), fill=MUTED)
 
-    # Stats
     stats_y = st_y + 34
     stat_h = 150
     stat_gap = 16
     stat_w = (rp_x2 - rp_x1 - stat_gap * 2) // 3
 
-    _draw_stat(
-        d,
-        x=rp_x1, y=stats_y, w=stat_w, h=stat_h,
-        icon_code=I_THUMBS, icon_bg=GOLD_BG, icon_color=GOLD,
-        lbl="ОТЗЫВОВ", val=str(reviews), val_color=TEXT,
-    )
-    _draw_stat(
-        d,
-        x=rp_x1 + stat_w + stat_gap, y=stats_y, w=stat_w, h=stat_h,
-        icon_code=I_GEM, icon_bg=GREEN_BG, icon_color=GREEN,
-        lbl="БАЛАНС", val=_fmt(balance), val_color=GREEN, val_suffix="DC",
-    )
-    _draw_stat(
-        d,
-        x=rp_x1 + (stat_w + stat_gap) * 2, y=stats_y, w=stat_w, h=stat_h,
-        icon_code=I_CLOCK, icon_bg=BLUE_BG, icon_color=BLUE,
-        lbl="ДНЕЙ В КОМЬЮНИТИ", val=str(days_n), val_color=TEXT,
-        val_suffix=_fmt_days(days_n).split(" ", 1)[1] if days_n else "",
-    )
+    _draw_stat(d, rp_x1, stats_y, stat_w, stat_h,
+               I_THUMBS, GOLD_BG, GOLD,
+               "ОТЗЫВОВ", str(reviews), TEXT)
+    _draw_stat(d, rp_x1 + stat_w + stat_gap, stats_y, stat_w, stat_h,
+               I_GEM, GREEN_BG, GREEN,
+               "БАЛАНС", _fmt(balance), GREEN, val_suffix="DC")
+    _draw_stat(d, rp_x1 + (stat_w + stat_gap) * 2, stats_y, stat_w, stat_h,
+               I_CLOCK, BLUE_BG, BLUE,
+               "ДНЕЙ В КОМЬЮНИТИ", str(days_n), TEXT,
+               val_suffix=_fmt_days(days_n).split(" ", 1)[1] if days_n else "")
 
-    # Section: Операции
+    # Операции
     op_st_y = stats_y + stat_h + 24
     _draw_icon(d, rp_x1 + 7, op_st_y + 8, I_ROTATE, 14, GOLD)
     d.text((rp_x1 + 22, op_st_y), "ПОСЛЕДНИЕ ОПЕРАЦИИ", font=_font(11), fill=MUTED)
 
-    # Операции
     ops_y = op_st_y + 34
     ops_bottom = lp_y2 - 28
     ops_area_h = ops_bottom - ops_y
