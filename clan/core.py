@@ -47,14 +47,18 @@ IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
+# ============================================================
+# КЛАНЫ — обновлённые цвета (c1 = светлый/акцент, c2 = тёмный/градиент)
+# ============================================================
 CLANS_DATA = [
     {
         "id": 1,
         "name": "Окаменелости",
         "emoji": "🪨",
         "role_id": 1552707675257831525,
-        "color": 0x8B7355,
-        "fa_icon": "🪨",
+        "color": 0xb3e1b9,          # акцент (светло-зелёный)
+        "color_dark": 0x749472,     # тёмный (мох) — для градиента
+        "fa_icon": "fa-gem",
         "description": "Стойкие, как камень. Непоколебимая воля и вековая мудрость.",
     },
     {
@@ -62,8 +66,9 @@ CLANS_DATA = [
         "name": "Сияние",
         "emoji": "✨",
         "role_id": 1552707025723465838,
-        "color": 0xFFD700,
-        "fa_icon": "✨",
+        "color": 0xaa8ae7,          # акцент (сиреневый)
+        "color_dark": 0x582189,     # тёмный (глубокий фиолет)
+        "fa_icon": "fa-star",
         "description": "Свет звёзд в ночи. Яркие, амбициозные, недосягаемые.",
     },
     {
@@ -71,8 +76,9 @@ CLANS_DATA = [
         "name": "Кристализация",
         "emoji": "💎",
         "role_id": 1551280425312194650,
-        "color": 0xB39DDB,
-        "fa_icon": "💎",
+        "color": 0x8799ae,          # акцент (серо-голубой)
+        "color_dark": 0xf1f7ff,     # светлый (почти белый) — в бордере ниже будет ок
+        "fa_icon": "fa-gem",
         "description": "Чистота формы и холодный расчёт. Всё по полочкам.",
     },
 ]
@@ -203,7 +209,6 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
     skipped = 0
     excluded = 0
 
-    # Проход 1: раскидываем тех, кого нет в клане
     for member in guild.members:
         if member.bot:
             continue
@@ -219,7 +224,6 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
         if result:
             assigned += 1
 
-    # Проход 2: РЕБАЛАНС — перекидываем из больших кланов в маленькие
     max_iter = 500
     while max_iter > 0:
         max_iter -= 1
@@ -441,12 +445,9 @@ def close_cycle_and_pay(bot) -> bool:
                 (total_paid, cycle_id))
     db.commit()
 
-    # Отчёт в ЛС админу
     asyncio.create_task(send_payout_report_dm(bot, report))
-    # Пост в канал копилки
     asyncio.create_task(post_payout_results(bot, report))
 
-    # 👇 НОВОСТЬ в канал новостей
     try:
         from clan.panels import post_news_season_end
         asyncio.create_task(post_news_season_end(bot, report))
