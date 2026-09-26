@@ -23,10 +23,21 @@ MSK = timezone(timedelta(hours=3))
 CLUB_ROLE_ID    = 1284697274655576186
 MIN_BALANCE     = 0
 
-EXCLUDE_FROM_CLAN = {
+# ============================================================
+# 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ ИЗ КЛАН-ЛИГИ
+# Эти юзеры НИКОГДА не участвуют:
+#   - не распределяются
+#   - не считаются вклады
+#   - не отображается клан в профиле
+#   - не получают выплаты
+#   - автоматически вычищаются из БД при старте
+# ============================================================
+HARD_EXCLUDED_USERS = {
     1124040555240898631,
     796293832751972352,
 }
+
+EXCLUDE_FROM_CLAN = HARD_EXCLUDED_USERS
 
 CLAN_CYCLE_DAYS = 28
 PAYOUT_DAY      = 28
@@ -47,17 +58,14 @@ IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
-# ============================================================
-# КЛАНЫ — обновлённые цвета (c1 = светлый/акцент, c2 = тёмный/градиент)
-# ============================================================
 CLANS_DATA = [
     {
         "id": 1,
         "name": "Окаменелости",
         "emoji": "🪨",
         "role_id": 1552707675257831525,
-        "color": 0xb3e1b9,          # акцент (светло-зелёный)
-        "color_dark": 0x749472,     # тёмный (мох) — для градиента
+        "color": 0xb3e1b9,
+        "color_dark": 0x749472,
         "fa_icon": "fa-gem",
         "description": "Стойкие, как камень. Непоколебимая воля и вековая мудрость.",
     },
@@ -66,8 +74,8 @@ CLANS_DATA = [
         "name": "Сияние",
         "emoji": "✨",
         "role_id": 1552707025723465838,
-        "color": 0xaa8ae7,          # акцент (сиреневый)
-        "color_dark": 0x582189,     # тёмный (глубокий фиолет)
+        "color": 0xaa8ae7,
+        "color_dark": 0x582189,
         "fa_icon": "fa-star",
         "description": "Свет звёзд в ночи. Яркие, амбициозные, недосягаемые.",
     },
@@ -76,8 +84,8 @@ CLANS_DATA = [
         "name": "Кристализация",
         "emoji": "💎",
         "role_id": 1551280425312194650,
-        "color": 0x8799ae,          # акцент (серо-голубой)
-        "color_dark": 0xf1f7ff,     # светлый (почти белый) — в бордере ниже будет ок
+        "color": 0x8799ae,
+        "color_dark": 0xf1f7ff,
         "fa_icon": "fa-gem",
         "description": "Чистота формы и холодный расчёт. Всё по полочкам.",
     },
@@ -85,7 +93,7 @@ CLANS_DATA = [
 
 
 # ============================================================
-# ИНИЦИАЛИЗАЦИЯ
+# ИНИЦИАЛИЗАЦИЯ + АВТООЧИСТКА
 # ============================================================
 def init_clan_core():
     for c in CLANS_DATA:
@@ -95,8 +103,135 @@ def init_clan_core():
             (c["id"], c["name"], c["emoji"], c["role_id"], c["color"], c["description"])
         )
     db.commit()
+    cleanup_excluded_users()
 
 
+def cleanup_excluded_users() -> dict:
+    """
+    Жёстко вычищает исключённых:
+      - из clan_members (left_at)
+      - из clan_contributions (удаляет вклады, но считает их сумму ДО удаления)
+      - из clan_payouts (удаляет историю)
+    Возвращает статистику: {user_id: {contribs_sum, contribs_count, cycles}}
+    """
+    if not HARD_EXCLUDED_USERS:
+        return {}
+
+    report = {}
+
+    for uid in HARD_EXCLUDED_USERS:
+        # Сначала считаем что удаляем
+        contrib_rows = cur.execute(
+            "SELECT cycle_id, clan_id, amount FROM clan_contributions WHERE user_id=?",
+            (uid,)
+        ).fetchall()
+
+        if contrib_rows:
+            total = sum(r["amount"] for r in contrib_rows)
+            count = len(contrib_rows)
+            cycles = sorted(set(r["cycle_id"] for r in contrib_rows))
+            clans = sorted(set(r["clan_id"] for r in contrib_rows))
+            report[uid] = {
+                "sum": total,
+                "count": count,
+                "cycles": cycles,
+                "clans": clans,
+            }
+
+        # Удаляем вклады
+        cur.execute("DELETE FROM clan_contributions WHERE user_id=?", (uid,))
+        # Удаляем выплаты
+        cur.execute("DELETE FROM clan_payouts WHERE user_id=?", (uid,))
+        # Помечаем left_at
+        cur.execute(
+            "UPDATE clan_members SET left_at=? "
+            "WHERE user_id=? AND left_at IS NULL",
+            (int(time.time()), uid)
+        )
+
+    db.commit()
+
+    # Логируем
+    for uid, data in report.items():
+        clan_names = []
+        for cid in data["clans"]:
+            c = get_clan(cid)
+            if c:
+                clan_names.append(f"{c['emoji']} {c['name']}")
+        logger.warning(
+            f"🧹 Cleanup user {uid}: удалено вкладов на {data['sum']} DC "
+            f"({data['count']} шт.) из кланов: {', '.join(clan_names) or '—'}"
+        )
+
+    return report
+
+
+def is_hard_excluded(user_id: int) -> bool:
+    return user_id in HARD_EXCLUDED_USERS
+
+
+# ============================================================
+# РУЧНАЯ ОЧИСТКА (для вызова из админки)
+# ============================================================
+def cleanup_specific_user(user_id: int) -> dict:
+    """Очищает ОДНОГО юзера. Возвращает точную статистику."""
+    contrib_rows = cur.execute(
+        "SELECT cycle_id, clan_id, amount, reason, ts FROM clan_contributions WHERE user_id=?",
+        (user_id,)
+    ).fetchall()
+
+    total = sum(r["amount"] for r in contrib_rows) if contrib_rows else 0
+    count = len(contrib_rows)
+
+    by_clan = {}
+    by_cycle = {}
+    for r in contrib_rows:
+        by_clan[r["clan_id"]] = by_clan.get(r["clan_id"], 0) + r["amount"]
+        by_cycle[r["cycle_id"]] = by_cycle.get(r["cycle_id"], 0) + r["amount"]
+
+    cur.execute("DELETE FROM clan_contributions WHERE user_id=?", (user_id,))
+    cur.execute("DELETE FROM clan_payouts WHERE user_id=?", (user_id,))
+    cur.execute(
+        "UPDATE clan_members SET left_at=? WHERE user_id=? AND left_at IS NULL",
+        (int(time.time()), user_id)
+    )
+    db.commit()
+
+    # Формируем красивую статистику
+    clan_stats = []
+    for cid, amount in by_clan.items():
+        c = get_clan(cid)
+        if c:
+            clan_stats.append({
+                "clan": f"{c['emoji']} {c['name']}",
+                "amount": amount,
+            })
+
+    cycle_stats = []
+    for cyc_id, amount in by_cycle.items():
+        cycle_row = cur.execute("SELECT number FROM clan_cycle WHERE id=?", (cyc_id,)).fetchone()
+        cycle_num = cycle_row["number"] if cycle_row else "?"
+        cycle_stats.append({
+            "cycle": f"Сезон #{cycle_num}",
+            "amount": amount,
+        })
+
+    logger.warning(
+        f"🧹 Ручная очистка {user_id}: всего {total} DC, записей: {count}"
+    )
+
+    return {
+        "user_id": user_id,
+        "total": total,
+        "count": count,
+        "by_clan": clan_stats,
+        "by_cycle": cycle_stats,
+    }
+
+
+# ============================================================
+# КЛАНЫ — доступ
+# ============================================================
 def get_clan(clan_id: int) -> Optional[dict]:
     row = cur.execute("SELECT * FROM clans WHERE id=?", (clan_id,)).fetchone()
     return dict(row) if row else None
@@ -116,6 +251,9 @@ def get_all_clans() -> List[dict]:
 # СОСТАВ КЛАНА
 # ============================================================
 def get_user_clan(user_id: int) -> Optional[dict]:
+    if is_hard_excluded(user_id):
+        return None
+
     row = cur.execute(
         "SELECT clan_id FROM clan_members WHERE user_id=? AND left_at IS NULL",
         (user_id,)
@@ -139,9 +277,10 @@ def _get_clan_stats() -> List[Tuple[dict, int, int]]:
             "SELECT user_id FROM clan_members WHERE clan_id=? AND left_at IS NULL",
             (c["id"],)
         ).fetchall()
-        count = len(members)
+        filtered = [m for m in members if not is_hard_excluded(m["user_id"])]
+        count = len(filtered)
         total_bal = 0
-        for m in members:
+        for m in filtered:
             b = cur.execute("SELECT balance FROM dc_cache WHERE user_id=?", (m["user_id"],)).fetchone()
             if b:
                 total_bal += b["balance"]
@@ -150,7 +289,7 @@ def _get_clan_stats() -> List[Tuple[dict, int, int]]:
 
 
 def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
-    if user_id in EXCLUDE_FROM_CLAN:
+    if is_hard_excluded(user_id):
         return None
 
     if get_user_clan(user_id):
@@ -209,12 +348,14 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
     skipped = 0
     excluded = 0
 
+    cleanup_excluded_users()
+
     for member in guild.members:
         if member.bot:
             continue
         if not any(r.id == CLUB_ROLE_ID for r in member.roles):
             continue
-        if member.id in EXCLUDE_FROM_CLAN:
+        if is_hard_excluded(member.id):
             excluded += 1
             continue
         if get_user_clan(member.id):
@@ -243,6 +384,9 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
         if not members_big:
             break
         moved_uid = members_big["user_id"]
+
+        if is_hard_excluded(moved_uid):
+            break
 
         cur.execute(
             "UPDATE clan_members SET clan_id=? WHERE user_id=?",
@@ -327,6 +471,8 @@ def close_cycle_and_pay(bot) -> bool:
     if not cycle:
         return False
 
+    cleanup_excluded_users()
+
     cur.execute("UPDATE clan_cycle SET state='payout' WHERE id=?", (cycle["id"],))
     db.commit()
 
@@ -347,6 +493,8 @@ def close_cycle_and_pay(bot) -> bool:
             "SELECT user_id, joined_at FROM clan_members WHERE clan_id=? AND left_at IS NULL",
             (c["id"],)
         ).fetchall()
+
+        members = [m for m in members if not is_hard_excluded(m["user_id"])]
 
         if not members or bank <= 0:
             report["clans"].append({
@@ -489,6 +637,9 @@ def close_cycle_and_pay(bot) -> bool:
 # ВКЛАДЫ
 # ============================================================
 async def add_clan_contribution(user_id: int, amount: int, reason: str):
+    if is_hard_excluded(user_id):
+        return False
+
     if amount <= 0:
         return False
 
@@ -548,11 +699,21 @@ def get_clan_bank(clan_id: int, cycle_id: Optional[int] = None) -> int:
     if cycle_id is None:
         cycle = get_current_cycle()
         cycle_id = cycle["id"] if cycle else 0
-    row = cur.execute(
-        "SELECT COALESCE(SUM(amount), 0) AS s FROM clan_contributions "
-        "WHERE cycle_id=? AND clan_id=?",
-        (cycle_id, clan_id)
-    ).fetchone()
+
+    if HARD_EXCLUDED_USERS:
+        ids = list(HARD_EXCLUDED_USERS)
+        placeholders = ",".join("?" * len(ids))
+        row = cur.execute(
+            f"SELECT COALESCE(SUM(amount), 0) AS s FROM clan_contributions "
+            f"WHERE cycle_id=? AND clan_id=? AND user_id NOT IN ({placeholders})",
+            (cycle_id, clan_id, *ids)
+        ).fetchone()
+    else:
+        row = cur.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS s FROM clan_contributions "
+            "WHERE cycle_id=? AND clan_id=?",
+            (cycle_id, clan_id)
+        ).fetchone()
     return row["s"] or 0
 
 
@@ -560,24 +721,39 @@ def get_clan_top(clan_id: int, cycle_id: Optional[int] = None, limit: int = 10) 
     if cycle_id is None:
         cycle = get_current_cycle()
         cycle_id = cycle["id"] if cycle else 0
-    rows = cur.execute(
-        "SELECT user_id, COALESCE(SUM(amount), 0) AS total "
-        "FROM clan_contributions WHERE cycle_id=? AND clan_id=? "
-        "GROUP BY user_id ORDER BY total DESC LIMIT ?",
-        (cycle_id, clan_id, limit)
-    ).fetchall()
+
+    if HARD_EXCLUDED_USERS:
+        ids = list(HARD_EXCLUDED_USERS)
+        placeholders = ",".join("?" * len(ids))
+        rows = cur.execute(
+            f"SELECT user_id, COALESCE(SUM(amount), 0) AS total "
+            f"FROM clan_contributions WHERE cycle_id=? AND clan_id=? "
+            f"AND user_id NOT IN ({placeholders}) "
+            f"GROUP BY user_id ORDER BY total DESC LIMIT ?",
+            (cycle_id, clan_id, *ids, limit)
+        ).fetchall()
+    else:
+        rows = cur.execute(
+            "SELECT user_id, COALESCE(SUM(amount), 0) AS total "
+            "FROM clan_contributions WHERE cycle_id=? AND clan_id=? "
+            "GROUP BY user_id ORDER BY total DESC LIMIT ?",
+            (cycle_id, clan_id, limit)
+        ).fetchall()
     return [{"user_id": r["user_id"], "total": r["total"]} for r in rows]
 
 
 def get_clan_members_count(clan_id: int) -> int:
-    row = cur.execute(
-        "SELECT COUNT(*) AS c FROM clan_members WHERE clan_id=? AND left_at IS NULL",
+    rows = cur.execute(
+        "SELECT user_id FROM clan_members WHERE clan_id=? AND left_at IS NULL",
         (clan_id,)
-    ).fetchone()
-    return row["c"] if row else 0
+    ).fetchall()
+    return sum(1 for r in rows if not is_hard_excluded(r["user_id"]))
 
 
 def get_user_contribution(user_id: int, cycle_id: Optional[int] = None) -> int:
+    if is_hard_excluded(user_id):
+        return 0
+
     if cycle_id is None:
         cycle = get_current_cycle()
         cycle_id = cycle["id"] if cycle else 0
@@ -590,20 +766,40 @@ def get_user_contribution(user_id: int, cycle_id: Optional[int] = None) -> int:
 
 
 def get_last_contributions(clan_id: int, limit: int = 5) -> List[dict]:
-    rows = cur.execute(
-        "SELECT user_id, amount, reason, ts FROM clan_contributions "
-        "WHERE clan_id=? ORDER BY ts DESC LIMIT ?",
-        (clan_id, limit)
-    ).fetchall()
+    if HARD_EXCLUDED_USERS:
+        ids = list(HARD_EXCLUDED_USERS)
+        placeholders = ",".join("?" * len(ids))
+        rows = cur.execute(
+            f"SELECT user_id, amount, reason, ts FROM clan_contributions "
+            f"WHERE clan_id=? AND user_id NOT IN ({placeholders}) "
+            f"ORDER BY ts DESC LIMIT ?",
+            (clan_id, *ids, limit)
+        ).fetchall()
+    else:
+        rows = cur.execute(
+            "SELECT user_id, amount, reason, ts FROM clan_contributions "
+            "WHERE clan_id=? ORDER BY ts DESC LIMIT ?",
+            (clan_id, limit)
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_recent_contributions_all(limit: int = 5) -> List[dict]:
-    rows = cur.execute(
-        "SELECT user_id, amount, reason, ts, clan_id FROM clan_contributions "
-        "ORDER BY ts DESC LIMIT ?",
-        (limit,)
-    ).fetchall()
+    if HARD_EXCLUDED_USERS:
+        ids = list(HARD_EXCLUDED_USERS)
+        placeholders = ",".join("?" * len(ids))
+        rows = cur.execute(
+            f"SELECT user_id, amount, reason, ts, clan_id FROM clan_contributions "
+            f"WHERE user_id NOT IN ({placeholders}) "
+            f"ORDER BY ts DESC LIMIT ?",
+            (*ids, limit)
+        ).fetchall()
+    else:
+        rows = cur.execute(
+            "SELECT user_id, amount, reason, ts, clan_id FROM clan_contributions "
+            "ORDER BY ts DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
