@@ -17,7 +17,7 @@ from core.utils import (
     has_admin_command_roles, has_review_moderation_roles,
     clean_embed_for_discohook, parse_emoji,
     add_ticket_owner, remove_ticket_owner, get_ticket_owner,
-    get_user_tickets_count152_in_category,
+    get_user_tickets_count_in_category,
     assign_ticket_manager, get_ticket_manager, clear_ticket_manager,
     increment_manager_closed, add_manager_rating,
     add_closed_order,
