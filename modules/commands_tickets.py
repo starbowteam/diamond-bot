@@ -17,7 +17,7 @@ from core.utils import (
     has_admin_command_roles, has_review_moderation_roles,
     clean_embed_for_discohook, parse_emoji,
     add_ticket_owner, remove_ticket_owner, get_ticket_owner,
-    get_user_tickets_count_in_category,
+    get_user_tickets_count152_in_category,
     assign_ticket_manager, get_ticket_manager, clear_ticket_manager,
     increment_manager_closed, add_manager_rating,
     add_closed_order,
@@ -35,7 +35,7 @@ from modules.dc import (
 )
 from modules.actions import load_action_embed
 
-_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+_IMG_STRIPE = "https://cdn.discordapp.com/attachments/7006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
 
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_RATING = "https://cdn.discordapp.com/attachments/1527006158282555412/1551636456403894383/image.png?ex=6ab2b18f&is=6ab1600f&hm=b735a4db21085a96326573718f9c397d574fd2d6690c5c55a22e7bc33f4da67a&"
@@ -99,11 +99,15 @@ def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
     return channel.category.id == CONFIG["PAID_CATEGORY_ID"]
 
 
+def _is_coins_ticket(channel: disnake.TextChannel) -> bool:
+    """DC-тикет — категория COINS_CATEGORY_ID."""
+    if not channel.category:
+        return False
+    return channel.category.id == CONFIG["COINS_CATEGORY_ID"]
+
+
 def _get_auto_role_names() -> set:
-    """
-    Возвращает set ИМЁН ролей, которые выдаются автоматически (есть role_id).
-    Их НЕ показываем в DC-тикете.
-    """
+    """Возвращает set ИМЁН ролей, которые выдаются автоматически (есть role_id)."""
     try:
         catalog = load_shop_catalog()
         names = set()
@@ -120,18 +124,12 @@ def _get_auto_role_names() -> set:
 
 
 def _filter_purchases_for_ticket(purchases: list) -> list:
-    """
-    Фильтрует покупки для отображения в DC-тикете:
-    - Скидки — оставляем
-    - Роли с role_id (авто-выдача) — убираем
-    - Всё остальное (кастомные роли, дизайн, реклама, бусты, казино, подарки) — оставляем
-    """
+    """Убирает из списка авто-роли (с role_id)."""
     auto_role_names = _get_auto_role_names()
     result = []
     for p in purchases:
         ptype = p.get("type", "")
         pvalue = p.get("value", "")
-        # Убираем авто-роли
         if ptype == "roles" and pvalue in auto_role_names:
             continue
         result.append(p)
@@ -231,24 +229,33 @@ async def _check_ticket_blocked(inter: disnake.MessageInteraction) -> bool:
 
 
 async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: bool = True):
+    """
+    Закрытие тикета.
+    Для DC-тикетов проверка оценки менеджера НЕ выполняется (кнопки такой нет).
+    Остаётся только требование отзыва в канале отзывов.
+    """
     channel = inter.channel
 
     if check_reviews:
         owner_id = get_ticket_owner(channel.id)
         if owner_id:
-            manager_id = get_ticket_manager(channel.id)
+            is_coins = _is_coins_ticket(channel)
 
-            if manager_id:
-                review = get_ticket_review(channel.id)
-                if not review:
-                    return await inter.response.send_message(
-                        content=(
-                            "❌ **Сначала оставьте отзыв о менеджере.**\n"
-                            "> Нажмите кнопку **«Оценить работу менеджера»** выше."
-                        ),
-                        ephemeral=True
-                    )
+            # 👇 Проверка оценки менеджера — только для НЕ-DC тикетов (real)
+            if not is_coins:
+                manager_id = get_ticket_manager(channel.id)
+                if manager_id:
+                    review = get_ticket_review(channel.id)
+                    if not review:
+                        return await inter.response.send_message(
+                            content=(
+                                "❌ **Сначала оставьте отзыв о менеджере.**\n"
+                                "> Нажмите кнопку **«Оценить работу менеджера»** выше."
+                            ),
+                            ephemeral=True
+                        )
 
+            # 👇 Проверка отзыва в канале — обязательна для ВСЕХ типов
             has_review = await _has_review_in_channel(channel, owner_id)
             if not has_review:
                 return await inter.response.send_message(
@@ -668,7 +675,6 @@ class BuySelect(disnake.ui.StringSelect):
 
         elif value == "coins":
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
-            # 👇 Убираем скидки (они не идут в тикет) + авто-роли
             purchases = [p for p in purchases if p.get('type') != 'discounts']
             purchases = _filter_purchases_for_ticket(purchases)
 
@@ -1219,7 +1225,7 @@ class PromoCodeModal(Modal):
 
 
 # ============================================================
-# КНОПКА ЗАКРЫТИЯ / ОЦЕНКИ
+# КНОПКА ЗАКРЫТИЯ / ОЦЕНКИ (для real-тикетов)
 # ============================================================
 class TicketRatingView(View):
     def __init__(self):
@@ -1323,7 +1329,7 @@ class RatingModal(Modal):
 
 
 # ============================================================
-# ОСНОВНОЙ VIEW С КНОПКАМИ
+# ОСНОВНОЙ VIEW С КНОПКАМИ (real-тикеты)
 # ============================================================
 class TicketView(View):
     def __init__(self):
@@ -1714,6 +1720,7 @@ class CoinsTicketButtons(View):
             except Exception as e:
                 logger.error(f"Ошибка закрытия: {e}")
         else:
+            # 👇 Для DC — проверка отзыва в канале, без оценки менеджера
             await _do_close_ticket(inter, check_reviews=True)
 
 
@@ -1966,7 +1973,6 @@ class BuySelectView(View):
                 embeds=[], view=None
             )
 
-        # 👇 Определяем: это авто-роль (есть role_id) или обычная покупка
         is_auto_role = bool(category == "roles" and item.get("role_id"))
 
         if is_auto_role:
@@ -1980,7 +1986,6 @@ class BuySelectView(View):
                 return await inter.response.edit_message(
                     content=f"❌ У вас уже есть роль **{role.name}**.", embeds=[], view=None
                 )
-            # Проверка на не выданную роль
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
             for p in purchases:
                 if p.get('type') == 'roles' and p.get('value') == item['name']:
@@ -2001,11 +2006,11 @@ class BuySelectView(View):
 
         target_id = recipient_id if recipient_id else user_id
 
-        # 👇 НЕ добавляем авто-роли в purchases (выдаётся сразу)
+        # 👇 Авто-роли НЕ идут в purchases
         if not is_auto_role:
             await add_purchase(target_id, category, item["name"])
 
-        # 👇 Хук квестов клан-лиги (покупка)
+        # 👇 Хук квестов
         try:
             from clan.quests import on_purchase_quest_hook
             await on_purchase_quest_hook(user_id, price)
@@ -2028,7 +2033,6 @@ class BuySelectView(View):
                             ),
                             embeds=[], view=None
                         )
-                        # 👇 ЛС получателю (без эмбеда)
                         await _send_role_review_dm(target_member, item["name"])
                         await log_discord(
                             title="🛒 Покупка роли в магазине DC",
@@ -2049,7 +2053,7 @@ class BuySelectView(View):
                         embeds=[], view=None
                     )
 
-        # 👇 Обычная покупка (не роль с role_id)
+        # 👇 Обычная покупка
         if recipient_id:
             await inter.response.edit_message(
                 content=(
@@ -2101,18 +2105,15 @@ class BuySelectView(View):
         if not success:
             return await inter.followup.send(content="❌ Не удалось списать DC.", ephemeral=True)
 
-        # 👇 НЕ добавляем авто-роль в purchases
         if not is_auto_role:
             await add_purchase(recipient_id, category, item["name"])
 
-        # 👇 Хук покупки
         try:
             from clan.quests import on_purchase_quest_hook
             await on_purchase_quest_hook(user_id, price)
         except Exception as e:
             logger.warning(f"clan purchase hook gift: {e}")
 
-        # 👇 Авто-выдача роли получателю
         if is_auto_role:
             role = inter.guild.get_role(item["role_id"])
             if role:
@@ -2128,7 +2129,6 @@ class BuySelectView(View):
                             ),
                             ephemeral=True
                         )
-                        # 👇 ЛС получателю
                         await _send_role_review_dm(target_member, item["name"])
                         await log_discord(
                             title="🎁 Покупка роли в подарок",
