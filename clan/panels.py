@@ -46,12 +46,10 @@ EMOJI_DEPOSITS = PartialEmoji.from_str("<:Otziv:1541808692314243172>")
 EMOJI_LAST     = PartialEmoji.from_str("<:warn:1552325395171381388>")
 EMOJI_TOTAL    = PartialEmoji.from_str("<:Politic:1539657020695650384>")
 
-# Оригинальные эмодзи игр
 EMOJI_ROULETTE  = "<:ropulet:1550563615675781282>"
 EMOJI_BLACKJACK = "<:joke:1551288467659428020>"
 EMOJI_COINFLIP  = "<:coins:1539649259245408340>"
 
-# Картинки
 IMG_SLOTS_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
                  "1552731239398768711/image.png?ex=6ab6ad27&is=6ab55ba7&"
                  "hm=60031b3eef30f7e7448875045e47612b869469755e50801f3819ae2dfbbb8913&")
@@ -64,9 +62,13 @@ IMG_NEWS_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
                 "1552733874444959824/image.png?ex=6ab6af9c&is=6ab55e1c&"
                 "hm=18b6186e463332b0a9ce258825a1be6592353df0d6ddb346b3e3455eae5206af&")
 
+IMG_ADMIN_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
+                 "1553238615444815963/image.png?ex=6ab885af&is=6ab7342f&"
+                 "hm=cd565ec3073866b96954abcb9ef14bd41b860d9f087492ebdf6c200eecbcfdc2&")
+
 
 # ============================================================
-# 1. КОПИЛКА — СТАТИЧНЫЙ ЭМБЕД (канал 1552700960474800128)
+# 1. КОПИЛКА — СТАТИЧНЫЙ ЭМБЕД
 # ============================================================
 def _build_static_pool_embeds() -> List[disnake.Embed]:
     data = load_json(os.path.join(EMBEDS_DIR, "clan_pool.json"), {})
@@ -79,7 +81,7 @@ def _build_static_pool_embeds() -> List[disnake.Embed]:
 
 
 # ============================================================
-# 2. СЕЗОН — СТАТИЧНЫЙ ЭМБЕД (канал 1552700989465956403)
+# 2. СЕЗОН — СТАТИЧНЫЙ ЭМБЕД
 # ============================================================
 def _build_season_static_embeds() -> List[disnake.Embed]:
     cycle = get_current_cycle()
@@ -115,7 +117,7 @@ def _build_season_static_embeds() -> List[disnake.Embed]:
 
 
 # ============================================================
-# 3. ВКЛАДЫ — эфемерный эмбед (кнопка)
+# 3. ВКЛАДЫ
 # ============================================================
 def _build_contributions_embed() -> disnake.Embed:
     e = disnake.Embed(
@@ -142,7 +144,7 @@ def _build_contributions_embed() -> disnake.Embed:
 
 
 # ============================================================
-# 4. ПОСЛЕДНЕЕ — эфемерный эмбед (кнопка)
+# 4. ПОСЛЕДНЕЕ
 # ============================================================
 def _build_last_embed() -> disnake.Embed:
     recent = get_recent_contributions_all(limit=5)
@@ -169,7 +171,7 @@ def _build_last_embed() -> disnake.Embed:
 
 
 # ============================================================
-# 5. ОБЩИЙ ПУЛ — эфемерный эмбед (кнопка)
+# 5. ОБЩИЙ ПУЛ
 # ============================================================
 def _build_total_pool_embed() -> disnake.Embed:
     total_bank = 0
@@ -201,7 +203,7 @@ def _build_total_pool_embed() -> disnake.Embed:
 
 
 # ============================================================
-# 6. БАНК КЛАНА — эфемерный эмбед (кнопка)
+# 6. БАНК КЛАНА
 # ============================================================
 def _build_clan_bank_embed(user_id: int) -> Optional[disnake.Embed]:
     user_clan = get_user_clan(user_id)
@@ -237,7 +239,7 @@ def _build_clan_bank_embed(user_id: int) -> Optional[disnake.Embed]:
 
 
 # ============================================================
-# 7. ТОП КЛАНА — эфемерный эмбед (кнопка)
+# 7. ТОП КЛАНА
 # ============================================================
 def _build_clan_top_embed(user_id: int) -> Optional[disnake.Embed]:
     user_clan = get_user_clan(user_id)
@@ -281,7 +283,7 @@ def _build_clan_top_embed(user_id: int) -> Optional[disnake.Embed]:
 
 
 # ============================================================
-# 8. КАК ЭТО РАБОТАЕТ — эфемерный эмбед (кнопка)
+# 8. КАК ЭТО РАБОТАЕТ
 # ============================================================
 def _build_howto_embed() -> disnake.Embed:
     e = disnake.Embed(
@@ -314,7 +316,7 @@ def _build_howto_embed() -> disnake.Embed:
 
 
 # ============================================================
-# 9. ИГРЫ — статичный эмбед (канал 1552700973753827509)
+# 9. ИГРЫ
 # ============================================================
 def _build_games_embeds() -> List[disnake.Embed]:
     data = load_json(os.path.join(EMBEDS_DIR, "clan_games.json"), {})
@@ -327,7 +329,7 @@ def _build_games_embeds() -> List[disnake.Embed]:
 
 
 # ============================================================
-# 10. КНОПКИ КОПИЛКИ (Банк / Топ / Как это работает)
+# 10. КНОПКИ КОПИЛКИ
 # ============================================================
 class ClanPoolView(View):
     def __init__(self):
@@ -371,7 +373,7 @@ class ClanPoolView(View):
 
 
 # ============================================================
-# 11. КНОПКИ СЕЗОНА (Вклады / Последнее / Общий пул)
+# 11. КНОПКИ СЕЗОНА
 # ============================================================
 class ClanSeasonView(View):
     def __init__(self):
@@ -409,7 +411,7 @@ class ClanSeasonView(View):
 
 
 # ============================================================
-# 12. КНОПКИ ИГР (Квесты / Игровые автоматы DC)
+# 12. КНОПКИ ИГР
 # ============================================================
 class ClanGamesView(View):
     def __init__(self):
@@ -493,7 +495,6 @@ async def _clan_games_select_callback(inter: disnake.MessageInteraction):
 # 13. ОТПРАВКА ПАНЕЛЕЙ
 # ============================================================
 async def send_clan_pool_panel(bot):
-    """Канал копилки — статичная панель."""
     ch = bot.get_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
     if not ch:
         ch = await bot.fetch_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
@@ -514,7 +515,6 @@ async def send_clan_pool_panel(bot):
 
 
 async def send_clan_season_panel(bot):
-    """Канал сезона — статичный эмбед + кнопки."""
     ch = bot.get_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
     if not ch:
         ch = await bot.fetch_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
@@ -556,17 +556,15 @@ async def send_clan_games_panel(bot):
 
 
 async def update_clan_pool_embed(bot):
-    """Обновляет все панели лиги."""
     await send_clan_pool_panel(bot)
     await send_clan_season_panel(bot)
     await send_clan_games_panel(bot)
 
 
 # ============================================================
-# 14. НОВОСТИ ЛИГИ (канал 1552700701128400979)
+# 14. НОВОСТИ
 # ============================================================
 async def _post_clan_news(bot, title: str, news: str, description: str):
-    """Отправляет новость в канал новостей по шаблону."""
     try:
         ch = bot.get_channel(CONFIG["CLAN_NEWS_CHANNEL_ID"])
         if not ch:
@@ -592,7 +590,6 @@ async def _post_clan_news(bot, title: str, news: str, description: str):
 
 
 async def post_news_season_start(bot):
-    """Новость о старте нового сезона."""
     cycle = get_current_cycle()
     if not cycle:
         return
@@ -607,7 +604,6 @@ async def post_news_season_start(bot):
 
 
 async def post_news_season_3days(bot):
-    """Новость за 3 дня до конца."""
     cycle = get_current_cycle()
     if not cycle:
         return
@@ -621,7 +617,6 @@ async def post_news_season_3days(bot):
 
 
 async def post_news_season_1hour(bot):
-    """Новость за 1 час до конца."""
     cycle = get_current_cycle()
     if not cycle:
         return
@@ -635,7 +630,6 @@ async def post_news_season_1hour(bot):
 
 
 async def post_news_season_end(bot, report: dict):
-    """Новость по итогам сезона."""
     cycle = report["cycle"]
     total = sum(c["bank"] for c in report["clans"])
     top_clan = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
@@ -659,7 +653,6 @@ async def post_news_season_end(bot, report: dict):
 
 
 async def post_news_weekly(bot):
-    """Еженедельный отчёт по воскресеньям."""
     cycle = get_current_cycle()
     if not cycle:
         return
@@ -678,7 +671,7 @@ async def post_news_weekly(bot):
     if top_clan:
         desc = (
             f"В лидерах — {top_clan['emoji']} **{top_clan['name'].upper()}** "
-            f"с банком {top_clan['bank'] if hasattr(top_clan, 'bank') else top_bank} DC. "
+            f"с банком {top_bank} DC. "
             f"Общий пул всех кланов составляет {total_bank} DC. "
             f"До конца сезона осталось совсем немного — успей поддержать свой клан."
         )
@@ -688,7 +681,7 @@ async def post_news_weekly(bot):
 
 
 # ============================================================
-# 15. АДМИН-ПАНЕЛЬ (селект в стафф-канале)
+# 15. АДМИН-ПАНЕЛЬ
 # ============================================================
 class ClanAdminSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -829,6 +822,7 @@ class _KickModal(disnake.ui.Modal):
 
 
 async def send_clan_admin_panel(bot):
+    """Отправляет админ-панель лиги с СЕЛЕКТОМ + красивой шапкой (676767)."""
     STAFF_CHANNEL = 1551276116679860314
     ch = bot.get_channel(STAFF_CHANNEL)
     if not ch:
@@ -836,6 +830,7 @@ async def send_clan_admin_panel(bot):
     if not ch:
         return
 
+    # Чистим прошлые панели лиги
     async for msg in ch.history(limit=30):
         if msg.author == bot.user and msg.embeds:
             for e in msg.embeds:
@@ -846,21 +841,28 @@ async def send_clan_admin_panel(bot):
                         pass
                     break
 
+    # 👇 Embed1 — картинка-шапка (676767)
+    e1 = disnake.Embed(color=0x676767)
+    e1.set_image(url=IMG_ADMIN_TOP)
+
+    # 👇 Embed2 — описание
     e2 = disnake.Embed(
-        title="🏛 Управление клановой лигой",
+        title="Управление клановой лигой",
         description=(
-            "Старт нового цикла — принудительно запустить сезон.\n"
-            "Форс-конец и выплата — закрыть сезон с расчётом.\n"
-            "Автораспределение — раскидать всех клубных без клана (с ребалансом).\n"
-            "Кик из клана — исключить юзера (вклад остаётся в банке).\n"
-            "Обновить панели — пересобрать эмбеды копилки и сезона.\n\n"
+            "> Управление клановой лигой по ручному вводу, имей ввиду, нажимая что то тут - ты управляешь **всем сезоном!**\n\n"
+            "> **Старт нового цикла** — принудительно запустить сезон.\n"
+            "> **Форс-конец и выплата** — закрыть сезон с расчётом пула.\n"
+            "> **Автораспределение** — раскидать всех клубных без клана (с ребалансом).\n"
+            "> **Кик из клана** — исключить юзера (вклад остаётся в банке).\n"
+            "> **Обновить панели** — пересобрать эмбеды копилки и сезона.\n\n"
             "────────────────────\n"
             "Исключения: `1124040555240898631`, `796293832751972352` не распределяются."
         ),
-        color=6776679
+        color=0x676767
     )
     e2.set_image(url=IMG_STRIPE)
-    await ch.send(embed=e2, view=ClanAdminView())
+
+    await ch.send(embeds=[e1, e2], view=ClanAdminView())
 
 
 # ============================================================
@@ -916,7 +918,6 @@ async def _clan_cycle_task(bot):
         if _last_payout_date == today:
             return
         _last_payout_date = today
-        # Собираем отчёт до закрытия (для новости)
         await close_cycle_and_pay(bot)
 
 
@@ -936,7 +937,6 @@ async def _clan_weekly_reset_task(bot):
         reset_weekly_quests()
 
 
-# 👇 Новости: за 3 дня, за 1 час, еженедельно
 @tasks.loop(minutes=1)
 async def _clan_news_task(bot):
     await bot.wait_until_ready()
@@ -947,19 +947,16 @@ async def _clan_news_task(bot):
         if not cycle:
             return
 
-        # За 3 дня до финала — 25 число 20:00 МСК
         if now.day == 25 and now.hour == 20 and now.minute < 2:
             if _news_sent["3days"] != today:
                 _news_sent["3days"] = today
                 await post_news_season_3days(bot)
 
-        # За 1 час до финала — 28 число 19:00 МСК
         if now.day == 28 and now.hour == 19 and now.minute < 2:
             if _news_sent["1hour"] != today:
                 _news_sent["1hour"] = today
                 await post_news_season_1hour(bot)
 
-        # Еженедельно — воскресенье 20:00 МСК
         if now.weekday() == 6 and now.hour == 20 and now.minute < 2:
             if _news_sent["weekly"] != today:
                 _news_sent["weekly"] = today
