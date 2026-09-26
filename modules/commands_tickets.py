@@ -45,6 +45,8 @@ PAY_CONFIRM_DELAY_SECONDS = 60
 WARN_CLOSE_COOLDOWN_SECONDS = 2 * 60 * 60
 QUESTIONS_CATEGORY_ID = 1544363672128987196
 
+REVIEW_CHANNEL_ID = 1462074763437543435
+
 
 # ============================================================
 # ЗАЩИТА ОТ БАГОЮЗА
@@ -97,6 +99,45 @@ def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
     return channel.category.id == CONFIG["PAID_CATEGORY_ID"]
 
 
+def _get_auto_role_names() -> set:
+    """
+    Возвращает set ИМЁН ролей, которые выдаются автоматически (есть role_id).
+    Их НЕ показываем в DC-тикете.
+    """
+    try:
+        catalog = load_shop_catalog()
+        names = set()
+        for cat_key, cat_data in catalog.items():
+            if cat_key != "roles":
+                continue
+            for item_key, item_data in cat_data.get("items", {}).items():
+                if item_data.get("role_id"):
+                    names.add(item_data["name"])
+        return names
+    except Exception as e:
+        logger.warning(f"_get_auto_role_names err: {e}")
+        return set()
+
+
+def _filter_purchases_for_ticket(purchases: list) -> list:
+    """
+    Фильтрует покупки для отображения в DC-тикете:
+    - Скидки — оставляем
+    - Роли с role_id (авто-выдача) — убираем
+    - Всё остальное (кастомные роли, дизайн, реклама, бусты, казино, подарки) — оставляем
+    """
+    auto_role_names = _get_auto_role_names()
+    result = []
+    for p in purchases:
+        ptype = p.get("type", "")
+        pvalue = p.get("value", "")
+        # Убираем авто-роли
+        if ptype == "roles" and pvalue in auto_role_names:
+            continue
+        result.append(p)
+    return result
+
+
 def _build_ticket_overwrites(guild: disnake.Guild, user: disnake.Member) -> dict:
     overwrites = {
         guild.default_role: disnake.PermissionOverwrite(view_channel=False),
@@ -121,6 +162,18 @@ def _build_ticket_overwrites(guild: disnake.Guild, user: disnake.Member) -> dict
                 view_channel=True, send_messages=True, read_message_history=True
             )
     return overwrites
+
+
+async def _send_role_review_dm(member: disnake.Member, role_name: str):
+    """Обычное ЛС (без эмбеда) с просьбой об отзыве."""
+    try:
+        await member.send(
+            f"**Спасибо за покупку роли «{role_name}»!**\n\n"
+            f"Не забудь оставить отзыв в <#{REVIEW_CHANNEL_ID}> — "
+            f"это очень помогает нам расти 💎"
+        )
+    except Exception as e:
+        logger.warning(f"_send_role_review_dm {member.id}: {e}")
 
 
 async def _has_review_in_channel(channel: disnake.TextChannel, user_id: int) -> bool:
@@ -615,7 +668,9 @@ class BuySelect(disnake.ui.StringSelect):
 
         elif value == "coins":
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
+            # 👇 Убираем скидки (они не идут в тикет) + авто-роли
             purchases = [p for p in purchases if p.get('type') != 'discounts']
+            purchases = _filter_purchases_for_ticket(purchases)
 
             if not purchases:
                 return await inter.response.edit_message(
@@ -1910,7 +1965,11 @@ class BuySelectView(View):
                 content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.",
                 embeds=[], view=None
             )
-        if category == "roles" and item.get("role_id"):
+
+        # 👇 Определяем: это авто-роль (есть role_id) или обычная покупка
+        is_auto_role = bool(category == "roles" and item.get("role_id"))
+
+        if is_auto_role:
             role_id = item["role_id"]
             role = inter.guild.get_role(role_id)
             if not role:
@@ -1921,6 +1980,7 @@ class BuySelectView(View):
                 return await inter.response.edit_message(
                     content=f"❌ У вас уже есть роль **{role.name}**.", embeds=[], view=None
                 )
+            # Проверка на не выданную роль
             purchases = await get_user_purchases(inter.author.id, only_unused=True)
             for p in purchases:
                 if p.get('type') == 'roles' and p.get('value') == item['name']:
@@ -1928,16 +1988,22 @@ class BuySelectView(View):
                         content="❌ Вы уже купили эту роль, но она ещё не выдана.",
                         embeds=[], view=None
                     )
+
         reason = f"Покупка: {item['name']}"
         if recipient_id:
             reason += f" (подарок для <@{recipient_id}>)"
+
         success = await remove_dc(user_id, price, reason)
         if not success:
             return await inter.response.edit_message(
                 content="❌ Не удалось списать DC.", embeds=[], view=None
             )
+
         target_id = recipient_id if recipient_id else user_id
-        await add_purchase(target_id, category, item["name"])
+
+        # 👇 НЕ добавляем авто-роли в purchases (выдаётся сразу)
+        if not is_auto_role:
+            await add_purchase(target_id, category, item["name"])
 
         # 👇 Хук квестов клан-лиги (покупка)
         try:
@@ -1946,7 +2012,8 @@ class BuySelectView(View):
         except Exception as e:
             logger.warning(f"clan purchase hook: {e}")
 
-        if category == "roles" and item.get("role_id"):
+        # 👇 Авто-выдача роли
+        if is_auto_role:
             role = inter.guild.get_role(item["role_id"])
             if role:
                 try:
@@ -1957,10 +2024,12 @@ class BuySelectView(View):
                             content=(
                                 f"✅ Вы купили роль **{item['name']}** за **{price} DC**!\n"
                                 f"🎭 Роль **{role.name}** выдана {target_member.mention}.\n"
-                                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                                f"📩 Проверьте ЛС — там информация об отзыве."
                             ),
                             embeds=[], view=None
                         )
+                        # 👇 ЛС получателю (без эмбеда)
+                        await _send_role_review_dm(target_member, item["name"])
                         await log_discord(
                             title="🛒 Покупка роли в магазине DC",
                             description=f"> **Покупатель:** {inter.author.mention}\n> **Получатель:** {target_member.mention}\n> **Роль:** {item['name']}\n> **Цена:** {price} DC",
@@ -1980,6 +2049,7 @@ class BuySelectView(View):
                         embeds=[], view=None
                     )
 
+        # 👇 Обычная покупка (не роль с role_id)
         if recipient_id:
             await inter.response.edit_message(
                 content=(
@@ -2019,15 +2089,21 @@ class BuySelectView(View):
                 content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у вас: **{balance} DC**.",
                 ephemeral=True
             )
-        if category == "roles" and item.get("role_id"):
+
+        is_auto_role = bool(category == "roles" and item.get("role_id"))
+        if is_auto_role:
             role = inter.guild.get_role(item["role_id"])
             if not role:
                 return await inter.followup.send(content="❌ Роль не найдена.", ephemeral=True)
+
         reason = f"Покупка: {item['name']} (подарок для <@{recipient_id}>)"
         success = await remove_dc(user_id, price, reason)
         if not success:
             return await inter.followup.send(content="❌ Не удалось списать DC.", ephemeral=True)
-        await add_purchase(recipient_id, category, item["name"])
+
+        # 👇 НЕ добавляем авто-роль в purchases
+        if not is_auto_role:
+            await add_purchase(recipient_id, category, item["name"])
 
         # 👇 Хук покупки
         try:
@@ -2036,7 +2112,8 @@ class BuySelectView(View):
         except Exception as e:
             logger.warning(f"clan purchase hook gift: {e}")
 
-        if category == "roles" and item.get("role_id"):
+        # 👇 Авто-выдача роли получателю
+        if is_auto_role:
             role = inter.guild.get_role(item["role_id"])
             if role:
                 try:
@@ -2047,10 +2124,12 @@ class BuySelectView(View):
                             content=(
                                 f"✅ Вы купили роль **{item['name']}** за **{price} DC** и подарили {target_member.mention}!\n"
                                 f"🎭 Роль выдана получателю.\n"
-                                f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
+                                f"📩 Он получил ЛС с просьбой об отзыве."
                             ),
                             ephemeral=True
                         )
+                        # 👇 ЛС получателю
+                        await _send_role_review_dm(target_member, item["name"])
                         await log_discord(
                             title="🎁 Покупка роли в подарок",
                             description=f"> **Покупатель:** {inter.author.mention}\n> **Получатель:** {target_member.mention}\n> **Роль:** {item['name']}\n> **Цена:** {price} DC",
@@ -2063,6 +2142,7 @@ class BuySelectView(View):
                         content=f"❌ Ошибка: {e}\n💎 {price} DC возвращены.",
                         ephemeral=True
                     )
+
         await inter.followup.send(
             content=(
                 f"✅ Вы купили **{item['name']}** за **{price} DC** и подарили <@{recipient_id}>!\n"
