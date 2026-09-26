@@ -34,14 +34,19 @@
     "label": "🎭 Особые роли",
     "description": "Временные и постоянные роли",
     "items": {
-      "role_active":       {"name": "Роль «Активный»",                 "price": 30,  "description": "Постоянная роль «Активный»", "role_id": 1533140263789395998},
-      "role_helper":       {"name": "Роль «Помощник»",                 "price": 40,  "description": "Роль «Помощник» (навсегда)", "role_id": 1536948551265812551},
-      "role_vip":          {"name": "Роль «VIP»",                      "price": 45,  "description": "VIP-роль на 30 дней",         "role_id": 1533549996790513685},
-      "role_mega":         {"name": "Роль «Мега-активный»",            "price": 60,  "description": "Роль «Мега-активный»",        "role_id": 1536948737514151976},
-      "role_legend":       {"name": "Роль «Легенда»",                  "price": 70,  "description": "Легендарная роль",            "role_id": 1535638212557541438},
-      "role_newbie":       {"name": "Роль «Новичок месяца»",           "price": 75,  "description": "Роль для новичков",           "role_id": 1536948841394212934},
-      "custom_role":       {"name": "Кастомная роль",                  "price": 105, "description": "Создание индивидуальной роли (выдача вручную)"},
-      "custom_role_emoji": {"name": "Кастомная роль с эмодзи в списке", "price": 130, "description": "Создание индивидуальной роли и эмодзи к ней (выдача вручную)"}
+      "role_active":          {"name": "Роль «Активный»",                 "price": 30,  "description": "Постоянная роль «Активный»", "role_id": 1533140263789395998},
+      "role_helper":          {"name": "Роль «Помощник»",                 "price": 40,  "description": "Роль «Помощник» (навсегда)", "role_id": 1536948551265812551},
+      "role_vip":             {"name": "Роль «VIP»",                      "price": 45,  "description": "VIP-роль на 30 дней",         "role_id": 1533549996790513685},
+      "role_mega":            {"name": "Роль «Мега-активный»",            "price": 60,  "description": "Роль «Мега-активный»",        "role_id": 1536948737514151976},
+      "role_legend":          {"name": "Роль «Легенда»",                  "price": 70,  "description": "Легендарная роль",            "role_id": 1535638212557541438},
+      "role_newbie":          {"name": "Роль «Новичок месяца»",           "price": 75,  "description": "Роль для новичков",           "role_id": 1536948841394212934},
+
+      "role_crystalized":     {"name": "Роль «Кристализированный»",        "price": 40,  "description": "Особая роль от Diamond",       "role_id": 1553243214750687322},
+      "role_mega_buyer":      {"name": "Роль «Мега-Скупщик»",             "price": 40,  "description": "Особая роль от Diamond",       "role_id": 1553243179296366652},
+      "role_reseller":        {"name": "Роль «Перекуп»",                  "price": 40,  "description": "Особая роль от Diamond",       "role_id": 1553243215870558269},
+
+      "custom_role":          {"name": "Кастомная роль",                  "price": 105, "description": "Создание индивидуальной роли (выдача вручную)"},
+      "custom_role_emoji":    {"name": "Кастомная роль с эмодзи в списке", "price": 130, "description": "Создание индивидуальной роли и эмодзи к ней (выдача вручную)"}
     }
   },
   "boosts": {
@@ -60,10 +65,10 @@
     "label": "🎲 Казино-предметы",
     "description": "Усилители и бонусы для игр в казино",
     "items": {
-      "casino_insurance":     {"name": "Страховка ставки",       "price": 65,  "description": "Возврат 50% при проигрыше в следующей игре",  "boost_type": "insurance",      "value": 0.5, "uses": 1},
+      "casino_insurance":     {"name": "Страховка ставки",        "price": 65,  "description": "Возврат 50% при проигрыше в следующей игре",  "boost_type": "insurance",      "value": 0.5, "uses": 1},
       "casino_boost_x2":      {"name": "x2 к следующему выигрышу","price": 200, "description": "Удвоение любой выплаты в 1 партии",            "boost_type": "next_mult",      "value": 2.0, "uses": 1},
       "casino_lucky_hour":    {"name": "Удачный час (60 мин)",    "price": 225, "description": "Все множители +20% на час",                    "boost_type": "lucky_hour",     "value": 1.2, "duration_hours": 1},
-      "casino_jackpot_ticket":{"name": "Билет в мега-джекпот",   "price": 280, "description": "Участвует в розыгрыше общего банка казино",    "boost_type": "jackpot_ticket", "value": 0,   "uses": 1}
+      "casino_jackpot_ticket":{"name": "Билет в мега-джекпот",    "price": 280, "description": "Участвует в розыгрыше общего банка казино",    "boost_type": "jackpot_ticket", "value": 0,   "uses": 1}
     }
   },
   "gifts": {
@@ -77,3 +82,4 @@
       "gift_5000": {"name": "Подарить 5000 DC", "price": 5250, "description": "Отправка 5000 DC другому юзеру (комиссия 5%)", "gift_amount": 5000}
     }
   }
+}
