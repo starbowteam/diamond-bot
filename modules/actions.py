@@ -44,6 +44,8 @@ DAILY_DEAL_DISCOUNT = 30
 FLASH_SALE_DISCOUNT = 70
 DAILY_DEALS_PER_CYCLE = 5
 
+REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
+
 # ============================================================
 # КАРТИНКИ
 # ============================================================
@@ -77,6 +79,22 @@ EMOJI_COIN_RETRY  = PartialEmoji(name="Otziv", id=1541808692314243172)
 EMOJI_COIN_DOUBLE = PartialEmoji(name="flas", id=1551289202279325756)
 
 P = "\u3164"
+
+
+# ============================================================
+# ХЕЛПЕР — ЛС об отзыве после покупки роли
+# ============================================================
+async def _send_role_review_dm(member: disnake.Member, role_name: str):
+    """Обычное ЛС (без эмбеда) с просьбой об отзыве."""
+    try:
+        await member.send(
+            f"**Спасибо за покупку роли «{role_name}»!**\n\n"
+            f"Не забудь оставить отзыв в <#{REVIEW_CHANNEL_ID}> — "
+            f"это очень помогает нам расти 💎"
+        )
+    except Exception as e:
+        logger.warning(f"_send_role_review_dm {member.id}: {e}")
+
 
 # ============================================================
 # DAILY DEAL / FLASH SALE
@@ -375,7 +393,6 @@ class RouletteModal(Modal):
         result = roll_roulette()
         mult = result["mult"]
 
-        # 👇 Хук квестов — партия сыграна
         if on_casino_quest_hook:
             try:
                 await on_casino_quest_hook(user_id)
@@ -389,9 +406,7 @@ class RouletteModal(Modal):
             reason = f"Выигрыш в рулетке: {result['name']}"
             if used:
                 reason += f" ({', '.join(used)})"
-            # 👇 60% в банк клана
             await add_dc(user_id, payout, reason, clan_share=0.6)
-            # 👇 Хук выигрыша
             if on_casino_win_hook:
                 try:
                     await on_casino_win_hook(user_id, payout, bet)
@@ -662,7 +677,6 @@ class BlackjackBetModal(Modal):
             "finished": False,
         }
 
-        # Хук партии
         if on_casino_quest_hook:
             try:
                 await on_casino_quest_hook(user_id)
@@ -821,7 +835,6 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
         payout, used = apply_casino_win(user_id, payout)
         if used:
             reason += f" ({', '.join(used)})"
-        # 👇 60% в банк клана
         await add_dc(user_id, payout, reason, clan_share=0.6)
         if on_casino_win_hook:
             try:
@@ -1109,7 +1122,6 @@ class CoinflipChoiceView(View):
             reason = f"Монетка ({result_side})"
             if used:
                 reason += f" ({', '.join(used)})"
-            # 👇 60% в банк клана
             await add_dc(user_id, payout, reason, clan_share=0.6)
             if on_casino_win_hook:
                 try:
@@ -1340,6 +1352,7 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
 
     user_id = inter.author.id
 
+    # Проверка что акционный товар уже куплен
     existing = await get_user_purchases(user_id, only_unused=False)
     for p in existing:
         if p.get("from_action") and p.get("value") == item_data["name"]:
@@ -1360,17 +1373,21 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     if not success:
         return await inter.response.send_message("❌ Ошибка списания DC.", ephemeral=True)
 
+    # 👇 АВТО-РОЛЬ (с role_id) — выдаём сразу, БЕЗ purchases
     if cat_key == "roles" and item_data.get("role_id"):
         role = inter.guild.get_role(item_data["role_id"])
         if role:
             try:
                 await inter.author.add_roles(role)
-                await add_purchase(user_id, cat_key, item_data["name"], from_action=True)
+                # ❌ НЕ добавляем в purchases — роль уже выдана
                 await inter.response.send_message(
                     f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Роль выдана.\n"
+                    f"📩 Проверьте ЛС — там информация об отзыве.\n"
                     f"⚠️ Это **акционный** товар — возврату не подлежит.",
                     ephemeral=True
                 )
+                # 👇 ЛС о отзыве
+                await _send_role_review_dm(inter.author, item_data["name"])
                 await log_discord(
                     title="🔥 Покупка по акции (роль)",
                     description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item_data['name']}\n> **Цена:** {price} DC",
@@ -1385,6 +1402,7 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
             await add_dc(user_id, price, "Возврат DC (роль не найдена)")
             return await inter.response.send_message("❌ Роль не найдена на сервере.", ephemeral=True)
 
+    # 👇 Обычная покупка — в purchases, ждёт выдачи в тикете
     await add_purchase(user_id, cat_key, item_data["name"], from_action=True)
     await inter.response.send_message(
         f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Активируйте товар в <#1462136361711829053>.\n"
