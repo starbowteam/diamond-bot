@@ -15,7 +15,7 @@
       "fields": [
         {
           "name": "> **1 Month Trial**",
-          "value": "```155₽ | 930 ₸ ```",
+          "value": "```160₽ | 930 ₸ ```",
           "inline": true
         },
         {
@@ -25,17 +25,17 @@
         },
         {
           "name": "> **3 Month Trial**",
-          "value": "```250₽ | 1500 ₸ ```",
+          "value": "```260₽ | 1500 ₸ ```",
           "inline": true
         },
         {
           "name": "> **1 Month**",
-          "value": "```445₽ | 2670 ₸ ```",
+          "value": "```460₽ | 2670 ₸ ```",
           "inline": true
         },
         {
           "name": "> **12 Month**",
-          "value": "```3300₽ | 19980 ₸ ```",
+          "value": "```3320₽ | 19980 ₸ ```",
           "inline": true
         }
       ],
