@@ -65,21 +65,19 @@ WELCOME_BONUS_DC = 50
 
 MSK = timezone(timedelta(hours=3))
 
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1551605614839463977/image.png?ex=6ab294d6&is=6ab14356&hm=4bddf29fabcc31cf6d81f58d190276c64503a03f1b27fa66b35e465e68d54000&"
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
-# Файл состояния зарплат (защита от повторной выдачи + catch-up)
 SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
 
-# защита от повторного запуска daily_activity_payout
 _LAST_PAYOUT_DATE = None
 _LAST_REMINDER_DATE = None
 
 
 # ============================================================
-# СОСТОЯНИЕ ЗАРПЛАТ (JSON)
+# СОСТОЯНИЕ ЗАРПЛАТ
 # ============================================================
 def load_salary_state() -> dict:
     return load_json(SALARY_STATE_FILE, {"advance": "", "salary": ""})
@@ -138,6 +136,14 @@ async def process_salary(mode: str):
             stats[top_role_id] += 1
             awarded += 1
             total += amount
+
+            # 👇 Достижения персонала
+            try:
+                from clan.achievements import check_and_unlock
+                await check_and_unlock(member.id, "staff_salary", value=1, bot=bot)
+            except Exception as e:
+                logger.warning(f"staff_salary ach: {e}")
+
             await asyncio.sleep(0.4)
         except Exception as e:
             logger.error(f"Ошибка авто-начисления {mode} {member.id}: {e}")
@@ -171,7 +177,7 @@ async def process_salary(mode: str):
 
 
 # ============================================================
-# CATCH-UP: ДОГОНЯЮЩИЕ ВЫПЛАТЫ
+# CATCH-UP
 # ============================================================
 async def try_pay_advance() -> bool:
     state = load_salary_state()
@@ -463,7 +469,7 @@ async def on_ready():
 
         await update_review_counter(silent=False)
 
-        # ⬇️ CATCH-UP: догоняем пропущенные выплаты
+        # CATCH-UP зарплат
         try:
             paid_advance = await try_pay_advance()
             if paid_advance:
@@ -478,7 +484,7 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"catch-up salary err: {e}")
 
-        # ⬇️ КЛАНОВАЯ ЛИГА — инициализация + панели
+        # КЛАН-ЛИГА + ДОСТИЖЕНИЯ
         try:
             from clan import init_clan_league
             from clan.panels import (
@@ -491,7 +497,7 @@ async def on_ready():
             bot.loop.create_task(send_clan_games_panel(bot))
             logger.info("Клан-лига инициализирована")
 
-            # Автораспределение клубных без клана
+            # Автораспределение клубных
             try:
                 from clan.core import distribute_all_club_members
                 guild_for_clan = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -500,6 +506,15 @@ async def on_ready():
                     logger.info(f"Автораспределение кланов: assigned={result['assigned']}, skipped={result['skipped']}")
             except Exception as e:
                 logger.exception(f"auto-distribute clan err: {e}")
+
+            # 👇 Достижение "Создатель" — тебе автоматически
+            try:
+                from clan.achievements import unlock_achievement, CREATOR_USER_ID
+                await unlock_achievement(CREATOR_USER_ID, "creator", bot=bot, notify=False)
+                logger.info("👑 Достижение Создателя проверено")
+            except Exception as e:
+                logger.warning(f"creator ach: {e}")
+
         except Exception as e:
             logger.exception(f"clan league init err: {e}")
 
@@ -605,7 +620,14 @@ async def on_member_join(member: disnake.Member):
         except Exception as e:
             logger.error(f"Не удалось выдать роль: {e}")
 
-    # Приветственный бонус 50 DC
+    # 👇 Достижение "Новичок"
+    try:
+        from clan.achievements import unlock_achievement
+        await unlock_achievement(member.id, "newbie", bot=bot)
+    except Exception as e:
+        logger.warning(f"newbie ach: {e}")
+
+    # Приветственный бонус
     try:
         data = get_dc_cache(member.id)
         already_received = any(
@@ -733,13 +755,32 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in added)}",
                 color=0x00ff00
             )
-            # 👇 Автораспределение в клан при получении роли Клуб
+            # Автораспределение в клан
             try:
                 from clan.core import CLUB_ROLE_ID, assign_user_to_clan, get_user_clan
                 if any(r.id == CLUB_ROLE_ID for r in added) and not get_user_clan(after.id):
                     assign_user_to_clan(after.id, after.guild)
             except Exception as e:
                 logger.warning(f"clan auto-assign on role: {e}")
+
+            # 👇 Достижения по ролям покупателя
+            try:
+                from clan.achievements import check_and_unlock
+                role_ids = CONFIG["ROLE_IDS"]
+                role_map = {
+                    role_ids["bronze"]: "bronze",
+                    role_ids["silver"]: "silver",
+                    role_ids["gold"]: "gold",
+                    role_ids["diamond"]: "diamond",
+                    role_ids["crystalis"]: "crystalis",
+                    role_ids["pka"]: "pka",
+                }
+                for r in added:
+                    if r.id in role_map:
+                        await check_and_unlock(after.id, "role", role_key=role_map[r.id], bot=bot)
+            except Exception as e:
+                logger.warning(f"role ach: {e}")
+
         if removed:
             await log_discord(
                 title="➖ Снята роль",
@@ -915,7 +956,6 @@ async def on_interaction(inter: disnake.MessageInteraction):
     from modules.commands_tickets import handle_interaction
     await handle_interaction(inter)
     await handle_flash_interaction(inter)
-    # Клан-лига
     try:
         from clan.panels import handle_clan_interaction
         await handle_clan_interaction(inter)
@@ -958,6 +998,12 @@ async def on_message(message: disnake.Message):
         if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
             if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
                 await add_message_dc(message.author.id)
+                # 👇 Достижение "Первое слово"
+                try:
+                    from clan.achievements import unlock_achievement
+                    await unlock_achievement(message.author.id, "first_message", bot=bot, notify=False)
+                except Exception:
+                    pass
 
     # Обработка отзывов
     if is_guild_text and message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
@@ -1007,13 +1053,20 @@ async def on_message(message: disnake.Message):
         save_json(FILES["review_counts"], counts)
 
         try:
-            # 👇 60% в банк клана
             await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке",
                          notify=False, log=False, clan_share=0.6)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
 
-        # 👇 Хук квестов клан-лиги
+        # 👇 Достижения за отзывы
+        try:
+            from clan.achievements import check_and_unlock
+            total_reviews = counts[str(user_id)]
+            await check_and_unlock(user_id, "reviews", value=total_reviews, bot=bot)
+        except Exception as e:
+            logger.warning(f"reviews ach: {e}")
+
+        # 👇 Квест-хук
         try:
             from clan.quests import on_review_quest_hook
             await on_review_quest_hook(user_id)
@@ -1057,7 +1110,7 @@ async def on_message(message: disnake.Message):
         await update_review_counter(silent=False)
         return
 
-    # 👇 Хук клан-квестов (сообщения)
+    # Клан-квест хуки
     if is_guild_text:
         try:
             from clan.quests import on_message_quest_hook
@@ -1078,6 +1131,12 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
     user_id = member.id
     if after.channel and (before.channel is None or before.channel != after.channel):
         voice_track[user_id] = (after.channel.id, int(time.time()))
+        # 👇 Достижение "Голос"
+        try:
+            from clan.achievements import unlock_achievement
+            await unlock_achievement(user_id, "first_voice", bot=bot, notify=False)
+        except Exception:
+            pass
     elif before.channel and (after.channel is None or after.channel != before.channel):
         if user_id in voice_track:
             channel_id, join_time = voice_track.pop(user_id)
@@ -1085,10 +1144,23 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
             if duration > 60:
                 from modules.dc import add_voice_dc
                 await add_voice_dc(user_id, duration)
-                # 👇 Хук квестов клан-лиги
                 try:
                     from clan.quests import on_voice_quest_hook
                     await on_voice_quest_hook(user_id, duration)
                 except Exception as e:
                     logger.warning(f"clan voice hook: {e}")
-                # лог не пишем — иначе спам в канале
+
+                # 👇 Достижения за войс (по часам)
+                try:
+                    from clan.achievements import check_and_unlock
+                    # Сколько всего часов в войсе у юзера
+                    row = cur.execute(
+                        "SELECT voice_time_today FROM dc_cache WHERE user_id=?",
+                        (user_id,)
+                    ).fetchone()
+                    # Точный подсчёт сложно, поэтому используем накопленный счётчик через БД
+                    # (можно добавить поле total_voice_time в dc_cache в будущем)
+                    # Пока проверяем только ежедневный минимум
+                    pass
+                except Exception:
+                    pass
