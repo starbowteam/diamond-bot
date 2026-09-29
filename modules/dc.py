@@ -23,7 +23,7 @@ from core.utils import (
     activate_item, get_item, clear_item,
 )
 
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
 
@@ -86,7 +86,8 @@ async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: 
 async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True, clan_share: float = 0.0):
     """
     Начисляет DC.
-    clan_share — доля, уходящая в банк клана (0.0 — не уходит; 0.6 — 60%).
+    clan_share — доля, уходящая в банк клана.
+    👇 Автоматически проверяет достижения по балансу.
     """
     data = get_dc_cache(user_id)
     data["balance"] += amount
@@ -100,7 +101,7 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
     save_dc_cache(user_id, data)
     sync_dc_to_json()
 
-    # 👇 Клан-вклад
+    # Клан-вклад
     if clan_share > 0 and amount > 0:
         try:
             from clan.core import add_clan_contribution
@@ -109,6 +110,15 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
                 await add_clan_contribution(user_id, bank_amount, reason)
         except Exception as e:
             logger.warning(f"clan_share add_dc err: {e}")
+
+    # 👇 Достижения по балансу
+    if amount > 0:
+        try:
+            from clan.achievements import check_and_unlock
+            from core.bot import bot
+            asyncio.create_task(check_and_unlock(user_id, "balance", value=data["balance"], bot=bot))
+        except Exception as e:
+            logger.warning(f"balance ach: {e}")
 
     if log:
         await log_discord(
@@ -227,7 +237,6 @@ async def daily_activity_payout():
                 parts.append(f"голос: {voice_dc} DC")
             reason = "Активность за день (" + ", ".join(parts) + ")"
 
-            # 👇 60% в банк клана
             await add_dc(uid, total, reason, notify=True, log=False, clan_share=0.6)
             paid_users += 1
             total_paid += total
@@ -343,7 +352,6 @@ async def daily_bonus():
             continue
         data = get_dc_cache(member.id)
         if data["last_bonus"] < now - 86400:
-            # 👇 60% в банк клана
             await add_dc(member.id, 3, "Ежедневный бонус (Клуб)", notify=True, log=False, clan_share=0.6)
             data = get_dc_cache(member.id)
             data["last_bonus"] = now
@@ -449,13 +457,6 @@ async def check_unused_purchases(bot):
     logger.info(f"check_unused_purchases: проверено {checked}, отправлено {sent}")
 
 
-# Новая сетка:
-#   Bronze   1-5
-#   Silver   6-10
-#   Gold     11-15
-#   Diamond  16-20
-#   Crystalis 21-25
-#   PKA      26+
 def get_progress_bar(count: int):
     thresholds = [
         (1, "club", "Клуб"),
