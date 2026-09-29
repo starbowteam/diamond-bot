@@ -2102,7 +2102,7 @@ class BuySelectView(View):
             await inter.response.edit_message(
                 content=(
                     f"✅ Вы купили **{item['name']}** за **{price} DC**!\n"
-                    f"📦 Товар будет выдан в ближайшее время.\n"
+                    f"📦 Оформите тикет в витрине, для дальнейшей покупки.\n"
                     f"📝 Не забудьте оставить отзыв в <#1462074763437543435>."
                 ),
                 embeds=[], view=None
