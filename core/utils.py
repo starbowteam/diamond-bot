@@ -307,6 +307,18 @@ CREATE TABLE IF NOT EXISTS clan_payouts (
     final_amount INTEGER,
     paid_at      INTEGER
 );
+
+-- ============================================================
+-- ДОСТИЖЕНИЯ
+-- ============================================================
+CREATE TABLE IF NOT EXISTS clan_achievements (
+    user_id     INTEGER,
+    ach_key     TEXT,
+    unlocked_at INTEGER,
+    season_id   INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, ach_key)
+);
+CREATE INDEX IF NOT EXISTS idx_clan_ach_user ON clan_achievements (user_id);
 """)
 db.commit()
 
@@ -458,7 +470,6 @@ def get_roles_for_count(count: int) -> list[int]:
 
 
 async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool = False):
-    # Снимаем устаревшие роли
     dep_to_remove = [r for r in member.roles if r.id in DEPRECATED_ROLE_IDS]
     for role in dep_to_remove:
         try:
