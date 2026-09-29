@@ -25,12 +25,6 @@ MIN_BALANCE     = 0
 
 # ============================================================
 # 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ ИЗ КЛАН-ЛИГИ
-# Эти юзеры НИКОГДА не участвуют:
-#   - не распределяются
-#   - не считаются вклады
-#   - не отображается клан в профиле
-#   - не получают выплаты
-#   - автоматически вычищаются из БД при старте
 # ============================================================
 HARD_EXCLUDED_USERS = {
     1124040555240898631,
@@ -53,11 +47,41 @@ TOP_BONUSES = [1.75, 1.50, 1.30]
 REPORT_DM_USER_ID = 796293832751972352
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
-              "1537851307757539390/image.png?ex=6ab5efe3&is=6ab49e63&"
-              "hm=d1b48b6ea98c9662564b5a77012797024de47fbc9444922b72184d6d0a6d5a2a&")
+              "1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&"
+              "hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&")
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
+
+# ============================================================
+# 🏷 НАЗВАНИЯ СЕЗОНОВ
+# ============================================================
+SEASON_NAMES = {
+    1: "Начало",
+    2: "Стихия проклятья",
+    3: "Неутопание кристалла",
+    4: "Сияние богачей",
+    # Добавляй по мере надобности
+}
+
+
+def get_season_name(number: int) -> str:
+    """Возвращает название сезона или фолбэк."""
+    if number in SEASON_NAMES:
+        return SEASON_NAMES[number]
+    return f"Сезон #{number}"
+
+
+def get_season_title(number: int) -> str:
+    """Красивый заголовок: 'Сезон 2 — Стихия проклятья'."""
+    if number in SEASON_NAMES:
+        return f"Сезон {number} — {SEASON_NAMES[number]}"
+    return f"Сезон #{number}"
+
+
+# ============================================================
+# КЛАНЫ
+# ============================================================
 CLANS_DATA = [
     {
         "id": 1,
@@ -93,7 +117,7 @@ CLANS_DATA = [
 
 
 # ============================================================
-# ИНИЦИАЛИЗАЦИЯ + АВТООЧИСТКА
+# ИНИЦИАЛИЗАЦИЯ
 # ============================================================
 def init_clan_core():
     for c in CLANS_DATA:
@@ -107,20 +131,13 @@ def init_clan_core():
 
 
 def cleanup_excluded_users() -> dict:
-    """
-    Жёстко вычищает исключённых:
-      - из clan_members (left_at)
-      - из clan_contributions (удаляет вклады, но считает их сумму ДО удаления)
-      - из clan_payouts (удаляет историю)
-    Возвращает статистику: {user_id: {contribs_sum, contribs_count, cycles}}
-    """
+    """Жёстко вычищает исключённых + удаляет их достижения."""
     if not HARD_EXCLUDED_USERS:
         return {}
 
     report = {}
 
     for uid in HARD_EXCLUDED_USERS:
-        # Сначала считаем что удаляем
         contrib_rows = cur.execute(
             "SELECT cycle_id, clan_id, amount FROM clan_contributions WHERE user_id=?",
             (uid,)
@@ -138,20 +155,15 @@ def cleanup_excluded_users() -> dict:
                 "clans": clans,
             }
 
-        # Удаляем вклады
         cur.execute("DELETE FROM clan_contributions WHERE user_id=?", (uid,))
-        # Удаляем выплаты
         cur.execute("DELETE FROM clan_payouts WHERE user_id=?", (uid,))
-        # Помечаем left_at
         cur.execute(
-            "UPDATE clan_members SET left_at=? "
-            "WHERE user_id=? AND left_at IS NULL",
+            "UPDATE clan_members SET left_at=? WHERE user_id=? AND left_at IS NULL",
             (int(time.time()), uid)
         )
 
     db.commit()
 
-    # Логируем
     for uid, data in report.items():
         clan_names = []
         for cid in data["clans"]:
@@ -170,11 +182,8 @@ def is_hard_excluded(user_id: int) -> bool:
     return user_id in HARD_EXCLUDED_USERS
 
 
-# ============================================================
-# РУЧНАЯ ОЧИСТКА (для вызова из админки)
-# ============================================================
 def cleanup_specific_user(user_id: int) -> dict:
-    """Очищает ОДНОГО юзера. Возвращает точную статистику."""
+    """Очищает ОДНОГО юзера."""
     contrib_rows = cur.execute(
         "SELECT cycle_id, clan_id, amount, reason, ts FROM clan_contributions WHERE user_id=?",
         (user_id,)
@@ -197,7 +206,6 @@ def cleanup_specific_user(user_id: int) -> dict:
     )
     db.commit()
 
-    # Формируем красивую статистику
     clan_stats = []
     for cid, amount in by_clan.items():
         c = get_clan(cid)
@@ -215,10 +223,6 @@ def cleanup_specific_user(user_id: int) -> dict:
             "cycle": f"Сезон #{cycle_num}",
             "amount": amount,
         })
-
-    logger.warning(
-        f"🧹 Ручная очистка {user_id}: всего {total} DC, записей: {count}"
-    )
 
     return {
         "user_id": user_id,
@@ -462,7 +466,7 @@ def start_new_cycle(force_short: bool = False) -> dict:
     db.commit()
 
     cycle = get_current_cycle()
-    logger.info(f"Клан-лига: старт цикла #{number} до {datetime.fromtimestamp(ends_at, MSK)}")
+    logger.info(f"Клан-лига: старт {get_season_title(number)} до {datetime.fromtimestamp(ends_at, MSK)}")
     return cycle
 
 
@@ -555,7 +559,7 @@ def close_cycle_and_pay(bot) -> bool:
                     from modules.dc import add_dc
                     bot.loop.create_task(add_dc(
                         m["user_id"], payout,
-                        f"Клановая лига: выплата за сезон #{cycle['number']}",
+                        f"Клановая лига: выплата за {get_season_title(cycle['number'])}",
                         notify=True, log=False, clan_share=0.0
                     ))
                 except Exception as e:
@@ -593,6 +597,24 @@ def close_cycle_and_pay(bot) -> bool:
                 (total_paid, cycle_id))
     db.commit()
 
+    # 👇 Достижения по итогам сезона (топ-1 клана и чемпион)
+    try:
+        from clan.achievements import unlock_achievement
+        top_clan_data = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
+        if top_clan_data:
+            for member_row in cur.execute(
+                "SELECT user_id FROM clan_members WHERE clan_id=? AND left_at IS NULL",
+                (top_clan_data["clan"]["id"],)
+            ).fetchall():
+                uid = member_row["user_id"]
+                if not is_hard_excluded(uid):
+                    bot.loop.create_task(unlock_achievement(uid, "clan_champion", bot=bot))
+            if top_clan_data["top"]:
+                winner_id = top_clan_data["top"][0]["user_id"]
+                bot.loop.create_task(unlock_achievement(winner_id, "king", bot=bot))
+    except Exception as e:
+        logger.warning(f"clan season achievements: {e}")
+
     asyncio.create_task(send_payout_report_dm(bot, report))
     asyncio.create_task(post_payout_results(bot, report))
 
@@ -603,7 +625,7 @@ def close_cycle_and_pay(bot) -> bool:
         logger.warning(f"post_news_season_end: {e}")
 
     asyncio.create_task(log_discord(
-        title=f"🏁 Клановая лига: сезон #{cycle['number']} завершён",
+        title=f"🏁 Клановая лига: {get_season_title(cycle['number'])} завершён",
         description=(
             f"> **Общий банк:** `{sum(c['bank'] for c in report['clans'])} DC`\n"
             f"> **Выплачено:** `{total_paid} DC`\n"
@@ -613,7 +635,7 @@ def close_cycle_and_pay(bot) -> bool:
         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
     ))
 
-    logger.info(f"Клан-лига: цикл #{cycle['number']} закрыт, выплачено {total_paid} DC")
+    logger.info(f"Клан-лига: {get_season_title(cycle['number'])} закрыт, выплачено {total_paid} DC")
 
     async def _delayed_start():
         await asyncio.sleep(300)
@@ -657,6 +679,16 @@ async def add_clan_contribution(user_id: int, amount: int, reason: str):
         (cycle["id"], clan["id"], user_id, amount, reason, int(time.time()))
     )
     db.commit()
+
+    # 👇 Достижения — вклады
+    try:
+        from clan.achievements import check_and_unlock, get_user_contribution
+        from core.bot import bot
+        total = get_user_contribution(user_id)
+        asyncio.create_task(check_and_unlock(user_id, "clan_deposit", value=total, bot=bot))
+    except Exception as e:
+        logger.warning(f"clan deposit achievements: {e}")
+
     return True
 
 
@@ -831,7 +863,7 @@ async def send_payout_report_dm(bot, report: dict):
         e1 = disnake.Embed(color=0xFFD700)
         e1.set_image(url=IMG_STRIPE)
         e2 = disnake.Embed(
-            title=f"📊 ОТЧЁТ ПО КЛАНОВОЙ ЛИГЕ — СЕЗОН #{cycle['number']}",
+            title=f"📊 ОТЧЁТ ПО КЛАНОВОЙ ЛИГЕ — {get_season_title(cycle['number']).upper()}",
             description="".join(lines) + (
                 f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"💰 **Общий оборот:** `{sum(c['bank'] for c in report['clans'])} DC`\n"
@@ -869,7 +901,7 @@ async def post_payout_results(bot, report: dict):
         e1 = disnake.Embed(color=0xFFD700)
         e1.set_image(url=IMG_STRIPE)
         e2 = disnake.Embed(
-            title=f"🏆 СЕЗОН #{cycle['number']} ЗАВЕРШЁН!",
+            title=f"🏆 {get_season_title(cycle['number']).upper()} ЗАВЕРШЁН!",
             description="".join(lines) + (
                 f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"💰 **Общий оборот:** `{sum(c['bank'] for c in report['clans'])} DC`\n"
