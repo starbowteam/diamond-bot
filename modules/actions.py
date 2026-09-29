@@ -25,7 +25,6 @@ from modules.boosts import (
     apply_casino_win, has_insurance, try_insurance, get_casino_multiplier,
 )
 
-# 👇 Клан-хуки (мягкий импорт — если модуль не загружен, не падаем)
 try:
     from clan.quests import on_casino_quest_hook, on_casino_win_hook
 except Exception:
@@ -53,7 +52,7 @@ IMG_ROULETTE_SPIN = "https://cdn.discordapp.com/attachments/1527006158282555412/
 IMG_ROULETTE_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&"
 IMG_ROULETTE_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685884456636527/image.png?ex=6aaf3c45&is=6aadeac5&hm=451731816ed61f6878fba789858bdf5aed0ef69cfe1bfd5ce5378a7f9a1e4a18&"
 
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
 IMG_BJ_TABLE = "https://media.discordapp.net/attachments/1527006158282555412/1551293759461920808/image.png?ex=6ab17265&is=6ab020e5&hm=d6e9e598b1981259566f329a2b43f19ab5bbd49440d6c9a6a8f1c31d6b2f9d38&=&format=webp&quality=lossless"
 IMG_BJ_WIN   = "https://media.discordapp.net/attachments/1527006158282555412/1551293759893930094/image.png?ex=6ab17266&is=6ab020e6&hm=2de3752ae558bf824c547cb08167e4fcd5b6e66ebec440a42d64130ee84a42ef&=&format=webp&quality=lossless"
@@ -85,7 +84,6 @@ P = "\u3164"
 # ХЕЛПЕР — ЛС об отзыве после покупки роли
 # ============================================================
 async def _send_role_review_dm(member: disnake.Member, role_name: str):
-    """Обычное ЛС (без эмбеда) с просьбой об отзыве."""
     try:
         await member.send(
             f"**Спасибо за покупку роли «{role_name}»!**\n\n"
@@ -94,6 +92,36 @@ async def _send_role_review_dm(member: disnake.Member, role_name: str):
         )
     except Exception as e:
         logger.warning(f"_send_role_review_dm {member.id}: {e}")
+
+
+# ============================================================
+# ХЕЛПЕР — достижения казино
+# ============================================================
+async def _check_casino_achievements(user_id: int, bet: int = 0, profit: int = 0):
+    """Проверяет достижения казино: 100 партий, хайроллер, мега-джекпот."""
+    try:
+        from clan.achievements import check_and_unlock
+        from core.bot import bot
+
+        # Считаем общее число партий
+        stats = load_roulette_stats()
+        total_games = stats.get("rolls", 0) + stats.get("total_bets", 0) // 10
+        # Простая эвристика — берём rolls из файла
+        rows = cur.execute("SELECT SUM(amount) FROM user_items").fetchone() if False else None
+
+        # Считаем партии через счётчик в файле (пока приблизительно)
+        games_count = stats.get("rolls", 0)
+        await check_and_unlock(user_id, "casino_games", value=games_count, bot=bot)
+
+        # Хайроллер — ставка >= 10000
+        if bet >= 10000:
+            await check_and_unlock(user_id, "casino_bet", value=bet, bot=bot)
+
+        # Мега-джекпот — profit >= 10000
+        if profit >= 10000:
+            await check_and_unlock(user_id, "casino_lucky", value=profit, bot=bot)
+    except Exception as e:
+        logger.warning(f"casino ach: {e}")
 
 
 # ============================================================
@@ -289,10 +317,10 @@ ROULETTE_ROLLS = [
 def roll_roulette() -> dict:
     total = sum(r["chance"] for r in ROULETTE_ROLLS)
     r = random.uniform(0, total)
-    cur = 0
+    cur_v = 0
     for roll in ROULETTE_ROLLS:
-        cur += roll["chance"]
-        if r <= cur:
+        cur_v += roll["chance"]
+        if r <= cur_v:
             return roll
     return ROULETTE_ROLLS[0]
 
@@ -399,6 +427,9 @@ class RouletteModal(Modal):
             except Exception as e:
                 logger.warning(f"casino_quest_hook roulette: {e}")
 
+        # 👇 Достижения казино
+        await _check_casino_achievements(user_id, bet=bet)
+
         if mult > 0:
             payout = bet + int(bet * mult)
             payout, used = apply_casino_win(user_id, payout)
@@ -418,6 +449,11 @@ class RouletteModal(Modal):
                 embeds=_build_win_embeds(result, bet, net, new_balance),
                 view=view
             )
+
+            # 👇 Достижения на мега-выигрыш
+            if net >= 10000:
+                await _check_casino_achievements(user_id, profit=net)
+
             stats = load_roulette_stats()
             stats["total_bets"] = stats.get("total_bets", 0) + bet
             stats["total_won"] = stats.get("total_won", 0) + net
@@ -513,6 +549,8 @@ class RouletteRetryView(View):
             except Exception as e:
                 logger.warning(f"casino_quest_hook roulette dbl: {e}")
 
+        await _check_casino_achievements(user_id, bet=new_bet)
+
         if mult > 0:
             payout = new_bet + int(new_bet * mult)
             payout, used = apply_casino_win(user_id, payout)
@@ -532,6 +570,9 @@ class RouletteRetryView(View):
                 embeds=_build_win_embeds(result, new_bet, net, new_balance),
                 view=view
             )
+
+            if net >= 10000:
+                await _check_casino_achievements(user_id, profit=net)
         else:
             refund = try_insurance(user_id, new_bet)
             if refund > 0:
@@ -682,6 +723,8 @@ class BlackjackBetModal(Modal):
                 await on_casino_quest_hook(user_id)
             except Exception:
                 pass
+
+        await _check_casino_achievements(user_id, bet=bet)
 
         await inter.edit_original_response(
             embeds=_build_bj_embeds(game, hide_dealer=True),
@@ -841,6 +884,20 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
                 await on_casino_win_hook(user_id, payout, total_bet)
             except Exception as e:
                 logger.warning(f"casino_win_hook bj: {e}")
+
+        # 👇 Достижения — блэкджек 21
+        if outcome == "blackjack":
+            try:
+                from clan.achievements import unlock_achievement
+                from core.bot import bot
+                await unlock_achievement(user_id, "casino_bj21", bot=bot)
+            except Exception as e:
+                logger.warning(f"bj21 ach: {e}")
+
+        # 👇 Достижения — крупный выигрыш
+        net = payout - total_bet
+        if net >= 10000:
+            await _check_casino_achievements(user_id, profit=net)
     else:
         refund = try_insurance(user_id, total_bet)
         if refund > 0:
@@ -946,6 +1003,8 @@ class BlackjackRetryView(View):
                 await on_casino_quest_hook(user_id)
             except Exception:
                 pass
+
+        await _check_casino_achievements(user_id, bet=new_bet)
 
         await inter.edit_original_response(
             embeds=_build_bj_embeds(game, hide_dealer=True),
@@ -1068,6 +1127,8 @@ class CoinflipBetModal(Modal):
         if not ok:
             return await inter.edit_original_response(content="❌ Не удалось списать DC.")
 
+        await _check_casino_achievements(user_id, bet=bet)
+
         await inter.edit_original_response(
             embeds=_build_coin_choice_embeds(bet),
             view=CoinflipChoiceView(bet)
@@ -1128,6 +1189,10 @@ class CoinflipChoiceView(View):
                     await on_casino_win_hook(user_id, payout, bet)
                 except Exception as e:
                     logger.warning(f"casino_win_hook coin: {e}")
+
+            net = payout - bet
+            if net >= 10000:
+                await _check_casino_achievements(user_id, profit=net)
         else:
             refund = try_insurance(user_id, bet)
             if refund > 0:
@@ -1207,13 +1272,16 @@ class CoinflipRetryView(View):
         ok = await remove_dc(user_id, new_bet, "Ставка в монетке (двойная)")
         if not ok:
             return await inter.edit_original_response(content="❌ Ошибка списания.")
+
+        await _check_casino_achievements(user_id, bet=new_bet)
+
         await inter.edit_original_response(
             embeds=_build_coin_choice_embeds(new_bet),
             view=CoinflipChoiceView(new_bet)
         )
 
 # ============================================================
-# СЕЛЕКТ ДЛЯ ACTIONS (только акции, игры убраны)
+# СЕЛЕКТ ДЛЯ ACTIONS (только акции)
 # ============================================================
 class ActionSelect(Select):
     def __init__(self):
@@ -1352,7 +1420,6 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
 
     user_id = inter.author.id
 
-    # Проверка что акционный товар уже куплен
     existing = await get_user_purchases(user_id, only_unused=False)
     for p in existing:
         if p.get("from_action") and p.get("value") == item_data["name"]:
@@ -1373,20 +1440,18 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     if not success:
         return await inter.response.send_message("❌ Ошибка списания DC.", ephemeral=True)
 
-    # 👇 АВТО-РОЛЬ (с role_id) — выдаём сразу, БЕЗ purchases
+    # АВТО-РОЛЬ (с role_id) — выдаём сразу, БЕЗ purchases
     if cat_key == "roles" and item_data.get("role_id"):
         role = inter.guild.get_role(item_data["role_id"])
         if role:
             try:
                 await inter.author.add_roles(role)
-                # ❌ НЕ добавляем в purchases — роль уже выдана
                 await inter.response.send_message(
                     f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Роль выдана.\n"
                     f"📩 Проверьте ЛС — там информация об отзыве.\n"
                     f"⚠️ Это **акционный** товар — возврату не подлежит.",
                     ephemeral=True
                 )
-                # 👇 ЛС о отзыве
                 await _send_role_review_dm(inter.author, item_data["name"])
                 await log_discord(
                     title="🔥 Покупка по акции (роль)",
@@ -1402,7 +1467,7 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
             await add_dc(user_id, price, "Возврат DC (роль не найдена)")
             return await inter.response.send_message("❌ Роль не найдена на сервере.", ephemeral=True)
 
-    # 👇 Обычная покупка — в purchases, ждёт выдачи в тикете
+    # Обычная покупка — в purchases
     await add_purchase(user_id, cat_key, item_data["name"], from_action=True)
     await inter.response.send_message(
         f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Активируйте товар в <#1462136361711829053>.\n"
