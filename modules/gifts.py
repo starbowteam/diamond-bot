@@ -7,7 +7,7 @@ from core.utils import logger, log_discord, CONFIG
 from modules.dc import get_user_balance, remove_dc, add_dc
 
 GIFT_FEE_PERCENT = 5  # комиссия магазина
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
 
 async def process_gift_dc(
@@ -46,12 +46,33 @@ async def process_gift_dc(
         await add_dc(sender.id, price_paid, "Возврат — ошибка начисления")
         return False, f"Ошибка начисления: {e}"
 
-    # 👇 Хук квестов клан-лиги (щедрость)
+    # 👇 Хук квестов клан-лиги
     try:
         from clan.quests import on_gift_quest_hook
         await on_gift_quest_hook(sender.id, amount)
     except Exception as e:
         logger.warning(f"clan gift hook: {e}")
+
+    # 👇 Достижение "Щедрый" — суммарные подарки
+    try:
+        from clan.achievements import check_and_unlock
+        from core.bot import bot
+
+        # Считаем общую сумму подарков от юзера (по истории DC)
+        from core.utils import get_dc_cache
+        data = get_dc_cache(sender.id)
+        total_gifted = 0
+        for h in data.get("history", []):
+            reason = h.get("reason", "")
+            amt = h.get("amount", 0)
+            if reason.startswith("Подарок от") and amt > 0:
+                total_gifted += amt
+        # Плюс только что сделанный
+        total_gifted += amount
+
+        await check_and_unlock(sender.id, "gift_total", value=total_gifted, bot=bot)
+    except Exception as e:
+        logger.warning(f"gift ach: {e}")
 
     # ЛС получателю
     try:
