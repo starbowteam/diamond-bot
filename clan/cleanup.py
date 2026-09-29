@@ -27,7 +27,6 @@ def main():
 
     print(f"\n🔍 Сканирую вклады юзера {uid}...\n")
 
-    # Показываем ВСЁ что у него есть, ДО удаления
     rows = cur.execute(
         "SELECT cycle_id, clan_id, amount, reason, ts FROM clan_contributions "
         "WHERE user_id=? ORDER BY ts",
@@ -53,13 +52,25 @@ def main():
         print("-" * 100)
         print(f"{'ИТОГО:':<42} {total:>13} DC\n")
 
-    # Применяем очистку
-    print(f"🧹 Очищаю...")
+    # Достижения этого юзера (показать что удалим)
+    ach_rows = cur.execute(
+        "SELECT ach_key, unlocked_at FROM clan_achievements WHERE user_id=?",
+        (uid,)
+    ).fetchall()
+    if ach_rows:
+        print(f"🏆 Достижений у юзера: {len(ach_rows)}")
+        for a in ach_rows[:10]:
+            print(f"   · {a['ach_key']}")
+        if len(ach_rows) > 10:
+            print(f"   ... и ещё {len(ach_rows) - 10}")
+        print()
+
+    print(f"🧹 Очищаю вклады...")
     report = cleanup_specific_user(uid)
 
     print(f"\n✅ ГОТОВО")
     print(f"   Юзер: {report['user_id']}")
-    print(f"   Удалено записей: {report['count']}")
+    print(f"   Удалено записей вклада: {report['count']}")
     print(f"   Удалено DC: {report['total']}")
     print(f"   По кланам:")
     for cs in report["by_clan"]:
@@ -67,6 +78,21 @@ def main():
     print(f"   По циклам:")
     for cs in report["by_cycle"]:
         print(f"     · {cs['cycle']}: {cs['amount']} DC")
+
+    # Спрашиваем про достижения
+    if ach_rows:
+        print(f"\n❓ Удалить также достижения этого юзера? (y/n)")
+        try:
+            ans = input("> ").strip().lower()
+            if ans in ("y", "yes", "да"):
+                cur.execute("DELETE FROM clan_achievements WHERE user_id=?", (uid,))
+                db.commit()
+                print(f"✅ Удалено достижений: {len(ach_rows)}")
+            else:
+                print("⏭ Достижения оставлены.")
+        except Exception:
+            pass
+
     print()
 
 
