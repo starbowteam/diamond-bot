@@ -25,6 +25,7 @@ from core.utils import (
     save_ticket_review, get_ticket_review, clear_ticket_review,
     set_ticket_cooldown, get_ticket_cooldown, get_ticket_cooldown_info,
     is_supreme,
+    cur, db,
 )
 from modules.dc import (
     add_dc, remove_dc, add_purchase,
@@ -35,7 +36,7 @@ from modules.dc import (
 )
 from modules.actions import load_action_embed
 
-_IMG_STRIPE = "https://cdn.discordapp.com/attachments/7006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_RATING = "https://cdn.discordapp.com/attachments/1527006158282555412/1551636456403894383/image.png?ex=6ab2b18f&is=6ab1600f&hm=b735a4db21085a96326573718f9c397d574fd2d6690c5c55a22e7bc33f4da67a&"
@@ -100,14 +101,12 @@ def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
 
 
 def _is_coins_ticket(channel: disnake.TextChannel) -> bool:
-    """DC-тикет — категория COINS_CATEGORY_ID."""
     if not channel.category:
         return False
     return channel.category.id == CONFIG["COINS_CATEGORY_ID"]
 
 
 def _get_auto_role_names() -> set:
-    """Возвращает set ИМЁН ролей, которые выдаются автоматически (есть role_id)."""
     try:
         catalog = load_shop_catalog()
         names = set()
@@ -124,7 +123,6 @@ def _get_auto_role_names() -> set:
 
 
 def _filter_purchases_for_ticket(purchases: list) -> list:
-    """Убирает из списка авто-роли (с role_id)."""
     auto_role_names = _get_auto_role_names()
     result = []
     for p in purchases:
@@ -163,7 +161,6 @@ def _build_ticket_overwrites(guild: disnake.Guild, user: disnake.Member) -> dict
 
 
 async def _send_role_review_dm(member: disnake.Member, role_name: str):
-    """Обычное ЛС (без эмбеда) с просьбой об отзыве."""
     try:
         await member.send(
             f"**Спасибо за покупку роли «{role_name}»!**\n\n"
@@ -231,8 +228,7 @@ async def _check_ticket_blocked(inter: disnake.MessageInteraction) -> bool:
 async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: bool = True):
     """
     Закрытие тикета.
-    Для DC-тикетов проверка оценки менеджера НЕ выполняется (кнопки такой нет).
-    Остаётся только требование отзыва в канале отзывов.
+    Для DC-тикетов проверка оценки менеджера НЕ выполняется.
     """
     channel = inter.channel
 
@@ -241,7 +237,6 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
         if owner_id:
             is_coins = _is_coins_ticket(channel)
 
-            # 👇 Проверка оценки менеджера — только для НЕ-DC тикетов (real)
             if not is_coins:
                 manager_id = get_ticket_manager(channel.id)
                 if manager_id:
@@ -255,7 +250,6 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
                             ephemeral=True
                         )
 
-            # 👇 Проверка отзыва в канале — обязательна для ВСЕХ типов
             has_review = await _has_review_in_channel(channel, owner_id)
             if not has_review:
                 return await inter.response.send_message(
@@ -281,6 +275,20 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
         clear_ticket_review(channel.id)
 
         await channel.delete()
+
+        # 👇 Достижения менеджера
+        try:
+            if manager_id:
+                from clan.achievements import check_and_unlock
+                from core.bot import bot
+                row = cur.execute(
+                    "SELECT closed_tickets FROM manager_stats WHERE user_id=?",
+                    (manager_id,)
+                ).fetchone()
+                total_closed = row["closed_tickets"] if row else 0
+                await check_and_unlock(manager_id, "staff_tickets", value=total_closed, bot=bot)
+        except Exception as e:
+            logger.warning(f"staff tickets ach: {e}")
 
         await log_discord(
             title="🗑️ Тикет закрыт",
@@ -1294,6 +1302,21 @@ class RatingModal(Modal):
         add_manager_rating(self.manager_id, rating)
         save_ticket_review(self.channel.id, inter.author.id, self.manager_id, rating)
 
+        # 👇 Достижение "Идеальный сервис" — 10 отзывов с оценкой 5
+        try:
+            if rating == 5:
+                row = cur.execute(
+                    "SELECT COUNT(*) as c FROM ticket_reviews WHERE manager_id=? AND rating=5",
+                    (self.manager_id,)
+                ).fetchone()
+                cnt = row["c"] if row else 0
+                if cnt >= 10:
+                    from clan.achievements import unlock_achievement
+                    from core.bot import bot
+                    await unlock_achievement(self.manager_id, "staff_perfect", bot=bot)
+        except Exception as e:
+            logger.warning(f"staff perfect ach: {e}")
+
         await log_discord(
             title="⭐ Оценка менеджера",
             description=f"> **Менеджер:** <@{self.manager_id}>\n> **Оценка:** {rating}/5\n> **Тикет:** {self.channel.mention}",
@@ -1720,7 +1743,6 @@ class CoinsTicketButtons(View):
             except Exception as e:
                 logger.error(f"Ошибка закрытия: {e}")
         else:
-            # 👇 Для DC — проверка отзыва в канале, без оценки менеджера
             await _do_close_ticket(inter, check_reviews=True)
 
 
@@ -1829,7 +1851,7 @@ class CatalogView(disnake.ui.View):
 
 
 # ============================================================
-# КАТАЛОГ ЗА DC (селект категорий → товары)
+# КАТАЛОГ ЗА DC
 # ============================================================
 class BuySelectView(View):
     def __init__(self):
@@ -2006,9 +2028,19 @@ class BuySelectView(View):
 
         target_id = recipient_id if recipient_id else user_id
 
-        # 👇 Авто-роли НЕ идут в purchases
         if not is_auto_role:
             await add_purchase(target_id, category, item["name"])
+
+        # 👇 Достижения — покупки
+        try:
+            from clan.achievements import check_and_unlock
+            from core.bot import bot
+            purchases_all = await get_user_purchases(user_id, only_unused=False)
+            await check_and_unlock(user_id, "first_purchase", bot=bot)
+            await check_and_unlock(user_id, "buyer_count", value=len(purchases_all), bot=bot)
+            await check_and_unlock(user_id, "shop_spent", value=price, bot=bot)
+        except Exception as e:
+            logger.warning(f"purchase ach: {e}")
 
         # 👇 Хук квестов
         try:
@@ -2017,7 +2049,6 @@ class BuySelectView(View):
         except Exception as e:
             logger.warning(f"clan purchase hook: {e}")
 
-        # 👇 Авто-выдача роли
         if is_auto_role:
             role = inter.guild.get_role(item["role_id"])
             if role:
@@ -2053,7 +2084,6 @@ class BuySelectView(View):
                         embeds=[], view=None
                     )
 
-        # 👇 Обычная покупка
         if recipient_id:
             await inter.response.edit_message(
                 content=(
@@ -2113,6 +2143,15 @@ class BuySelectView(View):
             await on_purchase_quest_hook(user_id, price)
         except Exception as e:
             logger.warning(f"clan purchase hook gift: {e}")
+
+        # 👇 Достижения покупок
+        try:
+            from clan.achievements import check_and_unlock
+            from core.bot import bot
+            await check_and_unlock(user_id, "first_purchase", bot=bot)
+            await check_and_unlock(user_id, "shop_spent", value=price, bot=bot)
+        except Exception as e:
+            logger.warning(f"purchase ach gift: {e}")
 
         if is_auto_role:
             role = inter.guild.get_role(item["role_id"])
