@@ -69,6 +69,83 @@ def _release_buy_lock(uid: int):
 
 
 # ============================================================
+# ОТВЕТ НА ИНТЕРАКЦИЮ БЕЗ ОШИБКИ 10062
+# ============================================================
+# Discord даёт 3 секунды на первый ответ. Любой await до ответа
+# (лог в канал, запрос к Discord API, работа с БД) съедает это окно,
+# и ответ падает с 404 Not Found (error code: 10062) Unknown interaction.
+# Поэтому сначала подтверждаем интеракцию — потом делаем долгую работу.
+_BG_TASKS: set = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    """Фоновая задача: не задерживает ответ на интеракцию."""
+    task = asyncio.create_task(coro)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return task
+
+
+async def _ack(inter, *, ephemeral: bool = False, with_message: bool = False) -> bool:
+    """
+    Мгновенно подтверждает интеракцию.
+
+    True  — подтверждена (или уже была подтверждена), можно работать дальше.
+    False — интеракция просрочена, отвечать уже некуда.
+    """
+    try:
+        if not inter.response.is_done():
+            await inter.response.defer(ephemeral=ephemeral, with_message=with_message)
+        return True
+    except disnake.InteractionResponded:
+        return True
+    except disnake.NotFound as e:
+        logger.warning(f"_ack: интеракция просрочена, ответ невозможен — {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"_ack: не удалось подтвердить интеракцию — {e}")
+        return False
+
+
+async def _safe_edit(inter, **kwargs) -> bool:
+    """
+    Правит исходное сообщение с компонентом — независимо от того,
+    подтверждена интеракция или ещё нет. Никогда не роняет callback.
+    """
+    try:
+        if inter.response.is_done():
+            await inter.edit_original_response(**kwargs)
+        else:
+            await inter.response.edit_message(**kwargs)
+        return True
+    except disnake.InteractionResponded:
+        try:
+            await inter.edit_original_response(**kwargs)
+            return True
+        except Exception as e:
+            logger.warning(f"_safe_edit: {e}")
+    except disnake.NotFound as e:
+        logger.warning(f"_safe_edit: интеракция просрочена — {e}")
+    except Exception as e:
+        logger.warning(f"_safe_edit: {e}")
+    return False
+
+
+async def _ephemeral_reply(inter, content: str) -> bool:
+    """Ответ в эфемерное сообщение (после defer) с откатом на followup."""
+    try:
+        await inter.edit_original_response(content=content)
+        return True
+    except Exception:
+        try:
+            await inter.followup.send(content=content, ephemeral=True)
+            return True
+        except Exception as e:
+            logger.warning(f"_ephemeral_reply: {e}")
+            return False
+
+
+# ============================================================
 # ХЕЛПЕРЫ
 # ============================================================
 def _load_slid_embeds() -> list:
@@ -197,18 +274,17 @@ async def _check_ticket_blocked(inter: disnake.MessageInteraction) -> bool:
         info = get_ticket_cooldown_info(user_id)
         reason = info.get("reason", "—") if info else "—"
         left_min = max(1, (until_ts - int(_time.time())) // 60)
-        try:
-            await inter.response.edit_message(
-                content=(
-                    f"⚠️ **Вам запрещено создавать тикеты.**\n"
-                    f"> **Причина:** {reason}\n"
-                    f"> **Осталось:** ~`{left_min} мин`\n"
-                    f"> **Разблокировка:** <t:{until_ts}:R>\n\n"
-                    f"> Тикеты в категории вопросов — по-прежнему доступны."
-                ),
-                embeds=[], view=None
-            )
-        except Exception:
+        if not await _safe_edit(
+            inter,
+            content=(
+                f"⚠️ **Вам запрещено создавать тикеты.**\n"
+                f"> **Причина:** {reason}\n"
+                f"> **Осталось:** ~`{left_min} мин`\n"
+                f"> **Разблокировка:** <t:{until_ts}:R>\n\n"
+                f"> Тикеты в категории вопросов — по-прежнему доступны."
+            ),
+            embeds=[], view=None
+        ):
             try:
                 await inter.followup.send(
                     content=(
@@ -232,6 +308,11 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
     """
     channel = inter.channel
 
+    # Подтверждаем интеракцию ДО работы: ниже идут запросы к Discord API,
+    # которые не укладываются в 3 секунды и раньше давали 10062.
+    if not await _ack(inter, ephemeral=True, with_message=True):
+        return
+
     if check_reviews:
         owner_id = get_ticket_owner(channel.id)
         if owner_id:
@@ -242,26 +323,26 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
                 if manager_id:
                     review = get_ticket_review(channel.id)
                     if not review:
-                        return await inter.response.send_message(
+                        return await _ephemeral_reply(
+                            inter,
                             content=(
                                 "❌ **Сначала оставьте отзыв о менеджере.**\n"
                                 "> Нажмите кнопку **«Оценить работу менеджера»** выше."
-                            ),
-                            ephemeral=True
+                            )
                         )
 
             has_review = await _has_review_in_channel(channel, owner_id)
             if not has_review:
-                return await inter.response.send_message(
+                return await _ephemeral_reply(
+                    inter,
                     content=(
                         "❌ **Необходимо оставить отзыв в канале.**\n"
                         f"> Перейдите в <#{CONFIG['REVIEW_COUNT_CHANNEL']}> и напишите отзыв о заказе.\n"
                         f"> После этого сможете закрыть тикет."
-                    ),
-                    ephemeral=True
+                    )
                 )
 
-    await inter.response.send_message("Тикет закрывается...", ephemeral=True)
+    await _ephemeral_reply(inter, content="Тикет закрывается...")
     await asyncio.sleep(3)
 
     try:
@@ -446,8 +527,8 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     cat = guild.get_channel(CONFIG["TICKET_CATEGORY_ID"])
     if not cat:
-        return await inter.response.edit_message(
-            content="❌ Категория не найдена.", embeds=[], view=None
+        return await _safe_edit(
+            inter, content="❌ Категория не найдена.", embeds=[], view=None
         )
 
     raw = user.display_name.lower().replace(" ", "-")
@@ -456,10 +537,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     overwrites = _build_ticket_overwrites(guild, user)
 
-    try:
-        await inter.response.edit_message(content="⏳ Создаём тикет...", embeds=[], view=None)
-    except Exception as e:
-        logger.warning(f"edit_message '⏳' failed: {e}")
+    await _safe_edit(inter, content="⏳ Создаём тикет...", embeds=[], view=None)
 
     try:
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
@@ -544,8 +622,8 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     cat = guild.get_channel(CONFIG["COINS_CATEGORY_ID"])
     if not cat:
-        return await inter.response.edit_message(
-            content="❌ Категория не найдена.", embeds=[], view=None
+        return await _safe_edit(
+            inter, content="❌ Категория не найдена.", embeds=[], view=None
         )
 
     item_name = purchase.get("value", "—")
@@ -556,10 +634,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     overwrites = _build_ticket_overwrites(guild, user)
 
-    try:
-        await inter.response.edit_message(content="⏳ Создаём тикет...", embeds=[], view=None)
-    except Exception as e:
-        logger.warning(f"edit_message '⏳' failed: {e}")
+    await _safe_edit(inter, content="⏳ Создаём тикет...", embeds=[], view=None)
 
     try:
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
@@ -670,13 +745,31 @@ class BuySelect(disnake.ui.StringSelect):
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
-        await log_discord(
+        value = inter.data.values[0] if inter.data.values else ""
+
+        # Модалку можно отправить ТОЛЬКО первым ответом, поэтому её
+        # обрабатываем в самом начале, без единого await выше.
+        if value == "question":
+            try:
+                await inter.response.send_modal(QuestionModal())
+            except disnake.InteractionResponded:
+                pass
+            except disnake.NotFound as e:
+                logger.warning(f"BuySelect: модалка не отправлена — {e}")
+            return
+
+        # Всё, что ниже (лог в канал, БД, создание канала), длится дольше
+        # 3 секунд. Сначала подтверждаем интеракцию — иначе Discord
+        # отдаёт 404 Not Found (error code: 10062) Unknown interaction.
+        if not await _ack(inter):
+            return
+
+        _spawn(log_discord(
             title="🛒 Выбор типа покупки",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
+            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{value}`",
             color=0x00aaff,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
-        value = inter.data.values[0]
+        ))
 
         if value == "real":
             await create_real_ticket(inter)
@@ -687,7 +780,8 @@ class BuySelect(disnake.ui.StringSelect):
             purchases = _filter_purchases_for_ticket(purchases)
 
             if not purchases:
-                return await inter.response.edit_message(
+                return await _safe_edit(
+                    inter,
                     content=(
                         "❌ У вас нет товаров для покупки за Diamond Coins.\n"
                         "> Сначала купите товар в каталоге за DC."
@@ -705,10 +799,7 @@ class BuySelect(disnake.ui.StringSelect):
             )
             embed.set_image(url=_IMG_STRIPE)
             view = CoinsBuyView(purchases)
-            await inter.response.edit_message(content=None, embeds=[embed], view=view)
-
-        elif value == "question":
-            await inter.response.send_modal(QuestionModal())
+            await _safe_edit(inter, content=None, embeds=[embed], view=view)
 
 
 class BuyTypeView(disnake.ui.View):
@@ -744,14 +835,19 @@ class CoinsBuySelect(disnake.ui.StringSelect):
 
     async def callback(self, inter: disnake.MessageInteraction):
         idx = int(inter.data.values[0])
+
+        # Подтверждаем интеракцию до работы с БД — иначе 10062.
+        if not await _ack(inter):
+            return
+
         if idx >= len(self.purchases):
-            return await inter.response.edit_message(
-                content="❌ Товар не найден.", embeds=[], view=None
+            return await _safe_edit(
+                inter, content="❌ Товар не найден.", embeds=[], view=None
             )
 
         user_id = inter.author.id
         if not _acquire_buy_lock(user_id):
-            return await inter.response.send_message(
+            return await inter.followup.send(
                 "⏳ Уже обрабатывается...", ephemeral=True
             )
         try:
@@ -765,7 +861,8 @@ class CoinsBuySelect(disnake.ui.StringSelect):
                     target_index = i
                     break
             if target_index is None:
-                return await inter.response.edit_message(
+                return await _safe_edit(
+                    inter,
                     content="❌ Товар уже использован или не найден.",
                     embeds=[], view=None
                 )
