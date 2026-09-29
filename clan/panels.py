@@ -22,6 +22,7 @@ from clan.core import (
     get_current_cycle, start_new_cycle, close_cycle_and_pay,
     make_progress_bar, clan_status_emoji,
     MSK, EMBEDS_DIR, IMG_STRIPE, REPORT_DM_USER_ID,
+    get_season_title, get_season_name,
 )
 
 from clan.quests import (
@@ -85,7 +86,13 @@ def _build_static_pool_embeds() -> List[disnake.Embed]:
 # ============================================================
 def _build_season_static_embeds() -> List[disnake.Embed]:
     cycle = get_current_cycle()
-    season_num = cycle["number"] if cycle else "?"
+    season_num = cycle["number"] if cycle else 1
+
+    # Заголовок с названием сезона
+    if cycle:
+        title = f"Клубная лига — {get_season_title(season_num)}!"
+    else:
+        title = f"Клубная лига — {get_season_title(1)}!"
 
     e1 = disnake.Embed(color=6776679)
     e1.set_image(url=IMG_SEASON_TOP)
@@ -107,7 +114,7 @@ def _build_season_static_embeds() -> List[disnake.Embed]:
         )
 
     e2 = disnake.Embed(
-        title=f"Клубная лига - сезон {season_num}!",
+        title=title,
         description=desc,
         color=6776679
     )
@@ -593,21 +600,23 @@ async def post_news_season_start(bot):
     cycle = get_current_cycle()
     if not cycle:
         return
-    news = "Стартует новый сезон клубной лиги."
+    season_title = get_season_title(cycle["number"])
+    news = f"Стартует новый сезон — **{season_title}**."
     desc = (
-        f"Сезон #{cycle['number']} официально открыт. "
+        f"{season_title} официально открыт. "
         f"Копилки кланов обнулены, отсчёт пошёл. "
         f"Участники могут зарабатывать DC, выполнять квесты и вносить вклад в банк клана. "
         f"Финал — **28 числа в 20:00 МСК**."
     )
-    await _post_clan_news(bot, "Старт нового сезона клубной лиги", news, desc)
+    await _post_clan_news(bot, f"Старт — {season_title}", news, desc)
 
 
 async def post_news_season_3days(bot):
     cycle = get_current_cycle()
     if not cycle:
         return
-    news = "До финала сезона осталось 3 дня."
+    season_name = get_season_name(cycle["number"])
+    news = f"До финала сезона «{season_name}» осталось 3 дня."
     desc = (
         f"Самое время увеличить свой вклад в банк клана. "
         f"Топ-3 участника получат бонусы ×1.75 / ×1.50 / ×1.30. "
@@ -620,7 +629,8 @@ async def post_news_season_1hour(bot):
     cycle = get_current_cycle()
     if not cycle:
         return
-    news = "Остался последний час до финала сезона."
+    season_name = get_season_name(cycle["number"])
+    news = f"Остался последний час до финала сезона «{season_name}»."
     desc = (
         f"Успей внести последний вклад в свой клан. "
         f"После 20:00 МСК банк будет распределён между участниками. "
@@ -631,10 +641,11 @@ async def post_news_season_1hour(bot):
 
 async def post_news_season_end(bot, report: dict):
     cycle = report["cycle"]
+    season_title = get_season_title(cycle["number"])
     total = sum(c["bank"] for c in report["clans"])
     top_clan = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
 
-    news = f"Сезон #{cycle['number']} официально завершён."
+    news = f"{season_title} официально завершён."
     winner_line = ""
     if top_clan:
         winner_line = (
@@ -649,7 +660,7 @@ async def post_news_season_end(bot, report: dict):
         f"топ-3 по вкладу получили повышенные коэффициенты. "
         f"Новый сезон стартует через 5 минут."
     )
-    await _post_clan_news(bot, "Сезон клубной лиги завершён", news, desc)
+    await _post_clan_news(bot, f"{season_title} завершён", news, desc)
 
 
 async def post_news_weekly(bot):
@@ -667,7 +678,8 @@ async def post_news_weekly(bot):
             top_bank = bank
             top_clan = c
 
-    news = "Еженедельный отчёт по клубной лиге."
+    season_name = get_season_name(cycle["number"])
+    news = f"Еженедельный отчёт по сезону «{season_name}»."
     if top_clan:
         desc = (
             f"В лидерах — {top_clan['emoji']} **{top_clan['name'].upper()}** "
@@ -709,6 +721,12 @@ class ClanAdminSelect(disnake.ui.StringSelect):
                 description="Исключить юзера из клана (вклад остаётся)",
                 emoji="👤",
                 value="kick"
+            ),
+            SelectOption(
+                label="・Пересчитать достижения",
+                description="Прогнать всех юзеров и выдать недостающие достижения",
+                emoji="🏆",
+                value="recalc_ach"
             ),
             SelectOption(
                 label="・Обновить панели",
@@ -764,6 +782,30 @@ class ClanAdminSelect(disnake.ui.StringSelect):
 
         elif value == "kick":
             await inter.response.send_modal(_KickModal())
+
+        elif value == "recalc_ach":
+            await inter.response.defer(ephemeral=True)
+            try:
+                from clan.achievements import recalculate_all_achievements
+                await inter.edit_original_response(
+                    content="⏳ Начинаю пересчёт достижений для всех юзеров...\n"
+                            "> Это может занять несколько минут, всем получателям придут ЛС."
+                )
+                stats = await recalculate_all_achievements(inter.bot)
+                await inter.edit_original_response(
+                    content=(
+                        f"✅ **Пересчёт достижений завершён!**\n\n"
+                        f"> **Проверено юзеров:** `{stats['checked']}`\n"
+                        f"> **Ошибок:** `{stats['errors']}`\n\n"
+                        f"> Всем получателям отправлены ЛС о новых достижениях. "
+                        f"Теперь они отображаются в профиле."
+                    )
+                )
+            except Exception as e:
+                logger.exception(f"recalc_ach: {e}")
+                await inter.edit_original_response(
+                    content=f"❌ Ошибка пересчёта: `{str(e)[:300]}`"
+                )
 
         elif value == "refresh":
             await inter.response.defer(ephemeral=True)
@@ -822,7 +864,7 @@ class _KickModal(disnake.ui.Modal):
 
 
 async def send_clan_admin_panel(bot):
-    """Отправляет админ-панель лиги с СЕЛЕКТОМ + красивой шапкой (676767)."""
+    """Отправляет админ-панель лиги с СЕЛЕКТОМ + красивой шапкой."""
     STAFF_CHANNEL = 1551276116679860314
     ch = bot.get_channel(STAFF_CHANNEL)
     if not ch:
@@ -830,7 +872,6 @@ async def send_clan_admin_panel(bot):
     if not ch:
         return
 
-    # Чистим прошлые панели лиги
     async for msg in ch.history(limit=30):
         if msg.author == bot.user and msg.embeds:
             for e in msg.embeds:
@@ -841,11 +882,9 @@ async def send_clan_admin_panel(bot):
                         pass
                     break
 
-    # 👇 Embed1 — картинка-шапка (676767)
     e1 = disnake.Embed(color=0x676767)
     e1.set_image(url=IMG_ADMIN_TOP)
 
-    # 👇 Embed2 — описание
     e2 = disnake.Embed(
         title="Управление клановой лигой",
         description=(
@@ -854,6 +893,7 @@ async def send_clan_admin_panel(bot):
             "> **Форс-конец и выплата** — закрыть сезон с расчётом пула.\n"
             "> **Автораспределение** — раскидать всех клубных без клана (с ребалансом).\n"
             "> **Кик из клана** — исключить юзера (вклад остаётся в банке).\n"
+            "> **Пересчитать достижения** — прогнать всех юзеров и выдать недостающие.\n"
             "> **Обновить панели** — пересобрать эмбеды копилки и сезона.\n\n"
             "────────────────────\n"
             "Исключения: `1124040555240898631`, `796293832751972352` не распределяются."
