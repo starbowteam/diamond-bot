@@ -24,7 +24,7 @@ CLUB_ROLE_ID    = 1284697274655576186
 MIN_BALANCE     = 0
 
 # ============================================================
-# 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ ИЗ КЛАН-ЛИГИ
+# 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ
 # ============================================================
 HARD_EXCLUDED_USERS = {
     1124040555240898631,
@@ -38,13 +38,21 @@ PAYOUT_DAY      = 28
 PAYOUT_HOUR_MSK = 20
 PAYOUT_MINUTE   = 0
 
-TAX_NORMAL      = 0.60
+# ============================================================
+# 👇 НАЛОГ 40% (БЫЛО 60%)
+# ============================================================
+TAX_NORMAL      = 0.40
 TAX_QUEST       = 1.00
-TAX_CASINO      = 0.60
+TAX_CASINO      = 0.40
 
 TOP_BONUSES = [1.75, 1.50, 1.30]
 
 REPORT_DM_USER_ID = 796293832751972352
+
+# ============================================================
+# 👇 ЛИМИТ ВКЛАДА В БАНК — 1000 DC/СУТКИ
+# ============================================================
+DAILY_CLAN_LIMIT = 1000
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
               "1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&"
@@ -61,19 +69,16 @@ SEASON_NAMES = {
     2: "Стихия проклятья",
     3: "Неутопание кристалла",
     4: "Сияние богачей",
-    # Добавляй по мере надобности
 }
 
 
 def get_season_name(number: int) -> str:
-    """Возвращает название сезона или фолбэк."""
     if number in SEASON_NAMES:
         return SEASON_NAMES[number]
     return f"Сезон #{number}"
 
 
 def get_season_title(number: int) -> str:
-    """Красивый заголовок: 'Сезон 2 — Стихия проклятья'."""
     if number in SEASON_NAMES:
         return f"Сезон {number} — {SEASON_NAMES[number]}"
     return f"Сезон #{number}"
@@ -126,12 +131,21 @@ def init_clan_core():
             "VALUES (?, ?, ?, ?, ?, ?)",
             (c["id"], c["name"], c["emoji"], c["role_id"], c["color"], c["description"])
         )
+    # Создаём таблицу дневного лимита
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS clan_daily_limit (
+            user_id  INTEGER,
+            date     TEXT,
+            amount   INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, date)
+        )
+    """)
     db.commit()
     cleanup_excluded_users()
 
 
 def cleanup_excluded_users() -> dict:
-    """Жёстко вычищает исключённых + удаляет их достижения."""
+    """Жёстко вычищает исключённых."""
     if not HARD_EXCLUDED_USERS:
         return {}
 
@@ -183,7 +197,7 @@ def is_hard_excluded(user_id: int) -> bool:
 
 
 def cleanup_specific_user(user_id: int) -> dict:
-    """Очищает ОДНОГО юзера."""
+    """Очищает одного юзера."""
     contrib_rows = cur.execute(
         "SELECT cycle_id, clan_id, amount, reason, ts FROM clan_contributions WHERE user_id=?",
         (user_id,)
@@ -231,6 +245,40 @@ def cleanup_specific_user(user_id: int) -> dict:
         "by_clan": clan_stats,
         "by_cycle": cycle_stats,
     }
+
+
+# ============================================================
+# ДНЕВНОЙ ЛИМИТ ВКЛАДА
+# ============================================================
+def _get_today_str() -> str:
+    """YYYY-MM-DD по МСК."""
+    return datetime.now(MSK).strftime("%Y-%m-%d")
+
+
+def _get_daily_contributed(user_id: int) -> int:
+    """Сколько юзер уже внёс сегодня."""
+    row = cur.execute(
+        "SELECT amount FROM clan_daily_limit WHERE user_id=? AND date=?",
+        (user_id, _get_today_str())
+    ).fetchone()
+    return row["amount"] if row else 0
+
+
+def _add_daily_contributed(user_id: int, amount: int):
+    """Увеличивает счётчик дня."""
+    today = _get_today_str()
+    cur.execute("""
+        INSERT INTO clan_daily_limit (user_id, date, amount)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id, date) DO UPDATE SET amount = amount + ?
+    """, (user_id, today, amount, amount))
+    db.commit()
+
+
+def get_remaining_daily_limit(user_id: int) -> int:
+    """Остаток лимита на сегодня."""
+    already = _get_daily_contributed(user_id)
+    return max(DAILY_CLAN_LIMIT - already, 0)
 
 
 # ============================================================
@@ -597,7 +645,7 @@ def close_cycle_and_pay(bot) -> bool:
                 (total_paid, cycle_id))
     db.commit()
 
-    # 👇 Достижения по итогам сезона (топ-1 клана и чемпион)
+    # Достижения по итогам сезона
     try:
         from clan.achievements import unlock_achievement
         top_clan_data = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
@@ -656,9 +704,13 @@ def close_cycle_and_pay(bot) -> bool:
 
 
 # ============================================================
-# ВКЛАДЫ
+# ВКЛАДЫ — С ЛИМИТОМ 1000 DC/ДЕНЬ
 # ============================================================
 async def add_clan_contribution(user_id: int, amount: int, reason: str):
+    """
+    Добавляет вклад в банк клана.
+    👇 Лимит 1000 DC/сутки с юзера. Сверх лимита — НЕ идёт в банк.
+    """
     if is_hard_excluded(user_id):
         return False
 
@@ -673,14 +725,27 @@ async def add_clan_contribution(user_id: int, amount: int, reason: str):
     if not cycle:
         return False
 
+    # 👇 Проверяем дневной лимит
+    already = _get_daily_contributed(user_id)
+    remaining = max(DAILY_CLAN_LIMIT - already, 0)
+
+    if remaining <= 0:
+        logger.info(f"👤 {user_id}: дневной лимит вклада исчерпан ({already}/{DAILY_CLAN_LIMIT}), {amount} DC в банк не ушло")
+        return False
+
+    actual_amount = min(amount, remaining)
+
     cur.execute(
         "INSERT INTO clan_contributions (cycle_id, clan_id, user_id, amount, reason, ts) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (cycle["id"], clan["id"], user_id, amount, reason, int(time.time()))
+        (cycle["id"], clan["id"], user_id, actual_amount, reason, int(time.time()))
     )
     db.commit()
 
-    # 👇 Достижения — вклады
+    # 👇 Записываем в счётчик дня
+    _add_daily_contributed(user_id, actual_amount)
+
+    # Достижения
     try:
         from clan.achievements import check_and_unlock, get_user_contribution
         from core.bot import bot
@@ -704,10 +769,11 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
             description=(
                 f"> Ты теперь часть команды, {member.mention}!\n\n"
                 f"**Как играть:**\n"
-                f"> • Зарабатывай DC — **60%** идёт в копилку клана\n"
+                f"> • Зарабатывай DC — **40%** идёт в копилку клана\n"
                 f"> • Выполняй квесты в <#1552700973753827509> — **100%** в копилку\n"
                 f"> • Топ-3 по вкладу получат бонус ×1.75 / ×1.50 / ×1.30\n"
-                f"> • В конце цикла банк делится между всеми участниками\n\n"
+                f"> • В конце цикла банк делится между всеми участниками\n"
+                f"> • Дневной лимит вклада — **1000 DC**\n\n"
                 f"**Где смотреть:**\n"
                 f"> 📊 Копилка — <#1552700960474800128>\n"
                 f"> 📊 Сезон — <#1552700989465956403>\n"
