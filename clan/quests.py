@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Квесты клановой лиги."""
+"""Квесты клановой лиги + интеграция достижений."""
 import os
 import time
 import asyncio
@@ -15,8 +15,8 @@ from core.utils import (
 MSK = timezone(timedelta(hours=3))
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
-              "1537851307757539390/image.png?ex=6ab5efe3&is=6ab49e63&"
-              "hm=d1b48b6ea98c9662564b5a77012797024de47fbc9444922b72184d6d0a6d5a2a&")
+              "1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&"
+              "hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&")
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
@@ -83,7 +83,7 @@ QUESTS: Dict[str, dict] = {
         "unit": "DC", "icon": "🎰",
     },
 
-    # ---------- ONCE (за цикл) ----------
+    # ---------- ONCE ----------
     "first_review": {
         "title": "🌟 Первый отзыв сезона",
         "desc": "Оставь первый отзыв в этом сезоне",
@@ -112,7 +112,7 @@ QUESTS: Dict[str, dict] = {
 
 
 def init_clan_quests():
-    """Регистрирует квесты в БД (для истории)."""
+    """Регистрирует квесты в БД."""
     for key, q in QUESTS.items():
         cur.execute(
             "INSERT OR IGNORE INTO quests (key, title, description, reward, goal, type, emoji, active) "
@@ -154,8 +154,7 @@ def _ensure_row(user_id: int, quest_key: str, cycle_id: int):
 
 def update_progress(user_id: int, quest_key: str, delta: int = 1, absolute: Optional[int] = None):
     """
-    Обновляет прогресс. Если absolute задан — приравнивает.
-    Если достигнут goal — выдаёт награду.
+    Обновляет прогресс квеста. Если достигнут goal — выдаёт награду.
     """
     if quest_key not in QUESTS:
         return
@@ -164,7 +163,6 @@ def update_progress(user_id: int, quest_key: str, delta: int = 1, absolute: Opti
     if cycle_id == 0:
         return
 
-    # Юзер должен быть в клане
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
@@ -177,7 +175,7 @@ def update_progress(user_id: int, quest_key: str, delta: int = 1, absolute: Opti
     ).fetchone()
 
     if row["completed_at"]:
-        return  # уже выполнено
+        return
 
     new_progress = absolute if absolute is not None else (row["progress"] + delta)
     new_progress = min(new_progress, quest["goal"])
@@ -189,7 +187,6 @@ def update_progress(user_id: int, quest_key: str, delta: int = 1, absolute: Opti
             (new_progress, int(time.time()), user_id, quest_key, cycle_id)
         )
         db.commit()
-        # Выдача награды
         asyncio.create_task(_reward_user(user_id, quest_key, quest))
     else:
         cur.execute(
@@ -206,10 +203,10 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
     - 100% в банк клана (вклад)
     - ЛС юзеру
     - Лог в канал
+    - 👇 Проверка достижений (квест-достижения)
     """
     reward = quest["reward"]
 
-    # 1. В банк клана (100%)
     from clan.core import add_clan_contribution, get_user_clan
     clan = get_user_clan(user_id)
     if not clan:
@@ -217,7 +214,21 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
 
     await add_clan_contribution(user_id, reward, f"Квест: {quest['title']}")
 
-    # 2. ЛС юзеру
+    # 👇 Достижения по квестам
+    try:
+        from clan.achievements import check_and_unlock
+        from core.bot import bot
+        # Считаем общее кол-во выполненных квестов у юзера
+        total_completed = cur.execute(
+            "SELECT COUNT(*) AS c FROM quest_progress WHERE user_id=? AND completed_at IS NOT NULL",
+            (user_id,)
+        ).fetchone()
+        total = total_completed["c"] if total_completed else 0
+        asyncio.create_task(check_and_unlock(user_id, "quests", value=total, bot=bot))
+    except Exception as e:
+        logger.warning(f"quest achievements: {e}")
+
+    # ЛС юзеру
     try:
         from core.bot import bot
         user = bot.get_user(user_id) or await bot.fetch_user(user_id)
@@ -238,7 +249,7 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
     except Exception as e:
         logger.warning(f"quest reward DM {user_id}: {e}")
 
-    # 3. Лог
+    # Лог
     await log_discord(
         title="🎯 Квест выполнен",
         description=(
@@ -354,19 +365,17 @@ def reset_weekly_quests():
 # ХУКИ
 # ============================================================
 async def on_message_quest_hook(message: disnake.Message):
-    """Вызывается из bot.on_message после основного расчёта DC."""
+    """Хук от bot.on_message."""
     if message.author.bot:
         return
     if not isinstance(message.channel, disnake.TextChannel):
         return
     user_id = message.author.id
 
-    # Только клубные и в клане
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
 
-    # msg_50 (daily) и msg_300 (weekly) — только в не-флудных каналах
     if message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         return
     if len((message.content or "").strip()) < CONFIG.get("MIN_MESSAGE_LENGTH", 3):
@@ -377,7 +386,6 @@ async def on_message_quest_hook(message: disnake.Message):
 
 
 async def on_voice_quest_hook(user_id: int, seconds: int):
-    """Вызывается из bot.on_voice_state_update при выходе из войса."""
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
@@ -388,7 +396,6 @@ async def on_voice_quest_hook(user_id: int, seconds: int):
 
 
 async def on_casino_quest_hook(user_id: int):
-    """Вызывается из actions.py при каждой партии."""
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
@@ -396,10 +403,6 @@ async def on_casino_quest_hook(user_id: int):
 
 
 async def on_casino_win_hook(user_id: int, payout: int, bet: int):
-    """
-    Вызывается при выигрыше в казино.
-    payout — полная выплата (что вернулось юзеру)
-    """
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
@@ -408,14 +411,11 @@ async def on_casino_win_hook(user_id: int, payout: int, bet: int):
     if profit > 0:
         update_progress(user_id, "win_500", delta=profit)
 
-    # jackpot — разовый, если профит за раз ≥ 1000
     if profit >= 1000:
-        # absolute=goal — сразу засчитываем
         update_progress(user_id, "jackpot", absolute=1000)
 
 
 async def on_review_quest_hook(user_id: int):
-    """Вызывается после успешного отзыва в REVIEW_COUNT_CHANNEL."""
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
@@ -424,7 +424,6 @@ async def on_review_quest_hook(user_id: int):
 
 
 async def on_purchase_quest_hook(user_id: int, amount_dc: int):
-    """Вызывается при покупке в магазине за DC."""
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
@@ -432,7 +431,6 @@ async def on_purchase_quest_hook(user_id: int, amount_dc: int):
 
 
 async def on_gift_quest_hook(sender_id: int, amount_dc: int):
-    """Вызывается при подарке DC."""
     from clan.core import get_user_clan
     if not get_user_clan(sender_id):
         return
@@ -440,7 +438,6 @@ async def on_gift_quest_hook(sender_id: int, amount_dc: int):
 
 
 async def on_panel_click_quest_hook(user_id: int):
-    """Вызывается при взаимодействии с панелями клана."""
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
