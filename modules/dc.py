@@ -26,6 +26,9 @@ from core.utils import (
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
+# 👇 НАЛОГ 40% (БЫЛО 60%)
+CLAN_SHARE = 0.40
+
 
 def get_user_dc_data(user_id: int) -> dict:
     return get_dc_cache(user_id)
@@ -87,7 +90,6 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
     """
     Начисляет DC.
     clan_share — доля, уходящая в банк клана.
-    👇 Автоматически проверяет достижения по балансу.
     """
     data = get_dc_cache(user_id)
     data["balance"] += amount
@@ -237,7 +239,8 @@ async def daily_activity_payout():
                 parts.append(f"голос: {voice_dc} DC")
             reason = "Активность за день (" + ", ".join(parts) + ")"
 
-            await add_dc(uid, total, reason, notify=True, log=False, clan_share=0.6)
+            # 👇 40%
+            await add_dc(uid, total, reason, notify=True, log=False, clan_share=CLAN_SHARE)
             paid_users += 1
             total_paid += total
             await asyncio.sleep(0.4)
@@ -352,7 +355,8 @@ async def daily_bonus():
             continue
         data = get_dc_cache(member.id)
         if data["last_bonus"] < now - 86400:
-            await add_dc(member.id, 3, "Ежедневный бонус (Клуб)", notify=True, log=False, clan_share=0.6)
+            # 👇 40%
+            await add_dc(member.id, 3, "Ежедневный бонус (Клуб)", notify=True, log=False, clan_share=CLAN_SHARE)
             data = get_dc_cache(member.id)
             data["last_bonus"] = now
             save_dc_cache(member.id, data)
