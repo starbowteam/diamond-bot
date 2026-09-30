@@ -22,8 +22,8 @@ from core.utils import (
 MSK = timezone(timedelta(hours=3))
 
 CLUB_ROLE_ID    = 1284697274655576186
-# 👇 Минимальный баланс DC для входа в клуб/кланы (было 0)
-MIN_BALANCE     = 20
+# 👇 Минимальный баланс DC для входа в клуб/кланы (было 20)
+MIN_BALANCE     = 50
 
 # ============================================================
 # 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ
@@ -70,6 +70,14 @@ def clan_cut(amount: int) -> int:
 
 # 👇 Бонусы топ-3 по вкладу (было 1.75 / 1.50 / 1.30)
 TOP_BONUSES = [3.00, 2.00, 1.50]
+
+# ============================================================
+# 👇 ПРАВИЛО ВЫПЛАТЫ ПО ИТОГАМ СЕЗОНА
+# ============================================================
+# Кто за сезон внёс в копилку меньше MIN_CONTRIB_FOR_PAYOUT DC —
+# выплату НЕ получает вообще. Банк делится только между теми,
+# кто внёс достаточно. Каждому в ЛС уходит причина.
+MIN_CONTRIB_FOR_PAYOUT = 50
 
 REPORT_DM_USER_ID = 796293832751972352
 
@@ -690,7 +698,8 @@ def close_cycle_and_pay(bot) -> bool:
     cycle_id = cycle["id"]
     all_clans = get_all_clans()
 
-    report = {"cycle": cycle, "clans": [], "total": 0}
+    report = {"cycle": cycle, "clans": [], "total": 0, "payouts": []}
+    payouts_dm = report["payouts"]   # 👈 сюда собираем данные для личных ЛС
     total_paid = 0
 
     for c in all_clans:
@@ -740,34 +749,50 @@ def close_cycle_and_pay(bot) -> bool:
         top_ids = [m["user_id"] for m in sorted_members[:3]]
 
         for m in members_list:
-            if m["user_id"] in top_ids:
+            # 👇 Право на выплату: вклад не меньше MIN_CONTRIB_FOR_PAYOUT
+            m["eligible"] = m["contrib"] >= MIN_CONTRIB_FOR_PAYOUT
+
+            if m["user_id"] in top_ids and m["eligible"]:
                 idx = top_ids.index(m["user_id"])
                 m["bonus"] = TOP_BONUSES[idx]
                 m["place"] = idx + 1
             else:
                 m["bonus"] = 1.0
                 m["place"] = None
-            m["eff"] = m["weight"] * m["bonus"]
+
+            # Не прошёл по вкладу — в делении не участвует
+            m["eff"] = (m["weight"] * m["bonus"]) if m["eligible"] else 0.0
 
         total_eff = sum(m["eff"] for m in members_list)
 
         clan_paid = 0
         top_report = []
         for m in members_list:
-            if total_eff > 0:
+            if m["eligible"] and total_eff > 0:
                 payout = math.floor(bank * m["eff"] / total_eff)
             else:
                 payout = 0
             m["payout"] = payout
             clan_paid += payout
 
+            # 👇 Причина для ЛС: получил или нет
+            if payout > 0:
+                m["reason"] = None
+            elif not m["eligible"]:
+                m["reason"] = f"вклад в копилку меньше {MIN_CONTRIB_FOR_PAYOUT} DC"
+            elif bank <= 0:
+                m["reason"] = "банк клана пуст"
+            else:
+                m["reason"] = "доля вышла меньше 1 DC"
+
             if payout > 0:
                 try:
                     from modules.dc import add_dc
+                    # notify=False: причину и сумму сообщим своим красивым ЛС
                     bot.loop.create_task(add_dc(
                         m["user_id"], payout,
                         f"Клановая лига: выплата за {get_season_title(cycle['number'])}",
-                        notify=True, log=False, clan_share=0.0
+                        notify=False, log=False, clan_share=0.0
                     ))
                 except Exception as e:
                     logger.exception(f"clan payout add_dc {m['user_id']}: {e}")
@@ -787,6 +812,22 @@ def close_cycle_and_pay(bot) -> bool:
                     "payout": payout,
                 })
 
+            # 👇 Данные для личного ЛС каждому участнику
+            payouts_dm.append({
+                "user_id": m["user_id"],
+                "clan_name": c["name"],
+                "clan_emoji": c["emoji"],
+                "clan_color": c["color"],
+                "season": get_season_title(cycle["number"]),
+                "contrib": m["contrib"],
+                "place": m["place"],
+                "bonus": m["bonus"],
+                "payout": payout,
+                "reason": m["reason"],
+                "bank": bank,
+                "eligible": m["eligible"],
+            })
+
         db.commit()
         total_paid += clan_paid
 
@@ -796,6 +837,7 @@ def close_cycle_and_pay(bot) -> bool:
             "members": len(members_list),
             "top": top_report,
             "paid": clan_paid,
+            "not_eligible": sum(1 for m in members_list if not m["eligible"]),
         })
 
     report["total"] = total_paid
@@ -824,6 +866,8 @@ def close_cycle_and_pay(bot) -> bool:
 
     asyncio.create_task(send_payout_report_dm(bot, report))
     asyncio.create_task(post_payout_results(bot, report))
+    # 👇 Личное ЛС каждому участнику: получил выплату или нет и почему
+    asyncio.create_task(send_payout_dms(bot, report))
 
     try:
         from clan.panels import post_news_season_end
@@ -1082,6 +1126,11 @@ async def send_payout_report_dm(bot, report: dict):
                     f"> {medal} <@{t['user_id']}> — {t['contrib']} DC (×{t['bonus']}) → **{t['payout']} DC**"
                 )
             lines.append(f"> ─── Итого выплачено: `{c_data['paid']} DC`")
+            if c_data.get("not_eligible"):
+                lines.append(
+                    f"> ─── Без выплаты (вклад < {MIN_CONTRIB_FOR_PAYOUT} DC): "
+                    f"`{c_data['not_eligible']}` чел."
+                )
 
         top_clan = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
 
@@ -1103,6 +1152,85 @@ async def send_payout_report_dm(bot, report: dict):
         logger.info(f"Отчёт по клан-лиге отправлен {REPORT_DM_USER_ID}")
     except Exception as e:
         logger.exception(f"send_payout_report_dm: {e}")
+
+
+async def send_payout_dms(bot, report: dict):
+    """
+    Личное ЛС каждому участнику сезона: получил выплату или нет — и почему.
+
+    Эмбед стилизованный: блоки-цитаты, разделители, поля. Без изображений.
+    """
+    season = get_season_title(report["cycle"]["number"])
+    payouts = report.get("payouts", [])
+    sent = 0
+    skipped = 0
+
+    for p in payouts:
+        try:
+            user = bot.get_user(p["user_id"])
+            if user is None:
+                try:
+                    user = await bot.fetch_user(p["user_id"])
+                except Exception:
+                    skipped += 1
+                    continue
+            if user is None:
+                skipped += 1
+                continue
+
+            got = p["payout"] > 0
+            color = (p["clan_color"] or 0x2ecc71) if got else 0x2f3136
+
+            lines = [
+                f"> Сезон **«{season}»** завершён.",
+                f"> Клан: {p['clan_emoji']} **{p['clan_name'].upper()}**",
+                "",
+                "**Твой итог за сезон**",
+                f"> Вклад в копилку: `{p['contrib']} DC`",
+                f"> Банк клана: `{p['bank']} DC`",
+            ]
+            if p["place"]:
+                lines.append(f"> Место по вкладу: `#{p['place']}`")
+                lines.append(f"> Множитель: `×{p['bonus']:.2f}`")
+
+            lines += ["", "────────────────────"]
+
+            if got:
+                lines += [
+                    f"**💎 Получено: `{p['payout']} DC`**",
+                    "",
+                    "> Выплата уже на балансе.",
+                    "> Спасибо, что держал копилку клана!",
+                ]
+            else:
+                lines += ["**Выплата не начислена**", ""]
+                lines.append(f"> Причина: {p['reason']}.")
+                if not p.get("eligible", True):
+                    lines += [
+                        f"> Для выплаты нужно внести минимум `{MIN_CONTRIB_FOR_PAYOUT} DC` за сезон.",
+                        "> В следующем сезоне всё в твоих руках.",
+                    ]
+
+            e = disnake.Embed(
+                title="💎 Клановая лига — итоги сезона",
+                description="\n".join(lines),
+                color=color
+            )
+            e.set_footer(text="Diamond Shop · Клановая лига")
+
+            await user.send(embed=e)
+            sent += 1
+            await asyncio.sleep(0.5)
+        except disnake.Forbidden:
+            skipped += 1
+            continue
+        except Exception as e:
+            logger.warning(f"send_payout_dms {p['user_id']}: {e}")
+
+    logger.info(
+        f"send_payout_dms: отправлено {sent} ЛС, пропущено {skipped} "
+        f"(всего участников: {len(payouts)})"
+    )
 
 
 async def post_payout_results(bot, report: dict):
