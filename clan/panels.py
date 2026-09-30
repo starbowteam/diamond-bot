@@ -88,7 +88,6 @@ def _build_season_static_embeds() -> List[disnake.Embed]:
     cycle = get_current_cycle()
     season_num = cycle["number"] if cycle else 1
 
-    # Заголовок с названием сезона
     if cycle:
         title = f"Клубная лига — {get_season_title(season_num)}!"
     else:
@@ -124,12 +123,6 @@ def _build_season_static_embeds() -> List[disnake.Embed]:
 
 
 def _live_footer(e: disnake.Embed, label: str = "") -> disnake.Embed:
-    """
-    Ставит на эмбед момент построения.
-
-    Сразу видно, что цифры пересчитаны только что, а не «закешированы»:
-    время меняется при каждом нажатии кнопки.
-    """
     stamp = datetime.now(MSK).strftime("%d.%m.%Y %H:%M:%S")
     e.set_footer(text=(f"{label} · " if label else "") + f"данные на {stamp} МСК")
     return e
@@ -751,9 +744,6 @@ class ClanAdminSelect(disnake.ui.StringSelect):
 
         value = inter.data.values[0]
 
-        # 👇 ВАЖНО: with_message=True. Без него Discord правит сам эмбед-панель,
-        # и вместо ответа юзер видел, как панель подменяется текстом итогов.
-        # С ним создаётся отдельное эфемерное сообщение — его и правим.
         await inter.response.defer(with_message=True, ephemeral=True)
 
         if value == "update_clans":
@@ -773,14 +763,17 @@ class ClanAdminSelect(disnake.ui.StringSelect):
     # ПЕРЕСБОРКА КЛАНОВ С НУЛЯ (со подтверждением)
     # --------------------------------------------------------
     async def _confirm_rebuild(self, inter: disnake.MessageInteraction):
-        """Спрашивает подтверждение: действие снимает кланы у ВСЕХ."""
-        # 👇 ИСПРАВЛЕНО: передаём view=, а не components=[View()].
-        # disnake ожидает в components кнопки/селекты/ряды, а не контейнер View.
+        """
+        Спрашивает подтверждение: действие снимает кланы у ВСЕХ.
+
+        👇 ИСПРАВЛЕНО: передаём view=, а не components=[View()].
+        disnake ожидает в components кнопки/селекты/ряды, а не контейнер View.
+        """
         await inter.edit_original_response(
             content=(
                 "⚠️ **Полная пересборка кланов**\n\n"
                 "> Снимет роли кланов **у всех** и раскидает заново случайно.\n"
-                "> Вклады за сезон остаются, но переедут в новые кланы.\n\n"
+                "> Вклады за сезон переедут за людьми в их новые кланы.\n\n"
                 "> Точно делаем?"
             ),
             view=ClanRebuildConfirmView()
@@ -790,14 +783,6 @@ class ClanAdminSelect(disnake.ui.StringSelect):
     # ОДНА КНОПКА: пересчёт + чистка + распределение + панели
     # --------------------------------------------------------
     async def _update_clans(self, inter: disnake.MessageInteraction):
-        """
-        Пересчитывает всё разом:
-          · роли покупателей по отзывам
-          · убирает из клана всех, кто провалил ХОТЯ БЫ ОДНО условие
-            (баланс < 50 DC, нет роли покупателя, нет активности)
-          · раскидывает кланы прошедшим
-          · обновляет панели
-        """
         try:
             from clan.core import (
                 recalculate_clan_league, MIN_BALANCE, INACTIVE_DAYS_LIMIT,
@@ -823,6 +808,7 @@ class ClanAdminSelect(disnake.ui.StringSelect):
                     f"нет роли покупателя, нет действий {INACTIVE_DAYS_LIMIT} дн.\n"
                     f"> 👀 Проверено участников: **{stats['members_checked']}**\n"
                     f"> 🚪 Исключено из клана: **{stats['removed']}**\n"
+                    f"> 💸 Вкладов вычищено: **{stats.get('removed_dc', 0)} DC**\n"
                     f"> ⏳ Первый отсчёт активности: **{stats.get('seeded', 0)}**\n\n"
                     f"**Распределение**\n"
                     f"> ♻️ Возвращены снятые роли: **{stats.get('repaired', 0)}**\n"
@@ -839,7 +825,7 @@ class ClanAdminSelect(disnake.ui.StringSelect):
             )
 
     # --------------------------------------------------------
-    # Пересчёт достижений (оставлен как есть)
+    # Пересчёт достижений
     # --------------------------------------------------------
     async def _recalc_ach(self, inter: disnake.MessageInteraction):
         try:
@@ -948,10 +934,6 @@ async def _run_clan_rebuild(inter: disnake.MessageInteraction):
         )
 
 
-# 👇 Ручной «Кик из клана» удалён: чистка идёт автоматически
-# в «Обновлении кланов» (clan.core.recalculate_clan_league → prune_ineligible_clan_members).
-
-
 async def send_clan_admin_panel(bot):
     """Отправляет админ-панель лиги с СЕЛЕКТОМ + красивой шапкой."""
     STAFF_CHANNEL = 1551276116679860314
@@ -986,9 +968,11 @@ async def send_clan_admin_panel(bot):
             f"> · баланс меньше **{MIN_BALANCE} DC**\n"
             "> · нет роли покупателя (нет отзывов)\n"
             "> · нет действий **30 дней**\n\n"
+            "> При исключении вклад за текущий сезон **удаляется из копилки**\n"
+            "> (ушёл из клана = ушёл со своими DC).\n\n"
             "> Если роль клана сняли руками — кнопка вернёт её обратно.\n\n"
             "> **Пересобрать кланы (рандом)** — снимает роли кланов У ВСЕХ\n"
-            "> и раскидывает заново случайно. Спросит подтверждение.\n\n"
+            "> и раскидывает заново случайно. Вклады едут за людьми.\n\n"
             "> **Пересчитать достижения** — прогнать всех юзеров и выдать недостающие.\n"
             "> **Обновить панели** — пересобрать эмбеды копилки и сезона.\n\n"
             "────────────────────\n"
@@ -1032,6 +1016,9 @@ def start_clan_tasks(bot):
         _clan_weekly_reset_task.start(bot)
     if not _clan_news_task.is_running():
         _clan_news_task.start(bot)
+    # 👇 НОВОЕ: авто-чистка кланов каждые 6 часов
+    if not _clan_prune_task.is_running():
+        _clan_prune_task.start(bot)
 
 
 @tasks.loop(minutes=1)
@@ -1100,6 +1087,31 @@ async def _clan_news_task(bot):
                 await post_news_weekly(bot)
     except Exception as e:
         logger.exception(f"clan news task: {e}")
+
+
+@tasks.loop(hours=6)
+async def _clan_prune_task(bot):
+    """
+    👇 Автоматическая чистка кланов. Без неё люди с балансом < MIN_BALANCE
+    (или без активности 30+ дней, или без роли покупателя) продолжают
+    висеть в клане, пока админ не нажмёт кнопку руками.
+    Запускается каждые 6 часов. Вклады исключённых вычищаются из копилок.
+    """
+    await bot.wait_until_ready()
+    try:
+        from clan.core import prune_ineligible_clan_members
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+        if not guild:
+            return
+        result = await prune_ineligible_clan_members(guild)
+        if result["removed"] > 0:
+            logger.info(
+                f"🧹 Авто-чистка кланов: исключено {result['removed']} чел., "
+                f"вычищено {result.get('removed_dc', 0)} DC из копилок"
+            )
+            await update_clan_pool_embed(bot)
+    except Exception as e:
+        logger.exception(f"_clan_prune_task: {e}")
 
 
 def init_clan_panels():
