@@ -719,6 +719,12 @@ class ClanAdminSelect(disnake.ui.StringSelect):
                 value="update_clans"
             ),
             SelectOption(
+                label="・Пересобрать кланы (рандом)",
+                description="СНЯТЬ ВСЕХ из кланов и раскидать заново случайно",
+                emoji="🎲",
+                value="rebuild_clans"
+            ),
+            SelectOption(
                 label="・Пересчитать достижения",
                 description="Прогнать всех юзеров и выдать недостающие достижения",
                 emoji="🏆",
@@ -753,12 +759,30 @@ class ClanAdminSelect(disnake.ui.StringSelect):
         if value == "update_clans":
             await self._update_clans(inter)
 
+        elif value == "rebuild_clans":
+            await self._confirm_rebuild(inter)
+
         elif value == "recalc_ach":
             await self._recalc_ach(inter)
 
         elif value == "refresh":
             await update_clan_pool_embed(inter.bot)
             await inter.edit_original_response(content="✅ Панели обновлены.")
+
+    # --------------------------------------------------------
+    # ПЕРЕСБОРКА КЛАНОВ С НУЛЯ (со подтверждением)
+    # --------------------------------------------------------
+    async def _confirm_rebuild(self, inter: disnake.MessageInteraction):
+        """Спрашивает подтверждение: действие снимает кланы у ВСЕХ."""
+        await inter.edit_original_response(
+            content=(
+                "⚠️ **Полная пересборка кланов**\n\n"
+                "> Снимет роли кланов **у всех** и раскидает заново случайно.\n"
+                "> Вклады за сезон остаются, но переедут в новые кланы.\n\n"
+                "> Точно делаем?"
+            ),
+            components=[ClanRebuildConfirmView()]
+        )
 
     # --------------------------------------------------------
     # ОДНА КНОПКА: пересчёт + чистка + распределение + панели
@@ -850,6 +874,77 @@ def _is_admin(inter: disnake.MessageInteraction) -> bool:
     return has_admin_command_roles(inter.author)
 
 
+# ============================================================
+# ПОДТВЕРЖДЕНИЕ ПОЛНОЙ ПЕРЕСБОРКИ КЛАНОВ
+# ============================================================
+class ClanRebuildConfirmView(View):
+    def __init__(self):
+        super().__init__(timeout=120)
+
+    @disnake.ui.button(
+        label="Да, снять всех и раскидать",
+        style=ButtonStyle.danger,
+        custom_id="clan_rebuild:yes",
+        emoji="🎲",
+    )
+    async def confirm(self, button, inter: disnake.MessageInteraction):
+        if not _is_admin(inter):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.defer(with_message=True, ephemeral=True)
+        await _run_clan_rebuild(inter)
+
+    @disnake.ui.button(
+        label="Отмена",
+        style=ButtonStyle.secondary,
+        custom_id="clan_rebuild:no",
+    )
+    async def cancel(self, button, inter: disnake.MessageInteraction):
+        await inter.response.edit_message(
+            content="❌ Пересборка кланов отменена.", components=[]
+        )
+
+
+async def _run_clan_rebuild(inter: disnake.MessageInteraction):
+    """Снимает кланы у всех и раскидывает заново случайно."""
+    try:
+        from clan.core import rebuild_clans_random
+
+        await inter.edit_original_response(
+            content="🎲 Пересобираю кланы: снимаю всех и раскидываю заново...\n"
+                    "> Может занять пару минут, не трогай панель.",
+            components=[]
+        )
+
+        stats = await rebuild_clans_random(inter.guild)
+
+        await update_clan_pool_embed(inter.bot)
+
+        dist_lines = "\n".join(
+            f"> · {name}: **{count}**" for name, count in stats["distribution"].items()
+        )
+
+        await inter.edit_original_response(
+            content=(
+                f"🎲 **Кланы пересобраны с нуля**\n\n"
+                f"**Снято**\n"
+                f"> 🚪 Освобождено от кланов: **{stats['stripped']}** чел.\n"
+                f"> ⚠️ Ошибок снятия: **{stats['strip_errors']}**\n\n"
+                f"**Раскидано заново (случайно)**\n"
+                f"> ✅ Получили клан: **{stats['assigned']}**\n"
+                f"> 🚫 Не прошли условия: **{stats['skipped']}**\n"
+                f"> ⚠️ Ошибок с ролями: **{stats['role_errors']}**\n\n"
+                f"**Новая раскладка**\n{dist_lines}\n\n"
+                f"> 🔄 Вклады перенесены: **{stats['moved']}** записей"
+            ),
+            components=[]
+        )
+    except Exception as e:
+        logger.exception(f"_run_clan_rebuild: {e}")
+        await inter.edit_original_response(
+            content=f"❌ Ошибка пересборки: `{str(e)[:300]}`", components=[]
+        )
+
+
 # 👇 Ручной «Кик из клана» удалён: чистка идёт автоматически
 # в «Обновлении кланов» (clan.core.recalculate_clan_league → prune_ineligible_clan_members).
 
@@ -889,6 +984,8 @@ async def send_clan_admin_panel(bot):
             "> · нет роли покупателя (нет отзывов)\n"
             "> · нет действий **30 дней**\n\n"
             "> Если роль клана сняли руками — кнопка вернёт её обратно.\n\n"
+            "> **Пересобрать кланы (рандом)** — снимает роли кланов У ВСЕХ\n"
+            "> и раскидывает заново случайно. Спросит подтверждение.\n\n"
             "> **Пересчитать достижения** — прогнать всех юзеров и выдать недостающие.\n"
             "> **Обновить панели** — пересобрать эмбеды копилки и сезона.\n\n"
             "────────────────────\n"
