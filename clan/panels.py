@@ -123,6 +123,18 @@ def _build_season_static_embeds() -> List[disnake.Embed]:
     return [e1, e2]
 
 
+def _live_footer(e: disnake.Embed, label: str = "") -> disnake.Embed:
+    """
+    Ставит на эмбед момент построения.
+
+    Сразу видно, что цифры пересчитаны только что, а не «закешированы»:
+    время меняется при каждом нажатии кнопки.
+    """
+    stamp = datetime.now(MSK).strftime("%d.%m.%Y %H:%M:%S")
+    e.set_footer(text=(f"{label} · " if label else "") + f"данные на {stamp} МСК")
+    return e
+
+
 # ============================================================
 # 3. ВКЛАДЫ
 # ============================================================
@@ -147,7 +159,8 @@ def _build_contributions_embed() -> disnake.Embed:
             value=f"{members} чел. · вклад {bank} DC\nЛидер: {leader}",
             inline=True
         )
-    return e
+
+    return _live_footer(e, "Вклады кланов")
 
 
 # ============================================================
@@ -206,7 +219,7 @@ def _build_total_pool_embed() -> disnake.Embed:
         color=6776679
     )
     e.set_image(url=IMG_STRIPE)
-    return e
+    return _live_footer(e, "Общий пул")
 
 
 # ============================================================
@@ -242,7 +255,7 @@ def _build_clan_bank_embed(user_id: int) -> Optional[disnake.Embed]:
         color=user_clan["color"]
     )
     e.set_image(url=IMG_STRIPE)
-    return e
+    return _live_footer(e, f"Банк клана {user_clan['name']}")
 
 
 # ============================================================
@@ -286,7 +299,7 @@ def _build_clan_top_embed(user_id: int) -> Optional[disnake.Embed]:
         color=user_clan["color"]
     )
     e.set_image(url=IMG_STRIPE)
-    return e
+    return _live_footer(e, f"Топ клана {user_clan['name']}")
 
 
 # ============================================================
@@ -787,6 +800,7 @@ class ClanAdminSelect(disnake.ui.StringSelect):
                     f"> ⏳ Первый отсчёт активности: **{stats.get('seeded', 0)}**\n\n"
                     f"**Распределение**\n"
                     f"> ♻️ Возвращены снятые роли: **{stats.get('repaired', 0)}**\n"
+                    f"> 🔄 Вклады перенесены в текущий клан: **{stats.get('moved', 0)}**\n"
                     f"> ✅ Выдан клан заново: **{stats['assigned']}**\n"
                     f"> 👥 Уже были в клане (роль на месте): **{stats['skipped']}**\n"
                     f"> ⛔ В жёстком исключении: **{stats['excluded']}**"
