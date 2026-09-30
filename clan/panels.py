@@ -700,16 +700,10 @@ class ClanAdminSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
             SelectOption(
-                label="・Пересчёт кланов",
-                description="Роли по отзывам + кланы: нужно минимум 50 DC",
+                label="・Обновление кланов",
+                description="Роли + чистка по условиям + распределение + панели",
                 emoji="🔄",
-                value="recalc_club"
-            ),
-            SelectOption(
-                label="・Обновление клана",
-                description="Исключить неактивных, раскидать клубных, обновить панели",
-                emoji="🧹",
-                value="update_clan"
+                value="update_clans"
             ),
             SelectOption(
                 label="・Пересчитать достижения",
@@ -743,11 +737,8 @@ class ClanAdminSelect(disnake.ui.StringSelect):
         # С ним создаётся отдельное эфемерное сообщение — его и правим.
         await inter.response.defer(with_message=True, ephemeral=True)
 
-        if value == "recalc_club":
-            await self._recalc_club(inter)
-
-        elif value == "update_clan":
-            await self._update_clan(inter)
+        if value == "update_clans":
+            await self._update_clans(inter)
 
         elif value == "recalc_ach":
             await self._recalc_ach(inter)
@@ -757,20 +748,24 @@ class ClanAdminSelect(disnake.ui.StringSelect):
             await inter.edit_original_response(content="✅ Панели обновлены.")
 
     # --------------------------------------------------------
-    # Пересчёт роли «Клуб» по новым условиям
+    # ОДНА КНОПКА: пересчёт + чистка + распределение + панели
     # --------------------------------------------------------
-    async def _recalc_club(self, inter: disnake.MessageInteraction):
+    async def _update_clans(self, inter: disnake.MessageInteraction):
         """
-        Полный пересчёт клановой лиги:
-          · роли покупателей по отзывам (роль «Клуб» — просто за отзыв)
-          · снять клан у тех, у кого баланс меньше 50 DC
-          · раскидать по кланам тех, кто имеет право, но без клана
+        Пересчитывает всё разом:
+          · роли покупателей по отзывам
+          · убирает из клана всех, кто провалил ХОТЯ БЫ ОДНО условие
+            (баланс < 50 DC, нет роли покупателя, нет активности)
+          · раскидывает кланы прошедшим
+          · обновляет панели
         """
         try:
-            from clan.core import recalculate_clan_league, MIN_BALANCE
+            from clan.core import (
+                recalculate_clan_league, MIN_BALANCE, INACTIVE_DAYS_LIMIT,
+            )
 
             await inter.edit_original_response(
-                content="⏳ Пересчитываю кланы и роли...\n"
+                content="⏳ Обновляю кланы: роли, чистка, распределение...\n"
                         "> Это может занять пару минут."
             )
 
@@ -780,57 +775,26 @@ class ClanAdminSelect(disnake.ui.StringSelect):
 
             await inter.edit_original_response(
                 content=(
-                    f"✅ **Пересчёт кланов завершён**\n\n"
+                    f"✅ **Обновление кланов завершено**\n\n"
                     f"**Роли покупателей**\n"
                     f"> 🔍 Пересчитано (есть отзыв): **{stats['roles_checked']}**\n"
                     f"> ⚠️ Ошибок: **{stats['roles_errors']}**\n\n"
-                    f"**Кланы** (нужно минимум {MIN_BALANCE} DC)\n"
+                    f"**Чистка кланов**\n"
+                    f"> 📋 Условия (провалил любое — вон): баланс < {MIN_BALANCE} DC, "
+                    f"нет роли покупателя, нет действий {INACTIVE_DAYS_LIMIT} дн.\n"
                     f"> 👀 Проверено участников: **{stats['members_checked']}**\n"
-                    f"> 🚪 Снят клан за малый баланс: **{stats['low_balance_removed']}**\n"
+                    f"> 🚪 Исключено из клана: **{stats['removed']}**\n"
+                    f"> ⏳ Первый отсчёт активности: **{stats.get('seeded', 0)}**\n\n"
+                    f"**Распределение**\n"
                     f"> ✅ Выдан клан: **{stats['assigned']}**\n"
                     f"> 👥 Уже были в клане: **{stats['skipped']}**\n"
                     f"> ⛔ В жёстком исключении: **{stats['excluded']}**"
                 )
             )
         except Exception as e:
-            logger.exception(f"recalc_club: {e}")
+            logger.exception(f"update_clans: {e}")
             await inter.edit_original_response(
-                content=f"❌ Ошибка пересчёта кланов: `{str(e)[:300]}`"
-            )
-
-    # --------------------------------------------------------
-    # Обновление клана: автоочистка + распределение + панели
-    # --------------------------------------------------------
-    async def _update_clan(self, inter: disnake.MessageInteraction):
-        try:
-            from clan.core import (
-                cleanup_inactive_clan_members, distribute_all_club_members,
-                INACTIVE_DAYS_LIMIT, INACTIVE_MAX_BALANCE,
-            )
-
-            await inter.edit_original_response(
-                content="⏳ Обновляю клан: чищу неактивных и распределяю..."
-            )
-
-            cleaned = await cleanup_inactive_clan_members(inter.guild)
-            result = distribute_all_club_members(inter.guild)
-
-            await update_clan_pool_embed(inter.bot)
-
-            await inter.edit_original_response(
-                content=(
-                    f"✅ **Обновление клана завершено**\n\n"
-                    f"> 🧹 Исключены (>{INACTIVE_DAYS_LIMIT} дн. без действий и баланс < {INACTIVE_MAX_BALANCE} DC): **{cleaned['removed']}**\n"
-                    f"> 💰 Оставлены с балансом >= {INACTIVE_MAX_BALANCE} DC: **{cleaned.get('kept_rich', 0)}**\n"
-                    f"> ✅ Распределено: **{result['assigned']}**\n"
-                    f"> 👥 Уже в клане: **{result['skipped']}**\n"
-                    f"> ⛔ В жёстком исключении: **{result.get('excluded', 0)}**"
-                )
-            )
-        except Exception as e:
-            logger.exception(f"update_clan: {e}")
-            await inter.edit_original_response(
-                content=f"❌ Ошибка обновления клана: `{str(e)[:300]}`"
+                content=f"❌ Ошибка обновления кланов: `{str(e)[:300]}`"
             )
 
     # --------------------------------------------------------
@@ -872,7 +836,7 @@ def _is_admin(inter: disnake.MessageInteraction) -> bool:
 
 
 # 👇 Ручной «Кик из клана» удалён: чистка идёт автоматически
-# в «Обновлении клана» (clan.core.cleanup_inactive_clan_members).
+# в «Обновлении кланов» (clan.core.recalculate_clan_league → prune_ineligible_clan_members).
 
 
 async def send_clan_admin_panel(bot):
@@ -902,10 +866,13 @@ async def send_clan_admin_panel(bot):
         description=(
             "> Управление клановой лигой. Сезон идёт **автоматически**:\n"
             "> старт и выплата происходят сами, руками запускать не нужно.\n\n"
-            "> **Пересчёт кланов** — заново выдать роли покупателям по отзывам "
-            "и раскидать кланы. Клан даётся только при балансе от **50 DC**.\n"
-            "> **Обновление клана** — исключить мёртвые аккаунты (месяц без действий "
-            "**и** баланс меньше 50 DC), раскидать клубных без клана и обновить панели.\n"
+            "> **Обновление кланов** — одна кнопка на всё: пересчитывает роли\n"
+            "> покупателям по отзывам, вычищает из кланов всех, кто провалил\n"
+            "> любое условие, и раскидывает кланы заново.\n\n"
+            "**Условия нахождения в клане** (провалил любое — вон):\n"
+            "> · баланс меньше **50 DC**\n"
+            "> · нет роли покупателя (нет отзывов)\n"
+            "> · нет действий **30 дней**\n\n"
             "> **Пересчитать достижения** — прогнать всех юзеров и выдать недостающие.\n"
             "> **Обновить панели** — пересобрать эмбеды копилки и сезона.\n\n"
             "────────────────────\n"
