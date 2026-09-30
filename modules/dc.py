@@ -184,6 +184,15 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
         except Exception as e:
             logger.warning(f"balance ach: {e}")
 
+    # 👇 АВТОВЫДАЧА КЛАНА: баланс только что дорос до порога (было < MIN_BALANCE)
+    if amount > 0:
+        try:
+            from clan.core import try_auto_assign_clan, MIN_BALANCE
+            if data["balance"] >= MIN_BALANCE > data["balance"] - amount:
+                await try_auto_assign_clan(user_id)
+        except Exception as e:
+            logger.warning(f"auto-assign clan после начисления {user_id}: {e}")
+
     if log:
         await log_discord(
             title="💎 Начислены Diamond Coins",
