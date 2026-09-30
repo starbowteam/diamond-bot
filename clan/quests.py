@@ -15,8 +15,8 @@ from core.utils import (
 MSK = timezone(timedelta(hours=3))
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
-              "1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&"
-              "hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&")
+              "1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&"
+              "hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&")
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
@@ -199,20 +199,26 @@ def update_progress(user_id: int, quest_key: str, delta: int = 1, absolute: Opti
 
 async def _reward_user(user_id: int, quest_key: str, quest: dict):
     """
-    Выдаёт награду:
-    - 100% в банк клана (вклад)
+    Выдаёт награду за квест:
+    - вклад в банк клана по правилу копилки (до 100 DC — вся сумма, больше — 40%)
     - ЛС юзеру
     - Лог в канал
     - 👇 Проверка достижений (квест-достижения)
     """
     reward = quest["reward"]
 
-    from clan.core import add_clan_contribution, get_user_clan
+    from clan.core import add_clan_contribution, get_user_clan, clan_cut
     clan = get_user_clan(user_id)
     if not clan:
         return
 
-    await add_clan_contribution(user_id, reward, f"Квест: {quest['title']}")
+    # 👇 Копилка по правилу: до 100 DC включительно — вся сумма,
+    # больше 100 DC — 40% от награды.
+    clan_amount = clan_cut(reward)
+    if clan_amount <= 0:
+        return
+
+    await add_clan_contribution(user_id, clan_amount, f"Квест: {quest['title']}")
 
     # 👇 Достижения по квестам
     try:
@@ -239,7 +245,7 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
                 title="✅ Квест выполнен!",
                 description=(
                     f"> **Квест:** {quest['title']}\n"
-                    f"> **Награда:** `+{reward} DC` в копилку клана {clan['emoji']} **{clan['name']}**\n\n"
+                    f"> **Награда:** `+{clan_amount} DC` в копилку клана {clan['emoji']} **{clan['name']}**\n\n"
                     f"> Продолжай выполнять квесты, чтобы поднять свой вклад!"
                 ),
                 color=clan["color"]
@@ -256,7 +262,7 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
             f"> **Участник:** <@{user_id}>\n"
             f"> **Клан:** {clan['emoji']} {clan['name']}\n"
             f"> **Квест:** {quest['title']}\n"
-            f"> **Награда:** `+{reward} DC`"
+            f"> **В копилку:** `+{clan_amount} DC`"
         ),
         color=clan["color"],
         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
@@ -293,7 +299,7 @@ def get_user_quests(user_id: int) -> List[dict]:
 
 def format_quests_embed(user_id: int) -> List[disnake.Embed]:
     """Возвращает 2 эмбеда: картинка + список с прогресс-барами."""
-    from clan.core import get_user_clan, make_progress_bar
+    from clan.core import get_user_clan, make_progress_bar, clan_cut
     from clan.core import EMBEDS_DIR as CORE_EMBEDS
 
     clan = get_user_clan(user_id)
@@ -307,7 +313,9 @@ def format_quests_embed(user_id: int) -> List[disnake.Embed]:
         pct = q["progress"] / q["goal"] if q["goal"] > 0 else 0
         bar = make_progress_bar(pct)
         status = "✅" if q["completed"] else f"`{q['progress']}/{q['goal']}`"
-        return f"> {q['icon']} **{q['title']}** — {q['desc']}\n> {bar} {status}  ·  +{q['reward']} DC"
+        # 👇 показываем реальную сумму, которая уйдёт в копилку по правилу
+        cut = clan_cut(q["reward"])
+        return f"> {q['icon']} **{q['title']}** — {q['desc']}\n> {bar} {status}  ·  +{cut} DC в копилку"
 
     lines = []
     if daily:
