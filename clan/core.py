@@ -11,9 +11,9 @@ from typing import Optional, List, Dict, Tuple
 import disnake
 
 from core.utils import (
-    CONFIG, DATA_DIR, ADD_DIR, logger, db, cur,
+    CONFIG, DATA_DIR, ADD_DIR, FILES, logger, db, cur,
     load_json, save_json, log_discord, now_ts,
-    get_dc_cache, save_dc_cache,
+    get_dc_cache, save_dc_cache, update_user_roles,
 )
 
 # ============================================================
@@ -22,7 +22,10 @@ from core.utils import (
 MSK = timezone(timedelta(hours=3))
 
 CLUB_ROLE_ID    = 1284697274655576186
-# 👇 Минимальный баланс DC для входа в клуб/кланы (было 20)
+
+# 👇 Минимальный баланс DC для входа В КЛАН (Окаменелости / Сияние /
+# Кристализация). Меньше 50 DC — клан не даётся.
+# Роль «Клуб» тут НИ ПРИ ЧЁМ: это обычная роль покупателя за отзыв.
 MIN_BALANCE     = 50
 
 # ============================================================
@@ -633,6 +636,132 @@ async def cleanup_inactive_clan_members(
         "kept_rich": kept_rich,
         "users": removed,
     }
+
+
+# ============================================================
+# 👇 ПОЛНЫЙ ПЕРЕСЧЁТ КЛАНОВ (кнопка в панели)
+# ============================================================
+# Снимать ли клан у тех, у кого баланс ниже MIN_BALANCE.
+# Поставь False — тогда пересчёт только ВЫДАЁТ кланы, но не забирает.
+CLAN_RECALC_REVOKE_LOW_BALANCE = True
+
+
+async def remove_low_balance_clan_members(guild: disnake.Guild) -> dict:
+    """
+    Снимает клан (членство + роль) у тех, у кого баланс меньше MIN_BALANCE.
+    Вклад при этом остаётся в банке клана.
+    """
+    removed = []
+    checked = 0
+
+    for c in get_all_clans():
+        rows = cur.execute(
+            "SELECT user_id FROM clan_members WHERE clan_id=? AND left_at IS NULL",
+            (c["id"],)
+        ).fetchall()
+
+        for r in rows:
+            uid = r["user_id"]
+            if is_hard_excluded(uid):
+                continue
+            checked += 1
+
+            row = cur.execute(
+                "SELECT balance FROM dc_cache WHERE user_id=?", (uid,)
+            ).fetchone()
+            balance = (row["balance"] or 0) if row else 0
+
+            if balance >= MIN_BALANCE:
+                continue
+
+            cur.execute(
+                "UPDATE clan_members SET left_at=? WHERE user_id=? AND left_at IS NULL",
+                (int(time.time()), uid)
+            )
+            db.commit()
+
+            member = guild.get_member(uid)
+            role = guild.get_role(c["role_id"])
+            if role and member and role in member.roles:
+                try:
+                    await member.remove_roles(
+                        role, reason=f"Клан-лига: баланс меньше {MIN_BALANCE} DC"
+                    )
+                except Exception as e:
+                    logger.warning(f"remove_low_balance role {uid}: {e}")
+
+            removed.append({"user_id": uid, "clan": c["name"], "balance": balance})
+
+            asyncio.create_task(log_discord(
+                title="🚪 Снят клан (мало DC)",
+                description=(
+                    f"> **Участник:** <@{uid}> (`{uid}`)\n"
+                    f"> **Клан:** {c['emoji']} **{c['name']}**\n"
+                    f"> **Баланс:** `{balance} DC` (нужно минимум {MIN_BALANCE})\n"
+                    f"> Вклад остаётся в банке клана."
+                ),
+                color=0xff6600,
+                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            ))
+
+            await asyncio.sleep(0.2)
+
+    logger.info(
+        f"Снятие кланов за низкий баланс: проверено {checked}, снято {len(removed)}"
+    )
+    return {"checked": checked, "removed": len(removed), "users": removed}
+
+
+async def recalculate_clan_league(guild: disnake.Guild) -> dict:
+    """
+    Полный пересчёт клановой лиги — то, что делает кнопка в панели.
+
+      1. Роли покупателей по отзывам. Роль «Клуб» — просто за отзыв,
+         никаких условий по балансу (это базовая роль покупателя).
+      2. Снять клан у тех, у кого баланс меньше MIN_BALANCE.
+      3. Раскидать по кланам тех, кто имеет право, но остался без клана.
+    """
+    counts = load_json(FILES["review_counts"], {}) or {}
+
+    stats = {
+        "roles_checked": 0,          # кому пересчитали роли (есть отзыв)
+        "roles_errors": 0,
+        "low_balance_removed": 0,    # снят клан за низкий баланс
+        "members_checked": 0,        # всего проверено участников кланов
+        "assigned": 0,               # выдано кланов
+        "skipped": 0,                # уже были в клане
+        "excluded": 0,               # жёсткие исключения
+    }
+
+    # ---- 1) Роли покупателей по отзывам ----
+    for member in guild.members:
+        if member.bot:
+            continue
+        cnt = int(counts.get(str(member.id), 0) or 0)
+        if cnt <= 0:
+            continue
+        try:
+            await update_user_roles(member, cnt, keep_pka=True)
+            stats["roles_checked"] += 1
+        except Exception as e:
+            stats["roles_errors"] += 1
+            logger.warning(f"recalculate_clan_league roles {member.id}: {e}")
+        await asyncio.sleep(0.15)
+
+    # ---- 2) Снять клан у тех, кто не дотягивает по балансу ----
+    if CLAN_RECALC_REVOKE_LOW_BALANCE:
+        low = await remove_low_balance_clan_members(guild)
+        stats["low_balance_removed"] = low["removed"]
+        stats["members_checked"] = low["checked"]
+
+    # ---- 3) Раскидать по кланам ----
+    dist = distribute_all_club_members(guild)
+    stats["assigned"] = dist["assigned"]
+    stats["skipped"] = dist["skipped"]
+    stats["excluded"] = dist.get("excluded", 0)
+
+    logger.info(f"Пересчёт клановой лиги: {stats}")
+    return stats
 
 
 # ============================================================
