@@ -58,7 +58,7 @@ IMG_ROULETTE_SPIN = "https://cdn.discordapp.com/attachments/1527006158282555412/
 IMG_ROULETTE_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&"
 IMG_ROULETTE_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685884456636527/image.png?ex=6aaf3c45&is=6aadeac5&hm=451731816ed61f6878fba789858bdf5aed0ef69cfe1bfd5ce5378a7f9a1e4a18&"
 
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
 IMG_BJ_TABLE = "https://media.discordapp.net/attachments/1527006158282555412/1551293759461920808/image.png?ex=6ab17265&is=6ab020e5&hm=d6e9e598b1981259566f329a2b43f19ab5bbd49440d6c9a6a8f1c31d6b2f9d38&=&format=webp&quality=lossless"
 IMG_BJ_WIN   = "https://media.discordapp.net/attachments/1527006158282555412/1551293759893930094/image.png?ex=6ab17266&is=6ab020e6&hm=2de3752ae558bf824c547cb08167e4fcd5b6e66ebec440a42d64130ee84a42ef&=&format=webp&quality=lossless"
@@ -415,8 +415,8 @@ class RouletteModal(Modal):
             reason = f"Выигрыш в рулетке: {result['name']}"
             if used:
                 reason += f" ({', '.join(used)})"
-            # 👇 clan_share=0.4 (было 0.6)
-            await add_dc(user_id, payout, reason, clan_share=0.4)
+            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
+            await add_dc(user_id, payout, reason, to_clan_pool=True)
             if on_casino_win_hook:
                 try:
                     await on_casino_win_hook(user_id, payout, bet)
@@ -542,7 +542,7 @@ class RouletteRetryView(View):
             reason = f"Выигрыш в рулетке: {result['name']} (двойная)"
             if used:
                 reason += f" ({', '.join(used)})"
-            await add_dc(user_id, payout, reason, clan_share=0.4)
+            await add_dc(user_id, payout, reason, to_clan_pool=True)
             if on_casino_win_hook:
                 try:
                     await on_casino_win_hook(user_id, payout, new_bet)
@@ -867,8 +867,8 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
         payout, used = apply_casino_win(user_id, payout)
         if used:
             reason += f" ({', '.join(used)})"
-        # 👇 clan_share=0.4
-        await add_dc(user_id, payout, reason, clan_share=0.4)
+        # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
+        await add_dc(user_id, payout, reason, to_clan_pool=True)
         if on_casino_win_hook:
             try:
                 await on_casino_win_hook(user_id, payout, total_bet)
@@ -1174,8 +1174,8 @@ class CoinflipChoiceView(View):
             reason = f"Монетка ({result_side})"
             if used:
                 reason += f" ({', '.join(used)})"
-            # 👇 clan_share=0.4
-            await add_dc(user_id, payout, reason, clan_share=0.4)
+            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
+            await add_dc(user_id, payout, reason, to_clan_pool=True)
             if on_casino_win_hook:
                 try:
                     await on_casino_win_hook(user_id, payout, bet)
