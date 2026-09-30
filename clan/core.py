@@ -23,9 +23,7 @@ MSK = timezone(timedelta(hours=3))
 
 CLUB_ROLE_ID    = 1284697274655576186
 
-# 👇 Минимальный баланс DC для входа В КЛАН (Окаменелости / Сияние /
-# Кристализация). Меньше 45 DC — клан не даётся.
-# Роль «Клуб» тут НИ ПРИ ЧЁМ: это обычная роль покупателя за отзыв.
+# 👇 Минимальный баланс DC для входа В КЛАН.
 MIN_BALANCE     = 45
 
 # ============================================================
@@ -46,40 +44,24 @@ PAYOUT_MINUTE   = 0
 # ============================================================
 # 👇 ПРАВИЛО КОПИЛКИ КЛАНА
 # ============================================================
-# Пользователь ВСЕГДА получает 100% начисления — вклад в копилку
-# идёт СВЕРХУ и никогда не списывается с его баланса.
-#
-# В копилку клана уходит:
-#   · начисление до 100 DC включительно — вся сумма (100%)
-#   · начисление больше 100 DC          — 40% от суммы
 CLAN_POOL_THRESHOLD = 100
 CLAN_POOL_SMALL     = 1.00
 CLAN_POOL_BIG       = 0.40
 
 
 def clan_cut(amount: int) -> int:
-    """
-    Сколько DC уходит в копилку клана с начисления `amount`.
-
-    До 100 DC включительно — вся сумма.
-    Больше 100 DC — 40%.
-    Нулевые и отрицательные начисления в копилку ничего не дают.
-    """
     if amount <= 0:
         return 0
     if amount <= CLAN_POOL_THRESHOLD:
         return int(amount * CLAN_POOL_SMALL)
     return int(amount * CLAN_POOL_BIG)
 
-# 👇 Бонусы топ-3 по вкладу (было 1.75 / 1.50 / 1.30)
+# 👇 Бонусы топ-3 по вкладу
 TOP_BONUSES = [3.00, 2.00, 1.50]
 
 # ============================================================
 # 👇 ПРАВИЛО ВЫПЛАТЫ ПО ИТОГАМ СЕЗОНА
 # ============================================================
-# Кто за сезон внёс в копилку меньше MIN_CONTRIB_FOR_PAYOUT DC —
-# выплату НЕ получает вообще. Банк делится только между теми,
-# кто внёс достаточно. Каждому в ЛС уходит причина.
 MIN_CONTRIB_FOR_PAYOUT = 50
 
 REPORT_DM_USER_ID = 796293832751972352
@@ -171,7 +153,6 @@ def init_clan_core():
             "VALUES (?, ?, ?, ?, ?, ?)",
             (c["id"], c["name"], c["emoji"], c["role_id"], c["color"], c["description"])
         )
-    # Создаём таблицу дневного лимита
     cur.execute("""
         CREATE TABLE IF NOT EXISTS clan_daily_limit (
             user_id  INTEGER,
@@ -182,20 +163,10 @@ def init_clan_core():
     """)
     db.commit()
     cleanup_excluded_users()
-
-    # 👇 Без активного сезона вклады НЕ записываются вообще:
-    # add_clan_contribution молча выходит, а get_clan_bank отдаёт 0.
-    # Поэтому при старте сезон гарантированно поднимаем.
     ensure_active_cycle()
 
 
 def ensure_active_cycle() -> Optional[dict]:
-    """
-    Гарантирует, что сезон идёт.
-
-    Если активного цикла нет — запускаем новый. Без этого копилка
-    клана всегда показывала бы 0, а вклады не начислялись.
-    """
     cycle = get_current_cycle()
     if cycle:
         logger.info(
@@ -210,7 +181,6 @@ def ensure_active_cycle() -> Optional[dict]:
 
 
 def cleanup_excluded_users() -> dict:
-    """Жёстко вычищает исключённых."""
     if not HARD_EXCLUDED_USERS:
         return {}
 
@@ -262,7 +232,6 @@ def is_hard_excluded(user_id: int) -> bool:
 
 
 def cleanup_specific_user(user_id: int) -> dict:
-    """Очищает одного юзера."""
     contrib_rows = cur.execute(
         "SELECT cycle_id, clan_id, amount, reason, ts FROM clan_contributions WHERE user_id=?",
         (user_id,)
@@ -316,12 +285,10 @@ def cleanup_specific_user(user_id: int) -> dict:
 # ДНЕВНОЙ ЛИМИТ ВКЛАДА
 # ============================================================
 def _get_today_str() -> str:
-    """YYYY-MM-DD по МСК."""
     return datetime.now(MSK).strftime("%Y-%m-%d")
 
 
 def _get_daily_contributed(user_id: int) -> int:
-    """Сколько юзер уже внёс сегодня."""
     row = cur.execute(
         "SELECT amount FROM clan_daily_limit WHERE user_id=? AND date=?",
         (user_id, _get_today_str())
@@ -330,7 +297,6 @@ def _get_daily_contributed(user_id: int) -> int:
 
 
 def _add_daily_contributed(user_id: int, amount: int):
-    """Увеличивает счётчик дня."""
     today = _get_today_str()
     cur.execute("""
         INSERT INTO clan_daily_limit (user_id, date, amount)
@@ -341,7 +307,6 @@ def _add_daily_contributed(user_id: int, amount: int):
 
 
 def get_remaining_daily_limit(user_id: int) -> int:
-    """Остаток лимита на сегодня."""
     already = _get_daily_contributed(user_id)
     return max(DAILY_CLAN_LIMIT - already, 0)
 
@@ -406,13 +371,6 @@ def _get_clan_stats() -> List[Tuple[dict, int, int]]:
 
 
 def clan_role_needs_fix(member, clan: dict) -> bool:
-    """
-    True, если роли клана разъехались с базой:
-      · нет роли своего клана, или
-      · висит чужая роль клана.
-
-    Синхронная проверка — можно звать из синхронного распределения.
-    """
     if member is None:
         return False
 
@@ -427,17 +385,6 @@ def clan_role_needs_fix(member, clan: dict) -> bool:
 
 
 async def enforce_clan_role(member, clan: dict) -> Optional[str]:
-    """
-    Приводит роли клана в порядок: у человека должна остаться РОВНО ОДНА
-    роль клана — та, что записана в базе.
-
-    Убирает чужие роли клана и возвращает нужную, если её сняли вручную.
-    Возвращает 'added' | 'removed' | 'fixed' | None.
-
-    Раньше тут стояли `except Exception: pass`, из-за чего неудачные
-    операции (например, у бота нет права «Управлять ролями») проходили
-    молча — база переезжала, а роль оставалась старой. Отсюда и разъезд.
-    """
     if member is None:
         return None
 
@@ -474,17 +421,6 @@ async def enforce_clan_role(member, clan: dict) -> Optional[str]:
 
 
 def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
-    """
-    Зачисляет юзера в клан, если он проходит ВСЕ условия входа:
-
-      · баланс не меньше MIN_BALANCE DC
-      · есть роль покупателя («Клуб» — хотя бы один отзыв)
-      · есть активность за последние INACTIVE_DAYS_LIMIT дней
-      · не в жёстком исключении и ещё не в клане
-
-    Условия проверяются по «ИЛИ»-логике провала: не прошёл хоть одно —
-    в клан не попадает. Проверка живёт в clan_block_reason().
-    """
     if get_user_clan(user_id):
         return None
 
@@ -492,7 +428,6 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
     if not member:
         return None
 
-    # 👇 Единая проверка условий входа (баланс, роль покупателя, активность)
     block = clan_block_reason(guild, user_id)
     if block:
         logger.info(f"Клан не выдан {user_id}: {block}")
@@ -515,7 +450,6 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
     role = guild.get_role(target_clan["role_id"])
     if role and role not in member.roles:
         try:
-            # 👇 enforce_clan_role сам снимет чужие роли клана, если они висят
             asyncio.create_task(enforce_clan_role(member, target_clan))
         except Exception as e:
             logger.warning(f"assign role {role.id}: {e}")
@@ -536,16 +470,6 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
 
 
 async def try_auto_assign_clan(user_id: int) -> Optional[dict]:
-    """
-    👇 АВТОВЫДАЧА КЛАНА — вызывается сама, без кнопок и перезапусков.
-
-    Дёргается из двух мест:
-      · add_dc — когда баланс дорос до порога MIN_BALANCE
-      · update_user_roles — когда только что выдали роль покупателя
-
-    Все условия проверяет assign_user_to_clan: роль покупателя,
-    баланс >= MIN_BALANCE, не в жёстком исключении, ещё не в клане.
-    """
     try:
         from core.bot import bot
     except Exception as e:
@@ -570,15 +494,9 @@ async def try_auto_assign_clan(user_id: int) -> Optional[dict]:
 
 
 # ============================================================
-# 👇 ЖЁСТКАЯ ПЕРЕСБОРКА КЛАНОВ (снять всех и раскидать заново)
+# 👇 ЖЁСТКАЯ ПЕРЕСБОРКА КЛАНОВ
 # ============================================================
 async def strip_all_clan_roles(guild: disnake.Guild) -> dict:
-    """
-    Снимает у ВСЕХ роли кланов и обнуляет членство в базе.
-
-    Вклады за сезон НЕ трогаем — они привязаны к сезону, не к человеку.
-    Возвращает {stripped, errors}.
-    """
     clans = get_all_clans()
     clan_role_ids = {c["role_id"] for c in clans}
 
@@ -615,19 +533,11 @@ async def strip_all_clan_roles(guild: disnake.Guild) -> dict:
 
 async def rebuild_clans_random(guild: disnake.Guild) -> dict:
     """
-    ПОЛНАЯ ПЕРЕСБОРКА КЛАНОВ:
-
-      1. снимает роли кланов у ВСЕХ и обнуляет членство
-      2. берёт всех, кто проходит условия (баланс 45+, роль покупателя,
-         активность) — и раскидывает их ЗАНОВО СЛУЧАЙНО
-      3. вклады пересопоставляет с новыми кланами
-
-    Порядок случайный, но раздаём по кругу — чтобы кланы не вышли
-    40 / 5 / 2. Кто именно попадёт в какой клан — решает жребий.
+    ПОЛНАЯ ПЕРЕСБОРКА КЛАНОВ.
+    Здесь вклады ЕДУТ ЗА ЧЕЛОВЕКОМ — resync_contribution_clans.
     """
     stripped = await strip_all_clan_roles(guild)
 
-    # ---- кто вообще имеет право быть в клане ----
     eligible = []
     skipped = 0
 
@@ -678,7 +588,6 @@ async def rebuild_clans_random(guild: disnake.Guild) -> dict:
 
     db.commit()
 
-    # 👇 вклады едут за людьми в их новые кланы
     moved = resync_contribution_clans()
 
     logger.info(
@@ -717,9 +626,6 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
         user_clan = get_user_clan(member.id)
         if user_clan:
-            # 👇 Человек уже в клане по базе — но роли могли разъехаться:
-            # роль сняли вручную или висит чужая роль другого клана.
-            # Раньше тут был просто skip, и кнопка ничего не возвращала.
             if clan_role_needs_fix(member, user_clan):
                 try:
                     asyncio.create_task(enforce_clan_role(member, user_clan))
@@ -768,11 +674,6 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
         moved_member = guild.get_member(moved_uid)
         if moved_member:
-            # 👇 Было: руками снимались все роли клана и вешалась новая,
-            # а все ошибки гасились `except: pass`. Если боту не хватало
-            # прав — база переезжала, а роль оставалась СТАРОЙ, и человек
-            # числился в одном клане, а роль носил другого.
-            # Теперь и съём, и выдача идут через enforce_clan_role с логами.
             new_clan = get_clan(smallest[0]["id"])
             if new_clan:
                 try:
@@ -785,8 +686,6 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
         assigned += 1
 
-    # 👇 Вклады переезжают вместе с людьми. Без этого после ребаланса
-    # DC человека остаются в старой копилке и все цифры врут.
     moved = resync_contribution_clans()
 
     logger.info(
@@ -803,30 +702,12 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
 
 # ============================================================
-# 👇 УСЛОВИЯ НАХОЖДЕНИЯ В КЛАНЕ — ПРОВЕРЯЮТСЯ ПО «ИЛИ»
+# 👇 УСЛОВИЯ НАХОЖДЕНИЯ В КЛАНЕ
 # ============================================================
-# Чтобы БЫТЬ в клане, нужно ОДНОВРЕМЕННО выполнять все три условия:
-#   1. баланс не меньше MIN_BALANCE DC
-#   2. есть роль покупателя («Клуб», то есть хотя бы один отзыв)
-#   3. есть активность за последние INACTIVE_DAYS_LIMIT дней
-#
-# Провалил ХОТЯ БЫ ОДНО — из клана убираем и обратно не пускаем.
-# Именно поэтому афкешеры и пустые аккаунты тут не задерживаются.
-INACTIVE_DAYS_LIMIT = 30   # месяц
+INACTIVE_DAYS_LIMIT = 30
 
 
 def clan_block_reason(guild: disnake.Guild, user_id: int) -> Optional[str]:
-    """
-    Причина, по которой юзера НЕ должно быть в клане.
-    None — всё в порядке, условия пройдены.
-
-    Условия проверяются по «ИЛИ»: достаточно одного провала.
-    Используется и при входе (assign_user_to_clan), и при чистке
-    (prune_ineligible_clan_members) — правило одно на всех.
-
-    ВАЖНО: отсутствие отметки активности (last_active_ts == 0) провалом
-    НЕ считается, иначе на первом прогоне вылетели бы все подряд.
-    """
     if is_hard_excluded(user_id):
         return "жёсткое исключение"
 
@@ -837,18 +718,15 @@ def clan_block_reason(guild: disnake.Guild, user_id: int) -> Optional[str]:
     balance = (row["balance"] or 0) if row else 0
     last_active = (row["last_active_ts"] or 0) if row else 0
 
-    # ---- 1) Баланс ----
     if balance < MIN_BALANCE:
         return f"баланс меньше {MIN_BALANCE} DC"
 
-    # ---- 2) Роль покупателя ----
     member = guild.get_member(user_id)
     if not member:
         return "нет на сервере"
     if not any(r.id == CLUB_ROLE_ID for r in member.roles):
         return "нет роли покупателя (нет отзывов)"
 
-    # ---- 3) Активность ----
     if last_active > 0:
         days_afk = (int(time.time()) - last_active) // 86400
         if days_afk >= INACTIVE_DAYS_LIMIT:
@@ -859,15 +737,21 @@ def clan_block_reason(guild: disnake.Guild, user_id: int) -> Optional[str]:
 
 async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
     """
-    Убирает из клана всех, кто провалил ХОТЯ БЫ ОДНО условие
-    (баланс, роль покупателя, активность) — см. clan_block_reason.
+    👇 ПРАВИЛО: «ушёл из клана = ушёл со своими DC».
 
-    Роль клана снимается, вклад остаётся в банке (left_at).
+    Убирает из клана всех, кто провалил хотя бы одно условие
+    (баланс, роль покупателя, активность). При исключении вклад
+    за текущий сезон УДАЛЯЕТСЯ из копилки — иначе человек висит
+    в банке клана, из которого уже ушёл.
     """
     now = int(time.time())
     checked = 0
     removed = []
     seeded = 0
+    total_removed_dc = 0
+
+    cycle = get_current_cycle()
+    cycle_id = cycle["id"] if cycle else 0
 
     for c in get_all_clans():
         rows = cur.execute(
@@ -882,7 +766,6 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
 
             checked += 1
 
-            # 👇 Грация: отметки активности ещё нет — ставим отсчёт с этого момента
             row = cur.execute(
                 "SELECT last_active_ts FROM dc_cache WHERE user_id=?", (uid,)
             ).fetchone()
@@ -897,10 +780,27 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
             if not reason:
                 continue
 
+            contrib = 0
+            if cycle_id:
+                r_c = cur.execute(
+                    "SELECT COALESCE(SUM(amount), 0) AS s FROM clan_contributions "
+                    "WHERE cycle_id=? AND user_id=?",
+                    (cycle_id, uid)
+                ).fetchone()
+                contrib = r_c["s"] or 0
+
             cur.execute(
                 "UPDATE clan_members SET left_at=? WHERE user_id=? AND left_at IS NULL",
                 (now, uid)
             )
+
+            if cycle_id and contrib > 0:
+                cur.execute(
+                    "DELETE FROM clan_contributions WHERE cycle_id=? AND user_id=?",
+                    (cycle_id, uid)
+                )
+                total_removed_dc += contrib
+
             db.commit()
 
             member = guild.get_member(uid)
@@ -915,6 +815,7 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
                 "user_id": uid,
                 "clan": c["name"],
                 "reason": reason,
+                "contrib": contrib,
             })
 
             asyncio.create_task(log_discord(
@@ -923,7 +824,7 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
                     f"> **Участник:** <@{uid}> (`{uid}`)\n"
                     f"> **Клан:** {c['emoji']} **{c['name']}**\n"
                     f"> **Причина:** {reason}\n"
-                    f"> Вклад остаётся в банке клана."
+                    f"> **Вклад унесён из копилки:** `{contrib} DC`"
                 ),
                 color=0xff6600,
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
@@ -934,12 +835,16 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
     if seeded:
         logger.info(f"Чистка клана: {seeded} юзерам проставлен старт отсчёта активности")
 
-    logger.info(f"Чистка клана: проверено {checked}, исключено {len(removed)}")
+    logger.info(
+        f"Чистка клана: проверено {checked}, исключено {len(removed)}, "
+        f"вкладов вычищено на {total_removed_dc} DC"
+    )
 
     return {
         "checked": checked,
         "removed": len(removed),
         "seeded": seeded,
+        "removed_dc": total_removed_dc,
         "users": removed,
     }
 
@@ -948,32 +853,22 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
 # 👇 ПЕРЕСЧЁТ И ОБНОВЛЕНИЕ КЛАНОВ — ОДНА КНОПКА
 # ============================================================
 async def recalculate_clan_league(guild: disnake.Guild) -> dict:
-    """
-    Одна кнопка делает всё:
-
-      1. пересчитывает роли покупателей по отзывам
-         (роль «Клуб» — просто за отзыв, без условий по балансу)
-      2. убирает из клана всех, кто провалил ХОТЯ БЫ ОДНО условие:
-         баланс < MIN_BALANCE, нет роли покупателя, нет активности
-      3. раскидывает кланы тем, кто прошёл все условия, но остался без клана
-      4. обновляет панели — это делает вызывающий код после вызова
-    """
     counts = load_json(FILES["review_counts"], {}) or {}
 
     stats = {
-        "roles_checked": 0,      # кому пересчитали роли (есть отзыв)
+        "roles_checked": 0,
         "roles_errors": 0,
-        "members_checked": 0,    # всего проверено участников кланов
-        "removed": 0,            # исключено из клана
-        "seeded": 0,             # кому проставлен старт отсчёта активности
-        "assigned": 0,           # выдано кланов впервые
-        "repaired": 0,           # возвращена снятая вручную роль клана
-        "skipped": 0,            # уже были в клане и роль на месте
-        "excluded": 0,           # жёсткие исключения
-        "moved": 0,              # вкладов пересопоставлено с текущим кланом
+        "members_checked": 0,
+        "removed": 0,
+        "seeded": 0,
+        "assigned": 0,
+        "repaired": 0,
+        "skipped": 0,
+        "excluded": 0,
+        "moved": 0,
+        "removed_dc": 0,
     }
 
-    # ---- 1) Роли покупателей по отзывам ----
     for member in guild.members:
         if member.bot:
             continue
@@ -988,13 +883,12 @@ async def recalculate_clan_league(guild: disnake.Guild) -> dict:
             logger.warning(f"recalculate_clan_league roles {member.id}: {e}")
         await asyncio.sleep(0.15)
 
-    # ---- 2) Убрать всех, кто не проходит условия (проверка по «ИЛИ») ----
     pruned = await prune_ineligible_clan_members(guild)
     stats["members_checked"] = pruned["checked"]
     stats["removed"] = pruned["removed"]
     stats["seeded"] = pruned["seeded"]
+    stats["removed_dc"] = pruned.get("removed_dc", 0)
 
-    # ---- 3) Раскидать по кланам тех, кто прошёл все условия ----
     dist = distribute_all_club_members(guild)
     stats["assigned"] = dist["assigned"]
     stats["repaired"] = dist.get("repaired", 0)
@@ -1070,7 +964,7 @@ def close_cycle_and_pay(bot) -> bool:
     all_clans = get_all_clans()
 
     report = {"cycle": cycle, "clans": [], "total": 0, "payouts": []}
-    payouts_dm = report["payouts"]   # 👈 сюда собираем данные для личных ЛС
+    payouts_dm = report["payouts"]
     total_paid = 0
 
     for c in all_clans:
@@ -1120,7 +1014,6 @@ def close_cycle_and_pay(bot) -> bool:
         top_ids = [m["user_id"] for m in sorted_members[:3]]
 
         for m in members_list:
-            # 👇 Право на выплату: вклад не меньше MIN_CONTRIB_FOR_PAYOUT
             m["eligible"] = m["contrib"] >= MIN_CONTRIB_FOR_PAYOUT
 
             if m["user_id"] in top_ids and m["eligible"]:
@@ -1131,7 +1024,6 @@ def close_cycle_and_pay(bot) -> bool:
                 m["bonus"] = 1.0
                 m["place"] = None
 
-            # Не прошёл по вкладу — в делении не участвует
             m["eff"] = (m["weight"] * m["bonus"]) if m["eligible"] else 0.0
 
         total_eff = sum(m["eff"] for m in members_list)
@@ -1146,7 +1038,6 @@ def close_cycle_and_pay(bot) -> bool:
             m["payout"] = payout
             clan_paid += payout
 
-            # 👇 Причина для ЛС: получил или нет
             if payout > 0:
                 m["reason"] = None
             elif not m["eligible"]:
@@ -1159,7 +1050,6 @@ def close_cycle_and_pay(bot) -> bool:
             if payout > 0:
                 try:
                     from modules.dc import add_dc
-                    # notify=False: причину и сумму сообщим своим красивым ЛС
                     bot.loop.create_task(add_dc(
                         m["user_id"], payout,
                         f"Клановая лига: выплата за {get_season_title(cycle['number'])}",
@@ -1183,7 +1073,6 @@ def close_cycle_and_pay(bot) -> bool:
                     "payout": payout,
                 })
 
-            # 👇 Данные для личного ЛС каждому участнику
             payouts_dm.append({
                 "user_id": m["user_id"],
                 "clan_name": c["name"],
@@ -1217,7 +1106,6 @@ def close_cycle_and_pay(bot) -> bool:
                 (total_paid, cycle_id))
     db.commit()
 
-    # Достижения по итогам сезона
     try:
         from clan.achievements import unlock_achievement
         top_clan_data = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
@@ -1237,7 +1125,6 @@ def close_cycle_and_pay(bot) -> bool:
 
     asyncio.create_task(send_payout_report_dm(bot, report))
     asyncio.create_task(post_payout_results(bot, report))
-    # 👇 Личное ЛС каждому участнику: получил выплату или нет и почему
     asyncio.create_task(send_payout_dms(bot, report))
 
     try:
@@ -1281,10 +1168,6 @@ def close_cycle_and_pay(bot) -> bool:
 # ВКЛАДЫ — С ЛИМИТОМ 1000 DC/ДЕНЬ
 # ============================================================
 async def add_clan_contribution(user_id: int, amount: int, reason: str):
-    """
-    Добавляет вклад в банк клана.
-    👇 Лимит 1000 DC/сутки с юзера. Сверх лимита — НЕ идёт в банк.
-    """
     if is_hard_excluded(user_id):
         return False
 
@@ -1299,7 +1182,6 @@ async def add_clan_contribution(user_id: int, amount: int, reason: str):
     if not cycle:
         return False
 
-    # 👇 Проверяем дневной лимит
     already = _get_daily_contributed(user_id)
     remaining = max(DAILY_CLAN_LIMIT - already, 0)
 
@@ -1316,10 +1198,8 @@ async def add_clan_contribution(user_id: int, amount: int, reason: str):
     )
     db.commit()
 
-    # 👇 Записываем в счётчик дня
     _add_daily_contributed(user_id, actual_amount)
 
-    # Достижения
     try:
         from clan.achievements import check_and_unlock, get_user_contribution
         from core.bot import bot
@@ -1370,18 +1250,11 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
 def resync_contribution_clans(cycle_id: Optional[int] = None) -> int:
     """
     👇 Приводит вклады в соответствие с ТЕКУЩИМ кланом участника.
+    Используется ТОЛЬКО при пересборке (вклады едут за человеком).
 
-    Зачем: при ребалансе человек переезжает в другой клан, а записи вклада
-    остаются под старым clan_id. Из-за этого его DC висели в чужой копилке,
-    а в топе своего клана он не появлялся.
-
-    Реализация переписана: раньше был UPDATE с коррелированным подзапросом
-    в SET и EXISTS — на «грязной» базе (несколько строк clan_members с
-    left_at IS NULL, ручные правки) он мог не сработать, а cur.rowcount
-    врал. Теперь явно тянем актуальные пары user_id → clan_id и обновляем
-    построчно. Это медленнее, но 100% предсказуемо.
-
-    Возвращает число реально перенесённых записей.
+    Переписано: явный проход по clan_members, без коррелированного
+    UPDATE с EXISTS — он на «грязной» базе мог не сработать,
+    а cur.rowcount врал.
     """
     if cycle_id is None:
         cycle = get_current_cycle()
@@ -1576,11 +1449,6 @@ async def send_payout_report_dm(bot, report: dict):
 
 
 async def send_payout_dms(bot, report: dict):
-    """
-    Личное ЛС каждому участнику сезона: получил выплату или нет — и почему.
-
-    Эмбед стилизованный: блоки-цитаты, разделители, поля. Без изображений.
-    """
     season = get_season_title(report["cycle"]["number"])
     payouts = report.get("payouts", [])
     sent = 0
