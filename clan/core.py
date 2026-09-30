@@ -13,6 +13,7 @@ import disnake
 from core.utils import (
     CONFIG, DATA_DIR, ADD_DIR, logger, db, cur,
     load_json, save_json, log_discord, now_ts,
+    get_dc_cache, save_dc_cache,
 )
 
 # ============================================================
@@ -21,7 +22,8 @@ from core.utils import (
 MSK = timezone(timedelta(hours=3))
 
 CLUB_ROLE_ID    = 1284697274655576186
-MIN_BALANCE     = 0
+# 👇 Минимальный баланс DC для входа в клуб/кланы (было 0)
+MIN_BALANCE     = 20
 
 # ============================================================
 # 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ
@@ -45,7 +47,8 @@ TAX_NORMAL      = 0.40
 TAX_QUEST       = 1.00
 TAX_CASINO      = 0.40
 
-TOP_BONUSES = [1.75, 1.50, 1.30]
+# 👇 Бонусы топ-3 по вкладу (было 1.75 / 1.50 / 1.30)
+TOP_BONUSES = [3.00, 2.00, 1.50]
 
 REPORT_DM_USER_ID = 796293832751972352
 
@@ -55,8 +58,8 @@ REPORT_DM_USER_ID = 796293832751972352
 DAILY_CLAN_LIMIT = 1000
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
-              "1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&"
-              "hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&")
+              "1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&"
+              "hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&")
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
@@ -69,6 +72,11 @@ SEASON_NAMES = {
     2: "Стихия проклятья",
     3: "Неутопание кристалла",
     4: "Сияние богачей",
+    5: "Кристализация магазина",
+    6: "Предновогодний дроп",
+    7: "27 Карат",
+    8: "Февральская потеха",
+    9: "Магнитуда сияния",
 }
 
 
@@ -469,6 +477,113 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
 
 # ============================================================
+# 👇 АВТООЧИСТКА КЛАНА
+# ============================================================
+# Кто не подавал признаков жизни INACTIVE_DAYS_LIMIT дней —
+# вылетает из клана, чтобы не сидел мёртвым грузом.
+# Вклад при этом остаётся в банке клана.
+INACTIVE_DAYS_LIMIT = 21  # 3 недели
+
+
+async def cleanup_inactive_clan_members(
+    guild: disnake.Guild,
+    days: int = INACTIVE_DAYS_LIMIT,
+) -> dict:
+    """
+    Убирает из клана неактивных:
+      · нет сообщений и голоса последние `days` дней;
+      · роль клана снимается, вклад остаётся в банке (left_at).
+
+    Защита от массового вылета: если отметки активности ещё нет
+    (первый прогон после обновления) — ставим её на сейчас и не трогаем юзера.
+    """
+    now = int(time.time())
+    threshold = now - days * 86400
+
+    checked = 0
+    removed = []
+    seeded = 0
+
+    for c in get_all_clans():
+        rows = cur.execute(
+            "SELECT user_id, joined_at FROM clan_members WHERE clan_id=? AND left_at IS NULL",
+            (c["id"],)
+        ).fetchall()
+
+        for r in rows:
+            uid = r["user_id"]
+            if is_hard_excluded(uid):
+                continue
+
+            checked += 1
+
+            row = cur.execute(
+                "SELECT user_id, last_active_ts FROM dc_cache WHERE user_id=?",
+                (uid,)
+            ).fetchone()
+
+            last_active = (row["last_active_ts"] or 0) if row else 0
+
+            # 👇 Первый прогон: отметки ещё нет — даём отсчёт с этого момента,
+            # чтобы разом не вычистить весь клан.
+            if last_active <= 0:
+                d = get_dc_cache(uid)
+                d["last_active_ts"] = now
+                save_dc_cache(uid, d)
+                seeded += 1
+                continue
+
+            if last_active >= threshold:
+                continue
+
+            cur.execute(
+                "UPDATE clan_members SET left_at=? WHERE user_id=? AND left_at IS NULL",
+                (now, uid)
+            )
+            db.commit()
+
+            member = guild.get_member(uid)
+            role = guild.get_role(c["role_id"])
+            if role and member and role in member.roles:
+                try:
+                    await member.remove_roles(role, reason=f"Клан-лига: нет активности {days} дней")
+                except Exception as e:
+                    logger.warning(f"cleanup_inactive remove role {uid}: {e}")
+
+            days_afk = max((now - last_active) // 86400, 1)
+            removed.append({"user_id": uid, "clan": c["name"], "days": days_afk})
+
+            asyncio.create_task(log_discord(
+                title="🧹 Исключён из клана (неактивность)",
+                description=(
+                    f"> **Участник:** <@{uid}> (`{uid}`)\n"
+                    f"> **Клан:** {c['emoji']} **{c['name']}**\n"
+                    f"> **Без активности:** `{days_afk}` дн.\n"
+                    f"> Вклад остаётся в банке клана."
+                ),
+                color=0xff6600,
+                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            ))
+
+            await asyncio.sleep(0.3)
+
+    if seeded:
+        logger.info(f"Автоочистка клана: {seeded} юзерам проставлен старт отсчёта активности")
+
+    logger.info(
+        f"Автоочистка клана: проверено {checked}, исключено {len(removed)} "
+        f"(порог {days} дн.)"
+    )
+
+    return {
+        "checked": checked,
+        "removed": len(removed),
+        "seeded": seeded,
+        "users": removed,
+    }
+
+
+# ============================================================
 # ЦИКЛ
 # ============================================================
 def get_current_cycle() -> Optional[dict]:
@@ -771,7 +886,7 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
                 f"**Как играть:**\n"
                 f"> • Зарабатывай DC — **40%** идёт в копилку клана\n"
                 f"> • Выполняй квесты в <#1552700973753827509> — **100%** в копилку\n"
-                f"> • Топ-3 по вкладу получат бонус ×1.75 / ×1.50 / ×1.30\n"
+                f"> • Топ-3 по вкладу получат бонус ×3.00 / ×2.00 / ×1.50\n"
                 f"> • В конце цикла банк делится между всеми участниками\n"
                 f"> • Дневной лимит вклада — **1000 DC**\n\n"
                 f"**Где смотреть:**\n"
