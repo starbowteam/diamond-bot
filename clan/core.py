@@ -435,6 +435,40 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
     return target_clan
 
 
+async def try_auto_assign_clan(user_id: int) -> Optional[dict]:
+    """
+    👇 АВТОВЫДАЧА КЛАНА — вызывается сама, без кнопок и перезапусков.
+
+    Дёргается из двух мест:
+      · add_dc — когда баланс дорос до порога MIN_BALANCE
+      · update_user_roles — когда только что выдали роль покупателя
+
+    Все условия проверяет assign_user_to_clan: роль покупателя,
+    баланс >= MIN_BALANCE, не в жёстком исключении, ещё не в клане.
+    """
+    try:
+        from core.bot import bot
+    except Exception as e:
+        logger.warning(f"try_auto_assign_clan: нет бота ({e})")
+        return None
+
+    guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+    if not guild:
+        return None
+
+    try:
+        clan = assign_user_to_clan(user_id, guild)
+    except Exception as e:
+        logger.warning(f"try_auto_assign_clan {user_id}: {e}")
+        return None
+
+    if clan:
+        logger.info(
+            f"👑 Автовыдача клана: {user_id} → {clan['emoji']} {clan['name']}"
+        )
+    return clan
+
+
 def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
     assigned = 0
     skipped = 0
