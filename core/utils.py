@@ -5,6 +5,7 @@ import json
 import sqlite3
 import logging
 import functools
+import asyncio
 import time
 import re
 from datetime import datetime, timezone
@@ -187,7 +188,8 @@ CREATE TABLE IF NOT EXISTS dc_cache (
     messages_today  INTEGER DEFAULT 0,
     voice_time_today INTEGER DEFAULT 0,
     last_reset_date INTEGER DEFAULT 0,
-    last_voice_dc   INTEGER DEFAULT 0
+    last_voice_dc   INTEGER DEFAULT 0,
+    last_active_ts  INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS promo_codes (
     code TEXT PRIMARY KEY,
@@ -322,6 +324,26 @@ CREATE INDEX IF NOT EXISTS idx_clan_ach_user ON clan_achievements (user_id);
 """)
 db.commit()
 
+
+# ============================================================
+# МИГРАЦИИ СХЕМЫ (для уже существующих баз)
+# ============================================================
+def _ensure_column(table: str, column: str, ddl: str):
+    """Добавляет колонку, если её ещё нет (SQLite ALTER TABLE ADD COLUMN)."""
+    try:
+        cols = [r[1] for r in cur.execute(f'PRAGMA table_info("{table}")').fetchall()]
+        if column not in cols:
+            cur.execute(f'ALTER TABLE "{table}" ADD COLUMN {ddl}')
+            db.commit()
+            logger.info(f"Миграция БД: {table}.{column} добавлена")
+    except Exception as e:
+        logger.error(f"Миграция {table}.{column}: {e}")
+
+
+# Отметка последней активности — нужна для автоочистки клана
+# (АФК и те, кто не писал на сервере 3 недели)
+_ensure_column("dc_cache", "last_active_ts", "last_active_ts INTEGER DEFAULT 0")
+
 # ============================================================
 # Загрузка JSON
 # ============================================================
@@ -449,11 +471,27 @@ def log_command(func):
 # ============================================================
 # Система ролей по отзывам
 # ============================================================
-def get_roles_for_count(count: int) -> list[int]:
+# 👇 Новое условие роли «Клуб»: мало иметь отзыв — нужно ещё
+# держать на балансе минимум CLUB_MIN_DC Diamond Coins.
+# Меняется одной строкой, если порог надо пересмотреть.
+CLUB_MIN_DC = 20
+
+
+def _club_condition_ok(count: int, balance: int) -> bool:
+    """Роль «Клуб»: есть хотя бы один отзыв И баланс не ниже порога."""
+    return count >= 1 and balance >= CLUB_MIN_DC
+
+
+def get_roles_for_count(count: int, balance: int = 0) -> list[int]:
     roles = []
     role_ids = CONFIG["ROLE_IDS"]
-    if count >= 1:
+
+    # Базовая роль «Клуб» — по действующим условиям (наличие отзыва)
+    # и дополнительно при балансе не меньше CLUB_MIN_DC.
+    if _club_condition_ok(count, balance):
         roles.append(role_ids["club"])
+
+    # Тир покупателя по количеству отзывов — без изменений
     if 1 <= count <= 5:
         roles.append(role_ids["bronze"])
     elif 6 <= count <= 10:
@@ -507,7 +545,9 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
 
     role_ids = CONFIG["ROLE_IDS"]
     all_buyer_roles = list(role_ids.values())
-    target_role_ids = get_roles_for_count(count)
+    # 👇 Баланс нужен для нового условия роли «Клуб» (минимум CLUB_MIN_DC)
+    balance = get_dc_cache(member.id)["balance"]
+    target_role_ids = get_roles_for_count(count, balance)
     current_role_ids = [r.id for r in member.roles]
     to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in target_role_ids]
     if keep_pka and CONFIG["FIXED_PKA_ROLE_ID"] in to_remove:
@@ -532,6 +572,90 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
                 description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
                 color=0x00ff00
             )
+
+    # 👇 «Клуб» не выдан из-за нехватки DC — пишем в лог, чтобы было видно причину
+    if count >= 1 and balance < CLUB_MIN_DC and role_ids["club"] not in current_role_ids:
+        logger.info(
+            f"Клуб не выдан {member.id}: баланс {balance} DC < {CLUB_MIN_DC} DC (отзывов: {count})"
+        )
+
+
+async def recalculate_club_roles(guild: disnake.Guild, progress=None) -> dict:
+    """
+    Пересчёт роли «Клуб» (и тиров покупателя) по актуальным условиям:
+    отзывы + минимум CLUB_MIN_DC на балансе.
+
+    Полная синхронизация: выдаёт роль достойным и снимает у тех,
+    кто условия больше не проходит.
+
+    progress — необязательная async-функция обратного вызова (done, total).
+    """
+    counts = load_json(FILES["review_counts"], {}) or {}
+
+    stats = {
+        "checked": 0,       # прошли условия (есть отзыв)
+        "club": 0,          # должны иметь роль «Клуб»
+        "no_dc": 0,         # отзыв есть, но DC меньше порога
+        "granted": 0,       # фактически выдано ролей
+        "revoked": 0,       # фактически снято ролей
+        "exempt": 0,        # исключения — их не трогаем
+        "errors": 0,
+    }
+
+    targets = []
+    for member in guild.members:
+        if member.bot:
+            continue
+        cnt = int(counts.get(str(member.id), 0) or 0)
+        if cnt <= 0:
+            continue
+        targets.append((member, cnt))
+
+    total = len(targets)
+    role_ids = CONFIG["ROLE_IDS"]
+    club_role_id = role_ids["club"]
+
+    for idx, (member, cnt) in enumerate(targets, start=1):
+        # 👇 Исключения всегда остаются в клубе — их не пересчитываем
+        if member.id in EXEMPT_USERS:
+            stats["exempt"] += 1
+            if progress is not None:
+                try:
+                    await progress(idx, total)
+                except Exception:
+                    pass
+            continue
+
+        balance = get_dc_cache(member.id)["balance"]
+        had_club = club_role_id in [r.id for r in member.roles]
+        should_club = _club_condition_ok(cnt, balance)
+
+        try:
+            await update_user_roles(member, cnt, keep_pka=True)
+            stats["checked"] += 1
+            if should_club:
+                stats["club"] += 1
+            else:
+                stats["no_dc"] += 1
+
+            if should_club and not had_club:
+                stats["granted"] += 1
+            elif had_club and not should_club:
+                stats["revoked"] += 1
+        except Exception as e:
+            stats["errors"] += 1
+            logger.warning(f"recalculate_club_roles {member.id}: {e}")
+
+        if progress is not None:
+            try:
+                await progress(idx, total)
+            except Exception:
+                pass
+        await asyncio.sleep(0.2)
+
+    logger.info(f"Пересчёт клуба: {stats}")
+    return stats
+
 
 # ============================================================
 # Инвайты / владельцы / менеджеры / отзывы / cooldown
@@ -713,8 +837,9 @@ def init_dc_cache_from_json():
             INSERT OR REPLACE INTO dc_cache (
                 user_id, balance, purchases, history,
                 last_review, last_bonus, messages_today,
-                voice_time_today, last_reset_date, last_voice_dc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                voice_time_today, last_reset_date, last_voice_dc,
+                last_active_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             uid,
             user_data.get("balance", 0),
@@ -725,7 +850,8 @@ def init_dc_cache_from_json():
             user_data.get("messages_today", 0),
             user_data.get("voice_time_today", 0),
             user_data.get("last_reset_date", 0),
-            user_data.get("last_voice_dc", 0)
+            user_data.get("last_voice_dc", 0),
+            user_data.get("last_active_ts", 0)
         ))
     db.commit()
 
@@ -741,7 +867,8 @@ def get_dc_cache(user_id: int) -> dict:
             "messages_today": row["messages_today"],
             "voice_time_today": row["voice_time_today"],
             "last_reset_date": row["last_reset_date"],
-            "last_voice_dc": row["last_voice_dc"]
+            "last_voice_dc": row["last_voice_dc"],
+            "last_active_ts": row["last_active_ts"] if "last_active_ts" in row.keys() else 0
         }
     return {
         "balance": 0,
@@ -752,16 +879,25 @@ def get_dc_cache(user_id: int) -> dict:
         "messages_today": 0,
         "voice_time_today": 0,
         "last_reset_date": 0,
-        "last_voice_dc": 0
+        "last_voice_dc": 0,
+        "last_active_ts": 0
     }
 
 def save_dc_cache(user_id: int, data: dict):
+    # 👇 Если вызывающий код не знает про last_active_ts — не затираем его
+    if "last_active_ts" not in data:
+        row = db.execute(
+            "SELECT last_active_ts FROM dc_cache WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        data["last_active_ts"] = row["last_active_ts"] if row else 0
+
     cur.execute("""
         INSERT OR REPLACE INTO dc_cache (
             user_id, balance, purchases, history,
             last_review, last_bonus, messages_today,
-            voice_time_today, last_reset_date, last_voice_dc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            voice_time_today, last_reset_date, last_voice_dc,
+            last_active_ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         user_id,
         data.get("balance", 0),
@@ -772,7 +908,8 @@ def save_dc_cache(user_id: int, data: dict):
         data.get("messages_today", 0),
         data.get("voice_time_today", 0),
         data.get("last_reset_date", 0),
-        data.get("last_voice_dc", 0)
+        data.get("last_voice_dc", 0),
+        data.get("last_active_ts", 0)
     ))
     db.commit()
 
@@ -790,7 +927,8 @@ def sync_dc_to_json():
             "messages_today": row["messages_today"],
             "voice_time_today": row["voice_time_today"],
             "last_reset_date": row["last_reset_date"],
-            "last_voice_dc": row["last_voice_dc"]
+            "last_voice_dc": row["last_voice_dc"],
+            "last_active_ts": row["last_active_ts"] if "last_active_ts" in row.keys() else 0
         }
     save_json(FILES["dc_data"], data)
 
