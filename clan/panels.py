@@ -774,6 +774,8 @@ class ClanAdminSelect(disnake.ui.StringSelect):
     # --------------------------------------------------------
     async def _confirm_rebuild(self, inter: disnake.MessageInteraction):
         """Спрашивает подтверждение: действие снимает кланы у ВСЕХ."""
+        # 👇 ИСПРАВЛЕНО: передаём view=, а не components=[View()].
+        # disnake ожидает в components кнопки/селекты/ряды, а не контейнер View.
         await inter.edit_original_response(
             content=(
                 "⚠️ **Полная пересборка кланов**\n\n"
@@ -781,7 +783,7 @@ class ClanAdminSelect(disnake.ui.StringSelect):
                 "> Вклады за сезон остаются, но переедут в новые кланы.\n\n"
                 "> Точно делаем?"
             ),
-            components=[ClanRebuildConfirmView()]
+            view=ClanRebuildConfirmView()
         )
 
     # --------------------------------------------------------
@@ -899,8 +901,9 @@ class ClanRebuildConfirmView(View):
         custom_id="clan_rebuild:no",
     )
     async def cancel(self, button, inter: disnake.MessageInteraction):
+        # 👇 ИСПРАВЛЕНО: view=None вместо components=[]
         await inter.response.edit_message(
-            content="❌ Пересборка кланов отменена.", components=[]
+            content="❌ Пересборка кланов отменена.", view=None
         )
 
 
@@ -912,7 +915,7 @@ async def _run_clan_rebuild(inter: disnake.MessageInteraction):
         await inter.edit_original_response(
             content="🎲 Пересобираю кланы: снимаю всех и раскидываю заново...\n"
                     "> Может занять пару минут, не трогай панель.",
-            components=[]
+            view=None
         )
 
         stats = await rebuild_clans_random(inter.guild)
@@ -936,12 +939,12 @@ async def _run_clan_rebuild(inter: disnake.MessageInteraction):
                 f"**Новая раскладка**\n{dist_lines}\n\n"
                 f"> 🔄 Вклады перенесены: **{stats['moved']}** записей"
             ),
-            components=[]
+            view=None
         )
     except Exception as e:
         logger.exception(f"_run_clan_rebuild: {e}")
         await inter.edit_original_response(
-            content=f"❌ Ошибка пересборки: `{str(e)[:300]}`", components=[]
+            content=f"❌ Ошибка пересборки: `{str(e)[:300]}`", view=None
         )
 
 
