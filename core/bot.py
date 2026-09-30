@@ -35,6 +35,7 @@ from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
     daily_bonus, check_unused_purchases, daily_activity_payout,
+    CLAN_SHARE,
 )
 
 intents = disnake.Intents.default()
@@ -65,7 +66,7 @@ WELCOME_BONUS_DC = 50
 
 MSK = timezone(timedelta(hours=3))
 
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1551605614839463977/image.png?ex=6ab294d6&is=6ab14356&hm=4bddf29fabcc31cf6d81f58d190276c64503a03f1b27fa66b35e465e68d54000&"
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
@@ -74,6 +75,7 @@ SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
 
 _LAST_PAYOUT_DATE = None
 _LAST_REMINDER_DATE = None
+_LAST_BONUS_DATE = None
 
 
 # ============================================================
@@ -298,10 +300,27 @@ async def review_counter_task():
     await update_review_counter(silent=False)
 
 
-@tasks.loop(hours=24)
+@tasks.loop(minutes=1)
 async def daily_bonus_task():
+    """
+    👇 Ежедневный клубный бонус (10 DC) выдаём в 23:59 МСК — в самом конце
+    суток, чтобы точно видеть, кто активил именно за этот день.
+    Раньше было раз в 24 часа от запуска бота, и активность не проверялась.
+    """
+    global _LAST_BONUS_DATE
     await bot.wait_until_ready()
-    await daily_bonus()
+    try:
+        now_msk = datetime.now(MSK)
+        if now_msk.hour != 23 or now_msk.minute != 59:
+            return
+        today = now_msk.date()
+        if _LAST_BONUS_DATE == today:
+            return
+        _LAST_BONUS_DATE = today
+        logger.info("Запуск ежедневного клубного бонуса (23:59 МСК)")
+        await daily_bonus()
+    except Exception as e:
+        logger.exception(f"daily_bonus_task: {e}")
 
 
 @tasks.loop(minutes=5)
@@ -497,11 +516,18 @@ async def on_ready():
             bot.loop.create_task(send_clan_games_panel(bot))
             logger.info("Клан-лига инициализирована")
 
-            # Автораспределение клубных
+            # 👇 Обновление клана: сначала чистим неактивных, потом раскидываем
             try:
-                from clan.core import distribute_all_club_members
+                from clan.core import (
+                    distribute_all_club_members, cleanup_inactive_clan_members
+                )
                 guild_for_clan = bot.get_guild(int(CONFIG["GUILD_ID"]))
                 if guild_for_clan:
+                    cleaned = await cleanup_inactive_clan_members(guild_for_clan)
+                    logger.info(
+                        f"Автоочистка клана: removed={cleaned['removed']}, "
+                        f"seeded={cleaned['seeded']}, checked={cleaned['checked']}"
+                    )
                     result = distribute_all_club_members(guild_for_clan)
                     logger.info(f"Автораспределение кланов: assigned={result['assigned']}, skipped={result['skipped']}")
             except Exception as e:
@@ -652,7 +678,7 @@ async def on_member_join(member: disnake.Member):
                         f"> • **Сообщения** — 1 DC за 10 сообщений\n"
                         f"> • **Голос** — 3 DC в час\n"
                         f"> • **Отзывы** — 15 DC за одобренный отзыв\n"
-                        f"> • **Ежедневный бонус** — +3 DC с ролью «Клуб»\n"
+                        f"> • **Ежедневный бонус** — +10 DC с ролью «Клуб» (нужна активность за день)\n"
                         f"> • **Ежедневный подарок** — от 10 до 30 DC каждый день, забирай в панели профиля\n"
                         f"> • **Казино** — испытай удачу в рулетке, блэкджеке и монетке\n\n"
                         f"**🛒 Где потратить?**\n"
@@ -1053,8 +1079,9 @@ async def on_message(message: disnake.Message):
         save_json(FILES["review_counts"], counts)
 
         try:
+            # 👇 40% от заработанного DC уходит в копилку клана
             await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке",
-                         notify=False, log=False, clan_share=0.6)
+                         notify=False, log=False, clan_share=CLAN_SHARE)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
 
@@ -1131,6 +1158,12 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
     user_id = member.id
     if after.channel and (before.channel is None or before.channel != after.channel):
         voice_track[user_id] = (after.channel.id, int(time.time()))
+        # 👇 Отмечаем активность сразу на входе в войс, а не только на выходе
+        try:
+            from modules.dc import touch_activity
+            touch_activity(user_id)
+        except Exception as e:
+            logger.warning(f"touch_activity voice: {e}")
         # 👇 Достижение "Голос"
         try:
             from clan.achievements import unlock_achievement
