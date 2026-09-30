@@ -212,6 +212,13 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
     if not clan:
         return
 
+    # 👇 Выполнил квест — значит действует, сбрасываем счётчик неактивности
+    try:
+        from modules.dc import touch_activity
+        touch_activity(user_id)
+    except Exception as e:
+        logger.warning(f"quest touch_activity: {e}")
+
     # 👇 Копилка по правилу: до 100 DC включительно — вся сумма,
     # больше 100 DC — 40% от награды.
     clan_amount = clan_cut(reward)
