@@ -405,6 +405,74 @@ def _get_clan_stats() -> List[Tuple[dict, int, int]]:
     return result
 
 
+def clan_role_needs_fix(member, clan: dict) -> bool:
+    """
+    True, если роли клана разъехались с базой:
+      · нет роли своего клана, или
+      · висит чужая роль клана.
+
+    Синхронная проверка — можно звать из синхронного распределения.
+    """
+    if member is None:
+        return False
+
+    target_id = clan["role_id"]
+    member_role_ids = {r.id for r in member.roles}
+
+    if target_id not in member_role_ids:
+        return True
+
+    alien = {c["role_id"] for c in get_all_clans()} - {target_id}
+    return bool(alien & member_role_ids)
+
+
+async def enforce_clan_role(member, clan: dict) -> Optional[str]:
+    """
+    Приводит роли клана в порядок: у человека должна остаться РОВНО ОДНА
+    роль клана — та, что записана в базе.
+
+    Убирает чужие роли клана и возвращает нужную, если её сняли вручную.
+    Возвращает 'added' | 'removed' | 'fixed' | None.
+
+    Раньше тут стояли `except Exception: pass`, из-за чего неудачные
+    операции (например, у бота нет права «Управлять ролями») проходили
+    молча — база переезжала, а роль оставалась старой. Отсюда и разъезд.
+    """
+    if member is None:
+        return None
+
+    guild = member.guild
+    target = guild.get_role(clan["role_id"])
+    alien_roles = []
+
+    for c in get_all_clans():
+        if c["id"] == clan["id"]:
+            continue
+        role = guild.get_role(c["role_id"])
+        if role is not None and role in member.roles:
+            alien_roles.append(role)
+
+    changed = None
+
+    for role in alien_roles:
+        try:
+            await member.remove_roles(role, reason="Клан-лига: это не его клан")
+            changed = "removed"
+            logger.info(f"➖ Снята чужая роль клана у {member.id}: {role.id}")
+        except Exception as e:
+            logger.warning(f"❌ НЕ СНЯТЬ чужую роль клана {role.id} у {member.id}: {e}")
+
+    if target is not None and target not in member.roles:
+        try:
+            await member.add_roles(target, reason="Клан-лига: роль клана")
+            changed = "fixed" if changed else "added"
+            logger.info(f"➕ Выдана роль клана {member.id}: {target.id}")
+        except Exception as e:
+            logger.warning(f"❌ НЕ ВЫДАТЬ роль клана {target.id} участнику {member.id}: {e}")
+
+    return changed
+
+
 def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
     """
     Зачисляет юзера в клан, если он проходит ВСЕ условия входа:
@@ -447,7 +515,8 @@ def assign_user_to_clan(user_id: int, guild: disnake.Guild) -> Optional[dict]:
     role = guild.get_role(target_clan["role_id"])
     if role and role not in member.roles:
         try:
-            asyncio.create_task(member.add_roles(role, reason="Клановая лига: автораскид"))
+            # 👇 enforce_clan_role сам снимет чужие роли клана, если они висят
+            asyncio.create_task(enforce_clan_role(member, target_clan))
         except Exception as e:
             logger.warning(f"assign role {role.id}: {e}")
 
@@ -519,20 +588,16 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
         user_clan = get_user_clan(member.id)
         if user_clan:
-            # 👇 Человек уже в клане по базе — НО роль могли снять вручную.
-            # Раньше тут просто шёл skip, и кнопка «Обновление кланов»
-            # ничего не возвращала. Теперь роль проверяется и чинится.
-            role = guild.get_role(user_clan["role_id"])
-            if role is None:
-                skipped += 1
-                continue
-            if role not in member.roles:
+            # 👇 Человек уже в клане по базе — но роли могли разъехаться:
+            # роль сняли вручную или висит чужая роль другого клана.
+            # Раньше тут был просто skip, и кнопка ничего не возвращала.
+            if clan_role_needs_fix(member, user_clan):
                 try:
-                    asyncio.create_task(member.add_roles(
-                        role, reason="Клан-лига: восстановление снятой роли"
-                    ))
+                    asyncio.create_task(enforce_clan_role(member, user_clan))
                     repaired += 1
-                    logger.info(f"♻️ Восстановлена роль клана: {member.id} → {user_clan['name']}")
+                    logger.info(
+                        f"♻️ Чиню роли клана: {member.id} → {user_clan['name']}"
+                    )
                 except Exception as e:
                     logger.warning(f"repair clan role {member.id}: {e}")
             else:
@@ -574,19 +639,20 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
         moved_member = guild.get_member(moved_uid)
         if moved_member:
-            for c in get_all_clans():
-                r = guild.get_role(c["role_id"])
-                if r and r in moved_member.roles:
-                    try:
-                        asyncio.create_task(moved_member.remove_roles(r, reason="Клан-лига: ребаланс"))
-                    except Exception:
-                        pass
-            new_role = guild.get_role(smallest[0]["role_id"])
-            if new_role:
+            # 👇 Было: руками снимались все роли клана и вешалась новая,
+            # а все ошибки гасились `except: pass`. Если боту не хватало
+            # прав — база переезжала, а роль оставалась СТАРОЙ, и человек
+            # числился в одном клане, а роль носил другого.
+            # Теперь и съём, и выдача идут через enforce_clan_role с логами.
+            new_clan = get_clan(smallest[0]["id"])
+            if new_clan:
                 try:
-                    asyncio.create_task(moved_member.add_roles(new_role, reason="Клан-лига: ребаланс"))
-                except Exception:
-                    pass
+                    asyncio.create_task(enforce_clan_role(moved_member, new_clan))
+                    logger.info(
+                        f"🔀 Ребаланс: {moved_uid} → {new_clan['emoji']} {new_clan['name']}"
+                    )
+                except Exception as e:
+                    logger.warning(f"rebalance role {moved_uid}: {e}")
 
         assigned += 1
 
