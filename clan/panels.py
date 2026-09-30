@@ -299,13 +299,13 @@ def _build_howto_embed() -> disnake.Embed:
             "> Сезон длится **28 дней**. Финал — **28 числа в 20:00 МСК**.\n"
             "> По итогам сезона, весь банк клана распределяется между участниками.\n\n"
             "**Как копится банк**\n"
-            ">>> · Каждый заработанный DC — **60%** в копилку клана\n"
+            ">>> · Каждый заработанный DC — **40%** в копилку клана\n"
             "· Выполнение квестов — **100%** награды в копилку\n"
-            "· Победа в казино — **60%** от выплаты в копилку\n\n"
+            "· Победа в казино — **40%** от выплаты в копилку\n\n"
             "**Как делится пул**\n"
             ">>> · Весь банк клана делится между всеми участниками\n"
             "· Вес участника = время в клане × бонус\n"
-            "· Топ-3 по вкладу получают бонусы ×1.75 / ×1.50 / ×1.30\n\n"
+            "· Топ-3 по вкладу получают бонусы ×3.00 / ×2.00 / ×1.50\n\n"
             "**Квесты**\n"
             ">>> · Ежедневные — сброс в 00:00 МСК\n"
             "· Недельные — сброс в пн 00:00 МСК\n"
@@ -451,7 +451,7 @@ class ClanGamesView(View):
             title="Игровые автоматы DC",
             description=(
                 "> Выбери игру, чтобы сыграть.\n"
-                "> Все выигрыши — **60%** в копилку клана."
+                "> Все выигрыши — **40%** в копилку клана."
             ),
             color=6776679
         )
@@ -619,7 +619,7 @@ async def post_news_season_3days(bot):
     news = f"До финала сезона «{season_name}» осталось 3 дня."
     desc = (
         f"Самое время увеличить свой вклад в банк клана. "
-        f"Топ-3 участника получат бонусы ×1.75 / ×1.50 / ×1.30. "
+        f"Топ-3 участника получат бонусы ×3.00 / ×2.00 / ×1.50. "
         f"Финал — **28 числа в 20:00 МСК**."
     )
     await _post_clan_news(bot, "До финала клубной лиги 3 дня", news, desc)
@@ -634,7 +634,7 @@ async def post_news_season_1hour(bot):
     desc = (
         f"Успей внести последний вклад в свой клан. "
         f"После 20:00 МСК банк будет распределён между участниками. "
-        f"Топ-3 забирают бонусы ×1.75 / ×1.50 / ×1.30."
+        f"Топ-3 забирают бонусы ×3.00 / ×2.00 / ×1.50."
     )
     await _post_clan_news(bot, "Час до финала клубной лиги", news, desc)
 
@@ -699,28 +699,16 @@ class ClanAdminSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
             SelectOption(
-                label="・Старт нового цикла",
-                description="Принудительно запустить новый сезон",
+                label="・Пересчёт клуба",
+                description="Роль «Клуб»: отзывы + минимум 20 DC на балансе",
                 emoji="🔄",
-                value="new_cycle"
+                value="recalc_club"
             ),
             SelectOption(
-                label="・Форс-конец и выплата",
-                description="Закрыть сезон с расчётом пула",
-                emoji="⏹",
-                value="force_pay"
-            ),
-            SelectOption(
-                label="・Автораспределение",
-                description="Раскидать всех клубных без клана (с ребалансом)",
-                emoji="🚀",
-                value="distribute"
-            ),
-            SelectOption(
-                label="・Кик из клана",
-                description="Исключить юзера из клана (вклад остаётся)",
-                emoji="👤",
-                value="kick"
+                label="・Обновление клана",
+                description="Исключить неактивных, раскидать клубных, обновить панели",
+                emoji="🧹",
+                value="update_clan"
             ),
             SelectOption(
                 label="・Пересчитать достижения",
@@ -749,68 +737,108 @@ class ClanAdminSelect(disnake.ui.StringSelect):
 
         value = inter.data.values[0]
 
-        if value == "new_cycle":
-            cycle = get_current_cycle()
-            if cycle:
-                return await inter.response.send_message(
-                    f"❌ Уже есть активный цикл #{cycle['number']}. Сначала заверши.",
-                    ephemeral=True
-                )
-            start_new_cycle()
-            await inter.response.send_message("✅ Новый цикл запущен.", ephemeral=True)
-            await update_clan_pool_embed(inter.bot)
-            await post_news_season_start(inter.bot)
+        # 👇 ВАЖНО: with_message=True. Без него Discord правит сам эмбед-панель,
+        # и вместо ответа юзер видел, как панель подменяется текстом итогов.
+        # С ним создаётся отдельное эфемерное сообщение — его и правим.
+        await inter.response.defer(with_message=True, ephemeral=True)
 
-        elif value == "force_pay":
-            await inter.response.defer(ephemeral=True)
-            result = await close_cycle_and_pay(inter.bot)
-            if result:
-                await inter.edit_original_response(content="✅ Цикл закрыт, выплаты произведены.")
-            else:
-                await inter.edit_original_response(content="❌ Нет активного цикла.")
+        if value == "recalc_club":
+            await self._recalc_club(inter)
 
-        elif value == "distribute":
-            await inter.response.defer(ephemeral=True)
-            from clan.core import distribute_all_club_members
-            result = distribute_all_club_members(inter.guild)
-            await inter.edit_original_response(
-                content=f"✅ Распределено: **{result['assigned']}**\n"
-                        f"Уже в клане: **{result['skipped']}**\n"
-                        f"Исключены: **{result.get('excluded', 0)}**"
-            )
-            await update_clan_pool_embed(inter.bot)
-
-        elif value == "kick":
-            await inter.response.send_modal(_KickModal())
+        elif value == "update_clan":
+            await self._update_clan(inter)
 
         elif value == "recalc_ach":
-            await inter.response.defer(ephemeral=True)
-            try:
-                from clan.achievements import recalculate_all_achievements
-                await inter.edit_original_response(
-                    content="⏳ Начинаю пересчёт достижений для всех юзеров...\n"
-                            "> Это может занять несколько минут, всем получателям придут ЛС."
-                )
-                stats = await recalculate_all_achievements(inter.bot)
-                await inter.edit_original_response(
-                    content=(
-                        f"✅ **Пересчёт достижений завершён!**\n\n"
-                        f"> **Проверено юзеров:** `{stats['checked']}`\n"
-                        f"> **Ошибок:** `{stats['errors']}`\n\n"
-                        f"> Всем получателям отправлены ЛС о новых достижениях. "
-                        f"Теперь они отображаются в профиле."
-                    )
-                )
-            except Exception as e:
-                logger.exception(f"recalc_ach: {e}")
-                await inter.edit_original_response(
-                    content=f"❌ Ошибка пересчёта: `{str(e)[:300]}`"
-                )
+            await self._recalc_ach(inter)
 
         elif value == "refresh":
-            await inter.response.defer(ephemeral=True)
             await update_clan_pool_embed(inter.bot)
             await inter.edit_original_response(content="✅ Панели обновлены.")
+
+    # --------------------------------------------------------
+    # Пересчёт роли «Клуб» по новым условиям
+    # --------------------------------------------------------
+    async def _recalc_club(self, inter: disnake.MessageInteraction):
+        try:
+            from core.utils import recalculate_club_roles, CLUB_MIN_DC
+            stats = await recalculate_club_roles(inter.guild)
+            await inter.edit_original_response(
+                content=(
+                    f"✅ **Пересчёт клуба завершён**\n\n"
+                    f"> 🔍 С отзывами найдено: **{stats['checked']}**\n"
+                    f"> 💎 Проходят условия «Клуб»: **{stats['club']}**\n"
+                    f"> 📉 Не хватило {CLUB_MIN_DC} DC: **{stats['no_dc']}**\n"
+                    f"> ➕ Роль выдана: **{stats['granted']}**\n"
+                    f"> ➖ Роль снята: **{stats['revoked']}**\n"
+                    f"> 🛡 Исключения (не тронуты): **{stats.get('exempt', 0)}**\n"
+                    f"> ⚠️ Ошибок: **{stats['errors']}**"
+                )
+            )
+        except Exception as e:
+            logger.exception(f"recalc_club: {e}")
+            await inter.edit_original_response(
+                content=f"❌ Ошибка пересчёта клуба: `{str(e)[:300]}`"
+            )
+
+    # --------------------------------------------------------
+    # Обновление клана: автоочистка + распределение + панели
+    # --------------------------------------------------------
+    async def _update_clan(self, inter: disnake.MessageInteraction):
+        try:
+            from clan.core import (
+                cleanup_inactive_clan_members, distribute_all_club_members,
+                INACTIVE_DAYS_LIMIT,
+            )
+
+            await inter.edit_original_response(
+                content="⏳ Обновляю клан: чищу неактивных и распределяю..."
+            )
+
+            cleaned = await cleanup_inactive_clan_members(inter.guild)
+            result = distribute_all_club_members(inter.guild)
+
+            await update_clan_pool_embed(inter.bot)
+
+            await inter.edit_original_response(
+                content=(
+                    f"✅ **Обновление клана завершено**\n\n"
+                    f"> 🧹 Исключены за неактивность (>{INACTIVE_DAYS_LIMIT} дн.): **{cleaned['removed']}**\n"
+                    f"> ✅ Распределено: **{result['assigned']}**\n"
+                    f"> 👥 Уже в клане: **{result['skipped']}**\n"
+                    f"> ⛔ В жёстком исключении: **{result.get('excluded', 0)}**"
+                )
+            )
+        except Exception as e:
+            logger.exception(f"update_clan: {e}")
+            await inter.edit_original_response(
+                content=f"❌ Ошибка обновления клана: `{str(e)[:300]}`"
+            )
+
+    # --------------------------------------------------------
+    # Пересчёт достижений (оставлен как есть)
+    # --------------------------------------------------------
+    async def _recalc_ach(self, inter: disnake.MessageInteraction):
+        try:
+            from clan.achievements import recalculate_all_achievements
+            await inter.edit_original_response(
+                content="⏳ Начинаю пересчёт достижений для всех юзеров...\n"
+                        "> Это может занять несколько минут, всем получателям придут ЛС."
+            )
+            stats = await recalculate_all_achievements(inter.bot)
+            await inter.edit_original_response(
+                content=(
+                    f"✅ **Пересчёт достижений завершён!**\n\n"
+                    f"> **Проверено юзеров:** `{stats['checked']}`\n"
+                    f"> **Ошибок:** `{stats['errors']}`\n\n"
+                    f"> Всем получателям отправлены ЛС о новых достижениях. "
+                    f"Теперь они отображаются в профиле."
+                )
+            )
+        except Exception as e:
+            logger.exception(f"recalc_ach: {e}")
+            await inter.edit_original_response(
+                content=f"❌ Ошибка пересчёта: `{str(e)[:300]}`"
+            )
 
 
 class ClanAdminView(View):
@@ -824,43 +852,8 @@ def _is_admin(inter: disnake.MessageInteraction) -> bool:
     return has_admin_command_roles(inter.author)
 
 
-class _KickModal(disnake.ui.Modal):
-    def __init__(self):
-        super().__init__(
-            title="Кик из клана",
-            components=[disnake.ui.TextInput(
-                label="ID юзера",
-                custom_id="uid",
-                min_length=1, max_length=30
-            )]
-        )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        uid = inter.text_values["uid"].strip()
-        if not uid.isdigit():
-            return await inter.response.send_message("❌ ID должен быть числом.", ephemeral=True)
-        uid = int(uid)
-        cur.execute(
-            "UPDATE clan_members SET left_at=? WHERE user_id=? AND left_at IS NULL",
-            (int(time.time()), uid)
-        )
-        db.commit()
-        from clan.core import get_all_clans
-        for c in get_all_clans():
-            role = inter.guild.get_role(c["role_id"])
-            member = inter.guild.get_member(uid)
-            if role and member and role in member.roles:
-                try:
-                    await member.remove_roles(role)
-                except Exception:
-                    pass
-        await inter.response.send_message(f"✅ Юзер <@{uid}> кикнут из клана.", ephemeral=True)
-        await log_discord(
-            title="👤 Кик из клана",
-            description=f"> **Кем:** {inter.author.mention}\n> **Кого:** <@{uid}>",
-            color=0xFF6B6B,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-        )
+# 👇 Ручной «Кик из клана» удалён: чистка идёт автоматически
+# в «Обновлении клана» (clan.core.cleanup_inactive_clan_members).
 
 
 async def send_clan_admin_panel(bot):
@@ -888,14 +881,16 @@ async def send_clan_admin_panel(bot):
     e2 = disnake.Embed(
         title="Управление клановой лигой",
         description=(
-            "> Управление клановой лигой по ручному вводу, имей ввиду, нажимая что то тут - ты управляешь **всем сезоном!**\n\n"
-            "> **Старт нового цикла** — принудительно запустить сезон.\n"
-            "> **Форс-конец и выплата** — закрыть сезон с расчётом пула.\n"
-            "> **Автораспределение** — раскидать всех клубных без клана (с ребалансом).\n"
-            "> **Кик из клана** — исключить юзера (вклад остаётся в банке).\n"
+            "> Управление клановой лигой. Сезон идёт **автоматически**:\n"
+            "> старт и выплата происходят сами, руками запускать не нужно.\n\n"
+            "> **Пересчёт клуба** — заново выдать роль «Клуб» по условиям: "
+            "есть отзыв **и** минимум **20 DC** на балансе.\n"
+            "> **Обновление клана** — исключить неактивных (нет активности 3 недели), "
+            "раскидать клубных без клана и обновить панели.\n"
             "> **Пересчитать достижения** — прогнать всех юзеров и выдать недостающие.\n"
             "> **Обновить панели** — пересобрать эмбеды копилки и сезона.\n\n"
             "────────────────────\n"
+            "Все ответы панели приходят **эфемерно** — сама панель не меняется.\n"
             "Исключения: `1124040555240898631`, `796293832751972352` не распределяются."
         ),
         color=0x676767
