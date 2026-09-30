@@ -45,7 +45,7 @@ TAROLOGY_CHANNEL_ID     = 1536796929873420308
 WORK_CHANNEL_ID         = 1532435807242289314
 TICKET_PANEL_CHANNEL_ID = 1462136361711829053
 
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
 
 def load_board_embed() -> list:
@@ -174,7 +174,8 @@ class TakeDcModal(Modal):
                 user_id = int(m.group(1))
         if not user_id:
             return await inter.response.send_message("❌ Не удалось определить пользователя.", ephemeral=True)
-        success = await remove_dc(user_id, amount, reason, notify=True)
+        # 👇 mark_activity=False: списание делает персонал, это не действие юзера
+        success = await remove_dc(user_id, amount, reason, notify=True, mark_activity=False)
         if success:
             await inter.response.send_message(f"✅ Снято {amount} DC у <@{user_id}>.", ephemeral=True)
         else:
