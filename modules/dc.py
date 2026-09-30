@@ -23,11 +23,54 @@ from core.utils import (
     activate_item, get_item, clear_item,
 )
 
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
 # 👇 НАЛОГ 40% (БЫЛО 60%)
 CLAN_SHARE = 0.40
+
+# ============================================================
+# 👇 ЕЖЕДНЕВНЫЙ КЛУБНЫЙ БОНУС
+# ============================================================
+MSK = timezone(timedelta(hours=3))
+
+DAILY_CLUB_BONUS = 10          # было 3 DC
+DAILY_BONUS_COOLDOWN = 86400   # раз в сутки
+
+
+def _msk_day_start_ts() -> int:
+    """Начало текущих суток по МСК — та же граница, что у сброса активности."""
+    now = datetime.now(MSK)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(start.timestamp())
+
+
+def touch_activity(user_id: int):
+    """
+    Отмечает активность юзера (сообщение / вход в войс).
+    Используется автоочисткой клана: кто не активен 3 недели — вон.
+    """
+    try:
+        data = get_dc_cache(user_id)
+        data["last_active_ts"] = int(time.time())
+        save_dc_cache(user_id, data)
+    except Exception as e:
+        logger.warning(f"touch_activity {user_id}: {e}")
+
+
+def has_daily_activity(data: dict) -> bool:
+    """
+    Активил ли юзер за текущие сутки (МСК).
+    Считаем: писал в чат ИЛИ был в войсе ИЛИ есть свежая отметка активности.
+    """
+    ts = int(data.get("last_active_ts", 0) or 0)
+    if ts >= _msk_day_start_ts():
+        return True
+    # Фолбэк для старых записей, где отметки активности ещё нет
+    return bool(
+        (data.get("messages_today", 0) or 0) > 0
+        or (data.get("voice_time_today", 0) or 0) > 0
+    )
 
 
 def get_user_dc_data(user_id: int) -> dict:
@@ -198,12 +241,14 @@ async def remove_purchase(user_id: int, purchase_index: int):
 async def add_message_dc(user_id: int):
     data = get_dc_cache(user_id)
     data["messages_today"] = data.get("messages_today", 0) + 1
+    data["last_active_ts"] = int(time.time())
     save_dc_cache(user_id, data)
 
 
 async def add_voice_dc(user_id: int, seconds: int):
     data = get_dc_cache(user_id)
     data["voice_time_today"] = data.get("voice_time_today", 0) + seconds
+    data["last_active_ts"] = int(time.time())
     save_dc_cache(user_id, data)
 
 
@@ -340,31 +385,66 @@ def create_default_catalog() -> dict:
 
 
 async def daily_bonus():
+    """
+    Ежедневный клубный бонус.
+
+    👇 Что изменилось:
+      · сумма 3 DC → 10 DC
+      · выдаётся ТОЛЬКО тем, кто за сутки хоть как-то активил
+        (писал в чат или был в войсе)
+    """
     from core.bot import bot
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
         return
+
     club_role = guild.get_role(CONFIG["ROLE_IDS"]["club"])
     if not club_role:
         return
+
     now = now_ts()
+    paid = 0
+    skipped_inactive = 0
+    total = 0
+
     for member in guild.members:
         if member.bot:
             continue
         if club_role not in member.roles:
             continue
+
         data = get_dc_cache(member.id)
-        if data["last_bonus"] < now - 86400:
-            # 👇 40%
-            await add_dc(member.id, 3, "Ежедневный бонус (Клуб)", notify=True, log=False, clan_share=CLAN_SHARE)
-            data = get_dc_cache(member.id)
-            data["last_bonus"] = now
-            save_dc_cache(member.id, data)
-            await asyncio.sleep(0.4)
+        # Уже получал за последние сутки
+        if data["last_bonus"] >= now - DAILY_BONUS_COOLDOWN:
+            continue
+
+        # 👇 Новое условие: без активности за день бонус не выдаём
+        if not has_daily_activity(data):
+            skipped_inactive += 1
+            continue
+
+        await add_dc(
+            member.id, DAILY_CLUB_BONUS, "Ежедневный бонус (Клуб)",
+            notify=True, log=False, clan_share=CLAN_SHARE
+        )
+
+        data = get_dc_cache(member.id)
+        data["last_bonus"] = now
+        save_dc_cache(member.id, data)
+
+        paid += 1
+        total += DAILY_CLUB_BONUS
+        await asyncio.sleep(0.4)
+
     try:
         sync_dc_to_json()
     except Exception:
         pass
+
+    logger.info(
+        f"daily_bonus: выдано {paid} юзерам по {DAILY_CLUB_BONUS} DC "
+        f"(всего {total} DC), пропущено неактивных: {skipped_inactive}"
+    )
 
 
 async def check_unused_purchases(bot):
