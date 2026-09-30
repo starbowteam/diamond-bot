@@ -590,15 +590,20 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
         assigned += 1
 
+    # 👇 Вклады переезжают вместе с людьми. Без этого после ребаланса
+    # DC человека остаются в старой копилке и все цифры врут.
+    moved = resync_contribution_clans()
+
     logger.info(
         f"Распределение кланов: assigned={assigned}, repaired={repaired}, "
-        f"skipped={skipped}, excluded={excluded}"
+        f"skipped={skipped}, excluded={excluded}, вкладов перенесено={moved}"
     )
     return {
         "assigned": assigned,
         "repaired": repaired,
         "skipped": skipped,
         "excluded": excluded,
+        "moved": moved,
     }
 
 
@@ -770,6 +775,7 @@ async def recalculate_clan_league(guild: disnake.Guild) -> dict:
         "repaired": 0,           # возвращена снятая вручную роль клана
         "skipped": 0,            # уже были в клане и роль на месте
         "excluded": 0,           # жёсткие исключения
+        "moved": 0,              # вкладов пересопоставлено с текущим кланом
     }
 
     # ---- 1) Роли покупателей по отзывам ----
@@ -799,6 +805,7 @@ async def recalculate_clan_league(guild: disnake.Guild) -> dict:
     stats["repaired"] = dist.get("repaired", 0)
     stats["skipped"] = dist["skipped"]
     stats["excluded"] = dist.get("excluded", 0)
+    stats["moved"] = dist.get("moved", 0)
 
     logger.info(f"Обновление кланов: {stats}")
     return stats
@@ -1165,6 +1172,50 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
 # ============================================================
 # ТОПЫ / СТАТИСТИКА
 # ============================================================
+def resync_contribution_clans(cycle_id: Optional[int] = None) -> int:
+    """
+    👇 Приводит вклады в соответствие с ТЕКУЩИМ кланом участника.
+
+    Зачем: при ребалансе человек переезжает в другой клан, а записи вклада
+    остаются под старым clan_id. Из-за этого его DC висели в чужой копилке,
+    а в топе своего клана он не появлялся.
+
+    Возвращает число перенесённых записей.
+    """
+    if cycle_id is None:
+        cycle = get_current_cycle()
+        cycle_id = cycle["id"] if cycle else 0
+
+    if not cycle_id:
+        return 0
+
+    cur.execute(
+        """
+        UPDATE clan_contributions
+           SET clan_id = (
+               SELECT m.clan_id FROM clan_members m
+                WHERE m.user_id = clan_contributions.user_id
+                  AND m.left_at IS NULL
+           )
+         WHERE cycle_id = ?
+           AND EXISTS (
+               SELECT 1 FROM clan_members m
+                WHERE m.user_id = clan_contributions.user_id
+                  AND m.left_at IS NULL
+                  AND m.clan_id <> clan_contributions.clan_id
+           )
+        """,
+        (cycle_id,)
+    )
+    moved = getattr(cur, "rowcount", 0) or 0
+    db.commit()
+
+    if moved:
+        logger.info(f"🔄 Вклады пересопоставлены с текущими кланами: {moved} записей")
+
+    return moved
+
+
 def get_clan_bank(clan_id: int, cycle_id: Optional[int] = None) -> int:
     if cycle_id is None:
         cycle = get_current_cycle()
