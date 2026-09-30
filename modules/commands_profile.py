@@ -59,7 +59,7 @@ def _role_info(count: int):
     return cur[1], cur[2]
 
 
-_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ab152a3&is=6ab00123&hm=c5c2963ca1ebbe6eb37f673fcef993cacf375c5a80490205c230d4c4adfe8b58&"
+_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
 IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
@@ -218,7 +218,10 @@ async def show_profile_card(
             history,
         )
 
-        filename = f"profile_{user.id}.png"
+        # 👇 УНИКАЛЬНОЕ имя файла каждый раз + чистка старых вложений.
+        # Без этого Discord оставлял прошлую картинку в сообщении, и профиль
+        # выглядел «закешированным»: менялся клан, баланс — а картинка старая.
+        filename = f"profile_{user.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
         file = disnake.File(buf, filename=filename)
 
         embed = disnake.Embed(color=6776679)
@@ -228,6 +231,7 @@ async def show_profile_card(
 
         await inter.edit_original_response(
             content=None, embed=embed, file=file,
+            attachments=[],          # 👈 выкидываем старые вложения из сообщения
             view=view
         )
 
