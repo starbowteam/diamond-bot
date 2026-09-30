@@ -24,9 +24,9 @@ MSK = timezone(timedelta(hours=3))
 CLUB_ROLE_ID    = 1284697274655576186
 
 # 👇 Минимальный баланс DC для входа В КЛАН (Окаменелости / Сияние /
-# Кристализация). Меньше 50 DC — клан не даётся.
+# Кристализация). Меньше 45 DC — клан не даётся.
 # Роль «Клуб» тут НИ ПРИ ЧЁМ: это обычная роль покупателя за отзыв.
-MIN_BALANCE     = 50
+MIN_BALANCE     = 45
 
 # ============================================================
 # 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ
@@ -182,6 +182,31 @@ def init_clan_core():
     """)
     db.commit()
     cleanup_excluded_users()
+
+    # 👇 Без активного сезона вклады НЕ записываются вообще:
+    # add_clan_contribution молча выходит, а get_clan_bank отдаёт 0.
+    # Поэтому при старте сезон гарантированно поднимаем.
+    ensure_active_cycle()
+
+
+def ensure_active_cycle() -> Optional[dict]:
+    """
+    Гарантирует, что сезон идёт.
+
+    Если активного цикла нет — запускаем новый. Без этого копилка
+    клана всегда показывала бы 0, а вклады не начислялись.
+    """
+    cycle = get_current_cycle()
+    if cycle:
+        logger.info(
+            f"Клан-лига: идёт {get_season_title(cycle['number'])} "
+            f"до {datetime.fromtimestamp(cycle['ends_at'], MSK):%d.%m.%Y %H:%M}"
+        )
+        return cycle
+
+    logger.warning("Клан-лига: активного сезона не было — запускаю автоматически")
+    cycle = start_new_cycle()
+    return cycle
 
 
 def cleanup_excluded_users() -> dict:
@@ -479,6 +504,7 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
     assigned = 0
     skipped = 0
     excluded = 0
+    repaired = 0
 
     cleanup_excluded_users()
 
@@ -490,9 +516,29 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
         if is_hard_excluded(member.id):
             excluded += 1
             continue
-        if get_user_clan(member.id):
-            skipped += 1
+
+        user_clan = get_user_clan(member.id)
+        if user_clan:
+            # 👇 Человек уже в клане по базе — НО роль могли снять вручную.
+            # Раньше тут просто шёл skip, и кнопка «Обновление кланов»
+            # ничего не возвращала. Теперь роль проверяется и чинится.
+            role = guild.get_role(user_clan["role_id"])
+            if role is None:
+                skipped += 1
+                continue
+            if role not in member.roles:
+                try:
+                    asyncio.create_task(member.add_roles(
+                        role, reason="Клан-лига: восстановление снятой роли"
+                    ))
+                    repaired += 1
+                    logger.info(f"♻️ Восстановлена роль клана: {member.id} → {user_clan['name']}")
+                except Exception as e:
+                    logger.warning(f"repair clan role {member.id}: {e}")
+            else:
+                skipped += 1
             continue
+
         result = assign_user_to_clan(member.id, guild)
         if result:
             assigned += 1
@@ -544,8 +590,16 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
         assigned += 1
 
-    logger.info(f"Распределение кланов: assigned={assigned}, skipped={skipped}, excluded={excluded}")
-    return {"assigned": assigned, "skipped": skipped, "excluded": excluded}
+    logger.info(
+        f"Распределение кланов: assigned={assigned}, repaired={repaired}, "
+        f"skipped={skipped}, excluded={excluded}"
+    )
+    return {
+        "assigned": assigned,
+        "repaired": repaired,
+        "skipped": skipped,
+        "excluded": excluded,
+    }
 
 
 # ============================================================
@@ -712,8 +766,9 @@ async def recalculate_clan_league(guild: disnake.Guild) -> dict:
         "members_checked": 0,    # всего проверено участников кланов
         "removed": 0,            # исключено из клана
         "seeded": 0,             # кому проставлен старт отсчёта активности
-        "assigned": 0,           # выдано кланов
-        "skipped": 0,            # уже были в клане
+        "assigned": 0,           # выдано кланов впервые
+        "repaired": 0,           # возвращена снятая вручную роль клана
+        "skipped": 0,            # уже были в клане и роль на месте
         "excluded": 0,           # жёсткие исключения
     }
 
@@ -741,6 +796,7 @@ async def recalculate_clan_league(guild: disnake.Guild) -> dict:
     # ---- 3) Раскидать по кланам тех, кто прошёл все условия ----
     dist = distribute_all_club_members(guild)
     stats["assigned"] = dist["assigned"]
+    stats["repaired"] = dist.get("repaired", 0)
     stats["skipped"] = dist["skipped"]
     stats["excluded"] = dist.get("excluded", 0)
 
