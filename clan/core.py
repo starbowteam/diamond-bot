@@ -569,6 +569,135 @@ async def try_auto_assign_clan(user_id: int) -> Optional[dict]:
     return clan
 
 
+# ============================================================
+# 👇 ЖЁСТКАЯ ПЕРЕСБОРКА КЛАНОВ (снять всех и раскидать заново)
+# ============================================================
+async def strip_all_clan_roles(guild: disnake.Guild) -> dict:
+    """
+    Снимает у ВСЕХ роли кланов и обнуляет членство в базе.
+
+    Вклады за сезон НЕ трогаем — они привязаны к сезону, не к человеку.
+    Возвращает {stripped, errors}.
+    """
+    clans = get_all_clans()
+    clan_role_ids = {c["role_id"] for c in clans}
+
+    stripped = 0
+    errors = 0
+
+    for member in guild.members:
+        if member.bot:
+            continue
+
+        own = [r for r in member.roles if r.id in clan_role_ids]
+        if not own:
+            continue
+
+        try:
+            await member.remove_roles(*own, reason="Клан-лига: полная пересборка")
+            stripped += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(
+                f"❌ НЕ СНЯТЬ роли клана у {member.id} ({[r.id for r in own]}): {e}"
+            )
+        await asyncio.sleep(0.1)
+
+    cur.execute(
+        "UPDATE clan_members SET left_at=? WHERE left_at IS NULL",
+        (int(time.time()),)
+    )
+    db.commit()
+
+    logger.info(f"Пересборка: роли сняты у {stripped} чел., ошибок {errors}")
+    return {"stripped": stripped, "errors": errors}
+
+
+async def rebuild_clans_random(guild: disnake.Guild) -> dict:
+    """
+    ПОЛНАЯ ПЕРЕСБОРКА КЛАНОВ:
+
+      1. снимает роли кланов у ВСЕХ и обнуляет членство
+      2. берёт всех, кто проходит условия (баланс 45+, роль покупателя,
+         активность) — и раскидывает их ЗАНОВО СЛУЧАЙНО
+      3. вклады пересопоставляет с новыми кланами
+
+    Порядок случайный, но раздаём по кругу — чтобы кланы не вышли
+    40 / 5 / 2. Кто именно попадёт в какой клан — решает жребий.
+    """
+    stripped = await strip_all_clan_roles(guild)
+
+    # ---- кто вообще имеет право быть в клане ----
+    eligible = []
+    skipped = 0
+
+    for member in guild.members:
+        if member.bot:
+            continue
+        if not any(r.id == CLUB_ROLE_ID for r in member.roles):
+            continue
+
+        block = clan_block_reason(guild, member.id)
+        if block:
+            skipped += 1
+            logger.info(f"Пересборка: {member.id} мимо — {block}")
+            continue
+
+        eligible.append(member)
+
+    random.shuffle(eligible)
+
+    clans = get_all_clans()
+    cycle = get_current_cycle()
+    cycle_id = cycle["id"] if cycle else 0
+    now = int(time.time())
+
+    assigned = 0
+    role_errors = 0
+    distribution = {c["name"]: 0 for c in clans}
+
+    for idx, member in enumerate(eligible):
+        clan = clans[idx % len(clans)]
+        distribution[clan["name"]] += 1
+
+        cur.execute(
+            "INSERT OR REPLACE INTO clan_members "
+            "(user_id, clan_id, joined_at, left_at, cycle_joined) "
+            "VALUES (?, ?, ?, NULL, ?)",
+            (member.id, clan["id"], now, cycle_id)
+        )
+
+        try:
+            await enforce_clan_role(member, clan)
+        except Exception as e:
+            role_errors += 1
+            logger.warning(f"rebuild role {member.id}: {e}")
+
+        assigned += 1
+        await asyncio.sleep(0.15)
+
+    db.commit()
+
+    # 👇 вклады едут за людьми в их новые кланы
+    moved = resync_contribution_clans()
+
+    logger.info(
+        f"🎲 Пересборка кланов: снято у {stripped['stripped']}, "
+        f"роздано {assigned}, мимо {skipped}, вкладов перенесено {moved}, "
+        f"расклад: {distribution}"
+    )
+
+    return {
+        "stripped": stripped["stripped"],
+        "strip_errors": stripped["errors"],
+        "assigned": assigned,
+        "skipped": skipped,
+        "moved": moved,
+        "role_errors": role_errors,
+        "distribution": distribution,
+    }
+
+
 def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
     assigned = 0
     skipped = 0
