@@ -474,7 +474,7 @@ def log_command(func):
 # 👇 Новое условие роли «Клуб»: мало иметь отзыв — нужно ещё
 # держать на балансе минимум CLUB_MIN_DC Diamond Coins.
 # Меняется одной строкой, если порог надо пересмотреть.
-CLUB_MIN_DC = 20
+CLUB_MIN_DC = 50
 
 
 def _club_condition_ok(count: int, balance: int) -> bool:
