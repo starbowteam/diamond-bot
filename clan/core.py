@@ -500,20 +500,28 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 # ============================================================
 # 👇 АВТООЧИСТКА КЛАНА
 # ============================================================
-# Кто не подавал признаков жизни INACTIVE_DAYS_LIMIT дней —
-# вылетает из клана, чтобы не сидел мёртвым грузом.
-# Вклад при этом остаётся в банке клана.
-INACTIVE_DAYS_LIMIT = 21  # 3 недели
+# Исключаем ТОЛЬКО если выполнены ОБА условия:
+#   1. месяц без действий (ни сообщений, ни покупок, ни игр, ни квестов)
+#   2. баланс меньше INACTIVE_MAX_BALANCE DC
+# Кто сидит молча, но с деньгами — остаётся в клане.
+# Вклад при исключении остаётся в банке клана.
+INACTIVE_DAYS_LIMIT  = 30   # месяц
+INACTIVE_MAX_BALANCE = 50   # порог баланса: меньше — кандидат на выход
 
 
 async def cleanup_inactive_clan_members(
     guild: disnake.Guild,
     days: int = INACTIVE_DAYS_LIMIT,
+    max_balance: int = INACTIVE_MAX_BALANCE,
 ) -> dict:
     """
-    Убирает из клана неактивных:
-      · нет сообщений и голоса последние `days` дней;
-      · роль клана снимается, вклад остаётся в банке (left_at).
+    Убирает из клана мёртвые аккаунты.
+
+    Условия исключения (оба сразу):
+      · нет действий `days` дней (сообщения, голос, покупки, ставки, квесты)
+      · баланс меньше `max_balance` DC
+
+    Роль клана снимается, вклад остаётся в банке (left_at).
 
     Защита от массового вылета: если отметки активности ещё нет
     (первый прогон после обновления) — ставим её на сейчас и не трогаем юзера.
@@ -524,6 +532,7 @@ async def cleanup_inactive_clan_members(
     checked = 0
     removed = []
     seeded = 0
+    kept_rich = 0
 
     for c in get_all_clans():
         rows = cur.execute(
@@ -539,11 +548,12 @@ async def cleanup_inactive_clan_members(
             checked += 1
 
             row = cur.execute(
-                "SELECT user_id, last_active_ts FROM dc_cache WHERE user_id=?",
+                "SELECT user_id, last_active_ts, balance FROM dc_cache WHERE user_id=?",
                 (uid,)
             ).fetchone()
 
             last_active = (row["last_active_ts"] or 0) if row else 0
+            balance = (row["balance"] or 0) if row else 0
 
             # 👇 Первый прогон: отметки ещё нет — даём отсчёт с этого момента,
             # чтобы разом не вычистить весь клан.
@@ -554,7 +564,13 @@ async def cleanup_inactive_clan_members(
                 seeded += 1
                 continue
 
+            # Ещё активен — оставляем
             if last_active >= threshold:
+                continue
+
+            # 👇 Молчит месяц, но с деньгами — НЕ трогаем
+            if balance >= max_balance:
+                kept_rich += 1
                 continue
 
             cur.execute(
@@ -572,14 +588,20 @@ async def cleanup_inactive_clan_members(
                     logger.warning(f"cleanup_inactive remove role {uid}: {e}")
 
             days_afk = max((now - last_active) // 86400, 1)
-            removed.append({"user_id": uid, "clan": c["name"], "days": days_afk})
+            removed.append({
+                "user_id": uid,
+                "clan": c["name"],
+                "days": days_afk,
+                "balance": balance,
+            })
 
             asyncio.create_task(log_discord(
                 title="🧹 Исключён из клана (неактивность)",
                 description=(
                     f"> **Участник:** <@{uid}> (`{uid}`)\n"
                     f"> **Клан:** {c['emoji']} **{c['name']}**\n"
-                    f"> **Без активности:** `{days_afk}` дн.\n"
+                    f"> **Без действий:** `{days_afk}` дн.\n"
+                    f"> **Баланс:** `{balance} DC`\n"
                     f"> Вклад остаётся в банке клана."
                 ),
                 color=0xff6600,
@@ -592,14 +614,15 @@ async def cleanup_inactive_clan_members(
         logger.info(f"Автоочистка клана: {seeded} юзерам проставлен старт отсчёта активности")
 
     logger.info(
-        f"Автоочистка клана: проверено {checked}, исключено {len(removed)} "
-        f"(порог {days} дн.)"
+        f"Автоочистка клана: проверено {checked}, исключено {len(removed)}, "
+        f"оставлено с балансом >= {max_balance} DC: {kept_rich} (порог {days} дн.)"
     )
 
     return {
         "checked": checked,
         "removed": len(removed),
         "seeded": seeded,
+        "kept_rich": kept_rich,
         "users": removed,
     }
 
