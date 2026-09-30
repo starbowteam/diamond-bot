@@ -471,27 +471,19 @@ def log_command(func):
 # ============================================================
 # Система ролей по отзывам
 # ============================================================
-# 👇 Новое условие роли «Клуб»: мало иметь отзыв — нужно ещё
-# держать на балансе минимум CLUB_MIN_DC Diamond Coins.
-# Меняется одной строкой, если порог надо пересмотреть.
-CLUB_MIN_DC = 50
-
-
-def _club_condition_ok(count: int, balance: int) -> bool:
-    """Роль «Клуб»: есть хотя бы один отзыв И баланс не ниже порога."""
-    return count >= 1 and balance >= CLUB_MIN_DC
-
-
-def get_roles_for_count(count: int, balance: int = 0) -> list[int]:
+# 👇 ВАЖНО: «Клуб» — это обычная роль покупателя (базовая ступень).
+# Она выдаётся ТОЛЬКО за наличие отзыва. Никаких условий по балансу DC
+# здесь быть не должно — баланс влияет только на попадание в КЛАН
+# (см. clan/core.py :: MIN_BALANCE).
+def get_roles_for_count(count: int) -> list[int]:
     roles = []
     role_ids = CONFIG["ROLE_IDS"]
 
-    # Базовая роль «Клуб» — по действующим условиям (наличие отзыва)
-    # и дополнительно при балансе не меньше CLUB_MIN_DC.
-    if _club_condition_ok(count, balance):
+    # Базовая роль «Клуб» — просто за первый отзыв
+    if count >= 1:
         roles.append(role_ids["club"])
 
-    # Тир покупателя по количеству отзывов — без изменений
+    # Тир покупателя по количеству отзывов
     if 1 <= count <= 5:
         roles.append(role_ids["bronze"])
     elif 6 <= count <= 10:
@@ -545,9 +537,7 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
 
     role_ids = CONFIG["ROLE_IDS"]
     all_buyer_roles = list(role_ids.values())
-    # 👇 Баланс нужен для нового условия роли «Клуб» (минимум CLUB_MIN_DC)
-    balance = get_dc_cache(member.id)["balance"]
-    target_role_ids = get_roles_for_count(count, balance)
+    target_role_ids = get_roles_for_count(count)
     current_role_ids = [r.id for r in member.roles]
     to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in target_role_ids]
     if keep_pka and CONFIG["FIXED_PKA_ROLE_ID"] in to_remove:
@@ -572,89 +562,6 @@ async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool =
                 description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
                 color=0x00ff00
             )
-
-    # 👇 «Клуб» не выдан из-за нехватки DC — пишем в лог, чтобы было видно причину
-    if count >= 1 and balance < CLUB_MIN_DC and role_ids["club"] not in current_role_ids:
-        logger.info(
-            f"Клуб не выдан {member.id}: баланс {balance} DC < {CLUB_MIN_DC} DC (отзывов: {count})"
-        )
-
-
-async def recalculate_club_roles(guild: disnake.Guild, progress=None) -> dict:
-    """
-    Пересчёт роли «Клуб» (и тиров покупателя) по актуальным условиям:
-    отзывы + минимум CLUB_MIN_DC на балансе.
-
-    Полная синхронизация: выдаёт роль достойным и снимает у тех,
-    кто условия больше не проходит.
-
-    progress — необязательная async-функция обратного вызова (done, total).
-    """
-    counts = load_json(FILES["review_counts"], {}) or {}
-
-    stats = {
-        "checked": 0,       # прошли условия (есть отзыв)
-        "club": 0,          # должны иметь роль «Клуб»
-        "no_dc": 0,         # отзыв есть, но DC меньше порога
-        "granted": 0,       # фактически выдано ролей
-        "revoked": 0,       # фактически снято ролей
-        "exempt": 0,        # исключения — их не трогаем
-        "errors": 0,
-    }
-
-    targets = []
-    for member in guild.members:
-        if member.bot:
-            continue
-        cnt = int(counts.get(str(member.id), 0) or 0)
-        if cnt <= 0:
-            continue
-        targets.append((member, cnt))
-
-    total = len(targets)
-    role_ids = CONFIG["ROLE_IDS"]
-    club_role_id = role_ids["club"]
-
-    for idx, (member, cnt) in enumerate(targets, start=1):
-        # 👇 Исключения всегда остаются в клубе — их не пересчитываем
-        if member.id in EXEMPT_USERS:
-            stats["exempt"] += 1
-            if progress is not None:
-                try:
-                    await progress(idx, total)
-                except Exception:
-                    pass
-            continue
-
-        balance = get_dc_cache(member.id)["balance"]
-        had_club = club_role_id in [r.id for r in member.roles]
-        should_club = _club_condition_ok(cnt, balance)
-
-        try:
-            await update_user_roles(member, cnt, keep_pka=True)
-            stats["checked"] += 1
-            if should_club:
-                stats["club"] += 1
-            else:
-                stats["no_dc"] += 1
-
-            if should_club and not had_club:
-                stats["granted"] += 1
-            elif had_club and not should_club:
-                stats["revoked"] += 1
-        except Exception as e:
-            stats["errors"] += 1
-            logger.warning(f"recalculate_club_roles {member.id}: {e}")
-
-        if progress is not None:
-            try:
-                await progress(idx, total)
-            except Exception:
-                pass
-        await asyncio.sleep(0.2)
-
-    logger.info(f"Пересчёт клуба: {stats}")
-    return stats
 
 
 # ============================================================
