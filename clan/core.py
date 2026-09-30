@@ -1375,7 +1375,13 @@ def resync_contribution_clans(cycle_id: Optional[int] = None) -> int:
     остаются под старым clan_id. Из-за этого его DC висели в чужой копилке,
     а в топе своего клана он не появлялся.
 
-    Возвращает число перенесённых записей.
+    Реализация переписана: раньше был UPDATE с коррелированным подзапросом
+    в SET и EXISTS — на «грязной» базе (несколько строк clan_members с
+    left_at IS NULL, ручные правки) он мог не сработать, а cur.rowcount
+    врал. Теперь явно тянем актуальные пары user_id → clan_id и обновляем
+    построчно. Это медленнее, но 100% предсказуемо.
+
+    Возвращает число реально перенесённых записей.
     """
     if cycle_id is None:
         cycle = get_current_cycle()
@@ -1384,25 +1390,25 @@ def resync_contribution_clans(cycle_id: Optional[int] = None) -> int:
     if not cycle_id:
         return 0
 
-    cur.execute(
-        """
-        UPDATE clan_contributions
-           SET clan_id = (
-               SELECT m.clan_id FROM clan_members m
-                WHERE m.user_id = clan_contributions.user_id
-                  AND m.left_at IS NULL
-           )
-         WHERE cycle_id = ?
-           AND EXISTS (
-               SELECT 1 FROM clan_members m
-                WHERE m.user_id = clan_contributions.user_id
-                  AND m.left_at IS NULL
-                  AND m.clan_id <> clan_contributions.clan_id
-           )
-        """,
-        (cycle_id,)
-    )
-    moved = getattr(cur, "rowcount", 0) or 0
+    rows = cur.execute(
+        "SELECT user_id, clan_id FROM clan_members WHERE left_at IS NULL"
+    ).fetchall()
+
+    if not rows:
+        return 0
+
+    moved = 0
+    for r in rows:
+        cur.execute(
+            "UPDATE clan_contributions "
+            "   SET clan_id = ? "
+            " WHERE cycle_id = ? "
+            "   AND user_id = ? "
+            "   AND clan_id <> ?",
+            (r["clan_id"], cycle_id, r["user_id"], r["clan_id"])
+        )
+        moved += cur.rowcount or 0
+
     db.commit()
 
     if moved:
