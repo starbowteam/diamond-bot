@@ -26,8 +26,10 @@ from core.utils import (
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
-# 👇 НАЛОГ 40% (БЫЛО 60%)
-CLAN_SHARE = 0.40
+# 👇 Правило копилки клана живёт в clan/core.py (функция clan_cut):
+#    до 100 DC — 100% в копилку, больше 100 DC — 40%.
+#    Пользователь при этом ВСЕГДА получает 100% начисления.
+CLAN_SHARE = 0.40  # оставлено для совместимости со старым кодом
 
 # ============================================================
 # 👇 ЕЖЕДНЕВНЫЙ КЛУБНЫЙ БОНУС
@@ -129,10 +131,17 @@ async def _notify_dc_change(user_id: int, delta: int, reason: str, new_balance: 
         logger.warning(f"_notify_dc_change {user_id}: {e}")
 
 
-async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True, clan_share: float = 0.0):
+async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True,
+                 clan_share: float = 0.0, to_clan_pool: bool = False):
     """
-    Начисляет DC.
-    clan_share — доля, уходящая в банк клана.
+    Начисляет DC пользователю.
+
+    Пользователь ВСЕГДА получает всю сумму — вклад в копилку с него не списывается,
+    он начисляется сверху.
+
+    to_clan_pool=True — дополнительно начислить в копилку клана по правилу
+        (см. clan.core.clan_cut): до 100 DC — вся сумма, больше 100 DC — 40%.
+    clan_share — явная доля 0..1, если правило нужно переопределить вручную.
     """
     data = get_dc_cache(user_id)
     data["balance"] += amount
@@ -146,15 +155,25 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
     save_dc_cache(user_id, data)
     sync_dc_to_json()
 
-    # Клан-вклад
-    if clan_share > 0 and amount > 0:
+    # 👇 Клан-вклад: считаем по правилу копилки
+    bank_amount = 0
+    if amount > 0:
+        if to_clan_pool:
+            try:
+                from clan.core import clan_cut
+                bank_amount = clan_cut(amount)
+            except Exception as e:
+                logger.warning(f"clan_cut err: {e}")
+                bank_amount = 0
+        elif clan_share > 0:
+            bank_amount = int(amount * clan_share)
+
+    if bank_amount > 0:
         try:
             from clan.core import add_clan_contribution
-            bank_amount = int(amount * clan_share)
-            if bank_amount > 0:
-                await add_clan_contribution(user_id, bank_amount, reason)
+            await add_clan_contribution(user_id, bank_amount, reason)
         except Exception as e:
-            logger.warning(f"clan_share add_dc err: {e}")
+            logger.warning(f"clan pool add_dc err: {e}")
 
     # 👇 Достижения по балансу
     if amount > 0:
@@ -284,8 +303,8 @@ async def daily_activity_payout():
                 parts.append(f"голос: {voice_dc} DC")
             reason = "Активность за день (" + ", ".join(parts) + ")"
 
-            # 👇 40%
-            await add_dc(uid, total, reason, notify=True, log=False, clan_share=CLAN_SHARE)
+            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
+            await add_dc(uid, total, reason, notify=True, log=False, to_clan_pool=True)
             paid_users += 1
             total_paid += total
             await asyncio.sleep(0.4)
@@ -336,7 +355,7 @@ async def claim_daily_gift(user_id: int) -> dict:
 
     amount = random.randint(DAILY_GIFT_MIN, DAILY_GIFT_MAX)
 
-    await add_dc(user_id, amount, "Ежедневный подарок", notify=False, log=False)
+    await add_dc(user_id, amount, "Ежедневный подарок", notify=False, log=False, to_clan_pool=True)
 
     activate_item(
         user_id,
@@ -425,7 +444,7 @@ async def daily_bonus():
 
         await add_dc(
             member.id, DAILY_CLUB_BONUS, "Ежедневный бонус (Клуб)",
-            notify=True, log=False, clan_share=CLAN_SHARE
+            notify=True, log=False, to_clan_pool=True
         )
 
         data = get_dc_cache(member.id)
