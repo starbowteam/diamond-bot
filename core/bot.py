@@ -516,20 +516,20 @@ async def on_ready():
             bot.loop.create_task(send_clan_games_panel(bot))
             logger.info("Клан-лига инициализирована")
 
-            # 👇 Обновление клана: сначала чистим неактивных, потом раскидываем
+            # 👇 Обновление кланов: чистим по условиям, потом раскидываем
             try:
                 from clan.core import (
-                    distribute_all_club_members, cleanup_inactive_clan_members
+                    distribute_all_club_members, prune_ineligible_clan_members
                 )
                 guild_for_clan = bot.get_guild(int(CONFIG["GUILD_ID"]))
                 if guild_for_clan:
-                    cleaned = await cleanup_inactive_clan_members(guild_for_clan)
+                    pruned = await prune_ineligible_clan_members(guild_for_clan)
                     logger.info(
-                        f"Автоочистка клана: removed={cleaned['removed']}, "
-                        f"seeded={cleaned['seeded']}, checked={cleaned['checked']}"
+                        f"Чистка кланов: removed={pruned['removed']}, "
+                        f"seeded={pruned['seeded']}, checked={pruned['checked']}"
                     )
                     result = distribute_all_club_members(guild_for_clan)
-                    logger.info(f"Автораспределение кланов: assigned={result['assigned']}, skipped={result['skipped']}")
+                    logger.info(f"Распределение кланов: assigned={result['assigned']}, skipped={result['skipped']}")
             except Exception as e:
                 logger.exception(f"auto-distribute clan err: {e}")
 
