@@ -1079,9 +1079,9 @@ async def on_message(message: disnake.Message):
         save_json(FILES["review_counts"], counts)
 
         try:
-            # 👇 40% от заработанного DC уходит в копилку клана
+            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
             await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке",
-                         notify=False, log=False, clan_share=CLAN_SHARE)
+                         notify=False, log=False, to_clan_pool=True)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
 
