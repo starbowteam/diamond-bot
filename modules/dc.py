@@ -195,7 +195,14 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
         await _notify_dc_change(user_id, amount, reason, data["balance"])
 
 
-async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True) -> bool:
+async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = True, log: bool = True,
+                    mark_activity: bool = True) -> bool:
+    """
+    Списывает DC.
+
+    mark_activity=True — засчитывает это как действие юзера (покупка, ставка).
+    Ставь False, если списание делает персонал вручную: это не активность юзера.
+    """
     data = get_dc_cache(user_id)
     if data["balance"] < amount:
         return False
@@ -207,6 +214,9 @@ async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = True,
     })
     if len(data["history"]) > 50:
         data["history"] = data["history"][-50:]
+    # 👇 Покупка/ставка — это действие, сбрасывает счётчик неактивности
+    if mark_activity:
+        data["last_active_ts"] = int(time.time())
     save_dc_cache(user_id, data)
     sync_dc_to_json()
 
@@ -354,6 +364,9 @@ async def claim_daily_gift(user_id: int) -> dict:
         }
 
     amount = random.randint(DAILY_GIFT_MIN, DAILY_GIFT_MAX)
+
+    # 👇 Забрал подарок — значит зашёл и что-то сделал
+    touch_activity(user_id)
 
     await add_dc(user_id, amount, "Ежедневный подарок", notify=False, log=False, to_clan_pool=True)
 
