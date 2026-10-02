@@ -71,17 +71,40 @@ def _strip_emoji(s: str) -> str:
     return "".join(out).strip()
 
 
+def _default_cat_description(key: str) -> str:
+    return {
+        "discounts": "Скидки на заказы в магазине — экономь на покупках",
+        "design":    "Аватарки, баннеры, логотипы — уникальный стиль",
+        "ads":       "Пост, закреп, упоминание — расскажи о себе",
+        "roles":     "Особые роли и кастом — выделись на сервере",
+        "boosts":    "Усилители DC-заработка на сутки и неделю",
+        "casino":    "Страховка ставки, x2 выигрыш, удачный час",
+        "gifts":     "Подари DC другому участнику — с комиссией 5%",
+    }.get(key, "Товары этой категории")
+
+
 def _get_categories_list() -> List[Dict]:
     catalog = load_shop_catalog()
     result = []
     for key, cat in catalog.items():
         items = cat.get("items", {})
         label = cat.get("label", key)
-        clean_label = _strip_emoji(label)
+        description = _strip_emoji(cat.get("description", "") or "")
+
+        # мин. цена по категории
+        prices = [int(it.get("price", 0)) for it in items.values()]
+        min_price = min(prices) if prices else 0
+
+        # если описания нет в JSON — сгенерим что-то осмысленное
+        if not description:
+            description = _default_cat_description(key)
+
         result.append({
             "key": key,
-            "label": clean_label,
+            "label": _strip_emoji(label),
             "count": len(items),
+            "min_price": min_price,
+            "description": description,
             "fa": shop_render.CATEGORY_FA.get(key, shop_render.I_CUBE),
         })
     return result
@@ -98,7 +121,7 @@ def _get_items_for_category(cat_key: str) -> List[Dict]:
             "key": key,
             "name": name,
             "price": int(it.get("price", 0)),
-            "description": it.get("description", ""),
+            "description": it.get("description", "") or "",
             "fa": shop_render.CATEGORY_FA.get(cat_key, shop_render.I_CUBE),
         })
     result.sort(key=lambda x: x["price"])
@@ -144,12 +167,14 @@ async def open_shop(inter: disnake.MessageInteraction):
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
     categories = _get_categories_list()
+    total_items = sum(c["count"] for c in categories)
 
     buf = shop_render.render_categories(
         user_id=user_id,
         balance=balance,
         total_spent=total_spent,
         categories=categories,
+        total_items=total_items,
     )
     view = ShopMainView(categories, active=categories[0]["key"] if categories else "")
     await _send_screen(inter, buf=buf, view=view)
@@ -163,9 +188,14 @@ async def goto_categories(inter: disnake.MessageInteraction):
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
     categories = _get_categories_list()
+    total_items = sum(c["count"] for c in categories)
+
     buf = shop_render.render_categories(
-        user_id=user_id, balance=balance, total_spent=total_spent,
+        user_id=user_id,
+        balance=balance,
+        total_spent=total_spent,
         categories=categories,
+        total_items=total_items,
     )
     view = ShopMainView(categories, active=categories[0]["key"] if categories else "")
     await _edit_screen(inter, buf=buf, view=view)
@@ -185,8 +215,12 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str):
     items = _get_items_for_category(cat_key)
 
     buf = shop_render.render_products(
-        user_id=user_id, balance=balance, total_spent=total_spent,
-        category_key=cat_key, category_label=cat_label, items=items,
+        user_id=user_id,
+        balance=balance,
+        total_spent=total_spent,
+        category_key=cat_key,
+        category_label=cat_label,
+        items=items,
     )
     view = ShopProductsView(cat_key, items, balance)
     await _edit_screen(inter, buf=buf, view=view)
@@ -205,12 +239,16 @@ async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key:
     item_view = {
         "name": _strip_emoji(item.get("name", item_key)),
         "price": int(item.get("price", 0)),
-        "description": item.get("description", ""),
+        "description": item.get("description", "") or "",
         "fa": shop_render.CATEGORY_FA.get(cat_key, shop_render.I_CUBE),
     }
     buf = shop_render.render_detail(
-        user_id=user_id, balance=balance, total_spent=total_spent,
-        category_key=cat_key, category_label=cat_label, item=item_view,
+        user_id=user_id,
+        balance=balance,
+        total_spent=total_spent,
+        category_key=cat_key,
+        category_label=cat_label,
+        item=item_view,
     )
     view = ShopDetailView(cat_key, item_key, item_view["price"])
     await _edit_screen(inter, buf=buf, view=view)
@@ -222,8 +260,11 @@ async def goto_purchases(inter: disnake.MessageInteraction):
     total_spent = _get_total_spent(user_id)
     purchases = await get_user_purchases(user_id, only_unused=True)
     filtered = [p for p in purchases if p.get("type") != "discounts"]
+
     buf = shop_render.render_purchases(
-        user_id=user_id, balance=balance, total_spent=total_spent,
+        user_id=user_id,
+        balance=balance,
+        total_spent=total_spent,
         purchases=filtered,
     )
     view = ShopPurchasesView()
@@ -243,8 +284,11 @@ async def goto_daily(inter: disnake.MessageInteraction):
     hours_left = max((next_ts - now_ts) // 3600, 0)
 
     buf = shop_render.render_daily_deal(
-        user_id=user_id, balance=balance, total_spent=total_spent,
-        deal=deal, hours_left=hours_left,
+        user_id=user_id,
+        balance=balance,
+        total_spent=total_spent,
+        deal=deal,
+        hours_left=hours_left,
     )
     if deal:
         view = ShopDealView(
@@ -263,8 +307,11 @@ async def goto_history(inter: disnake.MessageInteraction):
     total_spent = _get_total_spent(user_id)
     data = get_dc_cache(user_id)
     history = list(reversed((data.get("history") or [])[-20:]))
+
     buf = shop_render.render_history(
-        user_id=user_id, balance=balance, total_spent=total_spent,
+        user_id=user_id,
+        balance=balance,
+        total_spent=total_spent,
         history=history,
     )
     view = ShopHistoryView()
@@ -335,7 +382,9 @@ async def goto_purchases_after_buy(inter: disnake.MessageInteraction, user_id: i
     filtered = [p for p in purchases if p.get("type") != "discounts"]
 
     buf = shop_render.render_purchases(
-        user_id=user_id, balance=balance, total_spent=total_spent,
+        user_id=user_id,
+        balance=balance,
+        total_spent=total_spent,
         purchases=filtered,
     )
     view = ShopPurchasesView()
