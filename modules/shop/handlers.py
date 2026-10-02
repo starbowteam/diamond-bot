@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Логика витрины DC-Shop: навигация, покупка, подарок,
-успешный экран после покупки. Anti-double-click на покупке.
-"""
+"""Логика витрины DC-Shop: навигация, покупка, пагинация, подарок."""
 import io
 import os
 import time
@@ -32,6 +29,7 @@ from modules.shop.views import (
 
 
 DAILY_DEAL_REFRESH_HOURS = 5
+PAGE_SIZE = 6
 
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
@@ -39,7 +37,7 @@ REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 # ============================================================
 # ЗАЩИТА ОТ ДВОЙНОГО НАЖАТИЯ
 # ============================================================
-_BUY_LOCKS: dict = {}    # (user_id, "cat:item") → timestamp последнего клика
+_BUY_LOCKS: dict = {}
 
 
 def _prune_locks(now: float):
@@ -80,6 +78,12 @@ def _strip_emoji(s: str) -> str:
             continue
         out.append(ch)
     return "".join(out).strip()
+
+
+# 👇 Переопределения label категорий
+_LABEL_OVERRIDES = {
+    "casino": "Казино",
+}
 
 
 def _default_cat_description(key: str) -> str:
@@ -123,7 +127,7 @@ def _default_cat_description(key: str) -> str:
 
 def _default_item_description(cat_key: str, name: str) -> str:
     m = {
-        "discounts": f"Скидка «{name}» действует на любой заказ в магазине. Применяешь в тикете — она автоматически вычитается из итоговой суммы.",
+        "discounts": f"Скидка «{name}» действует на любой заказ в магазине. Применяется в тикете — она автоматически вычитается из итоговой суммы.",
         "design":    f"«{name}» делаем под тебя: стиль, цвета и композиция согласуются в тикете. Срок — до 2 рабочих дней.",
         "ads":       f"«{name}» публикуется в каналах Diamond. Расскажем о тебе или твоём проекте нашей аудитории.",
         "roles":     f"«{name}» — особая роль сервера. Даёт свой стиль, доступ к закрытым каналам и активностям.",
@@ -139,7 +143,7 @@ def _get_categories_list() -> List[Dict]:
     result = []
     for key, cat in catalog.items():
         items = cat.get("items", {})
-        label = cat.get("label", key)
+        label = _LABEL_OVERRIDES.get(key, cat.get("label", key))
         description = _strip_emoji(cat.get("description", "") or "")
         prices = [int(it.get("price", 0)) for it in items.values()]
         min_price = min(prices) if prices else 0
@@ -240,7 +244,7 @@ async def open_shop(inter: disnake.MessageInteraction):
         categories=categories,
         total_items=total_items,
     )
-    view = ShopMainView(categories, active=categories[0]["key"] if categories else "")
+    view = ShopMainView(categories, active="")
     await _send_screen(inter, buf=buf, view=view)
 
 
@@ -261,11 +265,11 @@ async def goto_categories(inter: disnake.MessageInteraction):
         categories=categories,
         total_items=total_items,
     )
-    view = ShopMainView(categories, active=categories[0]["key"] if categories else "")
+    view = ShopMainView(categories, active="")
     await _edit_screen(inter, buf=buf, view=view)
 
 
-async def goto_products(inter: disnake.MessageInteraction, cat_key: str):
+async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: int = 0):
     user_id = inter.author.id
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
@@ -275,8 +279,14 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str):
         return await inter.response.send_message(
             "Категория не найдена.", ephemeral=True
         )
-    cat_label = _strip_emoji(cat.get("label", cat_key))
-    items = _get_items_for_category(cat_key)
+    cat_label = _strip_emoji(_LABEL_OVERRIDES.get(cat_key, cat.get("label", cat_key)))
+    all_items = _get_items_for_category(cat_key)
+
+    total_pages = max(1, (len(all_items) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_items = all_items[start:end]
 
     buf = shop_render.render_products(
         user_id=user_id,
@@ -284,9 +294,11 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str):
         total_spent=total_spent,
         category_key=cat_key,
         category_label=cat_label,
-        items=items,
+        items=page_items,
+        page=page,
+        total_pages=total_pages,
     )
-    view = ShopProductsView(cat_key, items, balance)
+    view = ShopProductsView(cat_key, all_items, balance, page, total_pages)
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -299,7 +311,7 @@ async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key:
     item = cat.get("items", {}).get(item_key)
     if not item:
         return await inter.response.send_message("Товар не найден.", ephemeral=True)
-    cat_label = _strip_emoji(cat.get("label", cat_key))
+    cat_label = _strip_emoji(_LABEL_OVERRIDES.get(cat_key, cat.get("label", cat_key)))
     name = _strip_emoji(item.get("name", item_key))
     desc = item.get("description", "") or _default_item_description(cat_key, name)
     item_view = {
@@ -394,7 +406,6 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
     cat = (cat_key or "").lower()
     has_role = bool(item.get("role_id"))
     boost_type = item.get("boost_type")
-    gift_amount = item.get("gift_amount")
     is_auto_role = (cat == "roles" and has_role)
     is_boost = bool(boost_type) and cat in ("boosts", "casino")
 
@@ -502,12 +513,11 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
 
 
 # ============================================================
-# ПОКУПКА (с anti-double-click)
+# ПОКУПКА
 # ============================================================
 async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: str):
     user_id = inter.author.id
 
-    # Anti-double-click: 8 секунд блокировки на тот же товар
     lock_key = (user_id, f"{cat_key}:{item_key}")
     now_ts = time.time()
     prev = _BUY_LOCKS.get(lock_key, 0)
@@ -537,7 +547,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     balance = await get_user_balance(user_id)
     if balance < price:
         return await inter.edit_original_response(
-            content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у тебя: **{balance} DC**."
+            content=f"❌ Недостаточно DC.\n> **Нужно:** `{price} DC`\n> **У тебя:** `{balance} DC`"
         )
 
     success = await remove_dc(user_id, price, f"Покупка: {name}")
@@ -561,7 +571,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
             except Exception as e:
                 logger.warning(f"shop auto-role give {user_id}: {e}")
 
-    # Активация буста / казино-предмета
+    # Активация буста
     if item.get("boost_type"):
         try:
             from core.utils import activate_item
@@ -576,7 +586,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
         except Exception as e:
             logger.warning(f"shop boost activate {user_id}: {e}")
 
-    # В инвентарь — только не-автороли и не-бусты
+    # В инвентарь
     if not (cat_key == "roles" and item.get("role_id")) and not item.get("boost_type"):
         await add_purchase(user_id, cat_key, name)
 
@@ -595,13 +605,18 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     except Exception as e:
         logger.warning(f"shop buy ach: {e}")
 
+    # 👇 красивое логирование
     asyncio.create_task(log_discord(
-        title="Покупка в DC-Shop",
+        title="🛒 Покупка в DC-Shop",
         description=(
-            f"**Пользователь:** <@{user_id}>\n"
-            f"**Товар:** {name}\n"
-            f"**Цена:** {price} DC\n"
-            f"**Авто-роль:** {'да' if auto_role_given else 'нет'}"
+            f"> **Пользователь:** {inter.author.mention} (`{user_id}`)\n"
+            f"> **Категория:** `{cat_key}`\n"
+            f"> **Товар:** `{name}`\n"
+            f"> **Цена:** `{price} DC`\n"
+            f"> **Баланс до:** `{balance} DC`\n"
+            f"> **Баланс после:** `{balance - price} DC`\n"
+            f"> **Авто-роль:** {'выдана' if auto_role_given else 'не требуется'}\n"
+            f"> **Тип:** {'авто' if (item.get('role_id') or item.get('boost_type')) else 'в инвентарь'}"
         ),
         color=0x00aaff,
     ))
@@ -666,7 +681,7 @@ async def handle_gift(inter: disnake.ModalInteraction,
     balance = await get_user_balance(user_id)
     if balance < price:
         return await inter.edit_original_response(
-            content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у тебя: **{balance} DC**."
+            content=f"❌ Недостаточно DC.\n> **Нужно:** `{price} DC`\n> **У тебя:** `{balance} DC`"
         )
 
     success = await remove_dc(
@@ -692,11 +707,11 @@ async def handle_gift(inter: disnake.ModalInteraction,
 
         try:
             embed = disnake.Embed(
-                title="Тебе подарили Diamond Coins!",
+                title="🎁 Тебе подарили Diamond Coins!",
                 description=(
-                    f"**От:** <@{user_id}>\n"
-                    f"**Получено:** `+{gift_amount} DC`\n\n"
-                    f"Ты можешь потратить их в DC-магазине."
+                    f"> **От:** <@{user_id}>\n"
+                    f"> **Получено:** `+{gift_amount} DC`\n\n"
+                    f"> Ты можешь потратить их в DC-магазине."
                 ),
                 color=0x2ecc71,
                 timestamp=datetime.now(timezone.utc),
@@ -710,11 +725,11 @@ async def handle_gift(inter: disnake.ModalInteraction,
         await add_purchase(recipient_id, cat_key, name)
         try:
             embed = disnake.Embed(
-                title="Тебе подарили товар!",
+                title="🎁 Тебе подарили товар!",
                 description=(
-                    f"**От:** <@{user_id}>\n"
-                    f"**Товар:** {name}\n\n"
-                    f"Оформить можно в витрине — открой тикет за DC."
+                    f"> **От:** <@{user_id}>\n"
+                    f"> **Товар:** {name}\n\n"
+                    f"> Оформить можно в витрине — открой тикет за DC."
                 ),
                 color=0x2ecc71,
                 timestamp=datetime.now(timezone.utc),
@@ -725,17 +740,17 @@ async def handle_gift(inter: disnake.ModalInteraction,
         except Exception as e:
             logger.warning(f"shop gift item DM {recipient_id}: {e}")
 
-    await log_discord(
-        title="Подарок в DC-Shop",
+    asyncio.create_task(log_discord(
+        title="🎁 Подарок в DC-Shop",
         description=(
-            f"**От:** <@{user_id}>\n"
-            f"**Кому:** <@{recipient_id}>\n"
-            f"**Товар:** {name}\n"
-            f"**Цена:** {price} DC"
-            + (f"\n**DC получателю:** {gift_amount}" if gift_amount else "")
+            f"> **От:** {inter.author.mention} (`{user_id}`)\n"
+            f"> **Кому:** <@{recipient_id}> (`{recipient_id}`)\n"
+            f"> **Товар:** `{name}`\n"
+            f"> **Цена:** `{price} DC`"
+            + (f"\n> **DC получателю:** `{gift_amount}`" if gift_amount else "")
         ),
         color=0xffaa00,
-    )
+    ))
 
     if gift_amount:
         outcome = {
@@ -820,7 +835,7 @@ async def handle_gift(inter: disnake.ModalInteraction,
         logger.warning(f"gift success screen {user_id}: {e}")
         try:
             await inter.edit_original_response(
-                content=f"Готово! Подарок отправлен <@{recipient_id}>."
+                content=f"✅ Готово! Подарок отправлен <@{recipient_id}>."
             )
         except Exception:
             pass
