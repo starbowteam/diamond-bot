@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""UI витрины DC-Shop. Discord сам распределяет ширину кнопок в ряду."""
+"""UI витрины DC-Shop."""
 import time
 import asyncio
 from typing import List, Dict
@@ -11,39 +11,46 @@ from disnake.ui import View, Button, Select, Modal, TextInput
 from core.utils import logger, CONFIG
 
 
-P = "\u3164"   # hair space
+P = "\u3164"
 
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
 
 def L(text: str) -> str:
-    """По 1 hair space в начале и в конце."""
     return f"{P}{text}{P}"
 
 
+# ============================================================
+# ЭМОДЗИ КАТЕГОРИЙ — обновлены
+# ============================================================
 E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
 E_FIRE    = PartialEmoji(name="skidka",    id=1540819242625146961)
 E_HISTORY = PartialEmoji(name="Otziv",     id=1541808692314243172)
 E_BACK    = PartialEmoji(name="OffTicket", id=1539657125716824185)
 E_BUY     = PartialEmoji(name="Oplacheno", id=1539657164778512496)
-E_GIFT    = PartialEmoji(name="prom1",     id=1539646792139014234)
+E_GIFT    = PartialEmoji(name="gid1",      id=1555654337953267794)
 E_STAR    = PartialEmoji(name="Otziv",     id=1541808692314243172)
-E_SHOP    = PartialEmoji(name="shopg",     id=1539646815530651718)
+E_SHOP    = PartialEmoji(name="shop1",     id=1555654407776112750)
+
+# 👇 новые эмодзи категорий
+E_CAT_ADS    = PartialEmoji(name="reklama", id=1555654392202535073)
+E_CAT_ROLES  = PartialEmoji(name="peope",   id=1555654375781834883)
+E_CAT_CASINO = PartialEmoji(name="kazik",   id=1555654356152623104)
 
 
 CATEGORY_EMOJI = {
     "discounts": PartialEmoji(name="skidka", id=1540819242625146961),
     "design":    PartialEmoji(name="image",  id=1550869363266027641),
-    "ads":       PartialEmoji(name="banne1", id=1538551829246513312),
-    "roles":     PartialEmoji(name="roles",  id=1540046665984249878),
+    "ads":       E_CAT_ADS,
+    "roles":     E_CAT_ROLES,
     "boosts":    PartialEmoji(name="flash",  id=1551289202279325756),
-    "casino":    PartialEmoji(name="coins",  id=1539649259245408340),
+    "casino":    E_CAT_CASINO,
     "gifts":     PartialEmoji(name="prize",  id=1539657202170859561),
 }
 
 
 # ============================================================
-# SELECT КАТЕГОРИЙ
+# SELECT КАТЕГОРИЙ — без default, ничего не предвыбрано
 # ============================================================
 class ShopCategorySelect(Select):
     def __init__(self, categories: List[Dict], active: str = ""):
@@ -63,7 +70,6 @@ class ShopCategorySelect(Select):
                 description=desc,
                 value=key,
                 emoji=CATEGORY_EMOJI.get(key),
-                default=(key == active),
             ))
         super().__init__(
             placeholder="Выберите категорию магазина...",
@@ -76,7 +82,7 @@ class ShopCategorySelect(Select):
     async def callback(self, inter: disnake.MessageInteraction):
         cat_key = inter.data.values[0]
         from modules.shop.handlers import goto_products
-        await goto_products(inter, cat_key)
+        await goto_products(inter, cat_key, page=0)
 
 
 # ============================================================
@@ -180,7 +186,7 @@ class BtnBack(Button):
         if target == "categories":
             await goto_categories(inter)
         elif target == "products":
-            await goto_products(inter, cat_key)
+            await goto_products(inter, cat_key, page=0)
 
 
 class BtnBackToShop(Button):
@@ -272,6 +278,45 @@ class BtnGift(Button):
 
 
 # ============================================================
+# КНОПКИ ПАГИНАЦИИ (для ролей 11 товаров)
+# ============================================================
+class BtnPageLeft(Button):
+    def __init__(self, cat_key: str, page: int, row: int = 2):
+        super().__init__(
+            label=L("← Назад"),
+            style=ButtonStyle.gray,
+            custom_id=f"shop:page_left:{cat_key}:{page}",
+            row=row,
+            disabled=(page <= 0),
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        parts = self.custom_id.split(":")
+        cat_key = parts[2]
+        page = int(parts[3])
+        from modules.shop.handlers import goto_products
+        await goto_products(inter, cat_key, page=max(page - 1, 0))
+
+
+class BtnPageRight(Button):
+    def __init__(self, cat_key: str, page: int, total_pages: int, row: int = 2):
+        super().__init__(
+            label=L("Дальше →"),
+            style=ButtonStyle.gray,
+            custom_id=f"shop:page_right:{cat_key}:{page}",
+            row=row,
+            disabled=(page >= total_pages - 1),
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        parts = self.custom_id.split(":")
+        cat_key = parts[2]
+        page = int(parts[3])
+        from modules.shop.handlers import goto_products
+        await goto_products(inter, cat_key, page=page + 1)
+
+
+# ============================================================
 # МОДАЛКА ПОДАРКА
 # ============================================================
 class ShopGiftModal(Modal):
@@ -315,12 +360,17 @@ class ShopMainView(View):
 
 
 class ShopProductsView(View):
-    def __init__(self, cat_key: str, items: List[Dict], balance: int):
+    def __init__(self, cat_key: str, items: List[Dict], balance: int,
+                 page: int = 0, total_pages: int = 1):
         super().__init__(timeout=None)
         self.add_item(ShopItemSelect(cat_key, items, balance))
         self.add_item(BtnBack(target="categories", row=1))
         self.add_item(BtnPurchases(row=1))
         self.add_item(BtnHistory(row=1))
+
+        if total_pages > 1:
+            self.add_item(BtnPageLeft(cat_key, page, row=2))
+            self.add_item(BtnPageRight(cat_key, page, total_pages, row=2))
 
 
 class ShopDetailView(View):
