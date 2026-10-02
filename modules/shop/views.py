@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""UI витрины DC-Shop. Кнопки в ряду выровнены по длине label'а."""
+"""UI витрины DC-Shop. Discord сам распределяет ширину кнопок в ряду."""
 import time
 import asyncio
 from typing import List, Dict
@@ -11,38 +11,9 @@ from disnake.ui import View, Button, Select, Modal, TextInput
 from core.utils import logger, CONFIG
 
 
-P = "\u3164"   # hair space
-
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
 
-# ============================================================
-# РАСТЯЖКА КНОПОК — выравниваем длину label в ряду
-# ============================================================
-def _pad(text: str, target: int) -> str:
-    """Дополняет label до target длины, чтобы кнопки в ряду были одной ширины."""
-    pad = target - len(text)
-    if pad <= 0:
-        return text
-    left = pad // 2
-    right = pad - left
-    return (P * left) + text + (P * right)
-
-
-# Целевая длина label — 20 символов.
-# Для 3 кнопок в ряду — все по 20 = одинаковые кнопки 1/3 ширины.
-# Для 2 кнопок в ряду — все по 20 = одинаковые кнопки 1/2 ширины.
-_TARGET = 20
-
-
-def L(text: str) -> str:
-    """Выровнять label до _TARGET."""
-    return _pad(text, _TARGET)
-
-
-# ============================================================
-# ЭМОДЗИ
-# ============================================================
 E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
 E_FIRE    = PartialEmoji(name="skidka",    id=1540819242625146961)
 E_HISTORY = PartialEmoji(name="Otziv",     id=1541808692314243172)
@@ -137,12 +108,12 @@ class ShopItemSelect(Select):
 
 
 # ============================================================
-# КНОПКИ
+# КНОПКИ — короткие label, Discord сам выровняет по ширине
 # ============================================================
 class BtnPurchases(Button):
     def __init__(self, row: int = 1):
         super().__init__(
-            label=L("Мои покупки"),
+            label="Мои покупки",
             style=ButtonStyle.gray,
             custom_id="shop:btn_purchases",
             emoji=E_BAG,
@@ -157,7 +128,7 @@ class BtnPurchases(Button):
 class BtnDailyDeal(Button):
     def __init__(self, row: int = 1):
         super().__init__(
-            label=L("Акция дня"),
+            label="Акция дня",
             style=ButtonStyle.gray,
             custom_id="shop:btn_daily",
             emoji=E_FIRE,
@@ -172,7 +143,7 @@ class BtnDailyDeal(Button):
 class BtnHistory(Button):
     def __init__(self, row: int = 1):
         super().__init__(
-            label=L("История"),
+            label="История",
             style=ButtonStyle.gray,
             custom_id="shop:btn_history",
             emoji=E_HISTORY,
@@ -187,7 +158,7 @@ class BtnHistory(Button):
 class BtnBack(Button):
     def __init__(self, target: str = "categories", row: int = 1, cat_key: str = ""):
         super().__init__(
-            label=L("Назад"),
+            label="Назад",
             style=ButtonStyle.gray,
             custom_id=f"shop:btn_back:{target}:{cat_key}",
             emoji=E_BACK,
@@ -208,7 +179,7 @@ class BtnBack(Button):
 class BtnBackToShop(Button):
     def __init__(self, row: int = 0):
         super().__init__(
-            label=L("В магазин"),
+            label="В магазин",
             style=ButtonStyle.gray,
             custom_id="shop:btn_back_to_shop",
             emoji=E_SHOP,
@@ -223,7 +194,7 @@ class BtnBackToShop(Button):
 class BtnPurchasesWide(Button):
     def __init__(self, row: int = 0):
         super().__init__(
-            label=L("Мои покупки"),
+            label="Мои покупки",
             style=ButtonStyle.gray,
             custom_id="shop:btn_purchases_success",
             emoji=E_BAG,
@@ -238,7 +209,7 @@ class BtnPurchasesWide(Button):
 class BtnReviewHint(Button):
     def __init__(self, row: int = 0):
         super().__init__(
-            label=L("Оставить отзыв"),
+            label="Оставить отзыв",
             style=ButtonStyle.primary,
             custom_id="shop:btn_review_hint",
             emoji=E_STAR,
@@ -256,7 +227,7 @@ class BtnReviewHint(Button):
 class BtnBuy(Button):
     def __init__(self, cat_key: str, item_key: str, price: int, row: int = 0):
         super().__init__(
-            label=L(f"Купить за {price} DC"),
+            label=f"Купить за {price} DC",
             style=ButtonStyle.success,
             custom_id=f"shop:btn_buy:{cat_key}:{item_key}",
             emoji=E_BUY,
@@ -274,7 +245,7 @@ class BtnBuy(Button):
 class BtnGift(Button):
     def __init__(self, cat_key: str, item_key: str, row: int = 0):
         super().__init__(
-            label=L("Подарить"),
+            label="Подарить",
             style=ButtonStyle.gray,
             custom_id=f"shop:btn_gift:{cat_key}:{item_key}",
             emoji=E_GIFT,
