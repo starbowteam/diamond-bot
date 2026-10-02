@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 BuyAll — отдельная витрина для покупки любых товаров.
-Одна рабочая кнопка (половина ширины) + спейсер, чистый ephemeral-ответ.
+Одна кнопка, по 5 hair space с каждой стороны. Чистый ephemeral-ответ.
 """
 import os
 import re
@@ -38,9 +38,9 @@ BUYALL_EMBED_2_IMG = (
     "hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
 )
 
-# Рабочая кнопка «Оформить покупку» = 16 символов.
-# Спейсер справа — та же длина, чтобы Discord дал обеим по 50%.
-SPACER_LABEL = P * 16
+
+def _btn_label(text: str) -> str:
+    return f"{P * 5}{text}{P * 5}"
 
 
 # ============================================================
@@ -51,27 +51,14 @@ class BuyAllView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="Оформить покупку",
+        label=_btn_label("Оформить покупку"),
         style=ButtonStyle.gray,
         custom_id="buyall:create_ticket",
         row=0,
     )
     async def create(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        # Первое и единственное взаимодействие — defer ephemeral.
-        # Дальше всё идёт через edit_original_response, который правит
-        # именно ephemeral-сообщение, оригинальный эмбед не трогается.
         await inter.response.defer(ephemeral=True)
         await _create_buyall_ticket(inter)
-
-    @disnake.ui.button(
-        label=SPACER_LABEL,
-        style=ButtonStyle.gray,
-        custom_id="buyall:spacer",
-        disabled=True,
-        row=0,
-    )
-    async def spacer(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        pass
 
 
 # ============================================================
