@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-UI витрины DC-Shop. Каждое взаимодействие — перерисовка PNG
-и edit_message с новым файлом. Без кэша.
+UI витрины DC-Shop. Каждое взаимодействие = перерисовка PNG
++ edit_message с новым файлом. Без кэша.
 """
 import time
 import asyncio
@@ -12,24 +12,32 @@ from disnake import ButtonStyle, SelectOption, PartialEmoji
 from disnake.ui import View, Button, Select, Modal, TextInput
 
 from core.utils import logger
-from modules.shop import state
 
 
 P = "\u3164"
 
 
 # ============================================================
-# FA-EMOJI для кнопок Discord (компонентов)
+# ЭМОДЗИ ДЛЯ DISCORD-КОМПОНЕНТОВ
 # ============================================================
-# Discord-кнопки требуют иконку из Discord CDN или unicode.
-# Используем кастомные эмодзи сервера, как в старом коде.
-E_BAG     = PartialEmoji(name="prize",   id=1539657202170859561)
-E_FIRE    = PartialEmoji(name="skidka",  id=1540819242625146961)
-E_HISTORY = PartialEmoji(name="Otziv",   id=1541808692314243172)
+E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
+E_FIRE    = PartialEmoji(name="skidka",    id=1540819242625146961)
+E_HISTORY = PartialEmoji(name="Otziv",     id=1541808692314243172)
 E_BACK    = PartialEmoji(name="OffTicket", id=1539657125716824185)
 E_BUY     = PartialEmoji(name="Oplacheno", id=1539657164778512496)
-E_GIFT    = PartialEmoji(name="prom1",   id=1539646792139014234)
-E_CART    = PartialEmoji(name="shopg",   id=1539646815530651718)
+E_GIFT    = PartialEmoji(name="prom1",     id=1539646792139014234)
+E_CART    = PartialEmoji(name="shopg",     id=1539646815530651718)
+
+# Эмодзи категорий (custom IDs from server)
+CATEGORY_EMOJI = {
+    "discounts": PartialEmoji(name="skidka", id=1540819242625146961),
+    "design":    PartialEmoji(name="image",  id=1550869363266027641),
+    "ads":       PartialEmoji(name="banne1", id=1538551829246513312),
+    "roles":     PartialEmoji(name="roles",  id=1540046665984249878),
+    "boosts":    PartialEmoji(name="flash",  id=1551289202279325756),
+    "casino":    PartialEmoji(name="coins",  id=1539649259245408340),
+    "gifts":     PartialEmoji(name="prize",  id=1539657202170859561),
+}
 
 
 # ============================================================
@@ -39,16 +47,24 @@ class ShopCategorySelect(Select):
     def __init__(self, categories: List[Dict], active: str = ""):
         options = []
         for c in categories[:25]:
+            key = c["key"]
             label = c["label"][:100]
-            desc = f"{c['count']} шт."[:100]
+            count = c["count"]
+            count_word = (
+                "товар" if count == 1
+                else "товара" if 2 <= count <= 4
+                else "товаров"
+            )
+            desc = f"Смотреть {count} {count_word} →"[:100]
             options.append(SelectOption(
                 label=label,
                 description=desc,
-                value=c["key"],
-                default=(c["key"] == active),
+                value=key,
+                emoji=CATEGORY_EMOJI.get(key),
+                default=(key == active),
             ))
         super().__init__(
-            placeholder="Выберите категорию магазина...",
+            placeholder="▾  Выберите категорию магазина...",
             min_values=1,
             max_values=1,
             options=options,
@@ -71,14 +87,18 @@ class ShopItemSelect(Select):
             price = it["price"]
             ok = balance >= price
             label = f"{it['name']} · {price} DC"[:100]
-            desc = ("Можешь купить" if ok else "Не хватает DC")[:100]
+            if ok:
+                desc = f"Доступно · {it.get('description', '')[:60]}"[:100]
+            else:
+                missing = price - balance
+                desc = f"Не хватает {missing} DC"[:100]
             options.append(SelectOption(
                 label=label,
                 description=desc,
                 value=it["key"],
             ))
         super().__init__(
-            placeholder="Выберите товар для покупки...",
+            placeholder="▾  Выберите товар для покупки...",
             min_values=1,
             max_values=1,
             options=options,
@@ -93,7 +113,7 @@ class ShopItemSelect(Select):
 
 
 # ============================================================
-# КНОПКА «МОИ ПОКУПКИ»
+# КНОПКИ
 # ============================================================
 class BtnPurchases(Button):
     def __init__(self, row: int = 1):
@@ -110,9 +130,6 @@ class BtnPurchases(Button):
         await goto_purchases(inter)
 
 
-# ============================================================
-# КНОПКА «АКЦИЯ ДНЯ»
-# ============================================================
 class BtnDailyDeal(Button):
     def __init__(self, row: int = 1):
         super().__init__(
@@ -128,9 +145,6 @@ class BtnDailyDeal(Button):
         await goto_daily(inter)
 
 
-# ============================================================
-# КНОПКА «ИСТОРИЯ»
-# ============================================================
 class BtnHistory(Button):
     def __init__(self, row: int = 1):
         super().__init__(
@@ -146,9 +160,6 @@ class BtnHistory(Button):
         await goto_history(inter)
 
 
-# ============================================================
-# КНОПКА «НАЗАД»
-# ============================================================
 class BtnBack(Button):
     def __init__(self, target: str = "categories", row: int = 1, cat_key: str = ""):
         super().__init__(
@@ -170,9 +181,6 @@ class BtnBack(Button):
             await goto_products(inter, cat_key)
 
 
-# ============================================================
-# КНОПКА «КУПИТЬ»
-# ============================================================
 class BtnBuy(Button):
     def __init__(self, cat_key: str, item_key: str, price: int, row: int = 0):
         super().__init__(
@@ -191,9 +199,6 @@ class BtnBuy(Button):
         await handle_buy(inter, cat_key, item_key)
 
 
-# ============================================================
-# КНОПКА «ПОДАРИТЬ»
-# ============================================================
 class BtnGift(Button):
     def __init__(self, cat_key: str, item_key: str, row: int = 0):
         super().__init__(
@@ -208,8 +213,6 @@ class BtnGift(Button):
         parts = self.custom_id.split(":")
         cat_key = parts[2]
         item_key = parts[3]
-        # Модалку можно отправить только первым ответом на интеракцию.
-        # Мы отвечаем модалкой — исходное сообщение не редактируем.
         try:
             await inter.response.send_modal(
                 ShopGiftModal(cat_key=cat_key, item_key=item_key)
@@ -246,13 +249,11 @@ class ShopGiftModal(Modal):
                 "ID должен состоять только из цифр.", ephemeral=True
             )
         from modules.shop.handlers import handle_gift
-        await handle_gift(
-            inter, self.cat_key, self.item_key, int(recipient)
-        )
+        await handle_gift(inter, self.cat_key, self.item_key, int(recipient))
 
 
 # ============================================================
-# ГЛАВНОЕ VIEW — КАТЕГОРИИ
+# VIEWS
 # ============================================================
 class ShopMainView(View):
     def __init__(self, categories: List[Dict], active: str = ""):
@@ -263,9 +264,6 @@ class ShopMainView(View):
         self.add_item(BtnHistory(row=1))
 
 
-# ============================================================
-# VIEW — ТОВАРЫ
-# ============================================================
 class ShopProductsView(View):
     def __init__(self, cat_key: str, items: List[Dict], balance: int):
         super().__init__(timeout=None)
@@ -275,9 +273,6 @@ class ShopProductsView(View):
         self.add_item(BtnHistory(row=1))
 
 
-# ============================================================
-# VIEW — КАРТОЧКА ТОВАРА
-# ============================================================
 class ShopDetailView(View):
     def __init__(self, cat_key: str, item_key: str, price: int):
         super().__init__(timeout=None)
@@ -286,18 +281,12 @@ class ShopDetailView(View):
         self.add_item(BtnBack(target="products", cat_key=cat_key, row=0))
 
 
-# ============================================================
-# VIEW — МОИ ПОКУПКИ
-# ============================================================
 class ShopPurchasesView(View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(BtnBack(target="categories", row=0))
 
 
-# ============================================================
-# VIEW — АКЦИЯ ДНЯ
-# ============================================================
 class ShopDealView(View):
     def __init__(self, cat_key: str = "", item_key: str = "", price: int = 0):
         super().__init__(timeout=None)
@@ -306,9 +295,6 @@ class ShopDealView(View):
         self.add_item(BtnBack(target="categories", row=0))
 
 
-# ============================================================
-# VIEW — ИСТОРИЯ
-# ============================================================
 class ShopHistoryView(View):
     def __init__(self):
         super().__init__(timeout=None)
