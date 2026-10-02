@@ -429,7 +429,7 @@ async def on_ready():
         from modules.commands_tickets import (
             TicketPanelView, TicketPaidView, TicketView, CoinsTicketButtons,
             TicketRatingView, SelectView, CatalogTypeView, CatalogView,
-            BuySelectView, QuestionTicketView,
+            QuestionTicketView,
         )
         from modules.commands_profile import send_profile_panel, ProfilePanelView, ProfileCardView
         from modules.commands_staff import (
@@ -447,7 +447,6 @@ async def on_ready():
         bot.add_view(SelectView())
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
-        bot.add_view(BuySelectView())
         bot.add_view(HomeView())
         bot.add_view(TarologyView())
         bot.add_view(ProfilePanelView())
