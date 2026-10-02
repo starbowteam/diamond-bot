@@ -17,8 +17,8 @@ REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
 
 def L(text: str) -> str:
-    """По 2 hair space в начале и в конце."""
-    return f"{P}{P}{text}{P}{P}"
+    """По 1 hair space в начале и в конце."""
+    return f"{P}{text}{P}"
 
 
 E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
