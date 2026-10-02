@@ -4,13 +4,10 @@ BuyAll — отдельная витрина для покупки любых т
 Отдельный канал, отдельная кнопка, отдельный тикет за реальные деньги.
 """
 import disnake
-from disnake import ButtonStyle, PartialEmoji
+from disnake import ButtonStyle
 from disnake.ui import View
 
 from core.utils import CONFIG, logger, log_discord
-
-
-P = "\u3164"   # hair space — растягивает кнопку
 
 
 # ============================================================
@@ -29,8 +26,6 @@ BUYALL_EMBED_2_IMG = (
     "hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
 )
 
-E_SHOP = PartialEmoji(name="shopg", id=1539646815530651718)
-
 
 # ============================================================
 # VIEW
@@ -40,15 +35,15 @@ class BuyAllView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label=f"{P * 28}Оформить покупку{P * 28}",
-        style=ButtonStyle.success,
+        label="Оформить покупку",
+        style=ButtonStyle.gray,
         custom_id="buyall:create_ticket",
-        emoji=E_SHOP,
         row=0,
     )
     async def create(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        # Просто создаёт тикет за реальные деньги — весь остальной флоу
-        # (счёт, менеджер, оплата, оценка) уже реализован в create_real_ticket
+        # Отвечаем эфемерно сразу — весь флоу создания тикета
+        # идёт через ephemeral-ответы, исходный эмбед не трогаем.
+        await inter.response.defer(ephemeral=True)
         from modules.commands_tickets import create_real_ticket
         await create_real_ticket(inter)
 
