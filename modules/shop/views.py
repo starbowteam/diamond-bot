@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-UI витрины DC-Shop. Каждое взаимодействие = перерисовка PNG
-+ edit_message с новым файлом. Без кэша.
-"""
+"""UI витрины DC-Shop."""
 import time
 import asyncio
 from typing import List, Dict
@@ -11,15 +8,14 @@ import disnake
 from disnake import ButtonStyle, SelectOption, PartialEmoji
 from disnake.ui import View, Button, Select, Modal, TextInput
 
-from core.utils import logger
+from core.utils import logger, CONFIG
 
 
 P = "\u3164"
 
+REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
-# ============================================================
-# ЭМОДЗИ ДЛЯ DISCORD-КОМПОНЕНТОВ
-# ============================================================
+
 E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
 E_FIRE    = PartialEmoji(name="skidka",    id=1540819242625146961)
 E_HISTORY = PartialEmoji(name="Otziv",     id=1541808692314243172)
@@ -28,7 +24,7 @@ E_BUY     = PartialEmoji(name="Oplacheno", id=1539657164778512496)
 E_GIFT    = PartialEmoji(name="prom1",     id=1539646792139014234)
 E_CART    = PartialEmoji(name="shopg",     id=1539646815530651718)
 
-# Эмодзи категорий (custom IDs from server)
+
 CATEGORY_EMOJI = {
     "discounts": PartialEmoji(name="skidka", id=1540819242625146961),
     "design":    PartialEmoji(name="image",  id=1550869363266027641),
@@ -40,9 +36,6 @@ CATEGORY_EMOJI = {
 }
 
 
-# ============================================================
-# СЕЛЕКТ КАТЕГОРИЙ
-# ============================================================
 class ShopCategorySelect(Select):
     def __init__(self, categories: List[Dict], active: str = ""):
         options = []
@@ -77,9 +70,6 @@ class ShopCategorySelect(Select):
         await goto_products(inter, cat_key)
 
 
-# ============================================================
-# СЕЛЕКТ ТОВАРОВ
-# ============================================================
 class ShopItemSelect(Select):
     def __init__(self, cat_key: str, items: List[Dict], balance: int):
         options = []
@@ -112,9 +102,6 @@ class ShopItemSelect(Select):
         await goto_detail(inter, cat_key, it_key)
 
 
-# ============================================================
-# КНОПКИ
-# ============================================================
 class BtnPurchases(Button):
     def __init__(self, row: int = 1):
         super().__init__(
@@ -181,6 +168,54 @@ class BtnBack(Button):
             await goto_products(inter, cat_key)
 
 
+class BtnBackToShop(Button):
+    def __init__(self, row: int = 0):
+        super().__init__(
+            label=f"{P}В магазин{P}",
+            style=ButtonStyle.gray,
+            custom_id="shop:btn_back_to_shop",
+            emoji=E_BACK,
+            row=row,
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        from modules.shop.handlers import goto_categories
+        await goto_categories(inter)
+
+
+class BtnMyPurchasesSuccess(Button):
+    def __init__(self, row: int = 0):
+        super().__init__(
+            label=f"{P}Мои покупки{P}",
+            style=ButtonStyle.gray,
+            custom_id="shop:btn_purchases_success",
+            emoji=E_BAG,
+            row=row,
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        from modules.shop.handlers import goto_purchases
+        await goto_purchases(inter)
+
+
+class BtnReviewHint(Button):
+    def __init__(self, row: int = 0):
+        super().__init__(
+            label=f"{P}Оставить отзыв{P}",
+            style=ButtonStyle.gray,
+            custom_id="shop:btn_review_hint",
+            emoji=E_HISTORY,
+            row=row,
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await inter.response.send_message(
+            f"Перейди в <#{REVIEW_CHANNEL_ID}> и оставь отзыв о покупке.\n"
+            f"За каждый одобренный отзыв мы даём **+15 DC** на баланс.",
+            ephemeral=True,
+        )
+
+
 class BtnBuy(Button):
     def __init__(self, cat_key: str, item_key: str, price: int, row: int = 0):
         super().__init__(
@@ -221,9 +256,6 @@ class BtnGift(Button):
             logger.warning(f"ShopGiftModal send err: {e}")
 
 
-# ============================================================
-# МОДАЛКА ПОДАРКА
-# ============================================================
 class ShopGiftModal(Modal):
     def __init__(self, cat_key: str, item_key: str):
         self.cat_key = cat_key
@@ -252,9 +284,6 @@ class ShopGiftModal(Modal):
         await handle_gift(inter, self.cat_key, self.item_key, int(recipient))
 
 
-# ============================================================
-# VIEWS
-# ============================================================
 class ShopMainView(View):
     def __init__(self, categories: List[Dict], active: str = ""):
         super().__init__(timeout=None)
@@ -284,7 +313,8 @@ class ShopDetailView(View):
 class ShopPurchasesView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(BtnBack(target="categories", row=0))
+        self.add_item(BtnBackToShop(row=0))
+        self.add_item(BtnHistory(row=0))
 
 
 class ShopDealView(View):
@@ -292,10 +322,21 @@ class ShopDealView(View):
         super().__init__(timeout=None)
         if cat_key and item_key and price > 0:
             self.add_item(BtnBuy(cat_key, item_key, price, row=0))
-        self.add_item(BtnBack(target="categories", row=0))
+        self.add_item(BtnBackToShop(row=0))
+        self.add_item(BtnMyPurchasesSuccess(row=0))
 
 
 class ShopHistoryView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(BtnBack(target="categories", row=0))
+        self.add_item(BtnBackToShop(row=0))
+        self.add_item(BtnPurchases(row=0))
+
+
+class ShopSuccessView(View):
+    def __init__(self, show_review: bool = False):
+        super().__init__(timeout=None)
+        self.add_item(BtnMyPurchasesSuccess(row=0))
+        self.add_item(BtnBackToShop(row=0))
+        if show_review:
+            self.add_item(BtnReviewHint(row=0))
