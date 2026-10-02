@@ -145,11 +145,17 @@ async def _send_screen(inter, *, buf: io.BytesIO, view):
 
 
 async def _edit_screen(inter, *, buf: io.BytesIO, view):
+    """
+    Меняет исходное сообщение: новое вложение, старые — удаляем.
+    Если интеракция уже отвечена (defer/modal) — правим оригинальный ответ,
+    иначе — обычное редактирование сообщения.
+    """
     fname = f"shop_{inter.author.id}_{int(time.time() * 1000)}.png"
     file = disnake.File(buf, filename=fname)
     embed = disnake.Embed(color=shop_render.EMBED_COLOR)
     embed.set_image(url=f"attachment://{fname}")
-    await inter.response.edit_message(
+
+    kwargs = dict(
         content=None,
         embed=embed,
         file=file,
@@ -157,6 +163,15 @@ async def _edit_screen(inter, *, buf: io.BytesIO, view):
         view=view,
     )
 
+    try:
+        if inter.response.is_done():
+            await inter.edit_original_response(**kwargs)
+        else:
+            await inter.response.edit_message(**kwargs)
+    except disnake.InteractionResponded:
+        # на всякий случай — повторный вызов после edit_message не бывает,
+        # но если что — пробуем edit_original_response
+        await inter.edit_original_response(**kwargs)
 
 # ============================================================
 # ОТКРЫТИЕ
