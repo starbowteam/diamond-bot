@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 BuyAll — отдельная витрина для покупки любых товаров.
-Одна кнопка, по 5 hair space с каждой стороны. Чистый ephemeral-ответ.
+Одна кнопка (по 10 hair space), все ответы — через followup ephemeral.
 """
 import os
 import re
@@ -40,7 +40,7 @@ BUYALL_EMBED_2_IMG = (
 
 
 def _btn_label(text: str) -> str:
-    return f"{P * 5}{text}{P * 5}"
+    return f"{P * 10}{text}{P * 10}"
 
 
 # ============================================================
@@ -57,12 +57,13 @@ class BuyAllView(View):
         row=0,
     )
     async def create(self, button: disnake.Button, inter: disnake.MessageInteraction):
+        # ack, чтобы уложиться в 3 секунды
         await inter.response.defer(ephemeral=True)
         await _create_buyall_ticket(inter)
 
 
 # ============================================================
-# СОЗДАНИЕ ТИКЕТА — всё в ephemeral
+# СОЗДАНИЕ ТИКЕТА — все ответы ephemeral через followup
 # ============================================================
 async def _create_buyall_ticket(inter: disnake.MessageInteraction):
     user = inter.author
@@ -75,21 +76,31 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
             info = get_ticket_cooldown_info(user.id)
             reason = info.get("reason", "—") if info else "—"
             left_min = max(1, (until_ts - int(_time.time())) // 60)
-            await inter.edit_original_response(content=(
-                f"⚠️ **Вам запрещено создавать тикеты.**\n"
-                f"> **Причина:** {reason}\n"
-                f"> **Осталось:** ~`{left_min} мин`\n"
-                f"> **Разблокировка:** <t:{until_ts}:R>\n\n"
-                f"> Тикеты в категории вопросов — по-прежнему доступны."
-            ))
+            try:
+                await inter.followup.send(
+                    content=(
+                        f"⚠️ **Вам запрещено создавать тикеты.**\n"
+                        f"> **Причина:** {reason}\n"
+                        f"> **Осталось:** ~`{left_min} мин`\n"
+                        f"> **Разблокировка:** <t:{until_ts}:R>\n\n"
+                        f"> Тикеты в категории вопросов — по-прежнему доступны."
+                    ),
+                    ephemeral=True,
+                )
+            except Exception as e:
+                logger.warning(f"BuyAll block msg: {e}")
             return
 
     # ---- 2. Категория ----
     cat = guild.get_channel(CONFIG["TICKET_CATEGORY_ID"])
     if not cat:
-        await inter.edit_original_response(
-            content="❌ Категория тикетов не найдена. Сообщи администрации."
-        )
+        try:
+            await inter.followup.send(
+                content="❌ Категория тикетов не найдена. Сообщи администрации.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
         return
 
     # ---- 3. Переопределения прав ----
@@ -104,9 +115,13 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
     channel_name = raw[:80] or f"order-{user.id}"
 
     # ---- 5. Уведомляем «создаю» ----
-    await inter.edit_original_response(
-        content="⏳ Создаю тикет, подожди пару секунд..."
-    )
+    try:
+        await inter.followup.send(
+            content="⏳ Создаю тикет, подожди пару секунд...",
+            ephemeral=True,
+        )
+    except Exception:
+        pass
 
     # ---- 6. Создание канала ----
     try:
@@ -115,9 +130,13 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
         )
     except Exception as e:
         logger.error(f"BuyAll: не удалось создать тикет: {e}")
-        await inter.edit_original_response(
-            content=f"❌ Не удалось создать тикет: `{str(e)[:200]}`"
-        )
+        try:
+            await inter.followup.send(
+                content=f"❌ Не удалось создать тикет: `{str(e)[:200]}`",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
         return
 
     # ---- 7. Шаблон заказа ----
@@ -176,15 +195,21 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
     # ---- 8. Владелец ----
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # ---- 9. Финальный ephemeral-ответ ----
-    await inter.edit_original_response(content=(
-        f"✅ **Тикет создан**\n\n"
-        f"> **Канал:** {ticket_channel.mention}\n"
-        f"> **Статус:** ожидает менеджера\n"
-        f"> **Ответ:** в течение **2 рабочих дней**\n\n"
-        f"> Перейти в тикет: {ticket_channel.mention}\n"
-        f"> Менеджер <@&1154757071330365490> подхватит заказ."
-    ))
+    # ---- 9. Финальный ephemeral-ответ через followup ----
+    try:
+        await inter.followup.send(
+            content=(
+                f"✅ **Тикет создан**\n\n"
+                f"> **Канал:** {ticket_channel.mention}\n"
+                f"> **Статус:** ожидает менеджера\n"
+                f"> **Ответ:** в течение **2 рабочих дней**\n\n"
+                f"> Перейти в тикет: {ticket_channel.mention}\n"
+                f"> Менеджер <@&1154757071330365490> подхватит заказ."
+            ),
+            ephemeral=True,
+        )
+    except Exception as e:
+        logger.warning(f"BuyAll final msg: {e}")
 
     # ---- 10. Лог ----
     try:
