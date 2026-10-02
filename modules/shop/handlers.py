@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Логика витрины DC-Shop: навигация, покупка, подарок,
-успешный экран после покупки.
+успешный экран после покупки. Anti-double-click на покупке.
 """
 import io
 import os
@@ -34,6 +34,20 @@ from modules.shop.views import (
 DAILY_DEAL_REFRESH_HOURS = 5
 
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
+
+
+# ============================================================
+# ЗАЩИТА ОТ ДВОЙНОГО НАЖАТИЯ
+# ============================================================
+_BUY_LOCKS: dict = {}    # (user_id, "cat:item") → timestamp последнего клика
+
+
+def _prune_locks(now: float):
+    if len(_BUY_LOCKS) > 200:
+        cutoff = now - 60
+        for k in list(_BUY_LOCKS.keys()):
+            if _BUY_LOCKS[k] < cutoff:
+                _BUY_LOCKS.pop(k, None)
 
 
 # ============================================================
@@ -164,7 +178,6 @@ def _get_items_for_category(cat_key: str) -> List[Dict]:
 
 
 def _filter_history_purchases(history: list) -> list:
-    """Только покупки — списания с reason, начинающимся на 'Покупка'."""
     result = []
     for h in history or []:
         amt = h.get("amount", 0) or 0
@@ -188,11 +201,6 @@ async def _send_screen(inter, *, buf: io.BytesIO, view):
 
 
 async def _edit_screen(inter, *, buf: io.BytesIO, view):
-    """
-    Меняет исходное сообщение: новое вложение, старые — удаляем.
-    Если интеракция уже отвечена (defer/modal) — правим оригинальный ответ,
-    иначе — обычное редактирование сообщения.
-    """
     fname = f"shop_{inter.author.id}_{int(time.time() * 1000)}.png"
     file = disnake.File(buf, filename=fname)
     embed = disnake.Embed(color=shop_render.EMBED_COLOR)
@@ -389,9 +397,7 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
     gift_amount = item.get("gift_amount")
     is_auto_role = (cat == "roles" and has_role)
     is_boost = bool(boost_type) and cat in ("boosts", "casino")
-    is_gift = bool(gift_amount)
 
-    # --- АВТО-РОЛЬ ---
     if is_auto_role:
         return {
             "kind": "role",
@@ -409,7 +415,7 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
             "item_line": f"{name} · {price} DC",
             "steps": [
                 "Открой свой профиль Discord — увидишь новую роль",
-                f"Оставь отзыв — за одобренный отзыв начислим +15 DC",
+                "Оставь отзыв — за одобренный отзыв начислим +15 DC",
                 "Возвращайся в магазин — есть ещё много интересного",
             ],
             "hint": "Оставь отзыв — это даёт +15 DC на баланс",
@@ -424,7 +430,6 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
             ],
         }
 
-    # --- БУСТ / КАЗИНО-ПРЕДМЕТ ---
     if is_boost:
         return {
             "kind": "boost",
@@ -457,7 +462,6 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
             ],
         }
 
-    # --- ТОВАР В ИНВЕНТАРЕ (тикет) ---
     return {
         "kind": "ticket",
         "icon": shop_render.I_TICKET,
@@ -498,10 +502,27 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
 
 
 # ============================================================
-# ПОКУПКА
+# ПОКУПКА (с anti-double-click)
 # ============================================================
 async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: str):
     user_id = inter.author.id
+
+    # Anti-double-click: 8 секунд блокировки на тот же товар
+    lock_key = (user_id, f"{cat_key}:{item_key}")
+    now_ts = time.time()
+    prev = _BUY_LOCKS.get(lock_key, 0)
+    if now_ts - prev < 8:
+        try:
+            await inter.response.send_message(
+                "⏳ Покупка уже обрабатывается, подожди пару секунд...",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+        return
+    _BUY_LOCKS[lock_key] = now_ts
+    _prune_locks(now_ts)
+
     catalog = load_shop_catalog()
     cat = catalog.get(cat_key, {})
     item = cat.get("items", {}).get(item_key)
@@ -516,13 +537,13 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     balance = await get_user_balance(user_id)
     if balance < price:
         return await inter.edit_original_response(
-            content=f"Недостаточно DC. Нужно: **{price} DC**, у тебя: **{balance} DC**."
+            content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у тебя: **{balance} DC**."
         )
 
     success = await remove_dc(user_id, price, f"Покупка: {name}")
     if not success:
         return await inter.edit_original_response(
-            content="Не удалось списать DC. Попробуй ещё раз."
+            content="❌ Не удалось списать DC. Попробуй ещё раз."
         )
 
     # Авто-выдача роли
@@ -645,7 +666,7 @@ async def handle_gift(inter: disnake.ModalInteraction,
     balance = await get_user_balance(user_id)
     if balance < price:
         return await inter.edit_original_response(
-            content=f"Недостаточно DC. Нужно: **{price} DC**, у тебя: **{balance} DC**."
+            content=f"❌ Недостаточно DC. Нужно: **{price} DC**, у тебя: **{balance} DC**."
         )
 
     success = await remove_dc(
@@ -654,11 +675,9 @@ async def handle_gift(inter: disnake.ModalInteraction,
     )
     if not success:
         return await inter.edit_original_response(
-            content="Не удалось списать DC. Попробуй позже."
+            content="❌ Не удалось списать DC. Попробуй позже."
         )
 
-    # Подарок DC → переводим получателю
-    # Иначе → добавляем товар в инвентарь получателя
     if gift_amount:
         try:
             await add_dc(
@@ -718,7 +737,6 @@ async def handle_gift(inter: disnake.ModalInteraction,
         color=0xffaa00,
     )
 
-    # Экран успеха подарка
     if gift_amount:
         outcome = {
             "kind": "gift",
