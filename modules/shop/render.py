@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Pillow-рендер витрины DC-Shop.
-Палитра — холодное серебро. Плотная вёрстка, FA5-иконки, подробные описания.
+Pillow-рендер витрины DC-Shop по макету.
+Холодное серебро, FA5-иконки, плотная сетка.
 """
 import io
 import os
@@ -84,7 +84,7 @@ EMBED_COLOR = 0x2b2d31
 
 
 # ============================================================
-# FA5 ИКОНКИ (безопасные для fa-solid-900.ttf)
+# FA5 ИКОНКИ
 # ============================================================
 I_GEM        = 0xf3a5
 I_STAR       = 0xf005
@@ -141,11 +141,6 @@ CATEGORY_FA = {
 def _tw(d, text, font):
     b = d.textbbox((0, 0), text, font=font)
     return b[2] - b[0]
-
-
-def _th(d, text, font):
-    b = d.textbbox((0, 0), text, font=font)
-    return b[3] - b[1]
 
 
 def _ellipsis(d, text, font, max_w):
@@ -278,9 +273,8 @@ def _draw_dashed_rect(d, box, radius, color, dash=8, gap=6, width=2):
 # ============================================================
 CANVAS_W, CANVAS_H = 1800, 1000
 M = 14
-PAD_X = 56
+PAD_X = 40
 PAD_Y = 40
-HEADER_H = 106
 
 
 def _base_canvas(user_id: int, uid_label: str):
@@ -288,31 +282,31 @@ def _base_canvas(user_id: int, uid_label: str):
     d = ImageDraw.Draw(img)
     d.rounded_rectangle(
         (M, M, CANVAS_W - 1 - M, CANVAS_H - 1 - M),
-        radius=30, fill=CARD_TOP + (255,),
+        radius=26, fill=CARD_TOP + (255,),
         outline=CARD_BRD + (255,), width=3,
     )
 
     hx = PAD_X
     hy = PAD_Y
 
-    logo_size = 54
-    d.rounded_rectangle((hx, hy, hx + logo_size, hy + logo_size), radius=14,
+    logo_size = 60
+    d.rounded_rectangle((hx, hy, hx + logo_size, hy + logo_size), radius=16,
                         fill=(58, 58, 64) + (255,))
-    _draw_icon(d, hx + logo_size // 2, hy + logo_size // 2 + 1, I_GEM, 26, SILVER_HI)
+    _draw_icon(d, hx + logo_size // 2, hy + logo_size // 2 + 1, I_GEM, 28, SILVER_HI)
 
     brand_x = hx + logo_size + 18
-    d.text((brand_x, hy + 4), "DIAMOND", font=_font(26), fill=TEXT)
-    d.text((brand_x + 2, hy + 38), "SHOP & ECOSYSTEM", font=_font(11), fill=MUTED)
+    d.text((brand_x, hy + 4), "DIAMOND", font=_font(30), fill=TEXT)
+    d.text((brand_x + 2, hy + 42), "SHOP & ECOSYSTEM", font=_font(13), fill=MUTED)
 
     meta_r = CANVAS_W - M - PAD_X
     lbl = uid_label.upper()
     uid = f"UID · {user_id}"
-    w1 = _tw(d, lbl, _font(11))
-    w2 = _tw(d, uid, _font(20))
-    d.text((meta_r - w1, hy + 12), lbl, font=_font(11), fill=MUTED)
-    d.text((meta_r - w2, hy + 32), uid, font=_font(20), fill=TEXT)
+    w1 = _tw(d, lbl, _font(13))
+    w2 = _tw(d, uid, _font(22))
+    d.text((meta_r - w1, hy + 12), lbl, font=_font(13), fill=MUTED)
+    d.text((meta_r - w2, hy + 34), uid, font=_font(22), fill=TEXT)
 
-    sep_y = hy + logo_size + 16
+    sep_y = hy + logo_size + 18
     d.line((PAD_X, sep_y, CANVAS_W - M - PAD_X, sep_y),
            fill=STACK_HDR + (255,), width=2)
 
@@ -323,10 +317,10 @@ def _draw_footer(d, left_text: str, page: str):
     y = CANVAS_H - M - PAD_Y + 4
     d.line((PAD_X, y - 10, CANVAS_W - M - PAD_X, y - 10),
            fill=STACK_HDR + (255,), width=2)
-    _draw_icon(d, PAD_X + 8, y + 8, I_INFO, 12, DIM)
-    d.text((PAD_X + 28, y), left_text, font=_font(11), fill=DIM)
-    pw = _tw(d, page, _font(11))
-    d.text((CANVAS_W - M - PAD_X - pw, y), page, font=_font(11), fill=DIM)
+    _draw_icon(d, PAD_X + 10, y + 8, I_INFO, 14, DIM)
+    d.text((PAD_X + 32, y), left_text, font=_font(13), fill=DIM)
+    pw = _tw(d, page, _font(13))
+    d.text((CANVAS_W - M - PAD_X - pw, y), page, font=_font(13), fill=DIM)
 
 
 # ============================================================
@@ -338,54 +332,57 @@ def _draw_left_panel(img, d, box, user_id, balance, total_spent,
     x1, y1, x2, y2 = box
     pad = 26
 
-    bal_icon_size = 64
+    # Баланс
+    bal_icon_size = 72
     ib_x = x1 + pad
     ib_y = y1 + pad
 
     _gradient_box(img, (ib_x, ib_y, ib_x + bal_icon_size, ib_y + bal_icon_size),
-                  SILVER, SILVER_DIM, alpha=42, radius=18)
+                  SILVER, SILVER_DIM, alpha=42, radius=20)
     d.rounded_rectangle((ib_x, ib_y, ib_x + bal_icon_size, ib_y + bal_icon_size),
-                        radius=18, outline=SILVER + (140,), width=2)
+                        radius=20, outline=SILVER + (140,), width=2)
     _draw_icon(d, ib_x + bal_icon_size // 2, ib_y + bal_icon_size // 2 + 1,
-               I_GEM, 26, SILVER_HI)
+               I_GEM, 30, SILVER_HI)
 
-    lbl_x = ib_x + bal_icon_size + 16
-    d.text((lbl_x, ib_y + 2), "ТВОЙ БАЛАНС", font=_font(10), fill=MUTED)
+    lbl_x = ib_x + bal_icon_size + 18
+    d.text((lbl_x, ib_y + 4), "ТВОЙ БАЛАНС", font=_font(12), fill=MUTED)
 
     bal_str = _fmt(balance)
-    val_font = _font(36)
+    val_font = _font(40)
     max_w = x2 - pad - lbl_x - 16
-    while _tw(d, bal_str + " DC", val_font) > max_w and val_font.size > 20:
+    while _tw(d, bal_str + " DC", val_font) > max_w and val_font.size > 22:
         val_font = _font(val_font.size - 2)
-    d.text((lbl_x, ib_y + 22), bal_str, font=val_font, fill=TEXT)
+    d.text((lbl_x, ib_y + 26), bal_str, font=val_font, fill=TEXT)
     bw = _tw(d, bal_str, val_font)
-    d.text((lbl_x + bw + 5, ib_y + 22 + val_font.size - 20),
-           "DC", font=_font(16), fill=SILVER)
+    d.text((lbl_x + bw + 5, ib_y + 26 + val_font.size - 22),
+           "DC", font=_font(18), fill=SILVER)
 
-    sep_y = ib_y + bal_icon_size + 22
+    sep_y = ib_y + bal_icon_size + 24
     d.line((x1 + pad, sep_y, x2 - pad, sep_y),
            fill=STACK_HDR + (255,), width=2)
 
-    sp_icon_size = 52
+    # Всего потрачено
+    sp_icon_size = 58
     sp_x = x1 + pad
-    sp_y = sep_y + 22
+    sp_y = sep_y + 24
     _gradient_box(img, (sp_x, sp_y, sp_x + sp_icon_size, sp_y + sp_icon_size),
-                  GREEN, GREEN, alpha=26, radius=14)
+                  GREEN, GREEN, alpha=26, radius=16)
     d.rounded_rectangle((sp_x, sp_y, sp_x + sp_icon_size, sp_y + sp_icon_size),
-                        radius=14, outline=GREEN + (100,), width=2)
+                        radius=16, outline=GREEN + (100,), width=2)
     _draw_icon(d, sp_x + sp_icon_size // 2, sp_y + sp_icon_size // 2 + 1,
-               I_COINS, 22, GREEN)
+               I_COINS, 24, GREEN)
 
-    sp_lbl_x = sp_x + sp_icon_size + 14
-    d.text((sp_lbl_x, sp_y + 2), "ВСЕГО ПОТРАЧЕНО", font=_font(10), fill=MUTED)
+    sp_lbl_x = sp_x + sp_icon_size + 16
+    d.text((sp_lbl_x, sp_y + 4), "ВСЕГО ПОТРАЧЕНО", font=_font(12), fill=MUTED)
     sp_str = f"{_fmt(total_spent)} DC"
-    sp_font = _font(20)
+    sp_font = _font(22)
     while _tw(d, sp_str, sp_font) > x2 - pad - sp_lbl_x - 10 and sp_font.size > 14:
         sp_font = _font(sp_font.size - 2)
-    d.text((sp_lbl_x, sp_y + 22), sp_str, font=sp_font, fill=GREEN)
+    d.text((sp_lbl_x, sp_y + 26), sp_str, font=sp_font, fill=GREEN)
 
+    # Нижние блоки
     if extra_blocks:
-        bb_h = 80
+        bb_h = 84
         bb_gap = 10
         bottom_y = y2 - pad - bb_h
 
@@ -396,45 +393,39 @@ def _draw_left_panel(img, d, box, user_id, balance, total_spent,
             bx2 = x2 - pad
 
             bcolor = blk.get("color", SILVER)
-            bg_map = {
-                SILVER: SILVER_BG, GREEN: GREEN_BG, BLUE: BLUE_BG,
-                PURPLE: PURPLE_BG, RED: RED_BG,
-            }
-            bbg = bg_map.get(bcolor, SILVER_BG)
-
             _gradient_box(img, (bx1, by1, bx2, by2),
                           bcolor, bcolor, alpha=18, radius=14)
             d.rounded_rectangle((bx1, by1, bx2, by2),
                                 radius=14, outline=bcolor + (150,), width=2)
 
-            icon_size = 42
+            icon_size = 46
             ib2_x = bx1 + 14
             ib2_y = by1 + (bb_h - icon_size) // 2
             _alpha_fill(img, (ib2_x, ib2_y, ib2_x + icon_size, ib2_y + icon_size),
-                        bcolor, alpha=50, radius=11)
+                        bcolor, alpha=50, radius=12)
             _draw_icon(d, ib2_x + icon_size // 2, ib2_y + icon_size // 2 + 1,
-                       blk.get("icon", I_CIRCLE_M), 20, bcolor)
+                       blk.get("icon", I_CIRCLE_M), 22, bcolor)
 
-            tx = ib2_x + icon_size + 12
-            d.text((tx, by1 + 12), blk.get("label", "").upper(),
-                   font=_font(10), fill=bcolor)
+            tx = ib2_x + icon_size + 14
+            d.text((tx, by1 + 14), blk.get("label", "").upper(),
+                   font=_font(11), fill=bcolor)
             bv = blk.get("value", "—")
-            val_font = _font(16)
+            val_font = _font(18)
             max_w2 = bx2 - 16 - tx
             bv_shown = _ellipsis(d, bv, val_font, max_w2)
-            d.text((tx, by1 + 34), bv_shown, font=val_font, fill=bcolor)
+            d.text((tx, by1 + 38), bv_shown, font=val_font, fill=bcolor)
 
 
 # ============================================================
 # ПРАВЫЙ ЗАГОЛОВОК
 # ============================================================
 def _draw_right_head(d, x1, y1, x2, title: str, sub: str):
-    d.rounded_rectangle((x1, y1 + 2, x1 + 4, y1 + 40), radius=4,
+    d.rounded_rectangle((x1, y1 + 4, x1 + 5, y1 + 44), radius=3,
                         fill=SILVER + (255,))
-    d.text((x1 + 16, y1 + 2), title.upper(), font=_font(22), fill=TEXT)
-    sub_w = _tw(d, sub.upper(), _font(11))
-    d.text((x2 - sub_w, y1 + 14), sub.upper(), font=_font(11), fill=MUTED)
-    d.line((x1, y1 + 50, x2, y1 + 50), fill=STACK_HDR + (255,), width=2)
+    d.text((x1 + 18, y1 + 2), title.upper(), font=_font(26), fill=TEXT)
+    sub_w = _tw(d, sub.upper(), _font(13))
+    d.text((x2 - sub_w, y1 + 16), sub.upper(), font=_font(13), fill=MUTED)
+    d.line((x1, y1 + 58, x2, y1 + 58), fill=STACK_HDR + (255,), width=2)
 
 
 # ============================================================
@@ -444,134 +435,134 @@ def _draw_category_tile(d, img, x, y, w, h,
                         cat_key, label, count, min_price, description,
                         active=False):
     if active:
-        _gradient_box(img, (x, y, x + w, y + h), SILVER, SILVER_DIM, alpha=18, radius=14)
-        d.rounded_rectangle((x, y, x + w, y + h), radius=14,
+        _gradient_box(img, (x, y, x + w, y + h), SILVER, SILVER_DIM, alpha=18, radius=18)
+        d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                             outline=SILVER + (200,), width=2)
     else:
-        d.rounded_rectangle((x, y, x + w, y + h), radius=14,
+        d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                             fill=INNER_BG + (255,),
                             outline=INNER_BRD + (255,), width=2)
 
-    pad = 14
-    icon_size = 42
+    pad = 20
+    icon_size = 60
     ib_x = x + pad
     ib_y = y + pad
 
     icon_code = CATEGORY_FA.get(cat_key, I_CUBE)
     if active:
         _gradient_box(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                      SILVER, SILVER_DIM, alpha=60, radius=11)
+                      SILVER, SILVER_DIM, alpha=60, radius=14)
         d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                            radius=11, outline=SILVER + (180,), width=2)
+                            radius=14, outline=SILVER + (180,), width=2)
         _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-                   icon_code, 20, SILVER_HI)
+                   icon_code, 28, SILVER_HI)
     else:
         _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                    SILVER, alpha=25, radius=11)
+                    SILVER, alpha=25, radius=14)
         d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                            radius=11, outline=SILVER + (100,), width=2)
+                            radius=14, outline=SILVER + (100,), width=2)
         _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-                   icon_code, 20, SILVER)
+                   icon_code, 28, SILVER)
 
-    name_x = ib_x + icon_size + 12
+    name_x = ib_x + icon_size + 14
     name_w = w - (name_x - x) - pad
-    name_font = _font(16)
+    name_font = _font(22)
     name_shown = _ellipsis(d, label, name_font, name_w)
-    d.text((name_x, ib_y + 2), name_shown, font=name_font,
+    d.text((name_x, ib_y + 4), name_shown, font=name_font,
            fill=SILVER_HI if active else TEXT)
 
     cnt_str = f"{count} {'товар' if count == 1 else 'товара' if 2 <= count <= 4 else 'товаров'}"
-    d.text((name_x, ib_y + 24), cnt_str, font=_font(10), fill=MUTED)
+    d.text((name_x, ib_y + 32), cnt_str, font=_font(13), fill=MUTED)
 
-    desc_y = ib_y + icon_size + 12
-    desc_font = _font(10)
+    desc_y = ib_y + icon_size + 18
+    desc_font = _font(14)
     max_desc_w = w - pad * 2
     lines = _wrap(d, description or "Категория товаров", desc_font, max_desc_w, max_lines=4)
     for i, line in enumerate(lines):
-        d.text((x + pad, desc_y + i * 14), line, font=desc_font, fill=MUTED)
+        d.text((x + pad, desc_y + i * 20), line, font=desc_font, fill=MUTED)
 
-    foot_y = y + h - 28
-    d.line((x + pad, foot_y - 8, x + w - pad, foot_y - 8),
+    foot_y = y + h - 38
+    d.line((x + pad, foot_y - 10, x + w - pad, foot_y - 10),
            fill=INNER_BRD + (255,), width=1)
 
     if min_price > 0:
-        d.text((x + pad, foot_y), "от", font=_font(10), fill=DIM)
-        w_ot = _tw(d, "от ", _font(10))
+        d.text((x + pad, foot_y), "от", font=_font(13), fill=DIM)
+        w_ot = _tw(d, "от ", _font(13))
         price_str = _fmt(min_price)
-        pf = _font(16)
-        d.text((x + pad + w_ot + 2, foot_y - 3), price_str, font=pf,
+        pf = _font(22)
+        d.text((x + pad + w_ot + 4, foot_y - 5), price_str, font=pf,
                fill=SILVER_HI if active else SILVER)
         pw = _tw(d, price_str, pf)
-        d.text((x + pad + w_ot + pw + 4, foot_y + 1), "DC", font=_font(9), fill=SILVER)
+        d.text((x + pad + w_ot + pw + 6, foot_y + 1), "DC", font=_font(12), fill=SILVER)
     else:
-        d.text((x + pad, foot_y), "Пусто", font=_font(10), fill=DIM)
+        d.text((x + pad, foot_y), "Пусто", font=_font(13), fill=DIM)
 
-    _draw_icon(d, x + w - pad - 6, foot_y + 7, I_ARROW_L, 11, DIM)
+    _draw_icon(d, x + w - pad - 8, foot_y + 8, I_ARROW_L, 14, DIM)
 
 
 # ============================================================
 # ПЛИТКА ТОВАРА
 # ============================================================
 def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
-    pad = 14
+    pad = 20
 
     if active:
-        _gradient_box(img, (x, y, x + w, y + h), SILVER, SILVER_DIM, alpha=14, radius=14)
-        d.rounded_rectangle((x, y, x + w, y + h), radius=14,
+        _gradient_box(img, (x, y, x + w, y + h), SILVER, SILVER_DIM, alpha=14, radius=18)
+        d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                             outline=SILVER + (180,), width=2)
     else:
-        d.rounded_rectangle((x, y, x + w, y + h), radius=14,
+        d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                             fill=INNER_BG + (255,),
                             outline=INNER_BRD + (255,), width=2)
 
-    icon_size = 44
+    icon_size = 64
     ib_x = x + pad
     ib_y = y + pad
 
     _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                SILVER, alpha=25, radius=12)
+                SILVER, alpha=25, radius=16)
     d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=12, outline=SILVER + (110,), width=2)
+                        radius=16, outline=SILVER + (110,), width=2)
     _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               item.get("fa", I_CUBE), 22, SILVER)
+               item.get("fa", I_CUBE), 30, SILVER)
 
-    name_x = ib_x + icon_size + 12
+    name_x = ib_x + icon_size + 16
     name_w = w - (name_x - x) - pad
-    name_font = _font(16)
+    name_font = _font(21)
     name_shown = _ellipsis(d, item["name"], name_font, name_w)
-    d.text((name_x, ib_y + 4), name_shown, font=name_font, fill=TEXT)
+    d.text((name_x, ib_y + 8), name_shown, font=name_font, fill=TEXT)
 
-    desc_y = ib_y + icon_size + 14
-    desc_font = _font(11)
+    desc_y = ib_y + icon_size + 18
+    desc_font = _font(14)
     max_w = w - pad * 2
     desc = item.get("description") or "Описание товара появится здесь."
     lines = _wrap(d, desc, desc_font, max_w, max_lines=3)
     for i, line in enumerate(lines):
-        d.text((x + pad, desc_y + i * 16), line, font=desc_font, fill=MUTED)
+        d.text((x + pad, desc_y + i * 20), line, font=desc_font, fill=MUTED)
 
-    foot_y = y + h - 36
-    d.line((x + pad, foot_y - 8, x + w - pad, foot_y - 8),
+    foot_y = y + h - 46
+    d.line((x + pad, foot_y - 10, x + w - pad, foot_y - 10),
            fill=INNER_BRD + (255,), width=1)
 
     price = item["price"]
     price_str = f"{_fmt(price)}"
-    pf = _font(24)
+    pf = _font(30)
     d.text((x + pad, foot_y + 2), price_str, font=pf, fill=SILVER_HI)
     pw = _tw(d, price_str, pf)
-    d.text((x + pad + pw + 4, foot_y + 2 + pf.size - 16),
-           "DC", font=_font(11), fill=SILVER)
+    d.text((x + pad + pw + 6, foot_y + 2 + pf.size - 20),
+           "DC", font=_font(14), fill=SILVER)
 
     can_afford = balance >= price
     badge_text = "КУПИТЬ" if can_afford else "НЕ ХВАТАЕТ"
     badge_color = GREEN if can_afford else RED
     badge_bg = GREEN_BG if can_afford else RED_BG
-    bf = _font(9)
+    bf = _font(11)
     btw = _tw(d, badge_text, bf)
-    bpad = 10
+    bpad = 12
     bx = x + w - pad - btw - bpad * 2
-    by = foot_y + 4
-    d.rounded_rectangle((bx, by, bx + btw + bpad * 2, by + 22),
-                        radius=6, fill=badge_bg + (255,),
+    by = foot_y + 8
+    d.rounded_rectangle((bx, by, bx + btw + bpad * 2, by + 26),
+                        radius=7, fill=badge_bg + (255,),
                         outline=badge_color + (180,), width=1)
     d.text((bx + bpad, by + 7), badge_text, font=bf, fill=badge_color)
 
@@ -580,13 +571,13 @@ def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
 # СТРОКА ОПЕРАЦИИ (история)
 # ============================================================
 def _draw_operation_row(d, img, x, y, w, h, op):
-    d.rounded_rectangle((x, y, x + w, y + h), radius=11,
+    d.rounded_rectangle((x, y, x + w, y + h), radius=14,
                         fill=INNER_BG + (255,),
                         outline=INNER_BRD + (255,), width=2)
 
     if not op:
-        _draw_icon(d, x + 40, y + h // 2, I_CIRCLE_M, 18, DARK)
-        d.text((x + 68, y + h // 2), "—", font=_font(14),
+        _draw_icon(d, x + 48, y + h // 2, I_CIRCLE_M, 20, DARK)
+        d.text((x + 80, y + h // 2), "—", font=_font(16),
                fill=DARK, anchor="lm")
         return
 
@@ -596,28 +587,28 @@ def _draw_operation_row(d, img, x, y, w, h, op):
     accent = GREEN if is_plus else RED
     sign = "+" if is_plus else "−"
 
-    d.rounded_rectangle((x, y, x + 4, y + h), radius=4, fill=accent + (255,))
+    d.rounded_rectangle((x, y, x + 5, y + h), radius=5, fill=accent + (255,))
 
-    op_icon_size = 40
-    ib_x = x + 16
+    op_icon_size = 44
+    ib_x = x + 20
     ib_y = y + (h - op_icon_size) // 2
     _alpha_fill(img, (ib_x, ib_y, ib_x + op_icon_size, ib_y + op_icon_size),
-                accent, alpha=40, radius=10)
+                accent, alpha=40, radius=12)
     _draw_icon(d, ib_x + op_icon_size // 2, ib_y + op_icon_size // 2 + 1,
-               I_CART, 17, accent)
+               I_CART, 19, accent)
 
-    tx = ib_x + op_icon_size + 14
-    name_f = _font(14)
-    time_f = _font(10)
+    tx = ib_x + op_icon_size + 16
+    name_f = _font(16)
+    time_f = _font(11)
 
     amt_str = f"{sign}{abs(int(amt))} DC"
-    amt_f = _font(19)
+    amt_f = _font(22)
     amt_w = _tw(d, amt_str, amt_f)
-    rx = x + w - 20 - amt_w
+    rx = x + w - 24 - amt_w
 
     max_name_w = rx - 20 - tx
     name_shown = _ellipsis(d, reason, name_f, max_name_w)
-    name_y = y + h // 2 - 14
+    name_y = y + h // 2 - 16
     d.text((tx, name_y), name_shown, font=name_f, fill=TEXT_SOFT)
 
     try:
@@ -632,33 +623,33 @@ def _draw_operation_row(d, img, x, y, w, h, op):
             time_str = dt.strftime("%d.%m.%Y · %H:%M")
     except Exception:
         time_str = "—"
-    d.text((tx, name_y + 18), time_str.upper(), font=time_f, fill=DIM)
+    d.text((tx, name_y + 22), time_str.upper(), font=time_f, fill=DIM)
 
-    d.text((rx, y + h // 2 - 12), amt_str, font=amt_f, fill=accent)
+    d.text((rx, y + h // 2 - 14), amt_str, font=amt_f, fill=accent)
 
 
 # ============================================================
-# СТРОКА ПОКУПКИ (мои покупки)
+# СТРОКА ПОКУПКИ
 # ============================================================
 def _draw_purchase_row(d, img, x, y, w, h, p):
-    d.rounded_rectangle((x, y, x + w, y + h), radius=11,
+    d.rounded_rectangle((x, y, x + w, y + h), radius=14,
                         fill=INNER_BG + (255,),
                         outline=INNER_BRD + (255,), width=2)
 
-    icon_size = 40
-    ib_x = x + 16
+    icon_size = 44
+    ib_x = x + 20
     ib_y = y + (h - icon_size) // 2
     _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                SILVER, alpha=32, radius=10)
+                SILVER, alpha=32, radius=12)
     _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               I_TICKET, 17, SILVER)
+               I_TICKET, 19, SILVER)
 
     ptype = p.get("type", "—")
     pval = p.get("value", "—")
-    tx = ib_x + icon_size + 14
-    max_w = w - (tx - x) - 200
-    name_shown = _ellipsis(d, pval, _font(15), max_w)
-    d.text((tx, y + h // 2 - 14), name_shown, font=_font(15), fill=TEXT)
+    tx = ib_x + icon_size + 16
+    max_w = w - (tx - x) - 240
+    name_shown = _ellipsis(d, pval, _font(17), max_w)
+    d.text((tx, y + h // 2 - 16), name_shown, font=_font(17), fill=TEXT)
 
     try:
         from datetime import datetime, timezone
@@ -667,30 +658,30 @@ def _draw_purchase_row(d, img, x, y, w, h, p):
     except Exception:
         date_str = "—"
     d.text((tx, y + h // 2 + 6), f"{ptype.upper()} · {date_str}",
-           font=_font(10), fill=DIM)
+           font=_font(11), fill=DIM)
 
     badge_text = "ОФОРМИТЬ ТИКЕТ"
-    bf = _font(10)
+    bf = _font(11)
     btw = _tw(d, badge_text, bf)
-    bx = x + w - 20 - btw - 24
-    by = y + h // 2 - 11
-    d.rounded_rectangle((bx, by, bx + btw + 24, by + 22),
-                        radius=6, fill=GREEN_BG + (255,),
+    bx = x + w - 24 - btw - 28
+    by = y + h // 2 - 13
+    d.rounded_rectangle((bx, by, bx + btw + 28, by + 26),
+                        radius=7, fill=GREEN_BG + (255,),
                         outline=GREEN + (170,), width=1)
-    d.text((bx + 12, by + 6), badge_text, font=bf, fill=GREEN)
+    d.text((bx + 14, by + 7), badge_text, font=bf, fill=GREEN)
 
 
 # ============================================================
-# ЭКРАН 1: КАТЕГОРИИ (4×2 = 8 слотов)
+# ЭКРАН 1: КАТЕГОРИИ
 # ============================================================
 def render_categories(user_id, balance, total_spent, categories, total_items=0):
     img, d = _base_canvas(user_id, "витрина · dc")
 
-    body_y = HEADER_H + 46
+    body_y = 130
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    left_w = 360
-    gap = 28
+    left_w = 442
+    gap = 30
     left_x1 = PAD_X
     left_x2 = left_x1 + left_w
     right_x1 = left_x2 + gap
@@ -719,14 +710,14 @@ def render_categories(user_id, balance, total_spent, categories, total_items=0):
     rx1 = right_x1 + 28
     rx2 = right_x2 - 28
 
-    _draw_right_head(d, rx1, body_y + 20, rx2,
+    _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Каталог магазина",
                      "выбери категорию в меню ниже")
 
-    grid_y1 = body_y + 86
+    grid_y1 = body_y + 100
     grid_y2 = body_y + body_h - 22
     grid_h = grid_y2 - grid_y1
-    cell_gap = 12
+    cell_gap = 14
     cols, rows = 4, 2
     cell_w = (rx2 - rx1 - cell_gap * (cols - 1)) // cols
     cell_h = (grid_h - cell_gap * (rows - 1)) // rows
@@ -746,9 +737,9 @@ def render_categories(user_id, balance, total_spent, categories, total_items=0):
                 active=(idx == 0),
             )
         else:
-            _draw_dashed_rect(d, (cx, cy, cx + cell_w, cy + cell_h), 14,
-                              (36, 36, 42), dash=10, gap=7, width=2)
-            _draw_icon(d, cx + cell_w // 2, cy + cell_h // 2, I_ELLIPSIS, 22, DARK)
+            _draw_dashed_rect(d, (cx, cy, cx + cell_w, cy + cell_h), 18,
+                              (36, 36, 42), dash=12, gap=8, width=2)
+            _draw_icon(d, cx + cell_w // 2, cy + cell_h // 2, I_ELLIPSIS, 24, DARK)
 
     _draw_footer(d, "Выбери категорию в меню ниже", "стр. 1 / 6")
 
@@ -765,11 +756,11 @@ def render_products(user_id, balance, total_spent,
                     category_key, category_label, items):
     img, d = _base_canvas(user_id, "витрина · dc")
 
-    body_y = HEADER_H + 46
+    body_y = 130
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    left_w = 360
-    gap = 28
+    left_w = 442
+    gap = 30
     left_x1 = PAD_X
     left_x2 = left_x1 + left_w
     right_x1 = left_x2 + gap
@@ -801,14 +792,14 @@ def render_products(user_id, balance, total_spent,
     rx1 = right_x1 + 28
     rx2 = right_x2 - 28
 
-    _draw_right_head(d, rx1, body_y + 20, rx2,
+    _draw_right_head(d, rx1, body_y + 22, rx2,
                      f"{category_label} · товары",
                      f"{len(items)} позиций · выбери в меню ниже")
 
-    grid_y1 = body_y + 86
+    grid_y1 = body_y + 100
     grid_y2 = body_y + body_h - 22
     grid_h = grid_y2 - grid_y1
-    cell_gap = 12
+    cell_gap = 14
     cols, rows = 3, 2
     cell_w = (rx2 - rx1 - cell_gap * (cols - 1)) // cols
     cell_h = (grid_h - cell_gap * (rows - 1)) // rows
@@ -822,9 +813,9 @@ def render_products(user_id, balance, total_spent,
             _draw_item_tile(d, img, cx, cy, cell_w, cell_h,
                             items[idx], balance, active=False)
         else:
-            _draw_dashed_rect(d, (cx, cy, cx + cell_w, cy + cell_h), 14,
-                              (36, 36, 42), dash=10, gap=7, width=2)
-            _draw_icon(d, cx + cell_w // 2, cy + cell_h // 2, I_ELLIPSIS, 22, DARK)
+            _draw_dashed_rect(d, (cx, cy, cx + cell_w, cy + cell_h), 18,
+                              (36, 36, 42), dash=12, gap=8, width=2)
+            _draw_icon(d, cx + cell_w // 2, cy + cell_h // 2, I_ELLIPSIS, 24, DARK)
 
     _draw_footer(d, "Выбери товар в меню ниже", "стр. 2 / 6")
 
@@ -841,11 +832,11 @@ def render_detail(user_id, balance, total_spent,
                   category_key, category_label, item):
     img, d = _base_canvas(user_id, "витрина · dc")
 
-    body_y = HEADER_H + 46
+    body_y = 130
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    left_w = 360
-    gap = 28
+    left_w = 442
+    gap = 30
     left_x1 = PAD_X
     left_x2 = left_x1 + left_w
     right_x1 = left_x2 + gap
@@ -880,13 +871,13 @@ def render_detail(user_id, balance, total_spent,
     rx1 = right_x1 + 28
     rx2 = right_x2 - 28
 
-    _draw_right_head(d, rx1, body_y + 20, rx2,
+    _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Информация о товаре",
                      "готов к покупке" if can_afford else "недостаточно dc")
 
-    # Верхняя зона: иконка + инфо
-    top_y = body_y + 82
-    icon_size = 180
+    # Hero блок
+    top_y = body_y + 100
+    icon_size = 200
     ix = rx1
     iy = top_y
 
@@ -895,29 +886,28 @@ def render_detail(user_id, balance, total_spent,
     d.rounded_rectangle((ix, iy, ix + icon_size, iy + icon_size),
                         radius=20, outline=SILVER + (170,), width=3)
     _draw_icon(d, ix + icon_size // 2, iy + icon_size // 2 + 1,
-               item.get("fa", I_CUBE), 72, SILVER_HI)
+               item.get("fa", I_CUBE), 80, SILVER_HI)
 
-    tx = ix + icon_size + 28
+    tx = ix + icon_size + 30
     tx_max = rx2 - tx
 
-    d.text((tx, iy + 4), category_label.upper(), font=_font(11), fill=SILVER)
+    d.text((tx, iy + 4), category_label.upper(), font=_font(13), fill=SILVER)
 
     name = item["name"]
-    name_font = _font(38)
+    name_font = _font(42)
     while _tw(d, name, name_font) > tx_max and name_font.size > 22:
         name_font = _font(name_font.size - 2)
-    d.text((tx, iy + 26), name, font=name_font, fill=TEXT)
+    d.text((tx, iy + 28), name, font=name_font, fill=TEXT)
 
-    # Описание — обёртка на больше строк
     desc = item.get("description") or "Описание не указано."
-    desc_font = _font(13)
-    lines = _wrap(d, desc, desc_font, tx_max, max_lines=6)
+    desc_font = _font(15)
+    lines = _wrap(d, desc, desc_font, tx_max, max_lines=5)
     for i, line in enumerate(lines):
-        d.text((tx, iy + 78 + i * 20), line, font=desc_font, fill=TEXT_SOFT)
+        d.text((tx, iy + 90 + i * 22), line, font=desc_font, fill=TEXT_SOFT)
 
-    # Панель характеристик
+    # Spec-панель
     spec_y = iy + icon_size + 26
-    spec_h = 88
+    spec_h = 100
     spec_x1 = rx1
     spec_x2 = rx2
     d.rounded_rectangle((spec_x1, spec_y, spec_x2, spec_y + spec_h),
@@ -935,41 +925,41 @@ def render_detail(user_id, balance, total_spent,
         ("СРОК", "до 2 дней", BLUE),
     ]
     for i, (k, v, color) in enumerate(specs):
-        cx = spec_x1 + 26 + i * cell_w
-        d.text((cx, spec_y + 14), k, font=_font(10), fill=MUTED)
-        d.text((cx, spec_y + 32), v, font=_font(19), fill=color)
+        cx = spec_x1 + 30 + i * cell_w
+        d.text((cx, spec_y + 18), k, font=_font(12), fill=MUTED)
+        d.text((cx, spec_y + 40), v, font=_font(22), fill=color)
         if i < cols_count - 1:
-            d.line((spec_x1 + (i + 1) * cell_w, spec_y + 18,
-                    spec_x1 + (i + 1) * cell_w, spec_y + spec_h - 18),
+            d.line((spec_x1 + (i + 1) * cell_w, spec_y + 22,
+                    spec_x1 + (i + 1) * cell_w, spec_y + spec_h - 22),
                    fill=INNER_BRD + (255,), width=2)
 
-    # Статусная строка
-    foot_y = spec_y + spec_h + 18
+    # Статус
+    foot_y = spec_y + spec_h + 22
     foot_h = body_y + body_h - 30 - foot_y
-    if foot_h < 50:
-        foot_h = 50
+    if foot_h < 70:
+        foot_h = 70
 
     if can_afford:
         d.rounded_rectangle((rx1, foot_y, rx2, foot_y + foot_h),
-                            radius=12, fill=GREEN_BG + (200,),
+                            radius=14, fill=GREEN_BG + (200,),
                             outline=GREEN + (170,), width=2)
-        _draw_icon(d, rx1 + 28, foot_y + foot_h // 2, I_CHECK, 20, GREEN)
-        d.text((rx1 + 52, foot_y + foot_h // 2 - 14),
-               "Товар доступен для покупки", font=_font(15), fill=GREEN)
-        d.text((rx1 + 52, foot_y + foot_h // 2 + 6),
+        _draw_icon(d, rx1 + 34, foot_y + foot_h // 2, I_CHECK, 22, GREEN)
+        d.text((rx1 + 64, foot_y + foot_h // 2 - 18),
+               "Товар доступен для покупки", font=_font(17), fill=GREEN)
+        d.text((rx1 + 64, foot_y + foot_h // 2 + 6),
                "Нажми «Купить» в меню ниже — товар появится в инвентаре, оформишь в тикете",
-               font=_font(11), fill=GREEN)
+               font=_font(12), fill=GREEN)
     else:
         d.rounded_rectangle((rx1, foot_y, rx2, foot_y + foot_h),
-                            radius=12, fill=RED_BG + (200,),
+                            radius=14, fill=RED_BG + (200,),
                             outline=RED + (170,), width=2)
-        _draw_icon(d, rx1 + 28, foot_y + foot_h // 2, I_XMARK, 20, RED)
-        d.text((rx1 + 52, foot_y + foot_h // 2 - 14),
+        _draw_icon(d, rx1 + 34, foot_y + foot_h // 2, I_XMARK, 22, RED)
+        d.text((rx1 + 64, foot_y + foot_h // 2 - 18),
                f"Не хватает {_fmt(missing)} DC для покупки",
-               font=_font(15), fill=RED)
-        d.text((rx1 + 52, foot_y + foot_h // 2 + 6),
+               font=_font(17), fill=RED)
+        d.text((rx1 + 64, foot_y + foot_h // 2 + 6),
                "Заработай DC активностью или выбери другой товар",
-               font=_font(11), fill=RED)
+               font=_font(12), fill=RED)
 
     _draw_footer(d, "Нажми «Купить» в меню ниже", "стр. 3 / 6")
 
@@ -985,11 +975,11 @@ def render_detail(user_id, balance, total_spent,
 def render_purchases(user_id, balance, total_spent, purchases):
     img, d = _base_canvas(user_id, "витрина · dc")
 
-    body_y = HEADER_H + 46
+    body_y = 130
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    left_w = 360
-    gap = 28
+    left_w = 442
+    gap = 30
     left_x1 = PAD_X
     left_x2 = left_x1 + left_w
     right_x1 = left_x2 + gap
@@ -1018,32 +1008,32 @@ def render_purchases(user_id, balance, total_spent, purchases):
     rx1 = right_x1 + 28
     rx2 = right_x2 - 28
 
-    _draw_right_head(d, rx1, body_y + 20, rx2,
+    _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Мои покупки",
                      "активные · можно оформить в тикет")
 
-    list_y = body_y + 90
-    row_h = 66
+    list_y = body_y + 100
+    row_h = 68
     gap_row = 8
 
     if not purchases:
         box = (rx1, list_y, rx2, list_y + 260)
-        _draw_dashed_rect(d, box, 14, (58, 58, 64), dash=10, gap=7, width=2)
+        _draw_dashed_rect(d, box, 18, (58, 58, 64), dash=12, gap=8, width=2)
 
         icon_cx = (rx1 + rx2) // 2
         icon_cy = list_y + 70
-        _alpha_fill(img, (icon_cx - 36, icon_cy - 36, icon_cx + 36, icon_cy + 36),
-                    SILVER, alpha=25, radius=18)
-        _draw_icon(d, icon_cx, icon_cy, I_BAG, 32, SILVER)
+        _alpha_fill(img, (icon_cx - 40, icon_cy - 40, icon_cx + 40, icon_cy + 40),
+                    SILVER, alpha=25, radius=20)
+        _draw_icon(d, icon_cx, icon_cy, I_BAG, 36, SILVER)
 
-        d.text((icon_cx, list_y + 140), "У тебя пока нет активных покупок",
-               font=_font(18), fill=TEXT, anchor="mm")
-        d.text((icon_cx, list_y + 170),
+        d.text((icon_cx, list_y + 145), "У тебя пока нет активных покупок",
+               font=_font(20), fill=TEXT, anchor="mm")
+        d.text((icon_cx, list_y + 178),
                "Загляни в каталог — там есть из чего выбрать.",
-               font=_font(13), fill=MUTED, anchor="mm")
-        d.text((icon_cx, list_y + 200),
+               font=_font(14), fill=MUTED, anchor="mm")
+        d.text((icon_cx, list_y + 210),
                "После покупки товар появится здесь и его можно оформить в тикет.",
-               font=_font(11), fill=DIM, anchor="mm")
+               font=_font(12), fill=DIM, anchor="mm")
     else:
         for idx, p in enumerate(purchases[:8]):
             y = list_y + idx * (row_h + gap_row)
@@ -1063,11 +1053,11 @@ def render_purchases(user_id, balance, total_spent, purchases):
 def render_daily_deal(user_id, balance, total_spent, deal, hours_left):
     img, d = _base_canvas(user_id, "акция дня")
 
-    body_y = HEADER_H + 46
+    body_y = 130
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    left_w = 360
-    gap = 28
+    left_w = 442
+    gap = 30
     left_x1 = PAD_X
     left_x2 = left_x1 + left_w
     right_x1 = left_x2 + gap
@@ -1096,30 +1086,30 @@ def render_daily_deal(user_id, balance, total_spent, deal, hours_left):
     rx1 = right_x1 + 28
     rx2 = right_x2 - 28
 
-    _draw_right_head(d, rx1, body_y + 20, rx2,
+    _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Акция дня",
                      "сегодня только · обновляется ежедневно")
 
     if not deal:
-        box = (rx1, body_y + 90, rx2, body_y + body_h - 24)
-        _draw_dashed_rect(d, box, 14, (58, 58, 64), dash=10, gap=7, width=2)
+        box = (rx1, body_y + 100, rx2, body_y + body_h - 24)
+        _draw_dashed_rect(d, box, 18, (58, 58, 64), dash=12, gap=8, width=2)
 
         icon_cx = (rx1 + rx2) // 2
         icon_cy = box[1] + 90
-        _alpha_fill(img, (icon_cx - 44, icon_cy - 44, icon_cx + 44, icon_cy + 44),
-                    RED, alpha=25, radius=22)
-        _draw_icon(d, icon_cx, icon_cy, I_FIRE, 38, RED)
+        _alpha_fill(img, (icon_cx - 48, icon_cy - 48, icon_cx + 48, icon_cy + 48),
+                    RED, alpha=25, radius=24)
+        _draw_icon(d, icon_cx, icon_cy, I_FIRE, 42, RED)
 
-        d.text((icon_cx, box[1] + 170), "Акции сегодня пока нет",
-               font=_font(22), fill=TEXT, anchor="mm")
-        d.text((icon_cx, box[1] + 200),
+        d.text((icon_cx, box[1] + 175), "Акции сегодня пока нет",
+               font=_font(24), fill=TEXT, anchor="mm")
+        d.text((icon_cx, box[1] + 208),
                "Каждый день мы выбираем один товар и даём скидку до 30%.",
-               font=_font(13), fill=MUTED, anchor="mm")
-        d.text((icon_cx, box[1] + 224),
+               font=_font(14), fill=MUTED, anchor="mm")
+        d.text((icon_cx, box[1] + 232),
                "Следующее обновление автоматическое — заходи позже.",
-               font=_font(13), fill=MUTED, anchor="mm")
+               font=_font(14), fill=MUTED, anchor="mm")
 
-        info_y = box[1] + 270
+        info_y = box[1] + 280
         info_h = 90
         cols = 3
         cell_w = (rx2 - rx1 - 20 * (cols - 1)) // cols
@@ -1134,12 +1124,12 @@ def render_daily_deal(user_id, balance, total_spent, deal, hours_left):
             _alpha_fill(img, (cx1, info_y, cx2, info_y + info_h), color, alpha=18, radius=14)
             d.rounded_rectangle((cx1, info_y, cx2, info_y + info_h),
                                 radius=14, outline=color + (140,), width=2)
-            _draw_icon(d, cx1 + 30, info_y + info_h // 2, icon, 22, color)
-            d.text((cx1 + 58, info_y + 22), k, font=_font(10), fill=color)
-            d.text((cx1 + 58, info_y + 40), v, font=_font(18), fill=TEXT)
+            _draw_icon(d, cx1 + 32, info_y + info_h // 2, icon, 24, color)
+            d.text((cx1 + 64, info_y + 22), k, font=_font(11), fill=color)
+            d.text((cx1 + 64, info_y + 42), v, font=_font(20), fill=TEXT)
     else:
-        _draw_deal_card(d, img, rx1, body_y + 90,
-                        rx2 - rx1, body_h - 130, deal, balance)
+        _draw_deal_card(d, img, rx1, body_y + 100,
+                        rx2 - rx1, body_h - 140, deal, balance)
 
     _draw_footer(d, "Нажми «Купить» чтобы забрать по акции", "стр. 5 / 6")
 
@@ -1158,79 +1148,75 @@ def _draw_deal_card(d, img, x, y, w, h, deal, balance):
     discount = deal.get("discount", 0)
     cat_key = deal.get("cat_key", "misc")
 
-    d.rounded_rectangle((x, y, x + w, y + h), radius=16,
+    d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                         fill=INNER_BG + (255,),
                         outline=RED + (140,), width=2)
 
-    badge_h = 34
+    badge_h = 40
     _gradient_box(img, (x, y, x + w, y + badge_h), RED, RED,
-                  alpha=220, radius=16)
-    d.rectangle((x, y + badge_h - 16, x + w, y + badge_h), fill=RED + (220,))
-    _draw_icon(d, x + 24, y + badge_h // 2, I_FIRE, 16, (255, 255, 255))
-    d.text((x + 44, y + badge_h // 2 - 10),
+                  alpha=220, radius=18)
+    d.rectangle((x, y + badge_h - 18, x + w, y + badge_h), fill=RED + (220,))
+    _draw_icon(d, x + 28, y + badge_h // 2, I_FIRE, 18, (255, 255, 255))
+    d.text((x + 52, y + badge_h // 2 - 12),
            f"СКИДКА {discount}% · ТОЛЬКО СЕГОДНЯ",
-           font=_font(13), fill=(255, 255, 255))
+           font=_font(15), fill=(255, 255, 255))
 
-    icon_size = 180
-    ix = x + 30
-    iy = y + badge_h + 24
+    icon_size = 200
+    ix = x + 32
+    iy = y + badge_h + 26
     _gradient_box(img, (ix, iy, ix + icon_size, iy + icon_size),
-                  SILVER, SILVER_DIM, alpha=35, radius=18)
+                  SILVER, SILVER_DIM, alpha=35, radius=20)
     d.rounded_rectangle((ix, iy, ix + icon_size, iy + icon_size),
-                        radius=18, outline=SILVER + (160,), width=3)
+                        radius=20, outline=SILVER + (160,), width=3)
     _draw_icon(d, ix + icon_size // 2, iy + icon_size // 2 + 1,
-               CATEGORY_FA.get(cat_key, I_CUBE), 72, SILVER_HI)
+               CATEGORY_FA.get(cat_key, I_CUBE), 80, SILVER_HI)
 
-    tx = ix + icon_size + 30
-    tx_max = x + w - 30 - tx
+    tx = ix + icon_size + 34
+    tx_max = x + w - 34 - tx
 
-    d.text((tx, iy + 4), cat_label.upper(), font=_font(11), fill=SILVER)
+    d.text((tx, iy + 6), cat_label.upper(), font=_font(13), fill=SILVER)
 
-    name_font = _font(34)
-    while _tw(d, name, name_font) > tx_max and name_font.size > 20:
+    name_font = _font(38)
+    while _tw(d, name, name_font) > tx_max and name_font.size > 22:
         name_font = _font(name_font.size - 2)
-    d.text((tx, iy + 26), name, font=name_font, fill=TEXT)
+    d.text((tx, iy + 30), name, font=name_font, fill=TEXT)
 
     desc = item_data.get("description") or "Товар по акции со скидкой."
-    desc_font = _font(12)
+    desc_font = _font(14)
     lines = _wrap(d, desc, desc_font, tx_max, max_lines=3)
     for i, line in enumerate(lines):
-        d.text((tx, iy + 72 + i * 18), line, font=desc_font, fill=MUTED)
+        d.text((tx, iy + 82 + i * 20), line, font=desc_font, fill=MUTED)
 
-    # Старая цена
     orig_str = f"{_fmt(orig)} DC"
-    of = _font(15)
+    of = _font(17)
     ow = _tw(d, orig_str, of)
-    d.text((tx, iy + 132), orig_str, font=of, fill=DIM)
-    d.line((tx, iy + 142, tx + ow, iy + 142), fill=DIM, width=2)
+    d.text((tx, iy + 146), orig_str, font=of, fill=DIM)
+    d.line((tx, iy + 158, tx + ow, iy + 158), fill=DIM, width=2)
 
-    # Новая цена
     new_str = _fmt(new)
-    nf = _font(42)
-    d.text((tx, iy + 154), new_str, font=nf, fill=RED)
+    nf = _font(48)
+    d.text((tx, iy + 170), new_str, font=nf, fill=RED)
     nw = _tw(d, new_str, nf)
-    d.text((tx + nw + 8, iy + 154 + nf.size - 22), "DC",
-           font=_font(18), fill=RED)
+    d.text((tx + nw + 8, iy + 170 + nf.size - 24), "DC",
+           font=_font(20), fill=RED)
 
-    # Статус
     can_afford = balance >= new
     status_color = GREEN if can_afford else RED
     status_text = "ХВАТАЕТ DC" if can_afford else f"НЕ ХВАТАЕТ {_fmt(new - balance)} DC"
-    sf = _font(12)
+    sf = _font(13)
     stw = _tw(d, status_text, sf)
-    sx = x + w - 30 - stw - 26
-    sy = iy + 178
-    d.ellipse((sx, sy + 5, sx + 10, sy + 15), fill=status_color + (255,))
-    d.text((sx + 20, sy + 3), status_text, font=sf, fill=status_color)
+    sx = x + w - 34 - stw - 28
+    sy = iy + 200
+    d.ellipse((sx, sy + 6, sx + 11, sy + 17), fill=status_color + (255,))
+    d.text((sx + 22, sy + 4), status_text, font=sf, fill=status_color)
 
-    # Нижняя подсказка
-    hint_y = y + h - 34
-    d.line((x + 30, hint_y - 10, x + w - 30, hint_y - 10),
+    hint_y = y + h - 38
+    d.line((x + 34, hint_y - 12, x + w - 34, hint_y - 12),
            fill=INNER_BRD + (255,), width=2)
-    _draw_icon(d, x + 42, hint_y + 6, I_INFO, 14, DIM)
-    d.text((x + 60, hint_y),
+    _draw_icon(d, x + 46, hint_y + 8, I_INFO, 14, DIM)
+    d.text((x + 66, hint_y),
            "Акционный товар нельзя вернуть — проверь перед покупкой.",
-           font=_font(11), fill=DIM)
+           font=_font(12), fill=DIM)
 
 
 # ============================================================
@@ -1239,11 +1225,11 @@ def _draw_deal_card(d, img, x, y, w, h, deal, balance):
 def render_history(user_id, balance, total_spent, history):
     img, d = _base_canvas(user_id, "история dc")
 
-    body_y = HEADER_H + 46
+    body_y = 130
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    left_w = 360
-    gap = 28
+    left_w = 442
+    gap = 30
     left_x1 = PAD_X
     left_x2 = left_x1 + left_w
     right_x1 = left_x2 + gap
@@ -1274,30 +1260,30 @@ def render_history(user_id, balance, total_spent, history):
     rx1 = right_x1 + 28
     rx2 = right_x2 - 28
 
-    _draw_right_head(d, rx1, body_y + 20, rx2,
+    _draw_right_head(d, rx1, body_y + 22, rx2,
                      "История покупок",
                      "последние операции за dc")
 
-    list_y = body_y + 90
+    list_y = body_y + 100
     rows = 8
-    row_h = 58
+    row_h = 60
     gap_row = 8
 
     ops = list(history[:rows])
 
     if not ops:
         box = (rx1, list_y, rx2, list_y + 260)
-        _draw_dashed_rect(d, box, 14, (58, 58, 64), dash=10, gap=7, width=2)
+        _draw_dashed_rect(d, box, 18, (58, 58, 64), dash=12, gap=8, width=2)
         icon_cx = (rx1 + rx2) // 2
         icon_cy = list_y + 70
-        _alpha_fill(img, (icon_cx - 36, icon_cy - 36, icon_cx + 36, icon_cy + 36),
-                    SILVER, alpha=25, radius=18)
-        _draw_icon(d, icon_cx, icon_cy, I_HISTORY, 32, SILVER)
-        d.text((icon_cx, list_y + 150), "Покупок пока не было",
-               font=_font(18), fill=TEXT, anchor="mm")
-        d.text((icon_cx, list_y + 180),
+        _alpha_fill(img, (icon_cx - 40, icon_cy - 40, icon_cx + 40, icon_cy + 40),
+                    SILVER, alpha=25, radius=20)
+        _draw_icon(d, icon_cx, icon_cy, I_HISTORY, 36, SILVER)
+        d.text((icon_cx, list_y + 155), "Покупок пока не было",
+               font=_font(20), fill=TEXT, anchor="mm")
+        d.text((icon_cx, list_y + 188),
                "После первой покупки здесь появится история операций.",
-               font=_font(13), fill=MUTED, anchor="mm")
+               font=_font(14), fill=MUTED, anchor="mm")
     else:
         while len(ops) < rows:
             ops.append(None)
@@ -1319,11 +1305,11 @@ def render_history(user_id, balance, total_spent, history):
 def render_success(user_id, balance, total_spent, outcome):
     img, d = _base_canvas(user_id, outcome.get("uid_label", "покупка"))
 
-    body_y = HEADER_H + 46
+    body_y = 130
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    left_w = 360
-    gap = 28
+    left_w = 442
+    gap = 30
     left_x1 = PAD_X
     left_x2 = left_x1 + left_w
     right_x1 = left_x2 + gap
@@ -1341,80 +1327,78 @@ def render_success(user_id, balance, total_spent, outcome):
 
     accent = outcome.get("color", GREEN)
 
-    _draw_right_head(d, rx1, body_y + 20, rx2,
+    _draw_right_head(d, rx1, body_y + 22, rx2,
                      outcome.get("head_title", "Покупка совершена"),
                      outcome.get("head_sub", "что дальше"))
 
-    # Hero-блок: большая иконка + заголовок
-    top_y = body_y + 90
-    icon_size = 130
+    # Hero
+    top_y = body_y + 100
+    icon_size = 140
     ix = rx1 + 6
     iy = top_y + 8
 
     _gradient_box(img, (ix, iy, ix + icon_size, iy + icon_size),
-                  accent, accent, alpha=38, radius=20)
+                  accent, accent, alpha=38, radius=22)
     d.rounded_rectangle((ix, iy, ix + icon_size, iy + icon_size),
-                        radius=20, outline=accent + (200,), width=3)
+                        radius=22, outline=accent + (200,), width=3)
     _draw_icon(d, ix + icon_size // 2, iy + icon_size // 2 + 1,
-               outcome.get("icon", I_CHECK), 58, accent)
+               outcome.get("icon", I_CHECK), 62, accent)
 
-    tx = ix + icon_size + 26
+    tx = ix + icon_size + 28
     tx_max = rx2 - tx
 
     title = outcome.get("title", "Покупка совершена")
-    tfont = _font(28)
+    tfont = _font(30)
     while _tw(d, title, tfont) > tx_max and tfont.size > 18:
         tfont = _font(tfont.size - 2)
-    d.text((tx, iy + 10), title, font=tfont, fill=TEXT)
+    d.text((tx, iy + 12), title, font=tfont, fill=TEXT)
 
     subtitle = outcome.get("subtitle", "")
-    sfont = _font(13)
+    sfont = _font(14)
     sub_lines = _wrap(d, subtitle, sfont, tx_max, max_lines=4)
     for i, line in enumerate(sub_lines):
-        d.text((tx, iy + 50 + i * 18), line, font=sfont, fill=TEXT_SOFT)
+        d.text((tx, iy + 54 + i * 20), line, font=sfont, fill=TEXT_SOFT)
 
     item_line = outcome.get("item_line", "")
     if item_line:
-        d.text((tx, iy + icon_size - 20), item_line, font=_font(13),
-               fill=accent)
+        d.text((tx, iy + icon_size - 22), item_line, font=_font(15), fill=accent)
 
-    # Секция «что дальше»
-    steps_y = top_y + icon_size + 42
+    # Шаги
+    steps_y = top_y + icon_size + 44
     steps = outcome.get("steps", [])
     if steps:
-        d.text((rx1, steps_y), "ЧТО ДАЛЬШЕ", font=_font(11), fill=MUTED)
-        d.line((rx1, steps_y + 22, rx2, steps_y + 22),
+        d.text((rx1, steps_y), "ЧТО ДАЛЬШЕ", font=_font(13), fill=MUTED)
+        d.line((rx1, steps_y + 24, rx2, steps_y + 24),
                fill=STACK_HDR + (255,), width=2)
 
-        step_h = 52
-        step_gap = 7
+        step_h = 56
+        step_gap = 8
         max_steps = 4
         for i, step in enumerate(steps[:max_steps]):
-            sy = steps_y + 34 + i * (step_h + step_gap)
+            sy = steps_y + 38 + i * (step_h + step_gap)
             d.rounded_rectangle((rx1, sy, rx2, sy + step_h),
-                                radius=10, fill=INNER_BG + (255,),
+                                radius=12, fill=INNER_BG + (255,),
                                 outline=INNER_BRD + (255,), width=2)
 
-            num_cx = rx1 + 30
+            num_cx = rx1 + 34
             num_cy = sy + step_h // 2
-            d.ellipse((num_cx - 14, num_cy - 14, num_cx + 14, num_cy + 14),
+            d.ellipse((num_cx - 16, num_cy - 16, num_cx + 16, num_cy + 16),
                       fill=accent + (45,), outline=accent + (200,), width=2)
-            d.text((num_cx, num_cy), str(i + 1), font=_font(13),
+            d.text((num_cx, num_cy), str(i + 1), font=_font(15),
                    fill=accent, anchor="mm")
 
-            txf = _font(13)
-            step_shown = _ellipsis(d, step, txf, rx2 - rx1 - 90)
-            d.text((rx1 + 60, num_cy), step_shown, font=txf,
+            txf = _font(14)
+            step_shown = _ellipsis(d, step, txf, rx2 - rx1 - 100)
+            d.text((rx1 + 68, num_cy), step_shown, font=txf,
                    fill=TEXT_SOFT, anchor="lm")
 
-    # Нижняя подсказка
     hint_y = body_y + body_h - 30
     d.line((rx1, hint_y - 12, rx2, hint_y - 12),
            fill=STACK_HDR + (255,), width=2)
-    _draw_icon(d, rx1 + 10, hint_y + 6, I_INFO, 12, DIM)
-    d.text((rx1 + 28, hint_y),
+    _draw_icon(d, rx1 + 12, hint_y + 8, I_INFO, 13, DIM)
+    d.text((rx1 + 32, hint_y),
            outcome.get("hint", "Используй кнопки внизу"),
-           font=_font(11), fill=DIM)
+           font=_font(12), fill=DIM)
 
     _draw_footer(d, "Покупка завершена", "готово")
 
