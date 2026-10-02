@@ -10,6 +10,9 @@ from disnake.ui import View
 from core.utils import CONFIG, logger, log_discord
 
 
+P = "\u3164"   # hair space
+
+
 # ============================================================
 # КОНСТАНТЫ
 # ============================================================
@@ -27,6 +30,19 @@ BUYALL_EMBED_2_IMG = (
 )
 
 
+# Ширина кнопки: 22 hair space с каждой стороны + 16 символов текста = 60.
+# Меняй PADDING, если нужно шире/уже:
+#   P * 18 — узкая
+#   P * 22 — средняя (по умолчанию)
+#   P * 26 — почти на всю ширину
+#   P * 32 — максимально (лимит Discord 80 символов)
+PADDING = 22
+
+
+def _btn_label(text: str) -> str:
+    return f"{P * PADDING}{text}{P * PADDING}"
+
+
 # ============================================================
 # VIEW
 # ============================================================
@@ -35,14 +51,13 @@ class BuyAllView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label="Оформить покупку",
+        label=_btn_label("Оформить покупку"),
         style=ButtonStyle.gray,
         custom_id="buyall:create_ticket",
         row=0,
     )
     async def create(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        # Отвечаем эфемерно сразу — весь флоу создания тикета
-        # идёт через ephemeral-ответы, исходный эмбед не трогаем.
+        # Отвечаем эфемерно сразу — исходный эмбед не трогаем.
         await inter.response.defer(ephemeral=True)
         from modules.commands_tickets import create_real_ticket
         await create_real_ticket(inter)
@@ -70,7 +85,6 @@ async def send_buyall_panel():
     if not channel:
         return
 
-    # Удаляем прошлое сообщение бота с компонентами
     try:
         async for msg in channel.history(limit=50):
             if msg.author == bot.user and msg.components:
