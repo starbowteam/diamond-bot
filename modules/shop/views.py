@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""UI витрины DC-Shop. Кнопки растянуты на всю ширину через ㅤ."""
+"""UI витрины DC-Shop. Discord сам распределяет ширину кнопок в ряду."""
 import time
 import asyncio
 from typing import List, Dict
@@ -11,8 +11,6 @@ from disnake.ui import View, Button, Select, Modal, TextInput
 from core.utils import logger, CONFIG
 
 
-P = "\u3164"   # hair space — растягивает кнопки
-
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
 
@@ -23,6 +21,7 @@ E_BACK    = PartialEmoji(name="OffTicket", id=1539657125716824185)
 E_BUY     = PartialEmoji(name="Oplacheno", id=1539657164778512496)
 E_GIFT    = PartialEmoji(name="prom1",     id=1539646792139014234)
 E_STAR    = PartialEmoji(name="Otziv",     id=1541808692314243172)
+E_SHOP    = PartialEmoji(name="shopg",     id=1539646815530651718)
 
 
 CATEGORY_EMOJI = {
@@ -34,24 +33,6 @@ CATEGORY_EMOJI = {
     "casino":    PartialEmoji(name="coins",  id=1539649259245408340),
     "gifts":     PartialEmoji(name="prize",  id=1539657202170859561),
 }
-
-
-# ============================================================
-# Растяжка кнопок — W=wide (2 кнопки), M=medium (3 кнопки)
-# ============================================================
-def W(text: str) -> str:
-    """Для 2 кнопок в ряду — растягиваем максимально."""
-    return f"{P}{P}{P}{P}{P}{text}{P}{P}{P}{P}{P}"
-
-
-def M(text: str) -> str:
-    """Для 3 кнопок в ряду — растягиваем умеренно."""
-    return f"{P}{P}{P}{text}{P}{P}{P}"
-
-
-def S(text: str) -> str:
-    """Компактный вариант."""
-    return f"{P}{text}{P}"
 
 
 # ============================================================
@@ -127,13 +108,12 @@ class ShopItemSelect(Select):
 
 
 # ============================================================
-# КНОПКИ
+# КНОПКИ (без растяжки — Discord сам раздаёт ширину)
 # ============================================================
 class BtnPurchases(Button):
-    def __init__(self, row: int = 1, wide: bool = False):
-        label = W("Мои покупки") if wide else M("Мои покупки")
+    def __init__(self, row: int = 1):
         super().__init__(
-            label=label,
+            label="Мои покупки",
             style=ButtonStyle.gray,
             custom_id="shop:btn_purchases",
             emoji=E_BAG,
@@ -146,10 +126,9 @@ class BtnPurchases(Button):
 
 
 class BtnDailyDeal(Button):
-    def __init__(self, row: int = 1, wide: bool = False):
-        label = W("Акция дня") if wide else M("Акция дня")
+    def __init__(self, row: int = 1):
         super().__init__(
-            label=label,
+            label="Акция дня",
             style=ButtonStyle.gray,
             custom_id="shop:btn_daily",
             emoji=E_FIRE,
@@ -162,10 +141,9 @@ class BtnDailyDeal(Button):
 
 
 class BtnHistory(Button):
-    def __init__(self, row: int = 1, wide: bool = False):
-        label = W("История") if wide else M("История")
+    def __init__(self, row: int = 1):
         super().__init__(
-            label=label,
+            label="История",
             style=ButtonStyle.gray,
             custom_id="shop:btn_history",
             emoji=E_HISTORY,
@@ -178,11 +156,9 @@ class BtnHistory(Button):
 
 
 class BtnBack(Button):
-    def __init__(self, target: str = "categories", row: int = 1,
-                 cat_key: str = "", wide: bool = False):
-        label = W("Назад") if wide else M("Назад")
+    def __init__(self, target: str = "categories", row: int = 1, cat_key: str = ""):
         super().__init__(
-            label=label,
+            label="Назад",
             style=ButtonStyle.gray,
             custom_id=f"shop:btn_back:{target}:{cat_key}",
             emoji=E_BACK,
@@ -201,13 +177,12 @@ class BtnBack(Button):
 
 
 class BtnBackToShop(Button):
-    def __init__(self, row: int = 0, wide: bool = False):
-        label = W("В магазин") if wide else M("В магазин")
+    def __init__(self, row: int = 0):
         super().__init__(
-            label=label,
+            label="В магазин",
             style=ButtonStyle.gray,
             custom_id="shop:btn_back_to_shop",
-            emoji=PartialEmoji(name="shopg", id=1539646815530651718),
+            emoji=E_SHOP,
             row=row,
         )
 
@@ -217,10 +192,9 @@ class BtnBackToShop(Button):
 
 
 class BtnPurchasesWide(Button):
-    def __init__(self, row: int = 0, wide: bool = False):
-        label = W("Мои покупки") if wide else M("Мои покупки")
+    def __init__(self, row: int = 0):
         super().__init__(
-            label=label,
+            label="Мои покупки",
             style=ButtonStyle.gray,
             custom_id="shop:btn_purchases_success",
             emoji=E_BAG,
@@ -233,10 +207,9 @@ class BtnPurchasesWide(Button):
 
 
 class BtnReviewHint(Button):
-    def __init__(self, row: int = 0, wide: bool = False):
-        label = W("Оставить отзыв") if wide else M("Оставить отзыв")
+    def __init__(self, row: int = 0):
         super().__init__(
-            label=label,
+            label="Оставить отзыв",
             style=ButtonStyle.primary,
             custom_id="shop:btn_review_hint",
             emoji=E_STAR,
@@ -252,11 +225,9 @@ class BtnReviewHint(Button):
 
 
 class BtnBuy(Button):
-    def __init__(self, cat_key: str, item_key: str, price: int,
-                 row: int = 0, wide: bool = False):
-        label = W(f"Купить за {price} DC") if wide else M(f"Купить за {price} DC")
+    def __init__(self, cat_key: str, item_key: str, price: int, row: int = 0):
         super().__init__(
-            label=label,
+            label=f"Купить за {price} DC",
             style=ButtonStyle.success,
             custom_id=f"shop:btn_buy:{cat_key}:{item_key}",
             emoji=E_BUY,
@@ -272,11 +243,9 @@ class BtnBuy(Button):
 
 
 class BtnGift(Button):
-    def __init__(self, cat_key: str, item_key: str,
-                 row: int = 0, wide: bool = False):
-        label = W("Подарить") if wide else M("Подарить")
+    def __init__(self, cat_key: str, item_key: str, row: int = 0):
         super().__init__(
-            label=label,
+            label="Подарить",
             style=ButtonStyle.gray,
             custom_id=f"shop:btn_gift:{cat_key}:{item_key}",
             emoji=E_GIFT,
@@ -333,7 +302,6 @@ class ShopMainView(View):
     def __init__(self, categories: List[Dict], active: str = ""):
         super().__init__(timeout=None)
         self.add_item(ShopCategorySelect(categories, active))
-        # 3 кнопки — растяжка M
         self.add_item(BtnPurchases(row=1))
         self.add_item(BtnDailyDeal(row=1))
         self.add_item(BtnHistory(row=1))
@@ -359,9 +327,8 @@ class ShopDetailView(View):
 class ShopPurchasesView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        # 2 кнопки — растяжка W
-        self.add_item(BtnBackToShop(row=0, wide=True))
-        self.add_item(BtnHistory(row=0, wide=True))
+        self.add_item(BtnBackToShop(row=0))
+        self.add_item(BtnHistory(row=0))
 
 
 class ShopDealView(View):
@@ -372,15 +339,15 @@ class ShopDealView(View):
             self.add_item(BtnBackToShop(row=0))
             self.add_item(BtnPurchasesWide(row=0))
         else:
-            self.add_item(BtnBackToShop(row=0, wide=True))
-            self.add_item(BtnPurchasesWide(row=0, wide=True))
+            self.add_item(BtnBackToShop(row=0))
+            self.add_item(BtnPurchasesWide(row=0))
 
 
 class ShopHistoryView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(BtnBackToShop(row=0, wide=True))
-        self.add_item(BtnPurchasesWide(row=0, wide=True))
+        self.add_item(BtnBackToShop(row=0))
+        self.add_item(BtnPurchasesWide(row=0))
 
 
 class ShopSuccessView(View):
@@ -391,5 +358,5 @@ class ShopSuccessView(View):
             self.add_item(BtnReviewHint(row=0))
             self.add_item(BtnBackToShop(row=0))
         else:
-            self.add_item(BtnPurchasesWide(row=0, wide=True))
-            self.add_item(BtnBackToShop(row=0, wide=True))
+            self.add_item(BtnPurchasesWide(row=0))
+            self.add_item(BtnBackToShop(row=0))
