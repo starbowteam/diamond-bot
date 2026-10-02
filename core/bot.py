@@ -139,7 +139,6 @@ async def process_salary(mode: str):
             awarded += 1
             total += amount
 
-            # 👇 Достижения персонала
             try:
                 from clan.achievements import check_and_unlock
                 await check_and_unlock(member.id, "staff_salary", value=1, bot=bot)
@@ -302,11 +301,6 @@ async def review_counter_task():
 
 @tasks.loop(minutes=1)
 async def daily_bonus_task():
-    """
-    👇 Ежедневный клубный бонус (10 DC) выдаём в 23:59 МСК — в самом конце
-    суток, чтобы точно видеть, кто активил именно за этот день.
-    Раньше было раз в 24 часа от запуска бота, и активность не проверялась.
-    """
     global _LAST_BONUS_DATE
     await bot.wait_until_ready()
     try:
@@ -363,6 +357,16 @@ async def flash_sale_task():
                                   color=0xff6600)
     except Exception as e:
         logger.exception(f"flash_sale_task error: {e}")
+
+
+@tasks.loop(minutes=2)
+async def deal_announce_task():
+    await bot.wait_until_ready()
+    try:
+        from modules.deal_announce import process_deal_announce
+        await process_deal_announce(bot)
+    except Exception as e:
+        logger.exception(f"deal_announce_task: {e}")
 
 
 @tasks.loop(minutes=1)
@@ -438,6 +442,7 @@ async def on_ready():
             HomeView, TarologyView, WorkView,
             DCView, PromoView, AdminView,
         )
+        from modules.commands_buyall import BuyAllView, send_buyall_panel
 
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
@@ -456,9 +461,6 @@ async def on_ready():
         bot.add_view(DCView())
         bot.add_view(PromoView())
         bot.add_view(AdminView())
-
-        # 👇 BuyAll — регистрируем view, чтобы кнопка работала после рестарта
-        from modules.commands_buyall import BuyAllView
         bot.add_view(BuyAllView())
 
         bot.loop.create_task(send_home_panel())
@@ -468,9 +470,6 @@ async def on_ready():
         bot.loop.create_task(send_work_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_staff_panels())
-
-        # 👇 BuyAll — отдельная витрина со своей кнопкой
-        from modules.commands_buyall import send_buyall_panel
         bot.loop.create_task(send_buyall_panel())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -522,7 +521,6 @@ async def on_ready():
             bot.loop.create_task(send_clan_games_panel(bot))
             logger.info("Клан-лига инициализирована")
 
-            # 👇 Обновление кланов: чистим по условиям, потом раскидываем
             try:
                 from clan.core import (
                     distribute_all_club_members, prune_ineligible_clan_members
@@ -539,7 +537,6 @@ async def on_ready():
             except Exception as e:
                 logger.exception(f"auto-distribute clan err: {e}")
 
-            # 👇 Достижение "Создатель" — тебе автоматически
             try:
                 from clan.achievements import unlock_achievement, CREATOR_USER_ID
                 await unlock_achievement(CREATOR_USER_ID, "creator", bot=bot, notify=False)
@@ -559,6 +556,8 @@ async def on_ready():
             daily_deal_task.start()
         if not flash_sale_task.is_running():
             flash_sale_task.start()
+        if not deal_announce_task.is_running():
+            deal_announce_task.start()
         if not salary_advance_task.is_running():
             salary_advance_task.start()
         if not salary_main_task.is_running():
@@ -652,14 +651,12 @@ async def on_member_join(member: disnake.Member):
         except Exception as e:
             logger.error(f"Не удалось выдать роль: {e}")
 
-    # 👇 Достижение "Новичок"
     try:
         from clan.achievements import unlock_achievement
         await unlock_achievement(member.id, "newbie", bot=bot)
     except Exception as e:
         logger.warning(f"newbie ach: {e}")
 
-    # Приветственный бонус
     try:
         data = get_dc_cache(member.id)
         already_received = any(
@@ -787,7 +784,6 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in added)}",
                 color=0x00ff00
             )
-            # Автораспределение в клан
             try:
                 from clan.core import CLUB_ROLE_ID, assign_user_to_clan, get_user_clan
                 if any(r.id == CLUB_ROLE_ID for r in added) and not get_user_clan(after.id):
@@ -795,7 +791,6 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
             except Exception as e:
                 logger.warning(f"clan auto-assign on role: {e}")
 
-            # 👇 Достижения по ролям покупателя
             try:
                 from clan.achievements import check_and_unlock
                 role_ids = CONFIG["ROLE_IDS"]
@@ -1030,14 +1025,12 @@ async def on_message(message: disnake.Message):
         if len(message.content.strip()) >= CONFIG["MIN_MESSAGE_LENGTH"]:
             if message.channel.id != CONFIG["REVIEW_COUNT_CHANNEL"]:
                 await add_message_dc(message.author.id)
-                # 👇 Достижение "Первое слово"
                 try:
                     from clan.achievements import unlock_achievement
                     await unlock_achievement(message.author.id, "first_message", bot=bot, notify=False)
                 except Exception:
                     pass
 
-    # Обработка отзывов
     if is_guild_text and message.channel.id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         user_id = message.author.id
         now = time.time()
@@ -1085,13 +1078,11 @@ async def on_message(message: disnake.Message):
         save_json(FILES["review_counts"], counts)
 
         try:
-            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
             await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке",
                          notify=False, log=False, to_clan_pool=True)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
 
-        # 👇 Достижения за отзывы
         try:
             from clan.achievements import check_and_unlock
             total_reviews = counts[str(user_id)]
@@ -1099,7 +1090,6 @@ async def on_message(message: disnake.Message):
         except Exception as e:
             logger.warning(f"reviews ach: {e}")
 
-        # 👇 Квест-хук
         try:
             from clan.quests import on_review_quest_hook
             await on_review_quest_hook(user_id)
@@ -1143,7 +1133,6 @@ async def on_message(message: disnake.Message):
         await update_review_counter(silent=False)
         return
 
-    # Клан-квест хуки
     if is_guild_text:
         try:
             from clan.quests import on_message_quest_hook
@@ -1164,13 +1153,11 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
     user_id = member.id
     if after.channel and (before.channel is None or before.channel != after.channel):
         voice_track[user_id] = (after.channel.id, int(time.time()))
-        # 👇 Отмечаем активность сразу на входе в войс, а не только на выходе
         try:
             from modules.dc import touch_activity
             touch_activity(user_id)
         except Exception as e:
             logger.warning(f"touch_activity voice: {e}")
-        # 👇 Достижение "Голос"
         try:
             from clan.achievements import unlock_achievement
             await unlock_achievement(user_id, "first_voice", bot=bot, notify=False)
@@ -1188,18 +1175,3 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                     await on_voice_quest_hook(user_id, duration)
                 except Exception as e:
                     logger.warning(f"clan voice hook: {e}")
-
-                # 👇 Достижения за войс (по часам)
-                try:
-                    from clan.achievements import check_and_unlock
-                    # Сколько всего часов в войсе у юзера
-                    row = cur.execute(
-                        "SELECT voice_time_today FROM dc_cache WHERE user_id=?",
-                        (user_id,)
-                    ).fetchone()
-                    # Точный подсчёт сложно, поэтому используем накопленный счётчик через БД
-                    # (можно добавить поле total_voice_time в dc_cache в будущем)
-                    # Пока проверяем только ежедневный минимум
-                    pass
-                except Exception:
-                    pass
