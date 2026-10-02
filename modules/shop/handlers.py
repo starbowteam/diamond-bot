@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Логика витрины DC-Shop: навигация, покупка, подарок.
-Каждое нажатие = новый рендер + edit_message. Без кэша.
+Логика витрины DC-Shop: навигация, покупка, подарок,
+успешный экран после покупки.
 """
 import io
 import os
@@ -20,16 +20,17 @@ from core.utils import (
 from modules.dc import (
     load_shop_catalog, get_user_balance, remove_dc, add_purchase,
     get_user_purchases, remove_purchase, get_user_dc_data,
+    add_dc,
 )
 from modules.shop import state
 from modules.shop import render as shop_render
 from modules.shop.views import (
     ShopMainView, ShopProductsView, ShopDetailView,
     ShopPurchasesView, ShopDealView, ShopHistoryView,
+    ShopSuccessView,
 )
 
 
-DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
 DAILY_DEAL_REFRESH_HOURS = 5
 
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
@@ -39,10 +40,6 @@ REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 # ХЕЛПЕРЫ
 # ============================================================
 def _get_total_spent(user_id: int) -> int:
-    """
-    Сумма покупок за DC. Считаем по истории операций
-    (отрицательные amounts с reason, начинающимся на "Покупка").
-    """
     data = get_dc_cache(user_id)
     total = 0
     for h in data.get("history", []) or []:
@@ -73,14 +70,14 @@ def _strip_emoji(s: str) -> str:
 
 def _default_cat_description(key: str) -> str:
     return {
-        "discounts": "Скидки на заказы в магазине — экономь на покупках",
-        "design":    "Аватарки, баннеры, логотипы — уникальный стиль",
-        "ads":       "Пост, закреп, упоминание — расскажи о себе",
-        "roles":     "Особые роли и кастом — выделись на сервере",
-        "boosts":    "Усилители DC-заработка на сутки и неделю",
-        "casino":    "Страховка ставки, x2 выигрыш, удачный час",
-        "gifts":     "Подари DC другому участнику — с комиссией 5%",
-    }.get(key, "Товары этой категории")
+        "discounts": "Скидки на заказы в магазине. После покупки скидка применяется в тикете: выбери её на кнопке «Скидки» и она сама подставится в заказ.",
+        "design":    "Индивидуальный дизайн от команды Diamond. Аватарка, баннер, логотип — сделаем под твой вкус, уточним детали в тикете.",
+        "ads":       "Реклама сервера или проекта в каналах Diamond. Пост, закреп или упоминание в новостях — расскажем о тебе нашему сообществу.",
+        "roles":     "Особые роли сервера: часть выдаётся автоматически после покупки, часть — вручную в тикете. Каждая даёт свой стиль и доступ.",
+        "boosts":    "Усилители DC-заработка: ×2 к сообщениям, войсу, отзывам. Активируются сразу после покупки и работают указанное время.",
+        "casino":    "Предметы для казино: страховка ставки, ×2 выигрыш, удачный час, билет джекпота. Применяются автоматически в играх.",
+        "gifts":     "Подари Diamond Coins другому участнику — с комиссией 5%. Введи ID получателя и сумма сразу уйдёт на его баланс.",
+    }.get(key, "Товары этой категории — выбери что-то по вкусу и оформи в тикет.")
 
 
 def _get_categories_list() -> List[Dict]:
@@ -90,15 +87,10 @@ def _get_categories_list() -> List[Dict]:
         items = cat.get("items", {})
         label = cat.get("label", key)
         description = _strip_emoji(cat.get("description", "") or "")
-
-        # мин. цена по категории
         prices = [int(it.get("price", 0)) for it in items.values()]
         min_price = min(prices) if prices else 0
-
-        # если описания нет в JSON — сгенерим что-то осмысленное
         if not description:
             description = _default_cat_description(key)
-
         result.append({
             "key": key,
             "label": _strip_emoji(label),
@@ -128,6 +120,17 @@ def _get_items_for_category(cat_key: str) -> List[Dict]:
     return result
 
 
+def _filter_history_purchases(history: list) -> list:
+    """Только покупки — списания с reason, начинающимся на 'Покупка'."""
+    result = []
+    for h in history or []:
+        amt = h.get("amount", 0) or 0
+        reason = h.get("reason", "") or ""
+        if amt < 0 and reason.startswith("Покупка"):
+            result.append(h)
+    return result
+
+
 # ============================================================
 # ОТПРАВКА / РЕДАКТИРОВАНИЕ
 # ============================================================
@@ -142,10 +145,6 @@ async def _send_screen(inter, *, buf: io.BytesIO, view):
 
 
 async def _edit_screen(inter, *, buf: io.BytesIO, view):
-    """
-    Меняет исходное сообщение: новое вложение, старые — удаляем.
-    disnake: file=File — новое, attachments=[] — что оставить из старых.
-    """
     fname = f"shop_{inter.author.id}_{int(time.time() * 1000)}.png"
     file = disnake.File(buf, filename=fname)
     embed = disnake.Embed(color=shop_render.EMBED_COLOR)
@@ -306,7 +305,9 @@ async def goto_history(inter: disnake.MessageInteraction):
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
     data = get_dc_cache(user_id)
-    history = list(reversed((data.get("history") or [])[-20:]))
+    raw = data.get("history") or []
+    purchases = _filter_history_purchases(raw)
+    history = list(reversed(purchases[-20:]))
 
     buf = shop_render.render_history(
         user_id=user_id,
@@ -319,6 +320,123 @@ async def goto_history(inter: disnake.MessageInteraction):
 
 
 # ============================================================
+# ВЫБОР ОУТКОМА ПОСЛЕ ПОКУПКИ
+# ============================================================
+def _build_outcome(cat_key: str, item: dict, name: str, price: int, guild_id: int) -> dict:
+    """
+    Определяет, что показать на экране успеха.
+    Возвращает словарь для render_success.
+    """
+    cat = (cat_key or "").lower()
+    has_role = bool(item.get("role_id"))
+    boost_type = item.get("boost_type")
+    gift_amount = item.get("gift_amount")
+    is_auto_role = (cat == "roles" and has_role)
+    is_boost = bool(boost_type) and cat in ("boosts", "casino")
+
+    # --- АВТО-РОЛЬ ---
+    if is_auto_role:
+        return {
+            "kind": "role",
+            "icon": shop_render.I_CHECK,
+            "color": shop_render.GREEN,
+            "head_title": "Роль выдана",
+            "head_sub": "проверь профиль",
+            "title": "Роль на твоём аккаунте!",
+            "subtitle": (
+                f"Роль «{name}» уже выдана автоматически — "
+                f"загляни в свой профиль, она уже там."
+            ),
+            "item_line": f"{name} · {price} DC",
+            "steps": [
+                "Роль выдана автоматически после оплаты",
+                "Открой свой профиль — увидишь новую роль",
+                f"Оставь отзыв в <#{REVIEW_CHANNEL_ID}> — получишь +15 DC",
+                "Возвращайся за новыми покупками в магазин",
+            ],
+            "hint": "Оставь отзыв — это даёт +15 DC на баланс",
+            "show_review": True,
+            "left_blocks": [
+                {
+                    "label": "Выдано автоматически",
+                    "value": name,
+                    "icon": shop_render.I_MASKS,
+                    "color": shop_render.GREEN,
+                },
+            ],
+        }
+
+    # --- БУСТ / КАЗИНО-ПРЕДМЕТ ---
+    if is_boost:
+        return {
+            "kind": "boost",
+            "icon": shop_render.I_BOLT,
+            "color": shop_render.PURPLE,
+            "head_title": "Активировано",
+            "head_sub": "применено сразу",
+            "title": "Буст уже работает!",
+            "subtitle": (
+                f"«{name}» активирован автоматически — "
+                f"можешь пользоваться прямо сейчас."
+            ),
+            "item_line": f"{name} · {price} DC",
+            "steps": [
+                "Предмет активирован автоматически после оплаты",
+                "Работает без дополнительных действий",
+                "Длительность — в профиле, раздел «Активные бусты»",
+                "По окончании можно купить ещё раз",
+            ],
+            "hint": "Активировано — можно пользоваться",
+            "show_review": False,
+            "left_blocks": [
+                {
+                    "label": "Активировано",
+                    "value": name,
+                    "icon": shop_render.I_BOLT,
+                    "color": shop_render.PURPLE,
+                },
+            ],
+        }
+
+    # --- ТОВАР В ИНВЕНТАРЕ (тикет) ---
+    return {
+        "kind": "ticket",
+        "icon": shop_render.I_TICKET,
+        "color": shop_render.BLUE,
+        "head_title": "Товар в инвентаре",
+        "head_sub": "оформи в тикет",
+        "title": "Осталось оформить тикет",
+        "subtitle": (
+            f"«{name}» добавлен в инвентарь. "
+            f"Оформи тикет, чтобы менеджер выдал товар вручную."
+        ),
+        "item_line": f"{name} · {price} DC",
+        "steps": [
+            "Открой панель магазина в канале витрины",
+            "Нажми «Купить» → выбери «Diamond Coins»",
+            "Выбери этот товар в списке — откроется тикет",
+            "Менеджер свяжется и выдаст заказ до 2 рабочих дней",
+        ],
+        "hint": "Оформи тикет через «Купить» → Diamond Coins",
+        "show_review": False,
+        "left_blocks": [
+            {
+                "label": "Куплено",
+                "value": name,
+                "icon": shop_render.I_TICKET,
+                "color": shop_render.BLUE,
+            },
+            {
+                "label": "Что дальше",
+                "value": "Оформить тикет",
+                "icon": shop_render.I_INFO,
+                "color": shop_render.SILVER,
+            },
+        ],
+    }
+
+
+# ============================================================
 # ПОКУПКА
 # ============================================================
 async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: str):
@@ -328,6 +446,15 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     item = cat.get("items", {}).get(item_key)
     if not item:
         return await inter.response.send_message("Товар не найден.", ephemeral=True)
+
+    # Подарочные товары (категория gifts) — сначала спрашиваем получателя
+    if "gift_amount" in item:
+        try:
+            from modules.shop.views import ShopGiftModal
+            await inter.response.send_modal(ShopGiftModal(cat_key, item_key))
+        except Exception as e:
+            logger.warning(f"gift modal open: {e}")
+        return
 
     price = int(item.get("price", 0))
     name = _strip_emoji(item.get("name", item_key))
@@ -346,8 +473,42 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
             content="Не удалось списать DC. Попробуй ещё раз."
         )
 
-    await add_purchase(user_id, cat_key, name)
+    # Авто-выдача роли, если есть role_id и категория roles
+    auto_role_given = False
+    if cat_key == "roles" and item.get("role_id"):
+        role = inter.guild.get_role(int(item["role_id"]))
+        if role:
+            try:
+                member = inter.guild.get_member(user_id)
+                if member and role not in member.roles:
+                    await member.add_roles(role, reason=f"Покупка в DC-Shop: {name}")
+                    auto_role_given = True
+                elif member:
+                    auto_role_given = True  # роль уже была
+            except Exception as e:
+                logger.warning(f"shop auto-role give {user_id}: {e}")
 
+    # Активация буста / казино-предмета
+    if item.get("boost_type"):
+        try:
+            from core.utils import activate_item
+            activate_item(
+                user_id=user_id,
+                item_key=item_key,
+                item_type=cat_key,
+                value=float(item.get("value", 0) or 0),
+                duration_hours=int(item.get("duration_hours", 0) or 0),
+                uses=int(item.get("uses", -1)),
+            )
+        except Exception as e:
+            logger.warning(f"shop boost activate {user_id}: {e}")
+
+    # Для не-авто товаров — добавляем в инвентарь
+    if not (cat_key == "roles" and item.get("role_id")):
+        if not item.get("boost_type"):
+            await add_purchase(user_id, cat_key, name)
+
+    # Хуки квестов / достижений
     try:
         from clan.quests import on_purchase_quest_hook
         await on_purchase_quest_hook(user_id, price)
@@ -367,27 +528,31 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
         description=(
             f"**Пользователь:** <@{user_id}>\n"
             f"**Товар:** {name}\n"
-            f"**Цена:** {price} DC"
+            f"**Цена:** {price} DC\n"
+            f"**Авто-роль:** {'да' if auto_role_given else 'нет'}"
         ),
         color=0x00aaff,
     ))
 
-    await goto_purchases_after_buy(inter, user_id)
+    await goto_success(inter, user_id, cat_key, item, name, price)
 
 
-async def goto_purchases_after_buy(inter: disnake.MessageInteraction, user_id: int):
+async def goto_success(inter: disnake.MessageInteraction, user_id: int,
+                       cat_key: str, item: dict, name: str, price: int):
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
-    purchases = await get_user_purchases(user_id, only_unused=True)
-    filtered = [p for p in purchases if p.get("type") != "discounts"]
 
-    buf = shop_render.render_purchases(
+    outcome = _build_outcome(
+        cat_key, item, name, price, inter.guild.id if inter.guild else 0
+    )
+
+    buf = shop_render.render_success(
         user_id=user_id,
         balance=balance,
         total_spent=total_spent,
-        purchases=filtered,
+        outcome=outcome,
     )
-    view = ShopPurchasesView()
+    view = ShopSuccessView(show_review=outcome.get("show_review", False))
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -422,6 +587,7 @@ async def handle_gift(inter: disnake.ModalInteraction,
 
     price = int(item.get("price", 0))
     name = _strip_emoji(item.get("name", item_key))
+    gift_amount = item.get("gift_amount")
 
     await inter.response.defer(ephemeral=True)
 
@@ -431,30 +597,63 @@ async def handle_gift(inter: disnake.ModalInteraction,
             content=f"Недостаточно DC. Нужно: **{price} DC**, у тебя: **{balance} DC**."
         )
 
-    success = await remove_dc(user_id, price, f"Покупка: {name} (подарок для {recipient_id})")
+    success = await remove_dc(
+        user_id, price,
+        f"Покупка: {name} (подарок для {recipient_id})"
+    )
     if not success:
         return await inter.edit_original_response(
             content="Не удалось списать DC. Попробуй позже."
         )
 
-    await add_purchase(recipient_id, cat_key, name)
+    # Если это подарок DC — отправляем DC получателю.
+    # Иначе — добавляем товар в его инвентарь.
+    if gift_amount:
+        try:
+            await add_dc(
+                recipient_id,
+                int(gift_amount),
+                f"Подарок от {user_id}",
+                notify=True,
+                log=False,
+            )
+        except Exception as e:
+            logger.warning(f"shop gift DC send {recipient_id}: {e}")
 
-    try:
-        embed = disnake.Embed(
-            title="Тебе подарили товар!",
-            description=(
-                f"**От:** <@{user_id}>\n"
-                f"**Товар:** {name}\n\n"
-                f"Оформить можно в витрине — открой тикет за DC."
-            ),
-            color=0x2ecc71,
-            timestamp=datetime.now(timezone.utc),
-        )
-        await target.send(embed=embed)
-    except disnake.Forbidden:
-        pass
-    except Exception as e:
-        logger.warning(f"shop gift DM {recipient_id}: {e}")
+        try:
+            embed = disnake.Embed(
+                title="Тебе подарили Diamond Coins!",
+                description=(
+                    f"**От:** <@{user_id}>\n"
+                    f"**Получено:** `+{gift_amount} DC`\n\n"
+                    f"Ты можешь потратить их в DC-магазине."
+                ),
+                color=0x2ecc71,
+                timestamp=datetime.now(timezone.utc),
+            )
+            await target.send(embed=embed)
+        except disnake.Forbidden:
+            pass
+        except Exception as e:
+            logger.warning(f"shop gift DC DM {recipient_id}: {e}")
+    else:
+        await add_purchase(recipient_id, cat_key, name)
+        try:
+            embed = disnake.Embed(
+                title="Тебе подарили товар!",
+                description=(
+                    f"**От:** <@{user_id}>\n"
+                    f"**Товар:** {name}\n\n"
+                    f"Оформить можно в витрине — открой тикет за DC."
+                ),
+                color=0x2ecc71,
+                timestamp=datetime.now(timezone.utc),
+            )
+            await target.send(embed=embed)
+        except disnake.Forbidden:
+            pass
+        except Exception as e:
+            logger.warning(f"shop gift item DM {recipient_id}: {e}")
 
     await log_discord(
         title="Подарок в DC-Shop",
@@ -463,13 +662,99 @@ async def handle_gift(inter: disnake.ModalInteraction,
             f"**Кому:** <@{recipient_id}>\n"
             f"**Товар:** {name}\n"
             f"**Цена:** {price} DC"
+            + (f"\n**DC получателю:** {gift_amount}" if gift_amount else "")
         ),
         color=0xffaa00,
     )
 
-    await inter.edit_original_response(
-        content=f"Готово! **{name}** подарен <@{recipient_id}>."
-    )
+    # Для подарка — свой экран успеха
+    if gift_amount:
+        outcome = {
+            "kind": "gift",
+            "icon": shop_render.I_GIFT,
+            "color": shop_render.GREEN,
+            "head_title": "Подарок отправлен",
+            "head_sub": "получатель уведомлён",
+            "title": "Подарок доставлен!",
+            "subtitle": (
+                f"<@{recipient_id}> получил {gift_amount} DC "
+                f"и уведомление в ЛС."
+            ),
+            "item_line": f"{name} · {price} DC",
+            "steps": [
+                f"<@{recipient_id}> получил {gift_amount} DC на баланс",
+                "Ему отправлено уведомление в личные сообщения",
+                "Комиссия магазина 5% удержана при покупке",
+                "Ты можешь подарить кому-то ещё",
+            ],
+            "hint": "Подарок доставлен получателю",
+            "show_review": False,
+            "left_blocks": [
+                {
+                    "label": "Подарок доставлен",
+                    "value": f"+{gift_amount} DC",
+                    "icon": shop_render.I_GIFT,
+                    "color": shop_render.GREEN,
+                },
+            ],
+        }
+    else:
+        outcome = {
+            "kind": "gift",
+            "icon": shop_render.I_GIFT,
+            "color": shop_render.GREEN,
+            "head_title": "Подарок отправлен",
+            "head_sub": "получатель уведомлён",
+            "title": "Подарок доставлен!",
+            "subtitle": (
+                f"<@{recipient_id}> получил «{name}» в свой инвентарь."
+            ),
+            "item_line": f"{name} · {price} DC",
+            "steps": [
+                f"Товар добавлен в инвентарь <@{recipient_id}>",
+                "Ему отправлено уведомление в личные сообщения",
+                "Получатель оформит тикет и получит товар",
+                "Ты можешь подарить кому-то ещё",
+            ],
+            "hint": "Подарок доставлен получателю",
+            "show_review": False,
+            "left_blocks": [
+                {
+                    "label": "Подарено",
+                    "value": name,
+                    "icon": shop_render.I_GIFT,
+                    "color": shop_render.GREEN,
+                },
+            ],
+        }
+
+    # Для модального взаимодействия нельзя вызвать _edit_screen напрямую
+    # (там другой response), поэтому просто подредактируем текущее сообщение.
+    try:
+        balance = await get_user_balance(user_id)
+        total_spent = _get_total_spent(user_id)
+        buf = shop_render.render_success(
+            user_id=user_id,
+            balance=balance,
+            total_spent=total_spent,
+            outcome=outcome,
+        )
+        fname = f"shop_{user_id}_{int(time.time() * 1000)}.png"
+        file = disnake.File(buf, filename=fname)
+        embed = disnake.Embed(color=shop_render.EMBED_COLOR)
+        embed.set_image(url=f"attachment://{fname}")
+        await inter.edit_original_response(
+            content=None, embed=embed, file=file, attachments=[],
+            view=ShopSuccessView(show_review=False),
+        )
+    except Exception as e:
+        logger.warning(f"gift success screen {user_id}: {e}")
+        try:
+            await inter.edit_original_response(
+                content=f"Готово! Подарок отправлен <@{recipient_id}>."
+            )
+        except Exception:
+            pass
 
 
 async def handle_shop_modal(inter):
