@@ -40,7 +40,7 @@ BUYALL_EMBED_2_IMG = (
 
 
 def _btn_label(text: str) -> str:
-    return f"{P * 10}{text}{P * 10}"
+    return f"{P * 11}{text}{P * 10}"
 
 
 # ============================================================
