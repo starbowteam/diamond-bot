@@ -1856,7 +1856,6 @@ class CatalogTypeView(disnake.ui.View):
 # КАТАЛОГ ДЛЯ РЕАЛЬНЫХ ДЕНЕГ
 # ============================================================
 CATALOG_OPTIONS = [
-    {"label": "・BuyAll", "description": "Покупка всего ・Всё в одном месте", "emoji": "<:buyall:1489833017047253032> ", "json_path": os.path.join(CATALOG_DIR, "menu_buyall.json")},
     {"label": "・Discord", "description": "Покупка Nitro и Boosts ・Статус и величие", "emoji": "<:Discord:1464831837300854936>", "json_path": os.path.join(CATALOG_DIR, "menu_discord.json")},
     {"label": "・Steam", "description": "Пополнение и очки ・Свобода к играм", "emoji": "<:Steam:1464833200416100402>", "json_path": os.path.join(CATALOG_DIR, "menu_steam.json")},
     {"label": "・Telegram", "description": "Звезды и Подарки ・Индивидуальность и защита", "emoji": "<:Telegram:1465720888677896314>", "json_path": os.path.join(CATALOG_DIR, "menu_telegram.json")},
