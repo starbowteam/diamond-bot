@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 BuyAll — отдельная витрина для покупки любых товаров.
-Отдельный канал, отдельная кнопка, отдельный тикет за реальные деньги.
+Одна рабочая кнопка (половина ширины) + спейсер, чистый ephemeral-ответ.
 """
 import os
 import re
 import json
 import time as _time
-from datetime import datetime, timezone
 
 import disnake
 from disnake import ButtonStyle
@@ -39,13 +38,9 @@ BUYALL_EMBED_2_IMG = (
     "hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
 )
 
-# Ширина кнопки: PADDING с каждой стороны + 16 символов текста.
-# 22 — узкая, 26 — средняя, 30 — почти на всю ширину, 32 — максимум Discord (80 символов).
-PADDING = 30
-
-
-def _btn_label(text: str) -> str:
-    return f"{P * PADDING}{text}{P * PADDING}"
+# Рабочая кнопка «Оформить покупку» = 16 символов.
+# Спейсер справа — та же длина, чтобы Discord дал обеим по 50%.
+SPACER_LABEL = P * 16
 
 
 # ============================================================
@@ -56,19 +51,31 @@ class BuyAllView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label=_btn_label("Оформить покупку"),
+        label="Оформить покупку",
         style=ButtonStyle.gray,
         custom_id="buyall:create_ticket",
         row=0,
     )
     async def create(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        # Ephemeral-ответ: сразу defer, дальше — только edit_original_response
+        # Первое и единственное взаимодействие — defer ephemeral.
+        # Дальше всё идёт через edit_original_response, который правит
+        # именно ephemeral-сообщение, оригинальный эмбед не трогается.
         await inter.response.defer(ephemeral=True)
         await _create_buyall_ticket(inter)
 
+    @disnake.ui.button(
+        label=SPACER_LABEL,
+        style=ButtonStyle.gray,
+        custom_id="buyall:spacer",
+        disabled=True,
+        row=0,
+    )
+    async def spacer(self, button: disnake.Button, inter: disnake.MessageInteraction):
+        pass
+
 
 # ============================================================
-# СОЗДАНИЕ ТИКЕТА (полностью ephemeral, оригинал не трогаем)
+# СОЗДАНИЕ ТИКЕТА — всё в ephemeral
 # ============================================================
 async def _create_buyall_ticket(inter: disnake.MessageInteraction):
     user = inter.author
@@ -99,7 +106,9 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
         return
 
     # ---- 3. Переопределения прав ----
-    from modules.commands_tickets import _build_ticket_overwrites, TicketView, SelectView
+    from modules.commands_tickets import (
+        _build_ticket_overwrites, TicketView, SelectView,
+    )
     overwrites = _build_ticket_overwrites(guild, user)
 
     # ---- 4. Имя канала ----
@@ -107,7 +116,12 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
     raw = re.sub(r"[^a-zа-яё0-9\-_]", "", raw)
     channel_name = raw[:80] or f"order-{user.id}"
 
-    # ---- 5. Создание ----
+    # ---- 5. Уведомляем «создаю» ----
+    await inter.edit_original_response(
+        content="⏳ Создаю тикет, подожди пару секунд..."
+    )
+
+    # ---- 6. Создание канала ----
     try:
         ticket_channel = await cat.create_text_channel(
             name=channel_name, overwrites=overwrites
@@ -119,7 +133,7 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
         )
         return
 
-    # ---- 6. Шаблон заказа ----
+    # ---- 7. Шаблон заказа ----
     try:
         with open(CONFIG["INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -172,18 +186,20 @@ async def _create_buyall_ticket(inter: disnake.MessageInteraction):
     ))
     await ticket_channel.send(embed=select_embed, view=SelectView())
 
-    # ---- 7. Владелец тикета ----
+    # ---- 8. Владелец ----
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # ---- 8. Ответ пользователю (эфемерно) ----
-    await inter.edit_original_response(
-        content=(
-            f"> {user.mention}   ᶻ 𝘇 𐰁, тикет создан — {ticket_channel.mention}\n"
-            f"> Менеджер свяжется с тобой в течение **2 рабочих дней**."
-        )
-    )
+    # ---- 9. Финальный ephemeral-ответ ----
+    await inter.edit_original_response(content=(
+        f"✅ **Тикет создан**\n\n"
+        f"> **Канал:** {ticket_channel.mention}\n"
+        f"> **Статус:** ожидает менеджера\n"
+        f"> **Ответ:** в течение **2 рабочих дней**\n\n"
+        f"> Перейти в тикет: {ticket_channel.mention}\n"
+        f"> Менеджер <@&1154757071330365490> подхватит заказ."
+    ))
 
-    # ---- 9. Лог ----
+    # ---- 10. Лог ----
     try:
         await log_discord(
             title="📩 Тикет создан (BuyAll)",
