@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Pillow-рендер витрины DC-Shop.
-Крупные шрифты — Discord сжимает 1800px картинку до ~550px,
-поэтому всё должно быть в 1.5–2 раза больше «нормального».
+Крупные шрифты, обрезка названий через wrap, компактная вёрстка.
 """
 import io
 import os
@@ -178,6 +177,19 @@ def _wrap(d, text, font, max_w, max_lines=3):
     return lines or [""]
 
 
+def _wrap_ellipsis(d, text, font, max_w, max_lines=2):
+    """Обёртка с ограничением строк. Если не влезло — обрезает последнюю."""
+    lines = _wrap(d, text, font, max_w, max_lines + 1)
+    if len(lines) <= max_lines:
+        return lines
+    lines = lines[:max_lines]
+    last = lines[-1]
+    while last and _tw(d, last + "…", font) > max_w:
+        last = last[:-1]
+    lines[-1] = last + "…"
+    return lines
+
+
 def _fmt(n: int) -> str:
     try:
         return f"{int(n):,}".replace(",", " ")
@@ -338,7 +350,6 @@ def _draw_left_panel(img, d, box, user_id, balance, total_spent,
     x1, y1, x2, y2 = box
     pad = 28
 
-    # ---- Баланс ----
     bal_icon_size = 84
     ib_x = x1 + pad
     ib_y = y1 + pad
@@ -367,7 +378,6 @@ def _draw_left_panel(img, d, box, user_id, balance, total_spent,
     d.line((x1 + pad, sep_y, x2 - pad, sep_y),
            fill=STACK_HDR + (255,), width=2)
 
-    # ---- Всего потрачено ----
     sp_icon_size = 64
     sp_x = x1 + pad
     sp_y = sep_y + 26
@@ -386,7 +396,6 @@ def _draw_left_panel(img, d, box, user_id, balance, total_spent,
         sp_font = _font(sp_font.size - 2)
     d.text((sp_lbl_x, sp_y + 30), sp_str, font=sp_font, fill=GREEN)
 
-    # ---- Нижние блоки ----
     if extra_blocks:
         bb_h = 92
         bb_gap = 10
@@ -450,62 +459,66 @@ def _draw_category_tile(d, img, x, y, w, h,
                             outline=INNER_BRD + (255,), width=2)
 
     pad = 22
-    icon_size = 72
+    icon_size = 64
     ib_x = x + pad
     ib_y = y + pad
 
     icon_code = CATEGORY_FA.get(cat_key, I_CUBE)
     if active:
         _gradient_box(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                      SILVER, SILVER_DIM, alpha=60, radius=16)
+                      SILVER, SILVER_DIM, alpha=60, radius=15)
         d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                            radius=16, outline=SILVER + (180,), width=3)
+                            radius=15, outline=SILVER + (180,), width=3)
         _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-                   icon_code, 34, SILVER_HI)
+                   icon_code, 30, SILVER_HI)
     else:
         _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                    SILVER, alpha=25, radius=16)
+                    SILVER, alpha=25, radius=15)
         d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                            radius=16, outline=SILVER + (100,), width=3)
+                            radius=15, outline=SILVER + (100,), width=3)
         _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-                   icon_code, 34, SILVER)
+                   icon_code, 30, SILVER)
 
-    # Название / счётчик справа от иконки
-    name_x = ib_x + icon_size + 16
+    # Название и счётчик справа от иконки
+    name_x = ib_x + icon_size + 14
     name_w = w - (name_x - x) - pad
-    name_font = _font(26)
-    name_shown = _ellipsis(d, label, name_font, name_w)
-    d.text((name_x, ib_y + 6), name_shown, font=name_font,
-           fill=SILVER_HI if active else TEXT)
+    name_font = _font(22)
+
+    name_lines = _wrap_ellipsis(d, label, name_font, name_w, max_lines=2)
+    name_color = SILVER_HI if active else TEXT
+    for i, line in enumerate(name_lines):
+        d.text((name_x, ib_y + i * 28), line, font=name_font, fill=name_color)
 
     cnt_str = f"{count} {'товар' if count == 1 else 'товара' if 2 <= count <= 4 else 'товаров'}"
-    d.text((name_x, ib_y + 40), cnt_str, font=_font(15), fill=MUTED)
+    cnt_y = ib_y + len(name_lines) * 28 + 4
+    d.text((name_x, cnt_y), cnt_str, font=_font(13), fill=MUTED)
 
-    # Описание
-    desc_y = ib_y + icon_size + 20
-    desc_font = _font(16)
+    # Описание под иконкой на всю ширину
+    desc_y = ib_y + icon_size + 18
+    desc_font = _font(14)
     max_desc_w = w - pad * 2
-    lines = _wrap(d, description or "Категория товаров", desc_font, max_desc_w, max_lines=4)
+    lines = _wrap_ellipsis(d, description or "Категория товаров",
+                           desc_font, max_desc_w, max_lines=4)
     for i, line in enumerate(lines):
-        d.text((x + pad, desc_y + i * 22), line, font=desc_font, fill=MUTED)
+        d.text((x + pad, desc_y + i * 20), line, font=desc_font, fill=MUTED)
 
     # Футер
-    foot_y = y + h - 46
+    foot_y = y + h - 42
     d.line((x + pad, foot_y - 12, x + w - pad, foot_y - 12),
            fill=INNER_BRD + (255,), width=2)
 
     if min_price > 0:
-        ot_w = _tw(d, "от ", _font(15))
-        d.text((x + pad, foot_y + 2), "от", font=_font(15), fill=DIM)
+        ot_w = _tw(d, "от ", _font(14))
+        d.text((x + pad, foot_y + 2), "от", font=_font(14), fill=DIM)
         price_str = _fmt(min_price)
-        pf = _font(26)
+        pf = _font(24)
         d.text((x + pad + ot_w + 4, foot_y - 4), price_str, font=pf,
                fill=SILVER_HI if active else SILVER)
         pw = _tw(d, price_str, pf)
-        d.text((x + pad + ot_w + pw + 10, foot_y + 4), "DC",
-               font=_font(15), fill=SILVER)
+        d.text((x + pad + ot_w + pw + 8, foot_y + 2), "DC",
+               font=_font(14), fill=SILVER)
     else:
-        d.text((x + pad, foot_y + 2), "Пусто", font=_font(15), fill=DIM)
+        d.text((x + pad, foot_y + 2), "Пусто", font=_font(14), fill=DIM)
 
     _draw_icon(d, x + w - pad - 12, foot_y + 10, I_ARROW_L, 18, DIM)
 
@@ -525,63 +538,64 @@ def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
                             fill=INNER_BG + (255,),
                             outline=INNER_BRD + (255,), width=2)
 
-    icon_size = 72
+    icon_size = 64
     ib_x = x + pad
     ib_y = y + pad
 
     _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                SILVER, alpha=25, radius=16)
+                SILVER, alpha=25, radius=15)
     d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=16, outline=SILVER + (110,), width=3)
+                        radius=15, outline=SILVER + (110,), width=3)
     _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               item.get("fa", I_CUBE), 34, SILVER)
+               item.get("fa", I_CUBE), 30, SILVER)
 
-    # Название справа от иконки
-    name_x = ib_x + icon_size + 16
+    # Название справа от иконки, обёртка в 2 строки
+    name_x = ib_x + icon_size + 14
     name_w = w - (name_x - x) - pad
-    name_font = _font(24)
-    name_shown = _ellipsis(d, item["name"], name_font, name_w)
-    d.text((name_x, ib_y + 14), name_shown, font=name_font, fill=TEXT)
+    name_font = _font(20)
+    name_lines = _wrap_ellipsis(d, item["name"], name_font, name_w, max_lines=2)
+    for i, line in enumerate(name_lines):
+        d.text((name_x, ib_y + i * 26), line, font=name_font, fill=TEXT)
 
-    # Описание
-    desc_y = ib_y + icon_size + 18
-    desc_font = _font(16)
+    # Описание под иконкой на всю ширину
+    desc_y = ib_y + icon_size + 16
+    desc_font = _font(14)
     max_w = w - pad * 2
     desc = item.get("description") or "Описание товара появится здесь."
-    lines = _wrap(d, desc, desc_font, max_w, max_lines=3)
+    lines = _wrap_ellipsis(d, desc, desc_font, max_w, max_lines=3)
     for i, line in enumerate(lines):
-        d.text((x + pad, desc_y + i * 22), line, font=desc_font, fill=MUTED)
+        d.text((x + pad, desc_y + i * 20), line, font=desc_font, fill=MUTED)
 
     # Футер
-    foot_y = y + h - 58
+    foot_y = y + h - 54
     d.line((x + pad, foot_y - 14, x + w - pad, foot_y - 14),
            fill=INNER_BRD + (255,), width=2)
 
     price = item["price"]
     price_str = f"{_fmt(price)}"
-    pf = _font(36)
+    pf = _font(32)
     d.text((x + pad, foot_y), price_str, font=pf, fill=SILVER_HI)
     pw = _tw(d, price_str, pf)
-    d.text((x + pad + pw + 8, foot_y + pf.size - 24),
-           "DC", font=_font(16), fill=SILVER)
+    d.text((x + pad + pw + 8, foot_y + pf.size - 22),
+           "DC", font=_font(15), fill=SILVER)
 
     can_afford = balance >= price
     badge_text = "КУПИТЬ" if can_afford else "НЕ ХВАТАЕТ"
     badge_color = GREEN if can_afford else RED
     badge_bg = GREEN_BG if can_afford else RED_BG
-    bf = _font(14)
+    bf = _font(13)
     btw = _tw(d, badge_text, bf)
     bpad = 14
     bx = x + w - pad - btw - bpad * 2
-    by = foot_y + 10
-    d.rounded_rectangle((bx, by, bx + btw + bpad * 2, by + 34),
+    by = foot_y + 8
+    d.rounded_rectangle((bx, by, bx + btw + bpad * 2, by + 32),
                         radius=8, fill=badge_bg + (255,),
                         outline=badge_color + (180,), width=2)
-    d.text((bx + bpad, by + 10), badge_text, font=bf, fill=badge_color)
+    d.text((bx + bpad, by + 9), badge_text, font=bf, fill=badge_color)
 
 
 # ============================================================
-# СТРОКА ОПЕРАЦИИ (история)
+# СТРОКА ОПЕРАЦИИ
 # ============================================================
 def _draw_operation_row(d, img, x, y, w, h, op):
     d.rounded_rectangle((x, y, x + w, y + h), radius=14,
@@ -906,17 +920,19 @@ def render_detail(user_id, balance, total_spent,
 
     d.text((tx, iy + 6), category_label.upper(), font=_font(15), fill=SILVER)
 
+    # Название — обёртка до 2 строк
     name = item["name"]
-    name_font = _font(46)
-    while _tw(d, name, name_font) > tx_max and name_font.size > 24:
-        name_font = _font(name_font.size - 2)
-    d.text((tx, iy + 32), name, font=name_font, fill=TEXT)
+    name_font = _font(44)
+    name_lines = _wrap_ellipsis(d, name, name_font, tx_max, max_lines=2)
+    for i, line in enumerate(name_lines):
+        d.text((tx, iy + 32 + i * 52), line, font=name_font, fill=TEXT)
 
+    # Описание — начинается ниже имени (2 строки максимум)
     desc = item.get("description") or "Описание не указано."
     desc_font = _font(17)
     lines = _wrap(d, desc, desc_font, tx_max, max_lines=5)
     for i, line in enumerate(lines):
-        d.text((tx, iy + 100 + i * 26), line, font=desc_font, fill=TEXT_SOFT)
+        d.text((tx, iy + 145 + i * 26), line, font=desc_font, fill=TEXT_SOFT)
 
     # Панель характеристик
     spec_y = iy + icon_size + 28
@@ -946,7 +962,7 @@ def render_detail(user_id, balance, total_spent,
                     spec_x1 + (i + 1) * cell_w, spec_y + spec_h - 24),
                    fill=INNER_BRD + (255,), width=2)
 
-    # Статусная панель — ограничена по высоте 100px
+    # Статусная панель
     foot_y = spec_y + spec_h + 24
     foot_h = 100
     if can_afford:
@@ -1186,30 +1202,37 @@ def _draw_deal_card(d, img, x, y, w, h, deal, balance):
 
     d.text((tx, iy + 6), cat_label.upper(), font=_font(15), fill=SILVER)
 
-    name_font = _font(42)
-    while _tw(d, name, name_font) > tx_max and name_font.size > 24:
-        name_font = _font(name_font.size - 2)
-    d.text((tx, iy + 32), name, font=name_font, fill=TEXT)
+    # Название — обёртка до 2 строк
+    name_font = _font(40)
+    name_lines = _wrap_ellipsis(d, name, name_font, tx_max, max_lines=2)
+    for i, line in enumerate(name_lines):
+        d.text((tx, iy + 32 + i * 48), line, font=name_font, fill=TEXT)
 
+    # Описание — ниже имени
     desc = item_data.get("description") or "Товар по акции со скидкой."
     desc_font = _font(16)
+    desc_y = iy + 32 + len(name_lines) * 48 + 12
     lines = _wrap(d, desc, desc_font, tx_max, max_lines=3)
     for i, line in enumerate(lines):
-        d.text((tx, iy + 94 + i * 24), line, font=desc_font, fill=MUTED)
+        d.text((tx, desc_y + i * 24), line, font=desc_font, fill=MUTED)
 
+    # Старая цена
     orig_str = f"{_fmt(orig)} DC"
     of = _font(20)
     ow = _tw(d, orig_str, of)
-    d.text((tx, iy + 164), orig_str, font=of, fill=DIM)
-    d.line((tx, iy + 178, tx + ow, iy + 178), fill=DIM, width=2)
+    orig_y = iy + icon_size - 60
+    d.text((tx, orig_y), orig_str, font=of, fill=DIM)
+    d.line((tx, orig_y + 14, tx + ow, orig_y + 14), fill=DIM, width=2)
 
+    # Новая цена
     new_str = _fmt(new)
     nf = _font(56)
-    d.text((tx, iy + 190), new_str, font=nf, fill=RED)
+    d.text((tx, orig_y + 26), new_str, font=nf, fill=RED)
     nw = _tw(d, new_str, nf)
-    d.text((tx + nw + 10, iy + 190 + nf.size - 30), "DC",
+    d.text((tx + nw + 10, orig_y + 26 + nf.size - 30), "DC",
            font=_font(24), fill=RED)
 
+    # Статус
     can_afford = balance >= new
     status_color = GREEN if can_afford else RED
     status_text = "ХВАТАЕТ DC" if can_afford else f"НЕ ХВАТАЕТ {_fmt(new - balance)} DC"
@@ -1220,6 +1243,7 @@ def _draw_deal_card(d, img, x, y, w, h, deal, balance):
     d.ellipse((sx, sy + 6, sx + 12, sy + 18), fill=status_color + (255,))
     d.text((sx + 24, sy + 3), status_text, font=sf, fill=status_color)
 
+    # Нижняя подсказка
     hint_y = y + h - 44
     d.line((x + 36, hint_y - 12, x + w - 36, hint_y - 12),
            fill=INNER_BRD + (255,), width=2)
@@ -1357,17 +1381,20 @@ def render_success(user_id, balance, total_spent, outcome):
     tx = ix + icon_size + 30
     tx_max = rx2 - tx
 
+    # Заголовок — обёртка до 2 строк
     title = outcome.get("title", "Покупка совершена")
-    tfont = _font(34)
-    while _tw(d, title, tfont) > tx_max and tfont.size > 20:
-        tfont = _font(tfont.size - 2)
-    d.text((tx, iy + 16), title, font=tfont, fill=TEXT)
+    tfont = _font(32)
+    title_lines = _wrap_ellipsis(d, title, tfont, tx_max, max_lines=2)
+    for i, line in enumerate(title_lines):
+        d.text((tx, iy + 16 + i * 40), line, font=tfont, fill=TEXT)
 
+    # Подзаголовок — ниже заголовка
     subtitle = outcome.get("subtitle", "")
     sfont = _font(17)
     sub_lines = _wrap(d, subtitle, sfont, tx_max, max_lines=4)
+    sub_y = iy + 16 + len(title_lines) * 40 + 12
     for i, line in enumerate(sub_lines):
-        d.text((tx, iy + 64 + i * 24), line, font=sfont, fill=TEXT_SOFT)
+        d.text((tx, sub_y + i * 24), line, font=sfont, fill=TEXT_SOFT)
 
     item_line = outcome.get("item_line", "")
     if item_line:
