@@ -70,14 +70,54 @@ def _strip_emoji(s: str) -> str:
 
 def _default_cat_description(key: str) -> str:
     return {
-        "discounts": "Скидки на заказы в магазине. После покупки скидка применяется в тикете: выбери её на кнопке «Скидки» и она сама подставится в заказ.",
-        "design":    "Индивидуальный дизайн от команды Diamond. Аватарка, баннер, логотип — сделаем под твой вкус, уточним детали в тикете.",
-        "ads":       "Реклама сервера или проекта в каналах Diamond. Пост, закреп или упоминание в новостях — расскажем о тебе нашему сообществу.",
-        "roles":     "Особые роли сервера: часть выдаётся автоматически после покупки, часть — вручную в тикете. Каждая даёт свой стиль и доступ.",
-        "boosts":    "Усилители DC-заработка: ×2 к сообщениям, войсу, отзывам. Активируются сразу после покупки и работают указанное время.",
-        "casino":    "Предметы для казино: страховка ставки, ×2 выигрыш, удачный час, билет джекпота. Применяются автоматически в играх.",
-        "gifts":     "Подари Diamond Coins другому участнику — с комиссией 5%. Введи ID получателя и сумма сразу уйдёт на его баланс.",
+        "discounts": (
+            "Скидки на заказы в магазине. После покупки скидка "
+            "применяется в тикете — выбери её на кнопке «Скидки» "
+            "и она подставится в заказ."
+        ),
+        "design": (
+            "Индивидуальный дизайн от команды Diamond. Аватарка, "
+            "баннер, логотип — сделаем под твой вкус, уточним "
+            "детали в тикете."
+        ),
+        "ads": (
+            "Реклама сервера или проекта в каналах Diamond. Пост, "
+            "закреп или упоминание в новостях — расскажем о тебе "
+            "сообществу."
+        ),
+        "roles": (
+            "Особые роли сервера. Часть выдаётся автоматически "
+            "после покупки, часть — вручную в тикете. Каждая даёт "
+            "свой стиль и доступ."
+        ),
+        "boosts": (
+            "Усилители DC-заработка: ×2 к сообщениям, войсу, "
+            "отзывам. Активируются сразу после покупки и работают "
+            "указанное время."
+        ),
+        "casino": (
+            "Предметы для казино: страховка ставки, ×2 выигрыш, "
+            "удачный час, билет джекпота. Применяются автоматически "
+            "в играх."
+        ),
+        "gifts": (
+            "Подари Diamond Coins другому участнику — с комиссией 5%. "
+            "Введи ID получателя и сумма сразу уйдёт на его баланс."
+        ),
     }.get(key, "Товары этой категории — выбери что-то по вкусу и оформи в тикет.")
+
+
+def _default_item_description(cat_key: str, name: str) -> str:
+    m = {
+        "discounts": f"Скидка «{name}» действует на любой заказ в магазине. Применяешь в тикете — она автоматически вычитается из итоговой суммы.",
+        "design":    f"«{name}» делаем под тебя: стиль, цвета и композиция согласуются в тикете. Срок — до 2 рабочих дней.",
+        "ads":       f"«{name}» публикуется в каналах Diamond. Расскажем о тебе или твоём проекте нашей аудитории.",
+        "roles":     f"«{name}» — особая роль сервера. Даёт свой стиль, доступ к закрытым каналам и активностям.",
+        "boosts":    f"«{name}» активируется сразу после покупки. Работает указанное время, потом можно купить снова.",
+        "casino":    f"«{name}» — усилитель для игр в казино. Применяется автоматически в следующей партии.",
+        "gifts":     f"«{name}» — подарок DC другому участнику. Комиссия магазина 5%.",
+    }
+    return m.get(cat_key, f"«{name}» — товар из категории магазина Diamond.")
 
 
 def _get_categories_list() -> List[Dict]:
@@ -109,11 +149,14 @@ def _get_items_for_category(cat_key: str) -> List[Dict]:
     result = []
     for key, it in items.items():
         name = _strip_emoji(it.get("name", key))
+        desc = it.get("description", "") or ""
+        if not desc:
+            desc = _default_item_description(cat_key, name)
         result.append({
             "key": key,
             "name": name,
             "price": int(it.get("price", 0)),
-            "description": it.get("description", "") or "",
+            "description": desc,
             "fa": shop_render.CATEGORY_FA.get(cat_key, shop_render.I_CUBE),
         })
     result.sort(key=lambda x: x["price"])
@@ -169,9 +212,8 @@ async def _edit_screen(inter, *, buf: io.BytesIO, view):
         else:
             await inter.response.edit_message(**kwargs)
     except disnake.InteractionResponded:
-        # на всякий случай — повторный вызов после edit_message не бывает,
-        # но если что — пробуем edit_original_response
         await inter.edit_original_response(**kwargs)
+
 
 # ============================================================
 # ОТКРЫТИЕ
@@ -250,10 +292,12 @@ async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key:
     if not item:
         return await inter.response.send_message("Товар не найден.", ephemeral=True)
     cat_label = _strip_emoji(cat.get("label", cat_key))
+    name = _strip_emoji(item.get("name", item_key))
+    desc = item.get("description", "") or _default_item_description(cat_key, name)
     item_view = {
-        "name": _strip_emoji(item.get("name", item_key)),
+        "name": name,
         "price": int(item.get("price", 0)),
-        "description": item.get("description", "") or "",
+        "description": desc,
         "fa": shop_render.CATEGORY_FA.get(cat_key, shop_render.I_CUBE),
     }
     buf = shop_render.render_detail(
@@ -337,17 +381,15 @@ async def goto_history(inter: disnake.MessageInteraction):
 # ============================================================
 # ВЫБОР ОУТКОМА ПОСЛЕ ПОКУПКИ
 # ============================================================
-def _build_outcome(cat_key: str, item: dict, name: str, price: int, guild_id: int) -> dict:
-    """
-    Определяет, что показать на экране успеха.
-    Возвращает словарь для render_success.
-    """
+def _build_outcome(cat_key: str, item: dict, name: str, price: int,
+                   guild_id: int) -> dict:
     cat = (cat_key or "").lower()
     has_role = bool(item.get("role_id"))
     boost_type = item.get("boost_type")
     gift_amount = item.get("gift_amount")
     is_auto_role = (cat == "roles" and has_role)
     is_boost = bool(boost_type) and cat in ("boosts", "casino")
+    is_gift = bool(gift_amount)
 
     # --- АВТО-РОЛЬ ---
     if is_auto_role:
@@ -355,25 +397,26 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int, guild_id: in
             "kind": "role",
             "icon": shop_render.I_CHECK,
             "color": shop_render.GREEN,
+            "uid_label": "покупка · роль",
             "head_title": "Роль выдана",
             "head_sub": "проверь профиль",
             "title": "Роль на твоём аккаунте!",
             "subtitle": (
                 f"Роль «{name}» уже выдана автоматически — "
-                f"загляни в свой профиль, она уже там."
+                f"загляни в свой профиль Discord, она уже там. "
+                f"Все привилегии роли активны сразу."
             ),
             "item_line": f"{name} · {price} DC",
             "steps": [
-                "Роль выдана автоматически после оплаты",
-                "Открой свой профиль — увидишь новую роль",
-                f"Оставь отзыв в <#{REVIEW_CHANNEL_ID}> — получишь +15 DC",
-                "Возвращайся за новыми покупками в магазин",
+                "Открой свой профиль Discord — увидишь новую роль",
+                f"Оставь отзыв — за одобренный отзыв начислим +15 DC",
+                "Возвращайся в магазин — есть ещё много интересного",
             ],
             "hint": "Оставь отзыв — это даёт +15 DC на баланс",
             "show_review": True,
             "left_blocks": [
                 {
-                    "label": "Выдано автоматически",
+                    "label": "Роль выдана",
                     "value": name,
                     "icon": shop_render.I_MASKS,
                     "color": shop_render.GREEN,
@@ -387,19 +430,20 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int, guild_id: in
             "kind": "boost",
             "icon": shop_render.I_BOLT,
             "color": shop_render.PURPLE,
+            "uid_label": "покупка · буст",
             "head_title": "Активировано",
             "head_sub": "применено сразу",
             "title": "Буст уже работает!",
             "subtitle": (
-                f"«{name}» активирован автоматически — "
-                f"можешь пользоваться прямо сейчас."
+                f"«{name}» активирован автоматически — можешь "
+                f"пользоваться прямо сейчас. Действует ровно "
+                f"указанное время с момента покупки."
             ),
             "item_line": f"{name} · {price} DC",
             "steps": [
-                "Предмет активирован автоматически после оплаты",
-                "Работает без дополнительных действий",
-                "Длительность — в профиле, раздел «Активные бусты»",
-                "По окончании можно купить ещё раз",
+                "Пиши в чат — награда за 10 сообщений удвоена",
+                "Прогресс и активные бусты — в панели профиля",
+                "Когда буст закончится — можно купить ещё раз",
             ],
             "hint": "Активировано — можно пользоваться",
             "show_review": False,
@@ -418,12 +462,14 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int, guild_id: in
         "kind": "ticket",
         "icon": shop_render.I_TICKET,
         "color": shop_render.BLUE,
+        "uid_label": "покупка · товар",
         "head_title": "Товар в инвентаре",
         "head_sub": "оформи в тикет",
         "title": "Осталось оформить тикет",
         "subtitle": (
-            f"«{name}» добавлен в инвентарь. "
-            f"Оформи тикет, чтобы менеджер выдал товар вручную."
+            f"«{name}» добавлен в твой инвентарь. Оформи тикет, "
+            f"чтобы менеджер выдал товар вручную — согласуете "
+            f"стиль и детали работы."
         ),
         "item_line": f"{name} · {price} DC",
         "steps": [
@@ -462,15 +508,6 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     if not item:
         return await inter.response.send_message("Товар не найден.", ephemeral=True)
 
-    # Подарочные товары (категория gifts) — сначала спрашиваем получателя
-    if "gift_amount" in item:
-        try:
-            from modules.shop.views import ShopGiftModal
-            await inter.response.send_modal(ShopGiftModal(cat_key, item_key))
-        except Exception as e:
-            logger.warning(f"gift modal open: {e}")
-        return
-
     price = int(item.get("price", 0))
     name = _strip_emoji(item.get("name", item_key))
 
@@ -488,7 +525,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
             content="Не удалось списать DC. Попробуй ещё раз."
         )
 
-    # Авто-выдача роли, если есть role_id и категория roles
+    # Авто-выдача роли
     auto_role_given = False
     if cat_key == "roles" and item.get("role_id"):
         role = inter.guild.get_role(int(item["role_id"]))
@@ -499,7 +536,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
                     await member.add_roles(role, reason=f"Покупка в DC-Shop: {name}")
                     auto_role_given = True
                 elif member:
-                    auto_role_given = True  # роль уже была
+                    auto_role_given = True
             except Exception as e:
                 logger.warning(f"shop auto-role give {user_id}: {e}")
 
@@ -518,10 +555,9 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
         except Exception as e:
             logger.warning(f"shop boost activate {user_id}: {e}")
 
-    # Для не-авто товаров — добавляем в инвентарь
-    if not (cat_key == "roles" and item.get("role_id")):
-        if not item.get("boost_type"):
-            await add_purchase(user_id, cat_key, name)
+    # В инвентарь — только не-автороли и не-бусты
+    if not (cat_key == "roles" and item.get("role_id")) and not item.get("boost_type"):
+        await add_purchase(user_id, cat_key, name)
 
     # Хуки квестов / достижений
     try:
@@ -552,7 +588,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     await goto_success(inter, user_id, cat_key, item, name, price)
 
 
-async def goto_success(inter: disnake.MessageInteraction, user_id: int,
+async def goto_success(inter, user_id: int,
                        cat_key: str, item: dict, name: str, price: int):
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
@@ -621,8 +657,8 @@ async def handle_gift(inter: disnake.ModalInteraction,
             content="Не удалось списать DC. Попробуй позже."
         )
 
-    # Если это подарок DC — отправляем DC получателю.
-    # Иначе — добавляем товар в его инвентарь.
+    # Подарок DC → переводим получателю
+    # Иначе → добавляем товар в инвентарь получателя
     if gift_amount:
         try:
             await add_dc(
@@ -682,12 +718,13 @@ async def handle_gift(inter: disnake.ModalInteraction,
         color=0xffaa00,
     )
 
-    # Для подарка — свой экран успеха
+    # Экран успеха подарка
     if gift_amount:
         outcome = {
             "kind": "gift",
             "icon": shop_render.I_GIFT,
             "color": shop_render.GREEN,
+            "uid_label": "подарок",
             "head_title": "Подарок отправлен",
             "head_sub": "получатель уведомлён",
             "title": "Подарок доставлен!",
@@ -718,6 +755,7 @@ async def handle_gift(inter: disnake.ModalInteraction,
             "kind": "gift",
             "icon": shop_render.I_GIFT,
             "color": shop_render.GREEN,
+            "uid_label": "подарок",
             "head_title": "Подарок отправлен",
             "head_sub": "получатель уведомлён",
             "title": "Подарок доставлен!",
@@ -743,8 +781,6 @@ async def handle_gift(inter: disnake.ModalInteraction,
             ],
         }
 
-    # Для модального взаимодействия нельзя вызвать _edit_screen напрямую
-    # (там другой response), поэтому просто подредактируем текущее сообщение.
     try:
         balance = await get_user_balance(user_id)
         total_spent = _get_total_spent(user_id)
