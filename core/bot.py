@@ -457,14 +457,21 @@ async def on_ready():
         bot.add_view(PromoView())
         bot.add_view(AdminView())
 
+        # 👇 BuyAll — регистрируем view, чтобы кнопка работала после рестарта
+        from modules.commands_buyall import BuyAllView
+        bot.add_view(BuyAllView())
+
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
         bot.loop.create_task(send_work_panel())
         bot.loop.create_task(keep_voice_alive())
-        bot.loop.create_task(send_actions_panel())
         bot.loop.create_task(send_staff_panels())
+
+        # 👇 BuyAll — отдельная витрина со своей кнопкой
+        from modules.commands_buyall import send_buyall_panel
+        bot.loop.create_task(send_buyall_panel())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         counts = {}
