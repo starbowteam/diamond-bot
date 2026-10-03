@@ -25,6 +25,7 @@ from modules.tickets_render import (
     render_policy,
     render_rating_step1,
     render_rating_step2,
+    render_review_only,
 )
 
 
@@ -44,13 +45,18 @@ EMOJI_OFF = PartialEmoji(name="OffTicket", id=1539657125716824185)
 # ХЕЛПЕРЫ
 # ============================================================
 def _btn_label(text: str, total: int = _BTN_LABEL_MAX) -> str:
-    """Центрирует текст через hair spaces, гарантированно ≤ total."""
+    """
+    Центрирует текст через hair spaces, гарантированно ≤ total.
+    Справа — на 4 пробела меньше (по просьбе), чтобы кнопка
+    визуально не уезжала влево.
+    """
     text = text.strip()
     if len(text) >= total:
         return text[:total]
     padding = total - len(text)
     left = padding // 2
     right = padding - left
+    right = max(right - 4, 0)   # 👈 убираем 4 с конца
     return f"{P * left}{text}{P * right}"
 
 
@@ -62,10 +68,7 @@ def _clear_ticket_owner(channel: disnake.TextChannel):
 
 async def _send_image_to_channel(inter: disnake.MessageInteraction,
                                   buf, filename: str, view: View = None):
-    """
-    Постит картинку В КАНАЛ (не эфемерно).
-    Кнопки видны всем, права проверяются в callback.
-    """
+    """Постит картинку В КАНАЛ (не эфемерно). Кнопки видны всем."""
     try:
         file = disnake.File(buf, filename=filename)
         embed = disnake.Embed(color=6776679)
@@ -198,7 +201,6 @@ class RatingStep1View(View):
     async def open_rating(self, button: Button, inter: disnake.MessageInteraction):
         channel = inter.channel
 
-        # Проверка: только владелец тикета
         owner_id = get_ticket_owner(channel.id)
         if not owner_id:
             return await inter.response.send_message(
@@ -290,7 +292,6 @@ class RatingStarsModal(Modal):
 
         await inter.response.defer(ephemeral=True)
 
-        # Постим step2 В КАНАЛ
         try:
             buf = await asyncio.to_thread(
                 render_rating_step2,
@@ -300,7 +301,7 @@ class RatingStarsModal(Modal):
                 False,
             )
             fname = f"rating_step2_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            await _send_image_to_channel(inter, buf, fname, RatingStep2View())
+            await _send_image_to_channel(inter, buf, fname, RatingFinishView())
         except Exception as e:
             logger.exception(f"rating_step2 render: {e}")
 
@@ -312,22 +313,26 @@ class RatingStarsModal(Modal):
 
 
 # ============================================================
-# ШАГ 2: ЗАВЕРШИТЬ ЗАКАЗ
+# ФИНАЛЬНАЯ КНОПКА «Завершить заказ»
 # ============================================================
-class RatingStep2View(View):
+class RatingFinishView(View):
+    """
+    Кнопка «Завершить заказ» — используется и для step2 (после оценки),
+    и для review_only (DC-тикеты).
+    """
     def __init__(self):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
         label=_btn_label("Завершить заказ"),
         style=ButtonStyle.gray,
-        custom_id="rating_step2:finish",
+        custom_id="review:finish",
         emoji=EMOJI_OFF,
     )
     async def finish(self, button: Button, inter: disnake.MessageInteraction):
         channel = inter.channel
 
-        # Проверка: админ или назначенный менеджер
+        # Права: админ или назначенный менеджер
         manager_id = get_ticket_manager(channel.id)
         is_admin = inter.author.id == ADMIN_OVERRIDE_ID
 
@@ -357,7 +362,7 @@ class RatingStep2View(View):
 # ГЛАВНЫЙ ФЛОУ
 # ============================================================
 async def show_rating_flow(inter: disnake.MessageInteraction):
-    """Показывает step1 или step2 в зависимости от статуса оценки."""
+    """Показывает step1 / step2 / review_only в зависимости от статуса."""
     channel = inter.channel
 
     if not inter.response.is_done():
@@ -373,7 +378,21 @@ async def show_rating_flow(inter: disnake.MessageInteraction):
     manager_id = get_ticket_manager(channel.id)
     existing = get_ticket_review(channel.id)
 
-    # Оценки нет → step1
+    # Нет менеджера И нет оценки → просто отзыв (review_only)
+    if not manager_id and not existing:
+        has_review = await _has_review_in_channel(channel, owner_id)
+        try:
+            buf = await asyncio.to_thread(
+                render_review_only, owner_id, has_review,
+            )
+            fname = f"review_only_{int(datetime.now(timezone.utc).timestamp())}.png"
+            await _send_image_to_channel(inter, buf, fname, RatingFinishView())
+        except Exception as e:
+            logger.exception(f"review_only render: {e}")
+            await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
+        return
+
+    # Оценки нет, но менеджер есть → step1
     if not existing:
         manager_name = "—"
         if manager_id:
@@ -413,16 +432,17 @@ async def show_rating_flow(inter: disnake.MessageInteraction):
             has_review,
         )
         fname = f"rating_step2_{int(datetime.now(timezone.utc).timestamp())}.png"
-        await _send_image_to_channel(inter, buf, fname, RatingStep2View())
+        await _send_image_to_channel(inter, buf, fname, RatingFinishView())
     except Exception as e:
         logger.exception(f"rating_step2 render: {e}")
         await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
 
 
 # ============================================================
-# DC-ТИКЕТ: ТОЛЬКО ОТЗЫВ
+# DC-ТИКЕТ: ТОЛЬКО ОТЗЫВ (с панелью!)
 # ============================================================
 async def show_dc_close(inter: disnake.MessageInteraction):
+    """Для DC-тикетов — показываем панель «оставь отзыв» (без оценки)."""
     channel = inter.channel
 
     if not inter.response.is_done():
@@ -436,15 +456,14 @@ async def show_dc_close(inter: disnake.MessageInteraction):
         return await _ephemeral(inter, "❌ У тикета нет владельца.")
 
     has_review = await _has_review_in_channel(channel, owner_id)
-    if not has_review:
-        return await _ephemeral(
-            inter,
-            f"❌ **Сначала оставь отзыв в канале** `отзывы`.\n"
-            f"> После этого сможешь завершить заказ.\n"
-            f"> За одобренный отзыв начислим **+15 DC**.",
-        )
 
-    await _check_and_run_close(inter)
+    try:
+        buf = await asyncio.to_thread(render_review_only, owner_id, has_review)
+        fname = f"review_only_{int(datetime.now(timezone.utc).timestamp())}.png"
+        await _send_image_to_channel(inter, buf, fname, RatingFinishView())
+    except Exception as e:
+        logger.exception(f"show_dc_close render: {e}")
+        await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
 
 
 # ============================================================
