@@ -1,3 +1,4 @@
+# modules/commands_profile.py
 # -*- coding: utf-8 -*-
 import os
 import json
@@ -65,6 +66,56 @@ IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
 
+# ============================================================
+# ХЕЛПЕРЫ ДЛЯ ОТПРАВКИ ЭФЕМЕРНЫХ ОТВЕТОВ
+# ============================================================
+async def _send_ephemeral_file(inter: disnake.MessageInteraction,
+                                buf, filename: str,
+                                error_prefix: str = "❌ Ошибка"):
+    """
+    Отправляет картинку отдельным эфемерным сообщением.
+    НЕ трогает исходное сообщение (профиль остаётся нетронутым).
+    """
+    try:
+        file = disnake.File(buf, filename=filename)
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{filename}")
+
+        if inter.response.is_done():
+            await inter.followup.send(embed=embed, file=file, ephemeral=True)
+        else:
+            await inter.response.send_message(embed=embed, file=file, ephemeral=True)
+    except Exception as e:
+        logger.exception(f"_send_ephemeral_file: {e}")
+        try:
+            if inter.response.is_done():
+                await inter.followup.send(
+                    content=f"{error_prefix}: `{str(e)[:200]}`",
+                    ephemeral=True,
+                )
+            else:
+                await inter.response.send_message(
+                    content=f"{error_prefix}: `{str(e)[:200]}`",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
+
+
+async def _send_ephemeral_text(inter: disnake.MessageInteraction, content: str):
+    """Отправляет текст отдельным эфемерным сообщением."""
+    try:
+        if inter.response.is_done():
+            await inter.followup.send(content=content, ephemeral=True)
+        else:
+            await inter.response.send_message(content=content, ephemeral=True)
+    except Exception as e:
+        logger.warning(f"_send_ephemeral_text: {e}")
+
+
+# ============================================================
+# VIEW КАРТОЧКИ ПРОФИЛЯ (кнопки)
+# ============================================================
 class ProfileCardView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -76,11 +127,13 @@ class ProfileCardView(View):
         emoji=PartialEmoji(name="prize", id=1539657202170859561)
     )
     async def inv_btn(self, button, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
+        # 👇 ack без создания "thinking" в исходном сообщении
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
 
         purchases = await get_user_purchases(inter.author.id, only_unused=True)
-
-        # исключаем скидки-промо — их оформлять в тикет не нужно
         filtered = [p for p in purchases if p.get("type") != "discounts"]
 
         try:
@@ -107,16 +160,11 @@ class ProfileCardView(View):
                 inter.author.id, balance, total_spent, filtered,
             )
             fname = f"inv_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            file = disnake.File(buf, filename=fname)
-            embed = disnake.Embed(color=6776679)
-            embed.set_image(url=f"attachment://{fname}")
-            await inter.edit_original_response(content=None, embed=embed, file=file)
+            # 👇 ОТДЕЛЬНОЕ ЭФЕМЕРНОЕ СООБЩЕНИЕ, профиль не трогаем
+            await _send_ephemeral_file(inter, buf, fname)
         except Exception as e:
             logger.exception(f"inv_btn render: {e}")
-            try:
-                await inter.edit_original_response(content=f"❌ Ошибка: `{str(e)[:200]}`")
-            except Exception:
-                pass
+            await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
     @disnake.ui.button(
         label=f"{P}Кастомные роли",
@@ -125,7 +173,10 @@ class ProfileCardView(View):
         emoji=PartialEmoji(name="image", id=1550869363266027641)
     )
     async def roles_btn(self, button, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
 
         guild = inter.guild
         member = inter.author
@@ -186,16 +237,10 @@ class ProfileCardView(View):
                 inter.author.id, balance, total_spent, roles_list,
             )
             fname = f"roles_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            file = disnake.File(buf, filename=fname)
-            embed = disnake.Embed(color=6776679)
-            embed.set_image(url=f"attachment://{fname}")
-            await inter.edit_original_response(content=None, embed=embed, file=file)
+            await _send_ephemeral_file(inter, buf, fname)
         except Exception as e:
             logger.exception(f"roles_btn render: {e}")
-            try:
-                await inter.edit_original_response(content=f"❌ Ошибка: `{str(e)[:200]}`")
-            except Exception:
-                pass
+            await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
     @disnake.ui.button(
         label=f"{P}О валюте",
@@ -204,7 +249,10 @@ class ProfileCardView(View):
         emoji=PartialEmoji(name="pravil", id=1544388874497687622)
     )
     async def coin_btn(self, button, inter: disnake.MessageInteraction):
-        await inter.response.defer(ephemeral=True)
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
 
         try:
             from modules.dc import get_user_balance
@@ -230,18 +278,15 @@ class ProfileCardView(View):
                 inter.author.id, balance, total_spent,
             )
             fname = f"coin_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            file = disnake.File(buf, filename=fname)
-            embed = disnake.Embed(color=6776679)
-            embed.set_image(url=f"attachment://{fname}")
-            await inter.edit_original_response(content=None, embed=embed, file=file)
+            await _send_ephemeral_file(inter, buf, fname)
         except Exception as e:
             logger.exception(f"coin_btn render: {e}")
-            try:
-                await inter.edit_original_response(content=f"❌ Ошибка: `{str(e)[:200]}`")
-            except Exception:
-                pass
+            await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
 
+# ============================================================
+# КАРТОЧКА ПРОФИЛЯ
+# ============================================================
 async def show_profile_card(
     inter: disnake.MessageInteraction,
     user: disnake.Member,
@@ -284,9 +329,6 @@ async def show_profile_card(
             history,
         )
 
-        # 👇 УНИКАЛЬНОЕ имя файла каждый раз + чистка старых вложений.
-        # Без этого Discord оставлял прошлую картинку в сообщении, и профиль
-        # выглядел «закешированным»: менялся клан, баланс — а картинка старая.
         filename = f"profile_{user.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
         file = disnake.File(buf, filename=filename)
 
@@ -297,7 +339,7 @@ async def show_profile_card(
 
         await inter.edit_original_response(
             content=None, embed=embed, file=file,
-            attachments=[],          # 👈 выкидываем старые вложения из сообщения
+            attachments=[],
             view=view
         )
 
