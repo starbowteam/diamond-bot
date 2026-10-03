@@ -42,7 +42,7 @@ from modules.ticket_rating import (
     show_dc_close,
     show_policy,
     RatingStep1View,
-    RatingStep2View,
+    RatingFinishView,   # ← переименовано
 )
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
