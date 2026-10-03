@@ -61,7 +61,7 @@ QUESTS: Dict[str, dict] = {
     },
     "voice_10h": {
         "title": "Марафонец",
-        "desc": "10 часов в голосовых каналах за неделю",
+        "desc": "10 часов в ГЧ",
         "reward": 250, "goal": 36000, "type": "weekly",
         "unit": "секунд", "icon": "fa-headphones",
     },
@@ -99,7 +99,7 @@ QUESTS: Dict[str, dict] = {
     },
     "top_contributor": {
         "title": "Лидер клана",
-        "desc": "Стань топ-1 по вкладу в клане хотя бы раз",
+        "desc": "Стань топ-1 клана",
         "reward": 400, "goal": 1, "type": "once",
         "unit": "раз", "icon": "fa-crown",
     },
