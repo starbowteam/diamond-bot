@@ -2,8 +2,8 @@
 """
 Pillow-рендер для системы тикетов:
   · render_policy       — политика магазина
-  · render_rating_step1 — оценка менеджера + напоминание об отзыве
-  · render_rating_step2 — оценка поставлена + ждём отзыв
+  · render_rating_step1 — оценка менеджера (без упоминания отзыва)
+  · render_rating_step2 — отзыв в канале (без упоминания оценки)
 1800×1000, стиль 1:1 с остальными рендерами.
 """
 import io
@@ -93,24 +93,19 @@ EMBED_COLOR = 0x2b2d31
 # ============================================================
 I_GEM        = 0xf3a5
 I_STAR       = 0xf005
-I_STAR_HALF  = 0xf5c0
-I_COMMENT    = 0xf075
 I_COMMENTS   = 0xf086
 I_CLOCK      = 0xf017
 I_CHECK      = 0xf00c
 I_BAN        = 0xf05e
 I_ROTATE     = 0xf2ea
 I_INFO       = 0xf05a
-I_EXCL       = 0xf06a
 I_BOX        = 0xf466
-I_USER       = 0xf007
 I_HEAD       = 0xf590
-I_BALANCE    = 0xf24e
 I_SHIELD     = 0xf3ed
 I_RECEIPT    = 0xf543
 I_GIFT       = 0xf06b
 I_HAND       = 0xf4c0
-I_FIRE       = 0xf06d
+I_HAND_PTR   = 0xf25a
 
 
 # ============================================================
@@ -148,13 +143,6 @@ def _wrap(d, text, font, max_w, max_lines=4):
     if cur and len(lines) < max_lines:
         lines.append(cur)
     return lines or [""]
-
-
-def _fmt(n) -> str:
-    try:
-        return f"{int(n):,}".replace(",", " ")
-    except Exception:
-        return str(n)
 
 
 def _draw_icon(d, cx, cy, code, size, color):
@@ -226,7 +214,7 @@ M = 14
 PAD_X = 40
 PAD_Y = 40
 
-REVIEW_CHANNEL_NAME = "💎・отзывы"
+REVIEW_CHANNEL_NAME = "отзывы"
 
 
 def _base_canvas(user_id: int, uid_label: str, status_label: str):
@@ -314,12 +302,10 @@ def _draw_left_block(img, d, x, y, w, h, color, icon_code, label, value):
 
 
 def _draw_left_panel(img, d, box, top_icon, top_label, top_value, blocks: List[Dict]):
-    """Левая панель: верхний блок + N инфо-блоков снизу."""
     _draw_stack_panel(img, d, box, radius=22)
     x1, y1, x2, y2 = box
     pad = 28
 
-    # Верхний блок
     bal_icon_size = 84
     ib_x = x1 + pad
     ib_y = y1 + pad
@@ -364,7 +350,7 @@ def _now_msk_str() -> str:
 
 
 # ============================================================
-# ЭКРАН 1: ПОЛИТИКА
+# ПОЛИТИКА
 # ============================================================
 def _draw_policy_block(img, d, x, y, w, h, color, icon_code, title, text):
     border = tuple(min(int(c + (255 - c) * 0.25), 255) for c in color)
@@ -434,37 +420,21 @@ def render_policy(user_id: int) -> io.BytesIO:
     item_h = (items_bottom - items_y - gap_item * (n - 1)) // n
 
     rules = [
-        {
-            "color": BLUE,
-            "icon": I_CLOCK,
-            "title": "Сроки обработки заказа",
-            "text": "Максимальный срок — 2 рабочих дня с момента подтверждения оплаты. "
-                    "В большинстве случаев товар выдаётся в течение 3 часов. "
-                    "Часовой пояс продавца — МСК+5 (UTC+8).",
-        },
-        {
-            "color": RED,
-            "icon": I_ROTATE,
-            "title": "Возврат средств",
-            "text": "Если вы отказываетесь после оплаты — возврат 75% от суммы. "
-                    "25% удерживаются для покрытия комиссий платёжных систем и обработки.",
-        },
-        {
-            "color": GOLD,
-            "icon": I_BAN,
-            "title": "Стоп-лист",
-            "text": "Массовые пинги персонала, продавца или менеджеров, "
-                    "а также агрессивное поведение переводят тикет в «стоп-лист». "
-                    "Такие заказы обрабатываются в последнюю очередь.",
-        },
-        {
-            "color": GREEN,
-            "icon": I_CHECK,
-            "title": "Подтверждение оплаты",
-            "text": "Для подтверждения необходимо прикрепить чек оплаты и указать, "
-                    "куда перевод был сделан. После проверки менеджер подтвердит оплату — "
-                    "и продавец начнёт работу.",
-        },
+        {"color": BLUE,  "icon": I_CLOCK,  "title": "Сроки обработки заказа",
+         "text": "Максимальный срок — 2 рабочих дня с момента подтверждения оплаты. "
+                 "В большинстве случаев товар выдаётся в течение 3 часов. "
+                 "Часовой пояс продавца — МСК+5 (UTC+8)."},
+        {"color": RED,   "icon": I_ROTATE, "title": "Возврат средств",
+         "text": "Если вы отказываетесь после оплаты — возврат 75% от суммы. "
+                 "25% удерживаются для покрытия комиссий платёжных систем и обработки."},
+        {"color": GOLD,  "icon": I_BAN,    "title": "Стоп-лист",
+         "text": "Массовые пинги персонала, продавца или менеджеров, "
+                 "а также агрессивное поведение переводят тикет в «стоп-лист». "
+                 "Такие заказы обрабатываются в последнюю очередь."},
+        {"color": GREEN, "icon": I_CHECK,  "title": "Подтверждение оплаты",
+         "text": "Для подтверждения необходимо прикрепить чек оплаты и указать, "
+                 "куда перевод был сделан. После проверки менеджер подтвердит оплату — "
+                 "и продавец начнёт работу."},
     ]
 
     for i, rule in enumerate(rules):
@@ -472,7 +442,6 @@ def render_policy(user_id: int) -> io.BytesIO:
         _draw_policy_block(img, d, rx1, cy, rx2 - rx1, item_h,
                            rule["color"], rule["icon"], rule["title"], rule["text"])
 
-    # Нижняя плашка-предупреждение
     hint_h = 48
     hint_y = items_bottom + 12
     _alpha_fill(img, (rx1, hint_y, rx2, hint_y + hint_h), GOLD, alpha=22, radius=11)
@@ -492,20 +461,15 @@ def render_policy(user_id: int) -> io.BytesIO:
 
 
 # ============================================================
-# ЭКРАН 2: ОЦЕНКА МЕНЕДЖЕРА (STEP 1)
+# ШАГ 1: ОЦЕНКА МЕНЕДЖЕРА (без отзыва)
 # ============================================================
-def _draw_star(img, d, cx, cy, size, color, filled=True):
-    """Рисует 5-конечную звезду через FA-иконку."""
-    _draw_icon(d, cx, cy, I_STAR, size, color if filled else DARK)
-
-
 def render_rating_step1(
     user_id: int,
     manager_name: str,
     product_name: str,
     order_id: int,
 ) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "оценка · менеджер", f"заказ #{order_id}")
+    img, d = _base_canvas(user_id, "оценка · менеджер", "шаг 1 из 2")
 
     body_y = 140
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
@@ -521,9 +485,9 @@ def render_rating_step1(
         img, d, (left_x1, body_y, left_x2, body_y + body_h),
         top_icon=I_HEAD, top_label="Менеджер", top_value=f"@{manager_name}",
         blocks=[
-            {"color": SILVER, "icon": I_BOX,    "label": "Товар",          "value": product_name},
-            {"color": GREEN,  "icon": I_CHECK,  "label": "Статус заказа",  "value": "Выполнен"},
-            {"color": BLUE,   "icon": I_STAR,   "label": "Оценка",         "value": "Не поставлена"},
+            {"color": SILVER, "icon": I_BOX,    "label": "Товар",         "value": product_name},
+            {"color": GREEN,  "icon": I_CHECK,  "label": "Статус заказа", "value": "Выполнен"},
+            {"color": BLUE,   "icon": I_CLOCK,  "label": "Номер заказа",  "value": f"#{order_id}"},
         ],
     )
 
@@ -534,10 +498,10 @@ def render_rating_step1(
     _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Оцени работу", "шаг 1 из 2")
 
-    # ── HERO: 5 звёзд + текст ──
+    # HERO — весь блок
     hero_y1 = body_y + 118
-    hero_h = 340
-    hero_y2 = hero_y1 + hero_h
+    hero_y2 = body_y + body_h - 22
+    hero_h = hero_y2 - hero_y1
 
     _gradient_box(img, (rx1, hero_y1, rx2, hero_y2),
                   GOLD, GOLD, alpha=18, radius=20)
@@ -545,40 +509,50 @@ def render_rating_step1(
                         radius=20, outline=GOLD + (180,), width=3)
 
     cx = (rx1 + rx2) // 2
+    cy = (hero_y1 + hero_y2) // 2
 
     # TAG
-    tag_text = "ШАГ 1 · ОЦЕНКА МЕНЕДЖЕРА"
+    tag_text = "ОЦЕНКА МЕНЕДЖЕРА"
     tag_font = _font(14)
-    tag_w = _tw(d, tag_text, tag_font) + 80
-    tag_h = 36
+    tag_text_w = _tw(d, tag_text, tag_font)
+    tag_pad = 30
+    icon_size_tag = 16
+    gap_icon_text = 12
+    tag_w = tag_text_w + tag_pad * 2 + icon_size_tag + gap_icon_text
+    tag_h = 38
     tag_x = cx - tag_w // 2
-    tag_y = hero_y1 + 24
+    tag_y = cy - 180
 
     _alpha_fill(img, (tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
                 GOLD, alpha=55, radius=tag_h // 2)
     d.rounded_rectangle((tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
                         radius=tag_h // 2, outline=GOLD + (200,), width=2)
-    _draw_icon(d, tag_x + 24, tag_y + tag_h // 2, I_STAR, 15, GOLD)
-    d.text((tag_x + 44, tag_y + tag_h // 2), tag_text,
-           font=tag_font, fill=GOLD, anchor="lm")
+
+    icon_cx = tag_x + tag_pad + icon_size_tag // 2
+    icon_cy = tag_y + tag_h // 2
+    _draw_icon(d, icon_cx, icon_cy, I_STAR, icon_size_tag, GOLD)
+
+    d.text((icon_cx + icon_size_tag // 2 + gap_icon_text, icon_cy),
+           tag_text, font=tag_font, fill=GOLD, anchor="lm")
 
     # Заголовок
     title_text = "Как прошёл заказ?"
-    title_font = _font(28)
+    title_font = _font(32)
     tw = _tw(d, title_text, title_font)
-    d.text((cx - tw // 2, tag_y + tag_h + 14), title_text,
+    d.text((cx - tw // 2, tag_y + tag_h + 22), title_text,
            font=title_font, fill=TEXT)
 
+    # Подзаголовок
     sub_text = "Твоя оценка пойдёт в рейтинг менеджера"
-    sub_font = _font(15)
+    sub_font = _font(16)
     sw = _tw(d, sub_text, sub_font)
-    d.text((cx - sw // 2, tag_y + tag_h + 52), sub_text,
+    d.text((cx - sw // 2, tag_y + tag_h + 66), sub_text,
            font=sub_font, fill=MUTED)
 
     # 5 звёзд
-    star_size = 100
-    star_gap = 30
-    star_y = tag_y + tag_h + 100
+    star_size = 110
+    star_gap = 32
+    star_y = tag_y + tag_h + 130
     total_stars_w = star_size * 5 + star_gap * 4
     star_x_start = cx - total_stars_w // 2
 
@@ -587,67 +561,37 @@ def render_rating_step1(
         sy1 = star_y
 
         _gradient_box(img, (sx1, sy1, sx1 + star_size, sy1 + star_size),
-                      GOLD, GOLD, alpha=45, radius=22)
+                      GOLD, GOLD, alpha=50, radius=24)
         d.rounded_rectangle((sx1, sy1, sx1 + star_size, sy1 + star_size),
-                            radius=22, outline=GOLD + (220,), width=3)
-        _draw_icon(d, sx1 + star_size // 2, sy1 + star_size // 2 - 6,
-                   I_STAR, 46, GOLD)
+                            radius=24, outline=GOLD + (220,), width=3)
+        _draw_icon(d, sx1 + star_size // 2, sy1 + star_size // 2 - 8,
+                   I_STAR, 52, GOLD)
 
         num_text = str(i + 1)
-        nw = _tw(d, num_text, _font(14))
-        d.text((sx1 + star_size // 2 - nw // 2, sy1 + star_size - 24),
-               num_text, font=_font(14), fill=GOLD)
+        nw = _tw(d, num_text, _font(16))
+        d.text((sx1 + star_size // 2 - nw // 2, sy1 + star_size - 28),
+               num_text, font=_font(16), fill=GOLD)
 
-    hint_text = "Нажми на кнопку ниже — она откроет форму оценки"
-    hint_font = _font(13)
-    hw = _tw(d, hint_text, hint_font)
-    d.text((cx - hw // 2, hero_y2 - 32), hint_text,
-           font=hint_font, fill=DIM)
+    # Подсказка внизу
+    hint_y = star_y + star_size + 26
+    hint_text = "Нажми на кнопку ниже — откроется форма оценки"
+    hint_font = _font(15)
+    hint_text_w = _tw(d, hint_text, hint_font)
+    hint_icon_size = 18
+    hint_gap = 12
+    hint_w = hint_text_w + hint_icon_size + hint_gap + 40
+    hint_h = 40
+    hint_x = cx - hint_w // 2
 
-    # ── ПЛАШКА: ОТЗЫВ ──
-    rev_y1 = hero_y2 + 14
-    rev_y2 = body_y + body_h - 22
-    rev_h = rev_y2 - rev_y1
+    _alpha_fill(img, (hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
+                GOLD, alpha=25, radius=hint_h // 2)
+    d.rounded_rectangle((hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
+                        radius=hint_h // 2, outline=GOLD + (130,), width=2)
+    _draw_icon(d, hint_x + 20, hint_y + hint_h // 2, I_HAND_PTR, hint_icon_size, GOLD)
+    d.text((hint_x + 20 + hint_icon_size // 2 + hint_gap, hint_y + hint_h // 2),
+           hint_text, font=hint_font, fill=TEXT_SOFT, anchor="lm")
 
-    _gradient_box(img, (rx1, rev_y1, rx2, rev_y2),
-                  PURPLE, PURPLE, alpha=22, radius=18)
-    d.rounded_rectangle((rx1, rev_y1, rx2, rev_y2),
-                        radius=18, outline=PURPLE + (200,), width=3)
-
-    # Иконка
-    icon_size = 80
-    ib_x = rx1 + 26
-    ib_y = rev_y1 + (rev_h - icon_size) // 2
-
-    _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                PURPLE, alpha=55, radius=20)
-    d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=20, outline=PURPLE + (220,), width=3)
-    _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               I_COMMENTS, 38, PURPLE)
-
-    # Текст
-    tx = ib_x + icon_size + 22
-    d.text((tx, rev_y1 + 18), "ШАГ 2 · ОСТАВЬ ОТЗЫВ В КАНАЛЕ",
-           font=_font(14), fill=PURPLE)
-
-    # Канал
-    gem_size = 26
-    gem_x = tx
-    gem_y = rev_y1 + 44
-    _alpha_fill(img, (gem_x, gem_y, gem_x + gem_size, gem_y + gem_size),
-                PURPLE, alpha=70, radius=8)
-    _draw_icon(d, gem_x + gem_size // 2, gem_y + gem_size // 2 + 1,
-               I_GEM, 14, PURPLE)
-
-    d.text((gem_x + gem_size + 10, gem_y + 2),
-           REVIEW_CHANNEL_NAME, font=_font(22), fill=TEXT)
-
-    # Пояснение
-    hint2 = "За одобренный отзыв — +15 DC · без отзыва тикет не закрыть"
-    d.text((tx, rev_y1 + 86), hint2, font=_font(14), fill=TEXT_SOFT)
-
-    _draw_footer(d, f"Оценка менеджера · данные на {_now_msk_str()} МСК", "тикет · оценка")
+    _draw_footer(d, f"Оценка менеджера · данные на {_now_msk_str()} МСК", "оценка · шаг 1")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
@@ -656,36 +600,15 @@ def render_rating_step1(
 
 
 # ============================================================
-# ЭКРАН 3: ОЦЕНКА ПОСТАВЛЕНА (STEP 2)
+# ШАГ 2: ОТЗЫВ В КАНАЛЕ (без упоминания оценки)
 # ============================================================
-def _draw_star_filled_row(img, d, x, y, count: int, total: int = 5):
-    """Ряд из 5 звёзд — filled/unfilled."""
-    star_size = 42
-    gap = 10
-    for i in range(total):
-        sx = x + i * (star_size + gap)
-        if i < count:
-            _alpha_fill(img, (sx, y, sx + star_size, sy + star_size) if False else (sx, y, sx + star_size, y + star_size),
-                        GOLD, alpha=55, radius=12)
-            d.rounded_rectangle((sx, y, sx + star_size, y + star_size),
-                                radius=12, outline=GOLD + (220,), width=2)
-            _draw_icon(d, sx + star_size // 2, y + star_size // 2 + 1,
-                       I_STAR, 22, GOLD)
-        else:
-            d.rounded_rectangle((sx, y, sx + star_size, y + star_size),
-                                radius=12, fill=INNER_BG + (255,),
-                                outline=INNER_BRD + (255,), width=2)
-            _draw_icon(d, sx + star_size // 2, y + star_size // 2 + 1,
-                       I_STAR, 22, DARK)
-
-
 def render_rating_step2(
     user_id: int,
     manager_name: str,
     rating: int,
     has_review: bool = False,
 ) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "оценка · менеджер", "оценка поставлена")
+    img, d = _base_canvas(user_id, "отзыв · канал", "шаг 2 из 2")
 
     body_y = 140
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
@@ -699,11 +622,16 @@ def render_rating_step2(
 
     _draw_left_panel(
         img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        top_icon=I_HEAD, top_label="Менеджер", top_value=f"@{manager_name}",
+        top_icon=I_CHECK if has_review else I_COMMENTS,
+        top_label="Статус",
+        top_value="Отзыв оставлен" if has_review else "Ждём отзыв",
         blocks=[
-            {"color": GREEN,  "icon": I_STAR,    "label": "Оценка",         "value": f"{rating} / 5 ⭐"},
-            {"color": PURPLE, "icon": I_COMMENTS,"label": "Следующий шаг",  "value": "Отзыв в канале"},
-            {"color": GOLD,   "icon": I_GIFT,    "label": "Бонус за отзыв", "value": "+15 DC"},
+            {"color": PURPLE, "icon": I_COMMENTS, "label": "Следующий шаг", "value": "Отзыв в канале"},
+            {"color": GOLD,   "icon": I_GIFT,     "label": "Бонус за отзыв", "value": "+15 DC"},
+            {"color": GREEN if has_review else SILVER,
+             "icon": I_CHECK,
+             "label": "Проверка отзыва",
+             "value": "Готово" if has_review else "Ожидание"},
         ],
     )
 
@@ -712,105 +640,121 @@ def render_rating_step2(
     rx2 = right_x2 - 30
 
     _draw_right_head(d, rx1, body_y + 22, rx2,
-                     "Остался последний шаг", "без отзыва не закрыть")
+                     "Оставь отзыв", "шаг 2 из 2")
 
-    # ── HERO: оценка сохранена ──
+    # HERO
     hero_y1 = body_y + 118
-    hero_h = 220
-    hero_y2 = hero_y1 + hero_h
+    hero_y2 = body_y + body_h - 22
+    hero_h = hero_y2 - hero_y1
 
+    main_color = GREEN if has_review else PURPLE
     _gradient_box(img, (rx1, hero_y1, rx2, hero_y2),
-                  GREEN, GREEN, alpha=18, radius=20)
+                  main_color, main_color, alpha=18, radius=20)
     d.rounded_rectangle((rx1, hero_y1, rx2, hero_y2),
-                        radius=20, outline=GREEN + (200,), width=3)
+                        radius=20, outline=main_color + (200,), width=3)
 
-    icon_size = 100
-    ib_x = rx1 + 28
-    ib_y = hero_y1 + (hero_h - icon_size) // 2
+    cx = (rx1 + rx2) // 2
+    cy = (hero_y1 + hero_y2) // 2
 
-    _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                GREEN, alpha=55, radius=22)
-    d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=22, outline=GREEN + (230,), width=3)
-    _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               I_CHECK, 48, GREEN)
+    # TAG
+    tag_text = "ОТЗЫВ ОСТАВЛЕН" if has_review else "ФИНАЛЬНЫЙ ШАГ"
+    tag_font = _font(14)
+    tag_text_w = _tw(d, tag_text, tag_font)
+    tag_pad = 30
+    icon_size_tag = 16
+    gap_icon_text = 12
+    tag_w = tag_text_w + tag_pad * 2 + icon_size_tag + gap_icon_text
+    tag_h = 38
+    tag_x = cx - tag_w // 2
+    tag_y = cy - 190
 
-    tx = ib_x + icon_size + 26
-    d.text((tx, hero_y1 + 30), "ОЦЕНКА СОХРАНЕНА",
-           font=_font(14), fill=GREEN)
+    _alpha_fill(img, (tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
+                main_color, alpha=60, radius=tag_h // 2)
+    d.rounded_rectangle((tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
+                        radius=tag_h // 2, outline=main_color + (220,), width=2)
 
-    d.text((tx, hero_y1 + 56), "Спасибо! Менеджер оценён",
-           font=_font(30), fill=TEXT)
+    icon_cx = tag_x + tag_pad + icon_size_tag // 2
+    icon_cy = tag_y + tag_h // 2
+    _draw_icon(d, icon_cx, icon_cy,
+               I_CHECK if has_review else I_COMMENTS, icon_size_tag, main_color)
 
-    # Ряд звёзд
-    stars_y = hero_y1 + 106
-    _draw_star_filled_row(img, d, tx, stars_y, rating, 5)
+    d.text((icon_cx + icon_size_tag // 2 + gap_icon_text, icon_cy),
+           tag_text, font=tag_font, fill=main_color, anchor="lm")
 
-    # Текст «на N звёзд»
-    d.text((tx + 5 * 52, stars_y + 8),
-           f"{rating} / 5", font=_font(22), fill=GREEN)
+    # Заголовок
+    title_text = "Всё готово — можно закрывать" if has_review else "Напиши отзыв о заказе"
+    title_font = _font(30)
+    tw = _tw(d, title_text, title_font)
+    d.text((cx - tw // 2, tag_y + tag_h + 22), title_text,
+           font=title_font, fill=TEXT)
 
-    # ── ПЛАШКА: ОТЗЫВ ──
-    rev_y1 = hero_y2 + 14
-    rev_y2 = body_y + body_h - 22
-    rev_h = rev_y2 - rev_y1
+    # Pill с каналом
+    pill_y = tag_y + tag_h + 92
+    pill_h = 60
+    pill_icon_size = 34
+    pill_pad = 20
+    pill_gap = 14
 
+    channel_text = REVIEW_CHANNEL_NAME
+    channel_font = _font(24)
+    channel_text_w = _tw(d, channel_text, channel_font)
+
+    pill_w = pill_pad * 2 + pill_icon_size + pill_gap + channel_text_w
+    pill_x = cx - pill_w // 2
+
+    _alpha_fill(img, (pill_x, pill_y, pill_x + pill_w, pill_y + pill_h),
+                main_color, alpha=30, radius=14)
+    d.rounded_rectangle((pill_x, pill_y, pill_x + pill_w, pill_y + pill_h),
+                        radius=14, outline=main_color + (200,), width=2)
+
+    # FA-иконка алмаза (вместо эмодзи)
+    ib_x = pill_x + pill_pad
+    ib_y = pill_y + (pill_h - pill_icon_size) // 2
+
+    _alpha_fill(img, (ib_x, ib_y, ib_x + pill_icon_size, ib_y + pill_icon_size),
+                main_color, alpha=65, radius=10)
+    d.rounded_rectangle((ib_x, ib_y, ib_x + pill_icon_size, ib_y + pill_icon_size),
+                        radius=10, outline=main_color + (230,), width=2)
+    _draw_icon(d, ib_x + pill_icon_size // 2, ib_y + pill_icon_size // 2 + 1,
+               I_GEM, 18, main_color)
+
+    # Название канала
+    d.text((ib_x + pill_icon_size + pill_gap, pill_y + pill_h // 2),
+           channel_text, font=channel_font, fill=main_color, anchor="lm")
+
+    # Описание
     if has_review:
-        # Отзыв есть — зелёная плашка
-        main_color = GREEN
-        status_text = "ОТЗЫВ ОСТАВЛЕН ✓"
-        head_text = "Всё готово — можно завершать заказ"
-        body_text = "Ты уже оставил отзыв. Нажми на кнопку ниже, чтобы закрыть тикет."
-        icon_code = I_CHECK
+        sub_text = "Отзыв найден — нажми кнопку ниже, чтобы завершить заказ"
     else:
-        # Отзыва нет — фиолетовая плашка
-        main_color = PURPLE
-        status_text = "ОСТАЛСЯ ОТЗЫВ В КАНАЛЕ"
-        head_text = "Канал 💎・отзывы — следующий шаг"
-        body_text = ("Напиши пару слов о заказе. За одобренный отзыв начислим +15 DC. "
-                     "Без отзыва тикет не закроется.")
-        icon_code = I_COMMENTS
+        sub_text = "Пара тёплых слов о работе — за одобренный отзыв начислим +15 DC"
+    sub_font = _font(16)
+    sub_lines = _wrap(d, sub_text, sub_font, rx2 - rx1 - 80, max_lines=2)
+    sub_y = pill_y + pill_h + 26
+    for i, line in enumerate(sub_lines):
+        lw = _tw(d, line, sub_font)
+        d.text((cx - lw // 2, sub_y + i * 26), line, font=sub_font, fill=TEXT_SOFT)
 
-    _gradient_box(img, (rx1, rev_y1, rx2, rev_y2),
-                  main_color, main_color, alpha=22, radius=18)
-    d.rounded_rectangle((rx1, rev_y1, rx2, rev_y2),
-                        radius=18, outline=main_color + (200,), width=3)
+    # Итоговая плашка снизу
+    if not has_review:
+        hint_text = "Без отзыва тикет не закроется"
+        hint_font = _font(15)
+        hint_text_w = _tw(d, hint_text, hint_font)
+        hint_icon_size = 18
+        hint_gap = 12
+        hint_w = hint_text_w + hint_icon_size + hint_gap + 40
+        hint_h = 40
+        hint_x = cx - hint_w // 2
+        hint_y = sub_y + len(sub_lines) * 26 + 22
 
-    icon_size = 80
-    ib_x = rx1 + 26
-    ib_y = rev_y1 + (rev_h - icon_size) // 2
+        _alpha_fill(img, (hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
+                    main_color, alpha=25, radius=hint_h // 2)
+        d.rounded_rectangle((hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
+                            radius=hint_h // 2, outline=main_color + (130,), width=2)
+        _draw_icon(d, hint_x + 20, hint_y + hint_h // 2, I_INFO, hint_icon_size, main_color)
+        d.text((hint_x + 20 + hint_icon_size // 2 + hint_gap, hint_y + hint_h // 2),
+               hint_text, font=hint_font, fill=TEXT_SOFT, anchor="lm")
 
-    _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                main_color, alpha=55, radius=20)
-    d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=20, outline=main_color + (230,), width=3)
-    _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               icon_code, 38, main_color)
-
-    tx = ib_x + icon_size + 22
-    d.text((tx, rev_y1 + 16), status_text,
-           font=_font(14), fill=main_color)
-
-    # Канал с FA-алмазом
-    gem_size = 26
-    gem_x = tx
-    gem_y = rev_y1 + 42
-    _alpha_fill(img, (gem_x, gem_y, gem_x + gem_size, gem_y + gem_size),
-                main_color, alpha=70, radius=8)
-    _draw_icon(d, gem_x + gem_size // 2, gem_y + gem_size // 2 + 1,
-               I_GEM, 14, main_color)
-
-    d.text((gem_x + gem_size + 10, gem_y + 2),
-           REVIEW_CHANNEL_NAME, font=_font(22), fill=TEXT)
-
-    d.text((tx, rev_y1 + 84), head_text, font=_font(15), fill=TEXT_SOFT)
-
-    text_font = _font(13)
-    lines = _wrap(d, body_text, text_font, rx2 - tx - 20, max_lines=2)
-    for i, line in enumerate(lines):
-        d.text((tx, rev_y1 + 110 + i * 18), line, font=text_font, fill=MUTED)
-
-    _draw_footer(d, f"Оценка менеджера · данные на {_now_msk_str()} МСК", "тикет · оценка")
+    _draw_footer(d, f"Отзыв в канале · данные на {_now_msk_str()} МСК", "отзыв · шаг 2")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
