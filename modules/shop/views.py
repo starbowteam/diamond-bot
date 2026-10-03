@@ -20,9 +20,6 @@ def L(text: str) -> str:
     return f"{P}{text}{P}"
 
 
-# ============================================================
-# ЭМОДЗИ КАТЕГОРИЙ — обновлены
-# ============================================================
 E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
 E_FIRE    = PartialEmoji(name="skidka",    id=1540819242625146961)
 E_HISTORY = PartialEmoji(name="Otziv",     id=1541808692314243172)
@@ -32,7 +29,6 @@ E_GIFT    = PartialEmoji(name="gid1",      id=1555654337953267794)
 E_STAR    = PartialEmoji(name="Otziv",     id=1541808692314243172)
 E_SHOP    = PartialEmoji(name="shop1",     id=1555654407776112750)
 
-# 👇 новые эмодзи категорий
 E_CAT_ADS    = PartialEmoji(name="reklama", id=1555654392202535073)
 E_CAT_ROLES  = PartialEmoji(name="peope",   id=1555654375781834883)
 E_CAT_CASINO = PartialEmoji(name="kazik",   id=1555654356152623104)
@@ -50,7 +46,7 @@ CATEGORY_EMOJI = {
 
 
 # ============================================================
-# SELECT КАТЕГОРИЙ — без default, ничего не предвыбрано
+# SELECT КАТЕГОРИЙ
 # ============================================================
 class ShopCategorySelect(Select):
     def __init__(self, categories: List[Dict], active: str = ""):
@@ -86,12 +82,15 @@ class ShopCategorySelect(Select):
 
 
 # ============================================================
-# SELECT ТОВАРОВ
+# SELECT ТОВАРОВ (скрывает купленные роли)
 # ============================================================
 class ShopItemSelect(Select):
     def __init__(self, cat_key: str, items: List[Dict], balance: int):
+        # 👇 Фильтруем купленные роли
+        available = [it for it in items if not it.get("owned")]
+
         options = []
-        for it in items[:25]:
+        for it in available[:25]:
             price = it["price"]
             ok = balance >= price
             label = f"{it['name']} · {price} DC"[:100]
@@ -277,9 +276,6 @@ class BtnGift(Button):
             logger.warning(f"ShopGiftModal send err: {e}")
 
 
-# ============================================================
-# КНОПКИ ПАГИНАЦИИ (для ролей 11 товаров)
-# ============================================================
 class BtnPageLeft(Button):
     def __init__(self, cat_key: str, page: int, row: int = 2):
         super().__init__(
@@ -363,7 +359,12 @@ class ShopProductsView(View):
     def __init__(self, cat_key: str, items: List[Dict], balance: int,
                  page: int = 0, total_pages: int = 1):
         super().__init__(timeout=None)
-        self.add_item(ShopItemSelect(cat_key, items, balance))
+
+        # 👇 Селект показываем только если есть доступные товары
+        available = [it for it in items if not it.get("owned")]
+        if available:
+            self.add_item(ShopItemSelect(cat_key, items, balance))
+
         self.add_item(BtnBack(target="categories", row=1))
         self.add_item(BtnPurchases(row=1))
         self.add_item(BtnHistory(row=1))
@@ -378,6 +379,13 @@ class ShopDetailView(View):
         super().__init__(timeout=None)
         self.add_item(BtnBuy(cat_key, item_key, price, row=0))
         self.add_item(BtnGift(cat_key, item_key, row=0))
+        self.add_item(BtnBack(target="products", cat_key=cat_key, row=0))
+
+
+class ShopDetailOwnedView(View):
+    """Для уже купленных ролей — только «Назад» и подсказка."""
+    def __init__(self, cat_key: str):
+        super().__init__(timeout=None)
         self.add_item(BtnBack(target="products", cat_key=cat_key, row=0))
 
 
