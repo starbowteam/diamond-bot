@@ -65,14 +65,17 @@ IMG_COIN_FLIP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 IMG_COIN_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296698964377781/image.png?ex=6ab17522&is=6ab023a2&hm=ef1cd116093f11594be461116cb2d2c11d7ae0f2f36d5e8ee88e82349d79de70&"
 IMG_COIN_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296699820023989/image.png?ex=6ab17522&is=6ab023a2&hm=ca876fcb9981a13bff89958dfbd4061abec6dfad28a6e6e578c2563bbeb3ac97&"
 
+# ─── Игровые эмодзи (внутри игры) ───
 EMOJI_BJ_HIT    = PartialEmoji(name="adde", id=1551288309240696954)
 EMOJI_BJ_STAND  = PartialEmoji(name="PAM", id=1551288362822795434)
-EMOJI_BJ_DOUBLE = PartialEmoji(name="flas", id=1551289202279325756)
 
 EMOJI_COIN_HEADS  = PartialEmoji(name="image", id=1551296060729725019)
 EMOJI_COIN_TAILS  = PartialEmoji(name="2313", id=1551296094468575366)
-EMOJI_COIN_RETRY  = PartialEmoji(name="Otziv", id=1541808692314243172)
-EMOJI_COIN_DOUBLE = PartialEmoji(name="flas", id=1551289202279325756)
+
+# ─── Эмодзи для кнопок retry (единые для всех игр) ───
+EMOJI_REPLAY = PartialEmoji(name="image",  id=1555994370933653544)   # Играть ещё
+EMOJI_REPEAT = PartialEmoji(name="povtor", id=1555993533629071360)   # Повтор ставки
+EMOJI_DOUBLE = PartialEmoji(name="flas",   id=1551289202279325756)   # Двойная ставка
 
 P = "\u3164"
 
@@ -115,8 +118,10 @@ async def _check_casino_achievements(user_id: int, bet: int = 0, profit: int = 0
 def load_daily_deal() -> dict:
     return load_json(DAILY_DEAL_FILE, {})
 
+
 def save_daily_deal(data: dict):
     save_json(DAILY_DEAL_FILE, data)
+
 
 def generate_random_deal(discount: int):
     catalog = load_shop_catalog()
@@ -144,8 +149,10 @@ def generate_random_deal(discount: int):
         "category_label": catalog[cat_key]["label"],
     }
 
+
 def _current_deal_slot() -> int:
     return int(time.time() // (DAILY_DEAL_REFRESH_HOURS * 3600))
+
 
 def refresh_daily_deal(force: bool = False):
     current_slot = _current_deal_slot()
@@ -185,14 +192,17 @@ def refresh_daily_deal(force: bool = False):
     })
     return deal
 
+
 def load_flash_sale() -> dict:
     return load_json(FLASH_SALE_FILE, {
         "active": False, "item": None,
         "started_at": 0, "message_id": 0, "channel_id": 0
     })
 
+
 def save_flash_sale(data: dict):
     save_json(FLASH_SALE_FILE, data)
+
 
 def get_flash_sale_item():
     data = load_flash_sale()
@@ -202,6 +212,7 @@ def get_flash_sale_item():
         if time.time() - data.get("started_at", 0) < FLASH_SALE_DURATION_HOURS * 3600:
             return data["item"]
     return None
+
 
 async def start_flash_sale(bot):
     try:
@@ -254,14 +265,19 @@ async def start_flash_sale(bot):
     except Exception as e:
         logger.exception(f"start_flash_sale error: {e}")
 
+
 # ============================================================
 # СТАТИСТИКА РУЛЕТКИ
 # ============================================================
 def load_roulette_stats() -> dict:
-    return load_json(ROULETTE_STATS_FILE, {"total_bets": 0, "total_won": 0, "total_lost": 0, "rolls": 0})
+    return load_json(ROULETTE_STATS_FILE, {
+        "total_bets": 0, "total_won": 0, "total_lost": 0, "rolls": 0
+    })
+
 
 def save_roulette_stats(data: dict):
     save_json(ROULETTE_STATS_FILE, data)
+
 
 # ============================================================
 # ЗАГРУЗКА EMBED'ОВ
@@ -281,7 +297,7 @@ def load_action_embed(filename: str):
 
 
 # ============================================================
-# РУЛЕТКА — 55% ПРОИГРЫШ, БЕЗ ПАТТЕРНА
+# РУЛЕТКА
 # ============================================================
 ROULETTE_ROLLS = [
     {"name": "Проигрыш",        "mult": -1.0, "chance": 55.0, "color": 0xed4245, "emoji": "🎲", "desc": "Ты потерял ставку"},
@@ -293,6 +309,7 @@ ROULETTE_ROLLS = [
     {"name": "MEGA JACKPOT",    "mult":  9.0, "chance":  0.5, "color": 0xff00aa, "emoji": "⭐", "desc": "х10 — мега-джекпот!!!"},
 ]
 
+
 def roll_roulette() -> dict:
     total = sum(r["chance"] for r in ROULETTE_ROLLS)
     r = random.uniform(0, total)
@@ -302,6 +319,7 @@ def roll_roulette() -> dict:
         if r <= cur_v:
             return roll
     return ROULETTE_ROLLS[0]
+
 
 def _build_spin_embeds() -> list:
     embed1 = disnake.Embed(color=6776679)
@@ -313,6 +331,7 @@ def _build_spin_embeds() -> list:
     )
     embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
+
 
 def _build_win_embeds(result: dict, bet: int, net: int, new_balance: int) -> list:
     total_payout = bet + net
@@ -335,6 +354,7 @@ def _build_win_embeds(result: dict, bet: int, net: int, new_balance: int) -> lis
     embed2.set_footer(text=f"Ставка: {bet} DC · Удача на твоей стороне!")
     embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
+
 
 def _build_lose_embeds(result: dict, bet: int, new_balance: int, refund: int = 0) -> list:
     embed1 = disnake.Embed(color=6776679)
@@ -360,6 +380,120 @@ def _build_lose_embeds(result: dict, bet: int, new_balance: int, refund: int = 0
     embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
+
+# ────────────────────────────────────────────────────────────
+# Общая логика: сыграть раунд рулетки с указанной ставкой
+# Используется в модалке, повторной и двойной ставках
+# ────────────────────────────────────────────────────────────
+async def _roulette_play(inter, bet: int, reason: str = "Ставка в рулетке монет"):
+    user_id = inter.author.id
+
+    if bet < CASINO_MIN_BET:
+        return await inter.response.send_message(
+            f"❌ Минимальная ставка — **{CASINO_MIN_BET} DC**.", ephemeral=True
+        )
+    if bet > CASINO_MAX_BET:
+        return await inter.response.send_message(
+            f"❌ Максимальная ставка — **{CASINO_MAX_BET} DC**.", ephemeral=True
+        )
+
+    balance = await get_user_balance(user_id)
+    if bet > balance:
+        return await inter.response.send_message(
+            f"❌ Недостаточно DC.\n> **Твой баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
+            ephemeral=True
+        )
+
+    if not inter.response.is_done():
+        await inter.response.defer(ephemeral=True)
+
+    success = await remove_dc(user_id, bet, reason)
+    if not success:
+        return await inter.edit_original_response(
+            content="❌ Не удалось списать DC. Попробуй позже."
+        )
+
+    await inter.edit_original_response(embeds=_build_spin_embeds())
+    await asyncio.sleep(2.2)
+
+    result = roll_roulette()
+    mult = result["mult"]
+
+    if on_casino_quest_hook:
+        try:
+            await on_casino_quest_hook(user_id)
+        except Exception as e:
+            logger.warning(f"casino_quest_hook roulette: {e}")
+
+    await _check_casino_achievements(user_id, bet=bet)
+
+    if mult > 0:
+        payout = bet + int(bet * mult)
+        payout, used = apply_casino_win(user_id, payout)
+        net = payout - bet
+        r_reason = f"Выигрыш в рулетке: {result['name']}"
+        if used:
+            r_reason += f" ({', '.join(used)})"
+        await add_dc(user_id, payout, r_reason, to_clan_pool=True)
+        if on_casino_win_hook:
+            try:
+                await on_casino_win_hook(user_id, payout, bet)
+            except Exception as e:
+                logger.warning(f"casino_win_hook roulette: {e}")
+        new_balance = await get_user_balance(user_id)
+        view = RouletteRetryView(bet)
+        await inter.edit_original_response(
+            embeds=_build_win_embeds(result, bet, net, new_balance),
+            view=view
+        )
+
+        if net >= 10000:
+            await _check_casino_achievements(user_id, profit=net)
+
+        stats = load_roulette_stats()
+        stats["total_bets"] = stats.get("total_bets", 0) + bet
+        stats["total_won"] = stats.get("total_won", 0) + net
+        stats["rolls"] = stats.get("rolls", 0) + 1
+        save_roulette_stats(stats)
+        asyncio.create_task(log_discord(
+            title=f"🎰 Рулетка: {result['name']}",
+            description=(
+                f"> **Пользователь:** {inter.author.mention}\n"
+                f"> **Ставка:** `{bet} DC`\n"
+                f"> **Результат:** `x{1 + mult:.1f}`\n"
+                f"> **Чистый профит:** `+{net} DC`\n"
+                f"> **Новый баланс:** `{new_balance} DC`"
+            ),
+            color=result["color"]
+        ))
+    else:
+        refund = try_insurance(user_id, bet)
+        if refund > 0:
+            await add_dc(user_id, refund, "Страховка ставки (рулетка)")
+        new_balance = await get_user_balance(user_id)
+        view = RouletteRetryView(bet)
+        await inter.edit_original_response(
+            embeds=_build_lose_embeds(result, bet, new_balance, refund),
+            view=view
+        )
+        stats = load_roulette_stats()
+        stats["total_bets"] = stats.get("total_bets", 0) + bet
+        stats["total_lost"] = stats.get("total_lost", 0) + (bet - refund)
+        stats["rolls"] = stats.get("rolls", 0) + 1
+        save_roulette_stats(stats)
+        asyncio.create_task(log_discord(
+            title="🎰 Рулетка: проигрыш",
+            description=(
+                f"> **Пользователь:** {inter.author.mention}\n"
+                f"> **Ставка:** `{bet} DC`\n"
+                f"> **Результат:** `x0`\n"
+                f"> **Страховка:** `+{refund} DC`\n"
+                f"> **Новый баланс:** `{new_balance} DC`"
+            ),
+            color=0xed4245
+        ))
+
+
 class RouletteModal(Modal):
     def __init__(self):
         components = [
@@ -374,198 +508,69 @@ class RouletteModal(Modal):
         super().__init__(title="🎰 Рулетка монет", components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
-        user_id = inter.author.id
         bet_str = inter.text_values["bet"].strip()
         if not bet_str.isdigit():
-            return await inter.response.send_message("❌ Ставка должна быть целым числом.", ephemeral=True)
-        bet = int(bet_str)
-        if bet < CASINO_MIN_BET:
-            return await inter.response.send_message(f"❌ Минимальная ставка — **{CASINO_MIN_BET} DC**.", ephemeral=True)
-        if bet > CASINO_MAX_BET:
-            return await inter.response.send_message(f"❌ Максимальная ставка — **{CASINO_MAX_BET} DC**.", ephemeral=True)
-
-        balance = await get_user_balance(user_id)
-        if bet > balance:
             return await inter.response.send_message(
-                f"❌ Недостаточно DC.\n> **Твой баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
-                ephemeral=True
+                "❌ Ставка должна быть целым числом.", ephemeral=True
             )
+        bet = int(bet_str)
+        await _roulette_play(inter, bet, reason="Ставка в рулетке монет")
 
-        await inter.response.defer(ephemeral=True)
-        success = await remove_dc(user_id, bet, "Ставка в рулетке монет")
-        if not success:
-            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуй позже.")
 
-        await inter.edit_original_response(embeds=_build_spin_embeds())
-        await asyncio.sleep(2.2)
-
-        result = roll_roulette()
-        mult = result["mult"]
-
-        if on_casino_quest_hook:
-            try:
-                await on_casino_quest_hook(user_id)
-            except Exception as e:
-                logger.warning(f"casino_quest_hook roulette: {e}")
-
-        await _check_casino_achievements(user_id, bet=bet)
-
-        if mult > 0:
-            payout = bet + int(bet * mult)
-            payout, used = apply_casino_win(user_id, payout)
-            net = payout - bet
-            reason = f"Выигрыш в рулетке: {result['name']}"
-            if used:
-                reason += f" ({', '.join(used)})"
-            await add_dc(user_id, payout, reason, to_clan_pool=True)
-            if on_casino_win_hook:
-                try:
-                    await on_casino_win_hook(user_id, payout, bet)
-                except Exception as e:
-                    logger.warning(f"casino_win_hook roulette: {e}")
-            new_balance = await get_user_balance(user_id)
-            view = RouletteRetryView(bet)
-            await inter.edit_original_response(
-                embeds=_build_win_embeds(result, bet, net, new_balance),
-                view=view
-            )
-
-            if net >= 10000:
-                await _check_casino_achievements(user_id, profit=net)
-
-            stats = load_roulette_stats()
-            stats["total_bets"] = stats.get("total_bets", 0) + bet
-            stats["total_won"] = stats.get("total_won", 0) + net
-            stats["rolls"] = stats.get("rolls", 0) + 1
-            save_roulette_stats(stats)
-            asyncio.create_task(log_discord(
-                title=f"🎰 Рулетка: {result['name']}",
-                description=(
-                    f"> **Пользователь:** {inter.author.mention}\n"
-                    f"> **Ставка:** `{bet} DC`\n"
-                    f"> **Результат:** `x{1 + mult:.1f}`\n"
-                    f"> **Чистый профит:** `+{net} DC`\n"
-                    f"> **Новый баланс:** `{new_balance} DC`"
-                ),
-                color=result["color"]
-            ))
-        else:
-            refund = try_insurance(user_id, bet)
-            if refund > 0:
-                await add_dc(user_id, refund, "Страховка ставки (рулетка)")
-            new_balance = await get_user_balance(user_id)
-            view = RouletteRetryView(bet)
-            await inter.edit_original_response(
-                embeds=_build_lose_embeds(result, bet, new_balance, refund),
-                view=view
-            )
-            stats = load_roulette_stats()
-            stats["total_bets"] = stats.get("total_bets", 0) + bet
-            stats["total_lost"] = stats.get("total_lost", 0) + (bet - refund)
-            stats["rolls"] = stats.get("rolls", 0) + 1
-            save_roulette_stats(stats)
-            asyncio.create_task(log_discord(
-                title="🎰 Рулетка: проигрыш",
-                description=(
-                    f"> **Пользователь:** {inter.author.mention}\n"
-                    f"> **Ставка:** `{bet} DC`\n"
-                    f"> **Результат:** `x0`\n"
-                    f"> **Страховка:** `+{refund} DC`\n"
-                    f"> **Новый баланс:** `{new_balance} DC`"
-                ),
-                color=0xed4245
-            ))
-
+# ────────────────────────────────────────────────────────────
+# Retry View: 3 кнопки — Играть ещё / Повтор ставки / Двойная
+# ────────────────────────────────────────────────────────────
 class RouletteRetryView(View):
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
         self.last_bet = last_bet
 
-        btn_retry = Button(
-            label="Играть еще",
+        btn_replay = Button(
+            label="Играть ещё",
             style=ButtonStyle.gray,
             custom_id="roulette_retry",
-            emoji=PartialEmoji(name="gamee", id=1550686072168517632),
+            emoji=EMOJI_REPLAY,
             row=0
         )
-        btn_retry.callback = self.retry_callback
-        self.add_item(btn_retry)
+        btn_replay.callback = self.replay_callback
+        self.add_item(btn_replay)
+
+        btn_repeat = Button(
+            label="Повтор ставки",
+            style=ButtonStyle.gray,
+            custom_id="roulette_repeat",
+            emoji=EMOJI_REPEAT,
+            row=0
+        )
+        btn_repeat.callback = self.repeat_callback
+        self.add_item(btn_repeat)
 
         btn_double = Button(
             label="Двойная ставка",
-            style=ButtonStyle.gray,
+            style=ButtonStyle.danger,
             custom_id="roulette_double",
-            emoji=PartialEmoji(name="flash", id=1550686028522590309),
+            emoji=EMOJI_DOUBLE,
             row=0
         )
         btn_double.callback = self.double_callback
         self.add_item(btn_double)
 
-    async def retry_callback(self, inter: disnake.MessageInteraction):
+    async def replay_callback(self, inter: disnake.MessageInteraction):
         await inter.response.send_modal(RouletteModal())
 
+    async def repeat_callback(self, inter: disnake.MessageInteraction):
+        await _roulette_play(inter, self.last_bet,
+                             reason="Повтор ставки в рулетке")
+
     async def double_callback(self, inter: disnake.MessageInteraction):
-        user_id = inter.author.id
         new_bet = self.last_bet * 2
         if new_bet > CASINO_MAX_BET:
             return await inter.response.send_message(
                 f"❌ Двойная ставка превышает лимит ({CASINO_MAX_BET} DC).",
                 ephemeral=True
             )
-        balance = await get_user_balance(user_id)
-        if new_bet > balance:
-            return await inter.response.send_message(
-                f"❌ Недостаточно DC для двойной ставки.\n> **Нужно:** `{new_bet} DC`\n> **У тебя:** `{balance} DC`",
-                ephemeral=True
-            )
-        success = await remove_dc(user_id, new_bet, "Ставка в рулетке (двойная)")
-        if not success:
-            return await inter.response.send_message("❌ Ошибка списания DC.", ephemeral=True)
-        await inter.response.defer(ephemeral=True)
-        await inter.edit_original_response(embeds=_build_spin_embeds())
-        await asyncio.sleep(2.2)
-        result = roll_roulette()
-        mult = result["mult"]
-
-        if on_casino_quest_hook:
-            try:
-                await on_casino_quest_hook(user_id)
-            except Exception:
-                pass
-
-        await _check_casino_achievements(user_id, bet=new_bet)
-
-        if mult > 0:
-            payout = new_bet + int(new_bet * mult)
-            payout, used = apply_casino_win(user_id, payout)
-            net = payout - new_bet
-            reason = f"Выигрыш в рулетке: {result['name']} (двойная)"
-            if used:
-                reason += f" ({', '.join(used)})"
-            await add_dc(user_id, payout, reason, to_clan_pool=True)
-            if on_casino_win_hook:
-                try:
-                    await on_casino_win_hook(user_id, payout, new_bet)
-                except Exception as e:
-                    logger.warning(f"casino_win_hook roulette dbl: {e}")
-            new_balance = await get_user_balance(user_id)
-            view = RouletteRetryView(new_bet)
-            await inter.edit_original_response(
-                embeds=_build_win_embeds(result, new_bet, net, new_balance),
-                view=view
-            )
-            if net >= 10000:
-                await _check_casino_achievements(user_id, profit=net)
-        else:
-            refund = try_insurance(user_id, new_bet)
-            if refund > 0:
-                await add_dc(user_id, refund, "Страховка ставки (рулетка, двойная)")
-            new_balance = await get_user_balance(user_id)
-            view = RouletteRetryView(new_bet)
-            await inter.edit_original_response(
-                embeds=_build_lose_embeds(result, new_bet, new_balance, refund),
-                view=view
-            )
+        await _roulette_play(inter, new_bet,
+                             reason="Двойная ставка в рулетке")
 
 
 # ============================================================
@@ -580,16 +585,20 @@ BLACKJACK_DEALER_STAND   = 17
 RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 SUITS = ["♠️", "♥️", "♦️", "♣️"]
 
+
 def _new_deck() -> list:
     deck = [(r, s) for r in RANKS for s in SUITS]
     random.shuffle(deck)
     return deck
 
+
 def _card_str(card) -> str:
     return f"`{card[0]}{card[1]}`"
 
+
 def _hand_str(hand: list) -> str:
     return "  ".join(_card_str(c) for c in hand)
+
 
 def _hand_value(hand: list) -> int:
     total = 0
@@ -607,9 +616,11 @@ def _hand_value(hand: list) -> int:
         aces -= 1
     return total
 
+
 def _dealer_play(game: dict):
     while _hand_value(game["dealer"]) < BLACKJACK_DEALER_STAND:
         game["dealer"].append(game["deck"].pop())
+
 
 def _build_bj_embeds(game: dict, hide_dealer: bool = True,
                      result_title: str = None, result_color: int = None,
@@ -657,6 +668,66 @@ def _build_bj_embeds(game: dict, hide_dealer: bool = True,
     embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
+
+# ────────────────────────────────────────────────────────────
+# Общая логика: старт раунда блэкджека с указанной ставкой
+# ────────────────────────────────────────────────────────────
+async def _blackjack_play(inter, bet: int, reason: str = "Ставка в блэкджеке"):
+    user_id = inter.author.id
+
+    if bet < BLACKJACK_MIN_BET:
+        return await inter.response.send_message(
+            f"❌ Минимальная ставка — **{BLACKJACK_MIN_BET} DC**.", ephemeral=True
+        )
+    if bet > BLACKJACK_MAX_BET:
+        return await inter.response.send_message(
+            f"❌ Максимальная ставка — **{BLACKJACK_MAX_BET} DC**.", ephemeral=True
+        )
+
+    balance = await get_user_balance(user_id)
+    if bet > balance:
+        return await inter.response.send_message(
+            f"❌ Недостаточно DC.\n> **Баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
+            ephemeral=True
+        )
+
+    if not inter.response.is_done():
+        await inter.response.defer(ephemeral=True)
+
+    ok = await remove_dc(user_id, bet, reason)
+    if not ok:
+        return await inter.edit_original_response(
+            content="❌ Не удалось списать DC. Попробуй позже."
+        )
+
+    deck = _new_deck()
+    game = {
+        "user_id": user_id,
+        "bet": bet,
+        "deck": deck,
+        "player": [deck.pop(), deck.pop()],
+        "dealer": [deck.pop(), deck.pop()],
+        "doubled": False,
+        "finished": False,
+    }
+
+    if on_casino_quest_hook:
+        try:
+            await on_casino_quest_hook(user_id)
+        except Exception:
+            pass
+
+    await _check_casino_achievements(user_id, bet=bet)
+
+    await inter.edit_original_response(
+        embeds=_build_bj_embeds(game, hide_dealer=True),
+        view=BlackjackView(game)
+    )
+
+    if _hand_value(game["player"]) == 21:
+        await _bj_finish(inter, game)
+
+
 class BlackjackBetModal(Modal):
     def __init__(self):
         components = [
@@ -671,52 +742,14 @@ class BlackjackBetModal(Modal):
         super().__init__(title="Блэкджек — ставка", components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
-        user_id = inter.author.id
         bet_str = inter.text_values["bet"].strip()
         if not bet_str.isdigit():
-            return await inter.response.send_message("❌ Ставка должна быть целым числом.", ephemeral=True)
-        bet = int(bet_str)
-        if bet < BLACKJACK_MIN_BET:
-            return await inter.response.send_message(f"❌ Минимальная ставка — **{BLACKJACK_MIN_BET} DC**.", ephemeral=True)
-        if bet > BLACKJACK_MAX_BET:
-            return await inter.response.send_message(f"❌ Максимальная ставка — **{BLACKJACK_MAX_BET} DC**.", ephemeral=True)
-        balance = await get_user_balance(user_id)
-        if bet > balance:
             return await inter.response.send_message(
-                f"❌ Недостаточно DC.\n> **Баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
-                ephemeral=True
+                "❌ Ставка должна быть целым числом.", ephemeral=True
             )
-        await inter.response.defer(ephemeral=True)
-        success = await remove_dc(user_id, bet, "Ставка в блэкджеке")
-        if not success:
-            return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуй позже.")
+        bet = int(bet_str)
+        await _blackjack_play(inter, bet, reason="Ставка в блэкджеке")
 
-        deck = _new_deck()
-        game = {
-            "user_id": user_id,
-            "bet": bet,
-            "deck": deck,
-            "player": [deck.pop(), deck.pop()],
-            "dealer": [deck.pop(), deck.pop()],
-            "doubled": False,
-            "finished": False,
-        }
-
-        if on_casino_quest_hook:
-            try:
-                await on_casino_quest_hook(user_id)
-            except Exception:
-                pass
-
-        await _check_casino_achievements(user_id, bet=bet)
-
-        await inter.edit_original_response(
-            embeds=_build_bj_embeds(game, hide_dealer=True),
-            view=BlackjackView(game)
-        )
-
-        if _hand_value(game["player"]) == 21:
-            await _bj_finish(inter, game)
 
 class BlackjackView(View):
     def __init__(self, game: dict):
@@ -747,7 +780,7 @@ class BlackjackView(View):
             label=f"{P}{P}Удвоить{P}{P}",
             style=ButtonStyle.danger,
             custom_id="bj_double",
-            emoji=EMOJI_BJ_DOUBLE,
+            emoji=EMOJI_DOUBLE,
             row=0
         )
         btn_double.callback = self.double_callback
@@ -830,14 +863,12 @@ class BlackjackView(View):
         new_total = bet * 2
         if new_total > CASINO_MAX_BET:
             return await inter.response.send_message(
-                f"❌ Удвоение превышает лимит ({CASINO_MAX_BET} DC).",
-                ephemeral=True
+                f"❌ Удвоение превышает лимит ({CASINO_MAX_BET} DC).", ephemeral=True
             )
         balance = await get_user_balance(user_id)
         if balance < bet:
             return await inter.response.send_message(
-                f"❌ Недостаточно DC для удвоения.\n> Нужно ещё: `{bet} DC`",
-                ephemeral=True
+                f"❌ Недостаточно DC для удвоения.\n> Нужно ещё: `{bet} DC`", ephemeral=True
             )
         ok = await remove_dc(user_id, bet, "Удвоение в блэкджеке")
         if not ok:
@@ -845,6 +876,7 @@ class BlackjackView(View):
         self.game["doubled"] = True
         self.game["player"].append(self.game["deck"].pop())
         await self._stand_logic(inter)
+
 
 async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str):
     user_id = game["user_id"]
@@ -907,6 +939,7 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
         color=0x2ecc71 if payout > 0 else 0xed4245
     ))
 
+
 async def _bj_finish(inter: disnake.MessageInteraction, game: dict):
     _dealer_play(game)
     game["finished"] = True
@@ -927,82 +960,61 @@ async def _bj_finish(inter: disnake.MessageInteraction, game: dict):
     )
     await _bj_payout(inter, game, outcome)
 
+
+# ────────────────────────────────────────────────────────────
+# Retry View блэкджека: 3 кнопки
+# ────────────────────────────────────────────────────────────
 class BlackjackRetryView(View):
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
         self.last_bet = last_bet
 
-        btn_retry = Button(
-            label=f"{P}{P}Играть ещё{P}{P}",
+        btn_replay = Button(
+            label=f"{P}Играть ещё{P}",
             style=ButtonStyle.gray,
             custom_id="bj_retry",
-            emoji=EMOJI_BJ_HIT,
+            emoji=EMOJI_REPLAY,
             row=0
         )
-        btn_retry.callback = self.retry_callback
-        self.add_item(btn_retry)
+        btn_replay.callback = self.replay_callback
+        self.add_item(btn_replay)
+
+        btn_repeat = Button(
+            label=f"{P}Повтор ставки{P}",
+            style=ButtonStyle.gray,
+            custom_id="bj_repeat",
+            emoji=EMOJI_REPEAT,
+            row=0
+        )
+        btn_repeat.callback = self.repeat_callback
+        self.add_item(btn_repeat)
 
         btn_double = Button(
-            label=f"{P}{P}{P}Удвоить{P}{P}{P}",
+            label=f"{P}Двойная ставка{P}",
             style=ButtonStyle.danger,
             custom_id="bj_double_next",
-            emoji=EMOJI_BJ_DOUBLE,
+            emoji=EMOJI_DOUBLE,
             row=0
         )
-        btn_double.callback = self.double_bet_callback
+        btn_double.callback = self.double_callback
         self.add_item(btn_double)
 
-    async def retry_callback(self, inter: disnake.MessageInteraction):
+    async def replay_callback(self, inter: disnake.MessageInteraction):
         await inter.response.send_modal(BlackjackBetModal())
 
-    async def double_bet_callback(self, inter: disnake.MessageInteraction):
-        user_id = inter.author.id
+    async def repeat_callback(self, inter: disnake.MessageInteraction):
+        await _blackjack_play(inter, self.last_bet,
+                              reason="Повтор ставки в блэкджеке")
+
+    async def double_callback(self, inter: disnake.MessageInteraction):
         new_bet = self.last_bet * 2
         if new_bet > CASINO_MAX_BET:
             return await inter.response.send_message(
                 f"❌ Двойная ставка превышает лимит ({CASINO_MAX_BET} DC).",
                 ephemeral=True
             )
-        balance = await get_user_balance(user_id)
-
-        if new_bet < BLACKJACK_MIN_BET:
-            return await inter.response.send_message(f"❌ Минимум — {BLACKJACK_MIN_BET} DC.", ephemeral=True)
-        if new_bet > balance:
-            return await inter.response.send_message(
-                f"❌ Недостаточно DC.\n> **Нужно:** `{new_bet} DC`\n> **У тебя:** `{balance} DC`",
-                ephemeral=True
-            )
-
-        await inter.response.defer(ephemeral=True)
-        ok = await remove_dc(user_id, new_bet, "Ставка в блэкджеке (двойная)")
-        if not ok:
-            return await inter.edit_original_response(content="❌ Ошибка списания.")
-
-        deck = _new_deck()
-        game = {
-            "user_id": user_id,
-            "bet": new_bet,
-            "deck": deck,
-            "player": [deck.pop(), deck.pop()],
-            "dealer": [deck.pop(), deck.pop()],
-            "doubled": False,
-            "finished": False,
-        }
-
-        if on_casino_quest_hook:
-            try:
-                await on_casino_quest_hook(user_id)
-            except Exception:
-                pass
-
-        await _check_casino_achievements(user_id, bet=new_bet)
-
-        await inter.edit_original_response(
-            embeds=_build_bj_embeds(game, hide_dealer=True),
-            view=BlackjackView(game)
-        )
-        if _hand_value(game["player"]) == 21:
-            await _bj_finish(inter, game)
+        await _blackjack_play(inter, new_bet,
+                              reason="Двойная ставка в блэкджеке")
 
 
 # ============================================================
@@ -1011,6 +1023,7 @@ class BlackjackRetryView(View):
 COINFLIP_MIN_BET = CASINO_MIN_BET
 COINFLIP_MAX_BET = CASINO_MAX_BET
 COINFLIP_WIN_MULT = 1.9
+
 
 def _build_coin_choice_embeds(bet: int) -> list:
     embed1 = disnake.Embed(color=6776679)
@@ -1030,6 +1043,7 @@ def _build_coin_choice_embeds(bet: int) -> list:
     embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
+
 def _build_coin_spin_embeds() -> list:
     embed1 = disnake.Embed(color=6776679)
     embed1.set_image(url=IMG_COIN_FLIP)
@@ -1040,6 +1054,7 @@ def _build_coin_spin_embeds() -> list:
     )
     embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
+
 
 def _build_coin_result_embeds(bet: int, result_side: str, user_choice: str,
                               won: bool, payout: int, new_balance: int, refund: int = 0) -> list:
@@ -1085,6 +1100,46 @@ def _build_coin_result_embeds(bet: int, result_side: str, user_choice: str,
     embed2.set_image(url=IMG_STRIPE)
     return [embed1, embed2]
 
+
+# ────────────────────────────────────────────────────────────
+# Общая логика: старт раунда монетки с указанной ставкой
+# ────────────────────────────────────────────────────────────
+async def _coinflip_play(inter, bet: int, reason: str = "Ставка в монетке"):
+    user_id = inter.author.id
+
+    if bet < COINFLIP_MIN_BET:
+        return await inter.response.send_message(
+            f"❌ Минимальная ставка — **{COINFLIP_MIN_BET} DC**.", ephemeral=True
+        )
+    if bet > COINFLIP_MAX_BET:
+        return await inter.response.send_message(
+            f"❌ Максимальная ставка — **{COINFLIP_MAX_BET} DC**.", ephemeral=True
+        )
+
+    balance = await get_user_balance(user_id)
+    if bet > balance:
+        return await inter.response.send_message(
+            f"❌ Недостаточно DC.\n> **Баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
+            ephemeral=True
+        )
+
+    if not inter.response.is_done():
+        await inter.response.defer(ephemeral=True)
+
+    ok = await remove_dc(user_id, bet, reason)
+    if not ok:
+        return await inter.edit_original_response(
+            content="❌ Не удалось списать DC."
+        )
+
+    await _check_casino_achievements(user_id, bet=bet)
+
+    await inter.edit_original_response(
+        embeds=_build_coin_choice_embeds(bet),
+        view=CoinflipChoiceView(bet)
+    )
+
+
 class CoinflipBetModal(Modal):
     def __init__(self):
         components = [
@@ -1099,32 +1154,14 @@ class CoinflipBetModal(Modal):
         super().__init__(title="Монетка — ставка", components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
-        user_id = inter.author.id
         bet_str = inter.text_values["bet"].strip()
         if not bet_str.isdigit():
-            return await inter.response.send_message("❌ Ставка должна быть целым числом.", ephemeral=True)
-        bet = int(bet_str)
-        if bet < COINFLIP_MIN_BET:
-            return await inter.response.send_message(f"❌ Минимальная ставка — **{COINFLIP_MIN_BET} DC**.", ephemeral=True)
-        if bet > COINFLIP_MAX_BET:
-            return await inter.response.send_message(f"❌ Максимальная ставка — **{COINFLIP_MAX_BET} DC**.", ephemeral=True)
-        balance = await get_user_balance(user_id)
-        if bet > balance:
             return await inter.response.send_message(
-                f"❌ Недостаточно DC.\n> **Баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
-                ephemeral=True
+                "❌ Ставка должна быть целым числом.", ephemeral=True
             )
-        await inter.response.defer(ephemeral=True)
-        ok = await remove_dc(user_id, bet, "Ставка в монетке")
-        if not ok:
-            return await inter.edit_original_response(content="❌ Не удалось списать DC.")
+        bet = int(bet_str)
+        await _coinflip_play(inter, bet, reason="Ставка в монетке")
 
-        await _check_casino_achievements(user_id, bet=bet)
-
-        await inter.edit_original_response(
-            embeds=_build_coin_choice_embeds(bet),
-            view=CoinflipChoiceView(bet)
-        )
 
 class CoinflipChoiceView(View):
     def __init__(self, bet: int):
@@ -1218,61 +1255,61 @@ class CoinflipChoiceView(View):
     async def tails_callback(self, inter: disnake.MessageInteraction):
         await self._play(inter, "tails")
 
+
+# ────────────────────────────────────────────────────────────
+# Retry View монетки: 3 кнопки
+# ────────────────────────────────────────────────────────────
 class CoinflipRetryView(View):
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
         self.last_bet = last_bet
 
-        btn_retry = Button(
-            label=f"{P}{P}Играть ещё{P}{P}",
+        btn_replay = Button(
+            label=f"{P}Играть ещё{P}",
             style=ButtonStyle.gray,
             custom_id="coin_retry",
-            emoji=EMOJI_COIN_RETRY,
+            emoji=EMOJI_REPLAY,
             row=0
         )
-        btn_retry.callback = self.retry_callback
-        self.add_item(btn_retry)
+        btn_replay.callback = self.replay_callback
+        self.add_item(btn_replay)
+
+        btn_repeat = Button(
+            label=f"{P}Повтор ставки{P}",
+            style=ButtonStyle.gray,
+            custom_id="coin_repeat",
+            emoji=EMOJI_REPEAT,
+            row=0
+        )
+        btn_repeat.callback = self.repeat_callback
+        self.add_item(btn_repeat)
 
         btn_double = Button(
-            label=f"{P}{P}{P}Удвоить{P}{P}{P}",
+            label=f"{P}Двойная ставка{P}",
             style=ButtonStyle.danger,
             custom_id="coin_double",
-            emoji=EMOJI_COIN_DOUBLE,
+            emoji=EMOJI_DOUBLE,
             row=0
         )
         btn_double.callback = self.double_callback
         self.add_item(btn_double)
 
-    async def retry_callback(self, inter: disnake.MessageInteraction):
+    async def replay_callback(self, inter: disnake.MessageInteraction):
         await inter.response.send_modal(CoinflipBetModal())
 
+    async def repeat_callback(self, inter: disnake.MessageInteraction):
+        await _coinflip_play(inter, self.last_bet,
+                             reason="Повтор ставки в монетке")
+
     async def double_callback(self, inter: disnake.MessageInteraction):
-        user_id = inter.author.id
         new_bet = self.last_bet * 2
         if new_bet > CASINO_MAX_BET:
             return await inter.response.send_message(
                 f"❌ Двойная ставка превышает лимит ({CASINO_MAX_BET} DC).",
                 ephemeral=True
             )
-        balance = await get_user_balance(user_id)
-        if new_bet < COINFLIP_MIN_BET:
-            return await inter.response.send_message(f"❌ Минимум — {COINFLIP_MIN_BET} DC.", ephemeral=True)
-        if new_bet > balance:
-            return await inter.response.send_message(
-                f"❌ Недостаточно DC.\n> **Нужно:** `{new_bet} DC`\n> **У тебя:** `{balance} DC`",
-                ephemeral=True
-            )
-        await inter.response.defer(ephemeral=True)
-        ok = await remove_dc(user_id, new_bet, "Ставка в монетке (двойная)")
-        if not ok:
-            return await inter.edit_original_response(content="❌ Ошибка списания.")
-
-        await _check_casino_achievements(user_id, bet=new_bet)
-
-        await inter.edit_original_response(
-            embeds=_build_coin_choice_embeds(new_bet),
-            view=CoinflipChoiceView(new_bet)
-        )
+        await _coinflip_play(inter, new_bet,
+                             reason="Двойная ставка в монетке")
 
 
 # ============================================================
@@ -1360,7 +1397,9 @@ class ActionSelect(Select):
                 ))
 
             if not embeds:
-                return await inter.response.send_message("❌ Нет доступных товаров для акции.", ephemeral=True)
+                return await inter.response.send_message(
+                    "❌ Нет доступных товаров для акции.", ephemeral=True
+                )
 
             await inter.response.send_message(embeds=embeds, view=view, ephemeral=True)
             await log_discord(
@@ -1368,6 +1407,7 @@ class ActionSelect(Select):
                 description=f"> **Пользователь:** {inter.author.mention}",
                 color=0x00aaff
             )
+
 
 class ActionView(View):
     def __init__(self):
@@ -1383,10 +1423,13 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     if not custom_id:
         return
 
+    # Игнорируем игровые кнопки — их обрабатывают views
     if custom_id in (
-        "roulette_retry", "roulette_double",
-        "bj_hit", "bj_stand", "bj_double", "bj_retry", "bj_double_next",
-        "coin_heads", "coin_tails", "coin_retry", "coin_double",
+        "roulette_retry", "roulette_repeat", "roulette_double",
+        "bj_hit", "bj_stand", "bj_double",
+        "bj_retry", "bj_repeat", "bj_double_next",
+        "coin_heads", "coin_tails",
+        "coin_retry", "coin_repeat", "coin_double",
     ):
         return
 
@@ -1518,6 +1561,7 @@ async def send_actions_panel():
         )
     except Exception as e:
         logger.warning(f"send_actions_panel send err: {e}")
+
 
 async def refresh_actions_panel():
     await send_actions_panel()
