@@ -962,7 +962,7 @@ def generate_profile_card(
 
     # Статистика
     st_y = sep2_y + 18
-    _draw_icon(d, rp_x1 + 6, st_y + 7, I_CHART, 12, GOLD)
+    _draw_icon(d, rp_x1 + 6, st_y + 7, I_CHART, 12, SILVER)
     d.text((rp_x1 + 20, st_y), "СТАТИСТИКА", font=_font(10), fill=MUTED)
 
     stats_y = st_y + 28
@@ -985,7 +985,7 @@ def generate_profile_card(
 
     # Прогресс в клане
     cp_title_y = stats_y + stat_h + 18
-    _draw_icon(d, rp_x1 + 6, cp_title_y + 7, I_SHIELD, 12, GOLD)
+    _draw_icon(d, rp_x1 + 6, cp_title_y + 7, I_SHIELD, 12, SILVER)
     d.text((rp_x1 + 20, cp_title_y), "ПРОГРЕСС В КЛАНЕ", font=_font(10), fill=MUTED)
 
     cp_y = cp_title_y + 28
@@ -1027,7 +1027,7 @@ def generate_profile_card(
     # 3 ячейки
     cell_w = (rp_x2 - rp_x1) // 3
     cp_items = [
-        ("МЕСТО В КЛАНЕ", f"#{my_rank}" if my_rank else "—", GOLD),
+        ("МЕСТО В КЛАНЕ", f"#{my_rank}" if my_rank else "—", SILVER),
         ("ВКЛАД ЗА СЕЗОН", f"{my_contrib} DC", GREEN),
         ("ДО ТОП-3", f"{to_top3} DC" if to_top3 else "—", BLUE),
     ]
@@ -1040,7 +1040,7 @@ def generate_profile_card(
 
     # Операции
     op_title_y = cp_y + cp_h + 18
-    _draw_icon(d, rp_x1 + 6, op_title_y + 7, I_ROTATE, 12, GOLD)
+    _draw_icon(d, rp_x1 + 6, op_title_y + 7, I_ROTATE, 12, SILVER)
     d.text((rp_x1 + 20, op_title_y), "ПОСЛЕДНИЕ ОПЕРАЦИИ", font=_font(10), fill=MUTED)
 
     ops_y = op_title_y + 28
