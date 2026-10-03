@@ -434,6 +434,16 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
+        # ============================================================
+        # 🎁 МОДУЛЬ РОЗЫГРЫШЕЙ — использует ОБЩУЮ БД
+        # ============================================================
+        try:
+            from modules.giveaways import setup_giveaways
+            setup_giveaways(bot)
+            logger.info("🎁 Модуль розыгрышей подключён")
+        except Exception as e:
+            logger.exception(f"giveaways init err: {e}")
+
         from modules.commands_tickets import (
             TicketPanelView, TicketPaidView, TicketView, CoinsTicketButtons,
             TicketRatingView, SelectView, CatalogTypeView, CatalogView,
