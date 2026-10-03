@@ -2,7 +2,6 @@
 """
 Pillow-рендер панели квестов.
 3 колонки: Ежедневные / Недельные / Разовые. По 4 квеста в каждой.
-Крупные карточки с читаемыми названиями (28px) и описаниями (25px).
 """
 import io
 import os
@@ -60,6 +59,9 @@ TEXT_SOFT = (232, 232, 236)
 MUTED     = (136, 136, 136)
 DIM       = (102, 102, 102)
 DARK      = (85, 85, 85)
+
+# 👇 серый с холодным оттенком — для описаний квестов
+DESC_GREY = (168, 174, 186)
 
 SILVER     = (198, 208, 224)
 SILVER_HI  = (224, 232, 245)
@@ -236,7 +238,6 @@ def _base_canvas(user_id: int):
 def render_quests(user_id: int, quests: List[Dict]) -> io.BytesIO:
     img, d = _base_canvas(user_id)
 
-    # ---- Заголовок секции + общий прогресс ----
     title_y = 130
     d.rounded_rectangle((PAD_X, title_y + 6, PAD_X + 6, title_y + 48),
                         radius=3, fill=SILVER + (255,))
@@ -259,7 +260,6 @@ def render_quests(user_id: int, quests: List[Dict]) -> io.BytesIO:
     d.line((PAD_X, title_y + 60, CANVAS_W - M - PAD_X, title_y + 60),
            fill=STACK_HDR + (255,), width=2)
 
-    # ---- 3 колонки ----
     body_y = title_y + 76
     body_h = CANVAS_H - M - PAD_Y - body_y - 40
 
@@ -277,7 +277,6 @@ def render_quests(user_id: int, quests: List[Dict]) -> io.BytesIO:
         x2 = x1 + col_w
         _draw_column(d, img, x1, body_y, col_w, body_h, t, buckets[t])
 
-    # ---- Футер ----
     foot_y = CANVAS_H - M - PAD_Y + 4
     d.line((PAD_X, foot_y - 10, CANVAS_W - M - PAD_X, foot_y - 10),
            fill=STACK_HDR + (255,), width=2)
@@ -308,7 +307,6 @@ def _draw_column(d, img, x, y, w, h, kind: str, quests: List[Dict]):
 
     pad = 16
 
-    # ---- Заголовок колонки ----
     head_h = 72
     icon_size = 46
     ix = x + pad
@@ -326,7 +324,6 @@ def _draw_column(d, img, x, y, w, h, kind: str, quests: List[Dict]):
     d.line((x + pad, y + pad + head_h - 10, x + w - pad, y + pad + head_h - 10),
            fill=STACK_HDR + (255,), width=2)
 
-    # ---- Квесты ----
     q_y = y + pad + head_h
     q_gap = 12
 
@@ -361,7 +358,6 @@ def _draw_quest_card(d, img, x, y, w, h, q: Dict, kind: str):
     pad_x = 16
     pad_y = 12
 
-    # ---- Верхняя строка: иконка + название + награда ----
     ic_size = 44
     ix = x + pad_x
     iy = y + pad_y
@@ -396,11 +392,11 @@ def _draw_quest_card(d, img, x, y, w, h, q: Dict, kind: str):
     d.text((tx, iy + 6), name, font=name_font,
            fill=GREEN if done else TEXT)
 
-    # ---- Описание (крупнее, 25px) ----
-    desc_font = _font(25)
-    desc_y = iy + ic_size + 8
+    # ---- Описание (22px, серый холодный) ----
+    desc_font = _font(22)
+    desc_y = iy + ic_size + 10
     desc = _ellipsis(d, q.get("desc", ""), desc_font, w - pad_x * 2)
-    d.text((x + pad_x, desc_y), desc, font=desc_font, fill=TEXT_SOFT)
+    d.text((x + pad_x, desc_y), desc, font=desc_font, fill=DESC_GREY)
 
     # ---- Прогресс-бар ----
     bar_y = y + h - pad_y - 12
