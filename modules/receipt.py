@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
-import os
+"""
+Pillow-рендер счёта на оплату (Premium).
+Дизайн: акцент на реквизитах, крупные цифры, шаги оплаты.
+Размер 1800×1000, стиль 1:1 с остальными рендерами.
+"""
 import io
+import os
 import time
 import random
 from datetime import datetime, timezone, timedelta
@@ -8,71 +13,173 @@ from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
-from core.utils import ADD_DIR, DATA_DIR, logger
-
-FONT_BOLD_PATH = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
-FONT_FA_SOLID = os.path.join(ADD_DIR, "fa-solid-900.ttf")
-FONT_FA_REGULAR = os.path.join(ADD_DIR, "fa-regular-400.ttf")
-
-_FONT_CACHE = {}
-_FA_CACHE = {}
-
-ICON_CART        = 0xf07a
-ICON_USER_TIE    = 0xf508
-ICON_BOX         = 0xf466
-ICON_CREDIT_CARD = 0xf09d
-ICON_CLOCK       = 0xf017
-ICON_USER        = 0xf007
+from core.utils import ADD_DIR, logger
 
 
-def _get_font(size: int):
+# ============================================================
+# ШРИФТЫ
+# ============================================================
+FONT_BOLD = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
+FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
+
+_FONT_CACHE: dict = {}
+_FA_CACHE: dict = {}
+
+
+def _font(size: int):
     if size in _FONT_CACHE:
         return _FONT_CACHE[size]
     try:
-        font = ImageFont.truetype(FONT_BOLD_PATH, size)
+        f = ImageFont.truetype(FONT_BOLD, size)
     except Exception:
-        font = ImageFont.load_default()
-    _FONT_CACHE[size] = font
-    return font
+        f = ImageFont.load_default()
+    _FONT_CACHE[size] = f
+    return f
 
 
-def _get_fa_icon_font(size: int, solid: bool = True):
-    key = (size, solid)
-    if key in _FA_CACHE:
-        return _FA_CACHE[key]
-    path = FONT_FA_SOLID if solid else FONT_FA_REGULAR
-    font = None
-    if os.path.exists(path):
+def _fa(size: int):
+    if size in _FA_CACHE:
+        return _FA_CACHE[size]
+    f = None
+    if os.path.exists(FONT_FA):
         try:
-            font = ImageFont.truetype(path, size)
-        except Exception as e:
-            logger.warning(f"Ошибка загрузки FA-шрифта {path}: {e}")
-    _FA_CACHE[key] = font
-    return font
+            f = ImageFont.truetype(FONT_FA, size)
+        except Exception:
+            pass
+    _FA_CACHE[size] = f
+    return f
 
 
-def _draw_icon(draw, cx, cy, code, size, color, solid=True):
-    font = _get_fa_icon_font(size, solid)
-    if font is None:
-        return False
+# ============================================================
+# ПАЛИТРА
+# ============================================================
+BG        = (10, 10, 12)
+CARD_TOP  = (16, 16, 20)
+STACK_BG  = (21, 21, 26)
+STACK_BRD = (58, 58, 64)
+STACK_HDR = (36, 36, 42)
+INNER_BG  = (18, 18, 23)
+INNER_BRD = (40, 40, 47)
+TEXT      = (255, 255, 255)
+TEXT_SOFT = (232, 232, 236)
+MUTED     = (136, 136, 136)
+DIM       = (102, 102, 102)
+DARK      = (85, 85, 85)
+
+SILVER     = (198, 208, 224)
+SILVER_HI  = (224, 232, 245)
+SILVER_DIM = (120, 132, 155)
+
+GREEN     = (46, 204, 113)
+RED       = (255, 107, 107)
+BLUE      = (106, 155, 209)
+GOLD      = (247, 201, 145)
+
+CARD_BRD  = (74, 74, 79)
+
+
+# ============================================================
+# FA5-ИКОНКИ
+# ============================================================
+I_GEM        = 0xf3a5
+I_RECEIPT    = 0xf543
+I_CHECK      = 0xf00c
+I_BUILDING   = 0xf19c
+I_MOBILE     = 0xf3cd
+I_CLOCK      = 0xf017
+I_CREDIT     = 0xf09d
+
+
+# ============================================================
+# УТИЛИТЫ
+# ============================================================
+def _tw(d, text, font):
+    b = d.textbbox((0, 0), text, font=font)
+    return b[2] - b[0]
+
+
+def _fmt(n) -> str:
     try:
-        draw.text((cx, cy), chr(code), font=font, fill=color, anchor="mm")
-        return True
+        return f"{int(n):,}".replace(",", " ")
     except Exception:
-        return False
+        return str(n)
 
 
-def _text_size(draw, text, font):
-    bbox = draw.textbbox((0, 0), text, font=font)
-    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+def _draw_icon(d, cx, cy, code, size, color):
+    f = _fa(size)
+    if f is None:
+        return
+    try:
+        d.text((cx, cy), chr(code), font=f, fill=color, anchor="mm")
+    except Exception:
+        pass
 
 
-def _draw_centered(draw, cx, y, text, font, fill):
-    tw, _ = _text_size(draw, text, font)
-    draw.text((cx - tw // 2, y), text, font=font, fill=fill)
-    return tw
+def _alpha_fill(base, box, color, alpha=30, radius=0):
+    x1, y1, x2, y2 = box
+    w, h = x2 - x1, y2 - y1
+    if w <= 0 or h <= 0:
+        return
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    if radius > 0:
+        ld.rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=color + (alpha,))
+    else:
+        ld.rectangle((0, 0, w - 1, h - 1), fill=color + (alpha,))
+    base.paste(layer, (x1, y1), layer)
 
 
+def _gradient_box(base, box, c1, c2, alpha=30, radius=0, horizontal=True):
+    x1, y1, x2, y2 = box
+    w, h = x2 - x1, y2 - y1
+    if w <= 0 or h <= 0:
+        return
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    steps = w if horizontal else h
+    for i in range(steps):
+        t = i / max(steps - 1, 1)
+        r = int(c1[0] * (1 - t) + c2[0] * t)
+        g = int(c1[1] * (1 - t) + c2[1] * t)
+        b = int(c1[2] * (1 - t) + c2[2] * t)
+        if horizontal:
+            ld.line([(i, 0), (i, h)], fill=(r, g, b, alpha))
+        else:
+            ld.line([(0, i), (w, i)], fill=(r, g, b, alpha))
+    if radius > 0:
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
+        alpha_ch = layer.split()[3]
+        alpha_ch = Image.composite(alpha_ch, Image.new("L", (w, h), 0), mask)
+        layer.putalpha(alpha_ch)
+    base.paste(layer, (x1, y1), layer)
+
+
+# ============================================================
+# КАРКАС
+# ============================================================
+CANVAS_W, CANVAS_H = 1800, 1000
+M = 14
+PAD_X = 40
+PAD_Y = 40
+
+MSK = timezone(timedelta(hours=3))
+
+
+# ============================================================
+# РЕКВИЗИТЫ
+# ============================================================
+REQUISITES = [
+    ("Т-Банк",     "2200 7020 8029 9345", I_BUILDING),
+    ("АльфаБанк",  "2200 1545 6426 7465", I_BUILDING),
+    ("ОзонБанк",   "2204 3204 4881 5151", I_BUILDING),
+    ("СБП",        "+7 983 694 76 41",    I_MOBILE),
+]
+
+
+# ============================================================
+# ГЛАВНАЯ
+# ============================================================
 def generate_receipt_png(
     manager_name: str,
     customer_name: str,
@@ -81,256 +188,341 @@ def generate_receipt_png(
     discount_percent: int = 0,
     order_id: Optional[str] = None,
 ) -> io.BytesIO:
-    """1800×1200 (3:2). Реквизиты растянуты, шрифт крупнее, низ прижат к нижнему краю."""
+    """1800×1000 · Premium-дизайн счёта."""
+
     if order_id is None:
         order_id = f"D-{int(time.time())}-{random.randint(100, 999)}"
 
-    now = datetime.now(timezone.utc)
-    date_str = now.strftime("%d.%m.%Y · %H:%M")
-    deadline_str = (now + timedelta(hours=1)).strftime("%d.%m.%Y · %H:%M")
+    now = datetime.now(MSK)
+    deadline = now + timedelta(hours=1)
+    deadline_str = deadline.strftime("%d.%m.%Y · %H:%M МСК")
 
     discount_rub = int(amount * discount_percent / 100)
     total = max(amount - discount_rub, 0)
 
-    W, H = 1800, 1200
-    M = 22
-    PAD = 60
+    # ── Создаём холст ──
+    img = Image.new("RGBA", (CANVAS_W, CANVAS_H), BG + (255,))
+    d = ImageDraw.Draw(img)
 
-    BG = (10, 10, 12)
-    CARD_TOP = (26, 26, 31)
-    CARD_BOT = (20, 20, 26)
-    INNER = (20, 20, 26)
-    INNER_BORDER = (42, 42, 47)
-    BORDER = (74, 74, 79)
-    TEXT = (255, 255, 255)
-    MUTED = (136, 136, 136)
-    GREEN = (46, 204, 113)
-    GREEN_BG = (18, 44, 28)
-    LOGO_BG = (74, 74, 79)
-    LOGO_ICON = (224, 224, 224)
-    LINE = (42, 42, 47)
-    DASH = (34, 34, 34)
-    STEPS_OFF = (42, 42, 47)
+    # ── Внешний card ──
+    d.rounded_rectangle(
+        (M, M, CANVAS_W - 1 - M, CANVAS_H - 1 - M),
+        radius=28, fill=CARD_TOP + (255,),
+        outline=CARD_BRD + (255,), width=3,
+    )
 
-    img = Image.new("RGB", (W, H), BG)
-    draw = ImageDraw.Draw(img)
+    # ═════════════════════════════════════════════════════════
+    # 1. HEADER
+    # ═════════════════════════════════════════════════════════
+    hx = PAD_X
+    hy = PAD_Y
+    logo_size = 68
 
-    draw.ellipse((W - 570, -270, W + 120, 420), fill=(16, 16, 20))
-    draw.ellipse((-210, H - 390, 330, H + 150), fill=(14, 22, 18))
+    # Логотип
+    _gradient_box(img, (hx, hy, hx + logo_size, hy + logo_size),
+                  (74, 74, 82), (42, 42, 48), alpha=255, radius=18)
+    d.rounded_rectangle((hx, hy, hx + logo_size, hy + logo_size),
+                        radius=18, outline=(90, 90, 98) + (255,), width=2)
+    _draw_icon(d, hx + logo_size // 2, hy + logo_size // 2 + 1,
+               I_RECEIPT, 32, SILVER_HI)
 
-    draw.rounded_rectangle((M, M, W - M, H - M), radius=33, fill=CARD_BOT, outline=BORDER, width=3)
-    draw.rounded_rectangle((M + 1, M + 1, W - M - 1, H // 2), radius=33, fill=CARD_TOP)
+    # Бренд
+    bx = hx + logo_size + 20
+    d.text((bx, hy + 6), "DIAMOND", font=_font(34), fill=TEXT)
+    d.text((bx + 4, hy + 48), "SHOP & ECOSYSTEM", font=_font(15), fill=MUTED)
 
-    # 1. ШАПКА
-    y = M + 45
-    logo_box = 81
-    draw.rounded_rectangle((PAD, y, PAD + logo_box, y + logo_box), radius=21, fill=LOGO_BG)
-    _draw_icon(draw, PAD + logo_box // 2, y + logo_box // 2 + 2, ICON_CART, 48, LOGO_ICON, solid=True)
+    # Meta справа
+    meta_r = CANVAS_W - M - PAD_X
+    lbl = "СЧЁТ НА ОПЛАТУ"
+    lbl_w = _tw(d, lbl, _font(14))
+    d.text((meta_r - lbl_w, hy + 8), lbl, font=_font(14), fill=MUTED)
 
-    draw.text((PAD + logo_box + 24, y + 3), "DIAMOND", font=_get_font(39), fill=TEXT)
-    draw.text((PAD + logo_box + 27, y + 57), "SHOP & ECOSYSTEM", font=_get_font(16), fill=MUTED)
+    num_str = f"№ {order_id}"
+    num_w = _tw(d, num_str, _font(24))
+    d.text((meta_r - num_w, hy + 34), num_str, font=_font(24), fill=TEXT)
 
-    lbl_font = _get_font(20)
-    num_font = _get_font(22)
-    date_font = _get_font(20)
-    lbl_text = "Заказ "
-    num_text = f"№{order_id}"
-    lw, _ = _text_size(draw, lbl_text, lbl_font)
-    nw, _ = _text_size(draw, num_text, num_font)
-    dx = W - PAD - (lw + nw)
-    draw.text((dx, y + 15), lbl_text, font=lbl_font, fill=MUTED)
-    draw.text((dx + lw, y + 12), num_text, font=num_font, fill=TEXT)
-    dw, _ = _text_size(draw, date_str, date_font)
-    draw.text((W - PAD - dw, y + 51), date_str, font=date_font, fill=MUTED)
+    # Разделитель
+    sep_y = hy + logo_size + 22
+    d.line((PAD_X, sep_y, CANVAS_W - M - PAD_X, sep_y),
+           fill=STACK_HDR + (255,), width=2)
 
-    y += logo_box + 30
+    # ═════════════════════════════════════════════════════════
+    # 2. ВЕРХНИЙ БЛОК — HERO + INFO
+    # ═════════════════════════════════════════════════════════
+    body_y = sep_y + 10
+    body_h = CANVAS_H - PAD_Y - body_y - 32
 
-    # 2. ГЕРОЙ
-    cx = W // 2
-    _draw_centered(draw, cx, y, "ИТОГО К ОПЛАТЕ", _get_font(21), MUTED)
-    y += 39
-    total_text = f"{total} Р"
-    font_size = 108
-    tw, _ = _text_size(draw, total_text, _get_font(font_size))
-    while tw > W - PAD * 2 - 300 and font_size > 60:
-        font_size -= 6
-        tw, _ = _text_size(draw, total_text, _get_font(font_size))
-    _draw_centered(draw, cx, y, total_text, _get_font(font_size), TEXT)
-    y += font_size + 9
+    top_h = 200
+    info_w = 500
+    gap_top = 24
+
+    top_y1 = body_y
+    top_y2 = top_y1 + top_h
+
+    hero_x1 = PAD_X
+    hero_x2 = CANVAS_W - PAD_X - info_w - gap_top
+    info_x1 = hero_x2 + gap_top
+    info_x2 = CANVAS_W - PAD_X
+
+    # ── HERO (слева) ──
+    _gradient_box(img, (hero_x1, top_y1, hero_x2, top_y2),
+                  GREEN, GREEN, alpha=18, radius=22)
+    d.rounded_rectangle((hero_x1, top_y1, hero_x2, top_y2),
+                        radius=22, outline=GREEN + (160,), width=3)
+
+    # Иконка с подсветкой
+    icon_size = 110
+    icon_x1 = hero_x1 + 40
+    icon_y1 = top_y1 + (top_h - icon_size) // 2
+    icon_x2 = icon_x1 + icon_size
+    icon_y2 = icon_y1 + icon_size
+
+    # Свечение
+    for i, a in enumerate([35, 50, 65]):
+        gs = icon_size + 30 - i * 10
+        _alpha_fill(img,
+                    (icon_x1 + icon_size // 2 - gs // 2,
+                     icon_y1 + icon_size // 2 - gs // 2,
+                     icon_x1 + icon_size // 2 + gs // 2,
+                     icon_y1 + icon_size // 2 + gs // 2),
+                    GREEN, alpha=a, radius=gs // 2)
+
+    _alpha_fill(img, (icon_x1, icon_y1, icon_x2, icon_y2),
+                GREEN, alpha=70, radius=26)
+    d.rounded_rectangle((icon_x1, icon_y1, icon_x2, icon_y2),
+                        radius=26, outline=GREEN + (230,), width=3)
+    _draw_icon(d, (icon_x1 + icon_x2) // 2, (icon_y1 + icon_y2) // 2 + 1,
+               I_CHECK, 52, GREEN)
+
+    # Текст hero
+    tx = icon_x2 + 34
+
+    d.text((tx, top_y1 + 40), "ИТОГО К ОПЛАТЕ",
+           font=_font(15), fill=GREEN)
+
+    sum_str = _fmt(total)
+    sum_font = _font(90)
+    sum_w = _tw(d, sum_str, sum_font)
+    d.text((tx, top_y1 + 68), sum_str, font=sum_font, fill=TEXT)
+    d.text((tx + sum_w + 16, top_y1 + 68 + 90 - 48),
+           "₽", font=_font(36), fill=SILVER)
+
+    # ── INFO (справа) ──
+    _gradient_box(img, (info_x1, top_y1, info_x2, top_y2),
+                  SILVER, SILVER, alpha=10, radius=22)
+    d.rounded_rectangle((info_x1, top_y1, info_x2, top_y2),
+                        radius=22, outline=INNER_BRD + (255,), width=2)
+
+    pad_in = 22
+    info_in_x1 = info_x1 + pad_in + 6
+    info_in_x2 = info_x2 - pad_in - 6
+
+    row_h = 30
+    cur_y = top_y1 + 16
+
+    def _info_row(label, value, value_color=TEXT):
+        nonlocal cur_y
+        d.text((info_in_x1, cur_y), label.upper(),
+               font=_font(11), fill=MUTED)
+        val_w = _tw(d, value, _font(15))
+        d.text((info_in_x2 - val_w, cur_y - 2), value,
+               font=_font(15), fill=value_color)
+        cur_y += row_h
+
+    _info_row("Менеджер", f"@{manager_name}")
+    _info_row("Заказчик", f"@{customer_name}")
+
+    # Разделитель
+    d.line((info_in_x1, cur_y + 2, info_in_x2, cur_y + 2),
+           fill=INNER_BRD + (255,), width=1)
+    cur_y += 12
+
+    # Товар может быть длинным — обрезаем
+    prod_shown = product_name
+    if _tw(d, prod_shown, _font(15)) > (info_in_x2 - info_in_x1) - 100:
+        while prod_shown and _tw(d, prod_shown + "…", _font(15)) > (info_in_x2 - info_in_x1) - 100:
+            prod_shown = prod_shown[:-1]
+        prod_shown += "…"
+
+    _info_row("Товар", prod_shown, SILVER_HI)
+    _info_row("Сумма", f"{_fmt(amount)} ₽", SILVER_HI)
 
     if discount_percent > 0:
-        badge_text = f"Скидка {discount_percent}%  ·  −{discount_rub} Р"
-        bf = _get_font(21)
-        bw, bh = _text_size(draw, badge_text, bf)
-        pad_bx, pad_by = 27, 10
-        badge_w = bw + pad_bx * 2
-        badge_h = bh + pad_by * 2
-        bx = cx - badge_w // 2
-        draw.rounded_rectangle((bx, y, bx + badge_w, y + badge_h),
-                               radius=15, fill=GREEN_BG, outline=GREEN, width=2)
-        draw.text((bx + pad_bx, y + pad_by), badge_text, font=bf, fill=GREEN)
-        y += badge_h
+        _info_row("Скидка", f"−{discount_percent}%", GREEN)
+    else:
+        _info_row("Скидка", "—", DIM)
 
-    # 3. РАЗДЕЛИТЕЛЬ
-    y += 33
-    cx_ = W // 2
-    line_color = (58, 58, 63)
-    draw.line((PAD, y, cx_ - 30, y), fill=line_color, width=2)
-    draw.line((cx_ + 30, y, W - PAD, y), fill=line_color, width=2)
-    _draw_icon(draw, cx_, y, ICON_CART, 22, (74, 74, 79), solid=True)
-    y += 27
+    # ═════════════════════════════════════════════════════════
+    # 3. РЕКВИЗИТЫ (2×2 сетка)
+    # ═════════════════════════════════════════════════════════
+    req_y1 = top_y2 + 20
+    req_y2 = req_y1 + 434
+    req_x1 = PAD_X
+    req_x2 = CANVAS_W - M - PAD_X
 
-    # 4. МЕНЕДЖЕР / ЗАКАЗЧИК
-    meta_h = 99
-    gap_x = 21
-    card_w = (W - PAD * 2 - gap_x) // 2
+    _gradient_box(img, (req_x1, req_y1, req_x2, req_y2),
+                  SILVER, SILVER, alpha=6, radius=22)
+    d.rounded_rectangle((req_x1, req_y1, req_x2, req_y2),
+                        radius=22, outline=INNER_BRD + (255,), width=2)
 
-    draw.rounded_rectangle((PAD, y, PAD + card_w, y + meta_h),
-                           radius=21, fill=GREEN_BG, outline=GREEN, width=3)
-    _draw_icon(draw, PAD + 39, y + meta_h // 2, ICON_USER_TIE, 24, GREEN, solid=True)
-    draw.text((PAD + 69, y + 18), "МЕНЕДЖЕР", font=_get_font(15), fill=GREEN)
-    draw.text((PAD + 69, y + 48), manager_name[:24], font=_get_font(28), fill=TEXT)
+    pad_req = 30
 
-    cx2 = PAD + card_w + gap_x
-    draw.rounded_rectangle((cx2, y, cx2 + card_w, y + meta_h),
-                           radius=21, fill=INNER, outline=BORDER, width=3)
-    _draw_icon(draw, cx2 + 39, y + meta_h // 2, ICON_USER, 24, MUTED, solid=True)
-    draw.text((cx2 + 69, y + 18), "ЗАКАЗЧИК", font=_get_font(15), fill=MUTED)
-    draw.text((cx2 + 69, y + 48), customer_name[:24], font=_get_font(28), fill=TEXT)
+    # H3 заголовок
+    h3_y = req_y1 + 26
+    _draw_icon(d, req_x1 + pad_req + 12, h3_y + 9,
+               I_CREDIT, 20, SILVER)
+    d.text((req_x1 + pad_req + 38, h3_y),
+           "РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ",
+           font=_font(16), fill=SILVER)
 
-    y += meta_h + 21
+    # Grid
+    grid_x1 = req_x1 + pad_req
+    grid_x2 = req_x2 - pad_req
+    grid_w = grid_x2 - grid_x1
 
-    # 5. ТАБЛИЦА
-    items_top = y
-    rows = 1 + (1 if discount_percent > 0 else 0) + 1
-    items_h = 45 + rows * 39 + 18
+    cell_gap = 16
+    cell_w = (grid_w - cell_gap) // 2
+    cell_h = 130
 
-    draw.rounded_rectangle((PAD, items_top, W - PAD, items_top + items_h),
-                           radius=21, fill=INNER, outline=INNER_BORDER, width=2)
+    grid_total_h = cell_h * 2 + cell_gap
+    grid_y1 = h3_y + 30 + 20
+    grid_y2 = req_y2 - pad_req
 
-    ip = 27
-    draw.text((PAD + ip, items_top + 12), "ТОВАР / УСЛУГА", font=_get_font(15), fill=MUTED)
-    hdr = "СУММА"
-    hw, _ = _text_size(draw, hdr, _get_font(15))
-    draw.text((W - PAD - ip - hw, items_top + 12), hdr, font=_get_font(15), fill=MUTED)
-    draw.line((PAD + ip, items_top + 39, W - PAD - ip, items_top + 39), fill=LINE, width=2)
+    # Центрируем по вертикали, если места больше
+    free_h = grid_y2 - grid_y1
+    if free_h > grid_total_h:
+        grid_y1 += (free_h - grid_total_h) // 2
 
-    row_y = items_top + 48
-    item_font = _get_font(21)
-    draw.text((PAD + ip, row_y), product_name[:40], font=item_font, fill=TEXT)
-    amt_str = f"{amount} Р"
-    aw, _ = _text_size(draw, amt_str, item_font)
-    draw.text((W - PAD - ip - aw, row_y), amt_str, font=item_font, fill=TEXT)
-    row_y += 36
-
-    if discount_percent > 0:
-        disc_font = _get_font(21)
-        draw.text((PAD + ip, row_y), f"Скидка ({discount_percent}%)", font=disc_font, fill=GREEN)
-        ds = f"−{discount_rub} Р"
-        dw_, _ = _text_size(draw, ds, disc_font)
-        draw.text((W - PAD - ip - dw_, row_y), ds, font=disc_font, fill=GREEN)
-        row_y += 36
-
-    draw.line((PAD + ip, row_y + 3, W - PAD - ip, row_y + 3), fill=GREEN, width=3)
-    row_y += 12
-    tf = _get_font(27)
-    draw.text((PAD + ip, row_y), "Итого к оплате", font=tf, fill=TEXT)
-    ts = f"{total} Р"
-    tw_, _ = _text_size(draw, ts, tf)
-    draw.text((W - PAD - ip - tw_, row_y), ts, font=tf, fill=GREEN)
-
-    y = items_top + items_h + 18
-
-    # 6. РЕКВИЗИТЫ
-    bottom_block_h = 110
-    content_bottom = H - M - 30
-    req_top = y
-    req_h = content_bottom - req_top - bottom_block_h
-
-    draw.rounded_rectangle((PAD, req_top, W - PAD, req_top + req_h),
-                           radius=21, fill=INNER, outline=INNER_BORDER, width=2)
-
-    _draw_icon(draw, PAD + 36, req_top + 33, ICON_CREDIT_CARD, 24, MUTED, solid=True)
-    draw.text((PAD + 63, req_top + 22), "РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ", font=_get_font(16), fill=MUTED)
-
-    req_data = [
-        ("Т-Банк", "2200 7020 8029 9345"),
-        ("АльфаБанк", "2200 1545 6426 7465"),
-        ("ОзонБанк", "2204 3204 4881 5151"),
-        ("СБП", "+7 983 694 76 41"),
-    ]
-
-    inner_top = req_top + 75
-    inner_bottom = req_top + req_h - 22
-    available = inner_bottom - inner_top
-    row_h = available // 2
-
-    col_gap = 60
-    inner_side = 36
-    col_w = (W - PAD * 2 - inner_side * 2 - col_gap) // 2
-
-    k_font = _get_font(17)
-    v_font = _get_font(28)
-
-    for i, (key, val) in enumerate(req_data):
+    for i, (bank_name, bank_num, bank_icon) in enumerate(REQUISITES):
         col = i % 2
         row = i // 2
-        item_x = PAD + inner_side + col * (col_w + col_gap)
-        row_y_start = inner_top + row * row_h
-        row_y_center = row_y_start + row_h // 2
+        cx1 = grid_x1 + col * (cell_w + cell_gap)
+        cy1 = grid_y1 + row * (cell_h + cell_gap)
+        cx2 = cx1 + cell_w
+        cy2 = cy1 + cell_h
 
-        if row == 0:
-            sep_y = inner_top + row_h
-            draw.line((PAD + inner_side, sep_y, W - PAD - inner_side, sep_y), fill=DASH, width=2)
+        # Фон ячейки
+        d.rounded_rectangle((cx1, cy1, cx2, cy2),
+                            radius=16, fill=(24, 24, 32) + (255,),
+                            outline=(40, 40, 47) + (255,), width=2)
 
-        draw.text((item_x, row_y_center - 32), key.upper(), font=k_font, fill=MUTED)
-        vw, _ = _text_size(draw, val, v_font)
-        draw.text((item_x + col_w - vw, row_y_center - 6), val, font=v_font, fill=TEXT)
+        # Иконка банка
+        logo_size = 54
+        lx = cx1 + 24
+        ly = cy1 + (cell_h - logo_size) // 2
 
-    # 7. НИЗ
-    y = req_top + req_h + 25
-    draw.line((PAD, y, W - PAD, y), fill=LINE, width=2)
-    y += 24
+        _gradient_box(img, (lx, ly, lx + logo_size, ly + logo_size),
+                      SILVER, SILVER, alpha=22, radius=14)
+        d.rounded_rectangle((lx, ly, lx + logo_size, ly + logo_size),
+                            radius=14, outline=SILVER + (130,), width=2)
+        _draw_icon(d, lx + logo_size // 2, ly + logo_size // 2 + 1,
+                   bank_icon, 24, SILVER_HI)
 
-    _draw_icon(draw, PAD + 15, y + 15, ICON_CLOCK, 24, MUTED, solid=False)
-    dfont = _get_font(18)
-    draw.text((PAD + 36, y + 5), "Оплатить до:", font=dfont, fill=MUTED)
-    lw_, _ = _text_size(draw, "Оплатить до: ", dfont)
-    draw.text((PAD + 36 + lw_, y + 3), deadline_str, font=_get_font(20), fill=TEXT)
+        # Инфо
+        info_x = lx + logo_size + 20
+        info_cy = cy1 + cell_h // 2
 
+        d.text((info_x, info_cy - 26),
+               bank_name.upper(), font=_font(13), fill=MUTED)
+        d.text((info_x, info_cy - 2),
+               bank_num, font=_font(20), fill=TEXT)
+
+    # ═════════════════════════════════════════════════════════
+    # 4. BOTTOM BAR — срок + шаги
+    # ═════════════════════════════════════════════════════════
+    bot_y1 = req_y2 + 20
+    bot_y2 = bot_y1 + 100
+    bot_x1 = PAD_X
+    bot_x2 = CANVAS_W - M - PAD_X
+
+    _alpha_fill(img, (bot_x1, bot_y1, bot_x2, bot_y2),
+                GOLD, alpha=22, radius=14)
+    d.rounded_rectangle((bot_x1, bot_y1, bot_x2, bot_y2),
+                        radius=14, outline=GOLD + (140,), width=2)
+
+    bot_cy = (bot_y1 + bot_y2) // 2
+
+    # Левая часть: иконка часов + текст
+    clock_cx = bot_x1 + 34
+    _draw_icon(d, clock_cx, bot_cy, I_CLOCK, 22, GOLD)
+
+    deadline_text = f"Оплатить до: {deadline_str} · после оплаты пришлите чек в тикет"
+    d.text((clock_cx + 28, bot_cy), deadline_text,
+           font=_font(15), fill=TEXT_SOFT, anchor="lm")
+
+    # Правая часть: шаги 1→2→3→4
     steps = ["Оплата", "Чек", "Проверка", "Готово"]
-    step_font = _get_font(16)
-    n_font = _get_font(15)
-    step_gap = 21
+    step_num_size = 26
+    step_text_gap = 8
+    step_gap = 18
+
+    step_font = _font(13)
+    num_font = _font(12)
+
     step_widths = []
     for name in steps:
-        tw_, _ = _text_size(draw, name, step_font)
-        step_widths.append(27 + 9 + tw_)
+        tw = _tw(d, name, step_font)
+        step_widths.append(step_num_size + step_text_gap + tw)
+
     total_steps_w = sum(step_widths) + step_gap * (len(steps) - 1)
+    cur_x = bot_x2 - 28 - total_steps_w
 
-    sx = W - PAD - total_steps_w
     for i, name in enumerate(steps):
-        w = step_widths[i]
-        circle_x = sx
-        circle_y = y + 6
-        circle_size = 27
         is_active = (i == 0)
-        draw.ellipse((circle_x, circle_y, circle_x + circle_size, circle_y + circle_size),
-                     fill=GREEN if is_active else STEPS_OFF)
-        num_str = str(i + 1)
-        nw_, nh_ = _text_size(draw, num_str, n_font)
-        draw.text((circle_x + (circle_size - nw_) // 2,
-                   circle_y + (circle_size - nh_) // 2 - 3),
-                  num_str, font=n_font,
-                  fill=(0, 0, 0) if is_active else TEXT)
-        draw.text((circle_x + circle_size + 9, y + 9), name, font=step_font,
-                  fill=TEXT if is_active else MUTED)
-        sx += w + step_gap
 
+        # Кружок
+        circle_x1 = cur_x
+        circle_y1 = bot_cy - step_num_size // 2
+        circle_x2 = circle_x1 + step_num_size
+        circle_y2 = circle_y1 + step_num_size
+
+        if is_active:
+            _alpha_fill(img, (circle_x1, circle_y1, circle_x2, circle_y2),
+                        GREEN, alpha=65, radius=step_num_size // 2)
+            d.rounded_rectangle((circle_x1, circle_y1, circle_x2, circle_y2),
+                                radius=step_num_size // 2,
+                                outline=GREEN + (230,), width=2)
+            num_color = GREEN
+        else:
+            d.rounded_rectangle((circle_x1, circle_y1, circle_x2, circle_y2),
+                                radius=step_num_size // 2,
+                                fill=(40, 40, 47) + (255,))
+            num_color = (184, 188, 200)
+
+        num_str = str(i + 1)
+        nw = _tw(d, num_str, num_font)
+        d.text((circle_x1 + step_num_size // 2 - nw // 2,
+                circle_y1 + step_num_size // 2 - num_font.size // 2 - 2),
+               num_str, font=num_font, fill=num_color)
+
+        # Текст
+        text_x = circle_x2 + step_text_gap
+        text_color = GREEN if is_active else MUTED
+        d.text((text_x, bot_cy), name, font=step_font,
+               fill=text_color, anchor="lm")
+
+        cur_x += step_widths[i] + step_gap
+
+    # ═════════════════════════════════════════════════════════
+    # 5. FOOTER
+    # ═════════════════════════════════════════════════════════
+    footer_y = CANVAS_H - PAD_Y + 6
+    d.line((PAD_X, footer_y - 12, CANVAS_W - M - PAD_X, footer_y - 12),
+           fill=STACK_HDR + (255,), width=2)
+
+    left_f = "Счёт сгенерирован автоматически · Diamond Shop"
+    d.text((PAD_X, footer_y), left_f, font=_font(13), fill=DIM)
+
+    right_f = "Шаг 1 · Оплата"
+    rw = _tw(d, right_f, _font(13))
+    d.text((CANVAS_W - M - PAD_X - rw, footer_y),
+           right_f, font=_font(13), fill=DIM)
+
+    # ── Возврат ──
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    img.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
-    logger.info(f"Счёт сгенерирован: {order_id}")
+    logger.info(f"Счёт сгенерирован: {order_id} · {total} ₽")
     return buf
 
 
