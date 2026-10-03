@@ -479,7 +479,7 @@ async def on_ready():
 
         # 👇 Оценка менеджера (шаг 1 и шаг 2)
         bot.add_view(RatingStep1View())
-        bot.add_view(RatingStep2View())
+        bot.add_view(RatingFinishView())
 
         bot.add_view(HomeView())
         bot.add_view(TarologyView())
