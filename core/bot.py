@@ -453,7 +453,7 @@ async def on_ready():
             QuestionTicketView,
         )
         from modules.ticket_rating import (
-            RatingStep1View, RatingStep2View,
+            RatingStep1View, RatingFinishView,
         )
         from modules.commands_profile import (
             send_profile_panel, ProfilePanelView, ProfileCardView,
