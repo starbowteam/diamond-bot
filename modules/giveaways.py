@@ -55,7 +55,7 @@ GIVEAWAY_TEMPLATES = {
 
 
 # ============================================================
-# СОЗДАНИЕ ТАБЛИЦ В ОБЩЕЙ БД (если ещё нет)
+# СОЗДАНИЕ ТАБЛИЦ В ОБЩЕЙ БД
 # ============================================================
 def _init_tables():
     cur.executescript("""
@@ -176,7 +176,7 @@ async def log_discord(title: str, description: str, color: int = 0x00ff00, field
 
 
 # ============================================================
-# СТАТИСТИКА ИНВАЙТОВ (читаем из общей БД)
+# СТАТИСТИКА ИНВАЙТОВ
 # ============================================================
 async def get_invite_stats(guild: disnake.Guild, user: disnake.Member, giveaway_id: int = None):
     if giveaway_id is not None:
@@ -253,7 +253,7 @@ def build_finished_giveaway_embed(prize, description, participants_count, winner
 
 
 # ============================================================
-# 💎 ЛС ПОБЕДИТЕЛЯМ
+# ЛС ПОБЕДИТЕЛЯМ
 # ============================================================
 def _build_manual_winner_dm(gid: int, prize: str) -> list:
     e1 = disnake.Embed(color=0xffaa00)
@@ -571,7 +571,7 @@ async def schedule_end(gid: int):
 
 
 # ============================================================
-# 💰 АВТОНАЧИСЛЕНИЕ DC
+# АВТОНАЧИСЛЕНИЕ DC
 # ============================================================
 async def _auto_payout(gid: int, row, winners: List[int]) -> int:
     if not row["auto_payout"]:
@@ -1087,6 +1087,7 @@ async def send_giveaway_panel():
             logger.warning("[giveaways] канал панели не найден")
             return
 
+        # Удаляем старую панель розыгрышей (только её, не трогаем остальные панели)
         try:
             async for msg in ch.history(limit=50):
                 if msg.author == _bot.user and msg.embeds:
@@ -1118,34 +1119,45 @@ async def send_giveaway_panel():
         e2.set_image(url=IMG_STRIPE_GW)
 
         await ch.send(embeds=[e1, e2], view=GiveawayPanelView())
-        logger.info("[giveaways] панель отправлена")
+        logger.info("[giveaways] панель отправлена в стафф-канал")
     except Exception as e:
         logger.warning(f"[giveaways] send_giveaway_panel: {e}")
 
 
 # ============================================================
-# ON_READY (только восстановление таймеров)
+# ОТЛОЖЕННАЯ ИНИЦИАЛИЗАЦИЯ (восстановление таймеров + панель)
 # ============================================================
-async def _on_ready_giveaways():
+async def _delayed_init_and_panel():
+    """Запускается из setup_giveaways. Ждёт пока send_staff_panels закончит,
+    потом восстанавливает таймеры активных розыгрышей и постит панель."""
     try:
-        active_rows = cur.execute(
-            "SELECT giveaway_id, end_time FROM giveaways WHERE status='active'"
-        ).fetchall()
-        for r in active_rows:
-            gid = r["giveaway_id"]
-            if r["end_time"] <= now_ts():
-                asyncio.create_task(finish_giveaway(gid))
-            else:
-                asyncio.create_task(schedule_end(gid))
+        await _bot.wait_until_ready()
+        # Ждём main on_ready + send_staff_panels (который стирает сообщения бота в канале)
+        await asyncio.sleep(8)
 
+        # Восстанавливаем таймеры активных розыгрышей
+        try:
+            active_rows = cur.execute(
+                "SELECT giveaway_id, end_time FROM giveaways WHERE status='active'"
+            ).fetchall()
+            for r in active_rows:
+                gid = r["giveaway_id"]
+                if r["end_time"] <= now_ts():
+                    asyncio.create_task(finish_giveaway(gid))
+                else:
+                    asyncio.create_task(schedule_end(gid))
+            logger.info(f"[giveaways] восстановлено таймеров: {len(active_rows)}")
+        except Exception as e:
+            logger.exception(f"[giveaways] restore timers: {e}")
+
+        # Постим панель
         await send_giveaway_panel()
-        logger.info(f"[giveaways] ready | активных: {len(active_rows)}")
     except Exception as e:
-        logger.exception(f"[giveaways] on_ready: {e}")
+        logger.exception(f"[giveaways] _delayed_init_and_panel: {e}")
 
 
 # ============================================================
-# SETUP — вызывается 1 раз из core/bot.py (on_ready)
+# SETUP — 1 строка из core/bot.py
 # ============================================================
 def setup_giveaways(bot_instance):
     global _bot, _setup_done
@@ -1162,16 +1174,17 @@ def setup_giveaways(bot_instance):
     bot_instance.add_view(GiveawayView())
     bot_instance.add_view(GiveawayPanelView())
 
-    # 👇 ВАЖНО: НЕ регистрируем on_member_join / on_invite_create —
-    # они уже есть в core/bot.py и пишут в ту же таблицу invites.
-
-    # Только восстановление таймеров + панель
-    bot_instance.add_listener(_on_ready_giveaways, "on_ready")
-
     # Слэш-команда /invites
     try:
         bot_instance.add_slash_command(invites_cmd)
     except Exception as e:
         logger.warning(f"[giveaways] не удалось добавить /invites: {e}")
+
+    # 👇 Отложенная инициализация — восстановит таймеры и постит панель
+    # через 8 секунд после старта (после того как send_staff_panels закончит)
+    try:
+        bot_instance.loop.create_task(_delayed_init_and_panel())
+    except Exception as e:
+        logger.warning(f"[giveaways] не удалось запустить init task: {e}")
 
     logger.info("[giveaways] ✅ модуль розыгрышей подключён (общая БД)")
