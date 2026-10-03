@@ -439,8 +439,12 @@ class ClanGamesView(View):
     )
     async def quests(self, button, inter: disnake.MessageInteraction):
         await on_panel_click_quest_hook(inter.author.id)
-        embeds = format_quests_embed(inter.author.id)
-        await inter.response.send_message(embeds=embeds, ephemeral=True)
+        from clan.quests import build_quests_embeds
+        embeds, file = build_quests_embeds(inter.author.id)
+        if file:
+            await inter.response.send_message(embeds=embeds, file=file, ephemeral=True)
+        else:
+            await inter.response.send_message(embeds=embeds, ephemeral=True)
 
     @disnake.ui.button(
         label=f"{P}Игровые автоматы DC{P}",
