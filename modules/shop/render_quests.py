@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Pillow-рендер панели квестов.
-3 колонки: Ежедневные / Недельные / Разовые. По 5 квестов в каждой.
+3 колонки: Ежедневные / Недельные / Разовые. По 4 квеста в каждой.
+Крупные карточки с читаемыми названиями (28px) и описаниями (25px).
 """
 import io
 import os
@@ -81,7 +82,7 @@ EMBED_COLOR = 0x2b2d31
 # FA5
 I_GEM      = 0xf3a5
 I_CLOCK    = 0xf017
-I_CALENDAR = 0xf133      # calendar-week
+I_CALENDAR = 0xf133
 I_STAR     = 0xf005
 I_CHECK    = 0xf00c
 I_COMMENT  = 0xf075
@@ -98,7 +99,6 @@ I_GIFT     = 0xf06b
 I_FIRE     = 0xf06d
 I_CROWN    = 0xf521
 I_MONEY    = 0xf53a
-I_ELLIPSIS = 0xf141
 
 
 FA_MAP = {
@@ -119,7 +119,6 @@ FA_MAP = {
     "fa-money-bill-wave": I_MONEY,
 }
 
-# Иконки колонок
 COL_ICON = {
     "daily":  I_CLOCK,
     "weekly": I_CALENDAR,
@@ -130,12 +129,6 @@ COL_COLOR = {
     "daily":  BLUE,
     "weekly": SILVER,
     "once":   PURPLE,
-}
-
-COL_BG = {
-    "daily":  BLUE_BG,
-    "weekly": SILVER_BG,
-    "once":   PURPLE_BG,
 }
 
 COL_TITLE = {
@@ -241,14 +234,6 @@ def _base_canvas(user_id: int):
 # ГЛАВНАЯ
 # ============================================================
 def render_quests(user_id: int, quests: List[Dict]) -> io.BytesIO:
-    """
-    quests = [{
-        "key": str, "title": str, "desc": str, "reward": int,
-        "goal": int, "progress": int, "completed": bool,
-        "type": "daily"|"weekly"|"once", "icon": "fa-...",
-        "reward_cut": int,   # сколько уходит в копилку
-    }, ...]
-    """
     img, d = _base_canvas(user_id)
 
     # ---- Заголовок секции + общий прогресс ----
@@ -316,42 +301,39 @@ def render_quests(user_id: int, quests: List[Dict]) -> io.BytesIO:
 # ============================================================
 def _draw_column(d, img, x, y, w, h, kind: str, quests: List[Dict]):
     color = COL_COLOR[kind]
-    bg = COL_BG[kind]
 
-    # Панель колонки
     d.rounded_rectangle((x, y, x + w, y + h), radius=16,
                         fill=STACK_BG + (255,),
                         outline=STACK_BRD + (255,), width=2)
 
-    pad = 14
+    pad = 16
 
     # ---- Заголовок колонки ----
-    head_h = 56
-    icon_size = 38
+    head_h = 72
+    icon_size = 46
     ix = x + pad
     iy = y + pad
 
-    _alpha_fill(img, (ix, iy, ix + icon_size, iy + icon_size), color, alpha=45, radius=11)
+    _alpha_fill(img, (ix, iy, ix + icon_size, iy + icon_size), color, alpha=50, radius=12)
     _draw_icon(d, ix + icon_size // 2, iy + icon_size // 2 + 1,
-               COL_ICON[kind], 20, color)
+               COL_ICON[kind], 22, color)
 
-    d.text((ix + icon_size + 12, iy + 3),
-           COL_TITLE[kind].upper(), font=_font(17), fill=TEXT)
-    d.text((ix + icon_size + 12, iy + 24),
-           COL_SUB[kind], font=_font(10), fill=MUTED)
+    d.text((ix + icon_size + 14, iy + 2),
+           COL_TITLE[kind].upper(), font=_font(22), fill=TEXT)
+    d.text((ix + icon_size + 14, iy + 28),
+           COL_SUB[kind], font=_font(12), fill=MUTED)
 
-    d.line((x + pad, y + pad + head_h - 8, x + w - pad, y + pad + head_h - 8),
+    d.line((x + pad, y + pad + head_h - 10, x + w - pad, y + pad + head_h - 10),
            fill=STACK_HDR + (255,), width=2)
 
     # ---- Квесты ----
     q_y = y + pad + head_h
-    q_gap = 8
+    q_gap = 12
 
-    # Считаем высоту карточки
     available = h - pad * 2 - head_h - 4
     n = max(len(quests), 1)
     q_h = (available - q_gap * (n - 1)) // n
-    q_h = max(q_h, 60)
+    q_h = max(q_h, 90)
 
     for i, q in enumerate(quests):
         cy = q_y + i * (q_h + q_gap)
@@ -366,70 +348,68 @@ def _draw_quest_card(d, img, x, y, w, h, q: Dict, kind: str):
     done = q.get("completed", False)
 
     if done:
-        d.rounded_rectangle((x, y, x + w, y + h), radius=11,
+        d.rounded_rectangle((x, y, x + w, y + h), radius=12,
                             fill=GREEN_BG + (255,),
                             outline=GREEN + (150,), width=2)
         accent = GREEN
     else:
-        d.rounded_rectangle((x, y, x + w, y + h), radius=11,
+        d.rounded_rectangle((x, y, x + w, y + h), radius=12,
                             fill=INNER_BG + (255,),
                             outline=INNER_BRD + (255,), width=2)
         accent = color
 
-    pad_x = 12
-    pad_y = 10
+    pad_x = 16
+    pad_y = 12
 
-    # ---- Иконка ----
-    ic_size = 34
+    # ---- Верхняя строка: иконка + название + награда ----
+    ic_size = 44
     ix = x + pad_x
     iy = y + pad_y
 
     if done:
-        _alpha_fill(img, (ix, iy, ix + ic_size, iy + ic_size), GREEN, alpha=45, radius=9)
-        _draw_icon(d, ix + ic_size // 2, iy + ic_size // 2 + 1, I_CHECK, 16, GREEN)
+        _alpha_fill(img, (ix, iy, ix + ic_size, iy + ic_size), GREEN, alpha=50, radius=11)
+        _draw_icon(d, ix + ic_size // 2, iy + ic_size // 2 + 1, I_CHECK, 22, GREEN)
     else:
-        _alpha_fill(img, (ix, iy, ix + ic_size, iy + ic_size), color, alpha=40, radius=9)
+        _alpha_fill(img, (ix, iy, ix + ic_size, iy + ic_size), color, alpha=45, radius=11)
         icon_code = FA_MAP.get(q.get("icon", "fa-star"), I_STAR)
-        _draw_icon(d, ix + ic_size // 2, iy + ic_size // 2 + 1, icon_code, 16, color)
+        _draw_icon(d, ix + ic_size // 2, iy + ic_size // 2 + 1, icon_code, 22, color)
 
-    # ---- Награда справа (сверху) ----
+    # ---- Награда справа ----
     reward_cut = q.get("reward_cut", q.get("reward", 0))
     rw_txt = f"{reward_cut}"
-    rwf = _font(15)
-    rw_w = _tw(d, rw_txt, rwf) + _tw(d, " DC", _font(10)) + 3
+    rwf = _font(28)
+    unit_f = _font(16)
+    rw_w = _tw(d, rw_txt, rwf) + _tw(d, " DC", unit_f) + 4
 
     reward_color = GREEN if done else SILVER_HI
-    d.text((x + w - pad_x - rw_w, iy + 2), rw_txt, font=rwf, fill=reward_color)
+    rw_x = x + w - pad_x - rw_w
+    d.text((rw_x, iy + 4), rw_txt, font=rwf, fill=reward_color)
     w1 = _tw(d, rw_txt, rwf)
-    d.text((x + w - pad_x - rw_w + w1 + 3, iy + 7), "DC",
-           font=_font(10), fill=reward_color)
+    d.text((rw_x + w1 + 4, iy + 14), "DC", font=unit_f, fill=reward_color)
 
-    if done:
-        cw = _tw(d, "готово", _font(9))
-        d.text((x + w - pad_x - cw, iy + 20), "готово",
-               font=_font(9), fill=GREEN)
+    # ---- Название ----
+    tx = ix + ic_size + 14
+    tx_max = rw_x - 12
 
-    # ---- Название + описание ----
-    tx = ix + ic_size + 10
-    tx_max = x + w - pad_x - rw_w - 20
-
-    name_font = _font(13)
+    name_font = _font(28)
     name = _ellipsis(d, q.get("title", "—"), name_font, tx_max - tx)
-    d.text((tx, iy + 1), name, font=name_font,
+    d.text((tx, iy + 6), name, font=name_font,
            fill=GREEN if done else TEXT)
 
-    desc_font = _font(10)
+    # ---- Описание (крупнее, 25px) ----
+    desc_font = _font(25)
+    desc_y = iy + ic_size + 8
     desc = _ellipsis(d, q.get("desc", ""), desc_font, w - pad_x * 2)
-    d.text((x + pad_x, iy + ic_size + 6), desc, font=desc_font, fill=MUTED)
+    d.text((x + pad_x, desc_y), desc, font=desc_font, fill=TEXT_SOFT)
 
     # ---- Прогресс-бар ----
-    bar_y = y + h - pad_y - 8
+    bar_y = y + h - pad_y - 12
     bar_x1 = x + pad_x
-    bar_x2 = x + w - pad_x - 70   # оставляем место для текста
-    bar_h = 8
+    bar_x2 = x + w - pad_x - 110
+    bar_h = 12
 
-    if bar_x2 < bar_x1 + 40:
-        bar_x2 = bar_x1 + 40
+    if bar_x2 < bar_x1 + 60:
+        bar_x2 = bar_x1 + 60
 
     d.rounded_rectangle((bar_x1, bar_y, bar_x2, bar_y + bar_h),
                         radius=bar_h // 2, fill=(28, 28, 34) + (255,))
@@ -447,20 +427,19 @@ def _draw_quest_card(d, img, x, y, w, h, q: Dict, kind: str):
             d.rounded_rectangle((bar_x1, bar_y, bar_x1 + fill_w, bar_y + bar_h),
                                 radius=bar_h // 2, fill=color + (255,))
 
-    # Число прогресса
     if done:
         prog_txt = f"{goal} / {goal}"
     else:
         prog_txt = f"{prog} / {goal}"
+
     if goal >= 1000:
-        # сокращаем 500000 → 500k
         def shorten(v):
             if v >= 1000:
                 return f"{v // 1000}k"
             return str(v)
         prog_txt = f"{shorten(prog)} / {shorten(goal)}"
 
-    pf = _font(10)
+    pf = _font(16)
     pw = _tw(d, prog_txt, pf)
-    d.text((x + w - pad_x - pw, bar_y - 2), prog_txt, font=pf,
+    d.text((x + w - pad_x - pw, bar_y - 4), prog_txt, font=pf,
            fill=GREEN if done else MUTED)
