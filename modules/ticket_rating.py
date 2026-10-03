@@ -11,13 +11,14 @@ from disnake import ButtonStyle, PartialEmoji
 from disnake.ui import View, Button, Modal, TextInput
 
 from core.utils import (
-    logger,
+    CONFIG, logger,
     log_discord,
     get_ticket_owner, get_ticket_manager,
+    remove_ticket_owner,
     save_ticket_review, get_ticket_review, clear_ticket_review,
-    clear_ticket_owner, clear_ticket_manager,
+    clear_ticket_manager,
     increment_manager_closed, add_closed_order, add_manager_rating,
-    cur, db, CONFIG,
+    cur, db,
 )
 from modules.tickets_render import (
     render_policy,
@@ -32,6 +33,13 @@ P = "\u3164"
 # ============================================================
 # ХЕЛПЕРЫ
 # ============================================================
+def _clear_ticket_owner(channel: disnake.TextChannel):
+    """Локальная обёртка — не путаем с core.utils."""
+    uid = get_ticket_owner(channel.id)
+    if uid:
+        remove_ticket_owner(channel.id)
+
+
 async def _send_ephemeral_image(inter: disnake.MessageInteraction,
                                  buf, filename: str, view: View = None):
     """Отправляет эфемерную картинку с опциональной view."""
@@ -78,6 +86,16 @@ async def _has_review_in_channel(channel: disnake.TextChannel, user_id: int) -> 
     except Exception as e:
         logger.warning(f"_has_review_in_channel err: {e}")
     return False
+
+
+async def _ephemeral(inter: disnake.MessageInteraction, content: str):
+    try:
+        if inter.response.is_done():
+            await inter.followup.send(content=content, ephemeral=True)
+        else:
+            await inter.response.send_message(content=content, ephemeral=True)
+    except Exception as e:
+        logger.warning(f"_ephemeral: {e}")
 
 
 async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
@@ -133,7 +151,7 @@ async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
             logger.warning(f"staff tickets ach: {e}")
 
         # Чистим и удаляем
-        clear_ticket_owner(channel)
+        _clear_ticket_owner(channel)
         clear_ticket_manager(channel.id)
         clear_ticket_review(channel.id)
 
@@ -158,16 +176,6 @@ async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
         return False
 
 
-async def _ephemeral(inter: disnake.MessageInteraction, content: str):
-    try:
-        if inter.response.is_done():
-            await inter.followup.send(content=content, ephemeral=True)
-        else:
-            await inter.response.send_message(content=content, ephemeral=True)
-    except Exception as e:
-        logger.warning(f"_ephemeral: {e}")
-
-
 # ============================================================
 # ШАГ 1: ОЦЕНКА МЕНЕДЖЕРА
 # ============================================================
@@ -184,7 +192,6 @@ class RatingStep1View(View):
     async def open_rating(self, button: Button, inter: disnake.MessageInteraction):
         channel = inter.channel
 
-        # Только владелец тикета
         owner_id = get_ticket_owner(channel.id)
         if owner_id and inter.author.id != owner_id:
             return await inter.response.send_message(
@@ -239,14 +246,12 @@ class RatingStarsModal(Modal):
                 "❌ Менеджер не назначен.", ephemeral=True,
             )
 
-        # Сохраняем оценку
         try:
             add_manager_rating(self.manager_id, rating)
             save_ticket_review(self.channel.id, inter.author.id, self.manager_id, rating)
         except Exception as e:
             logger.exception(f"save rating: {e}")
 
-        # Ачивка «идеальный сервис»
         try:
             if rating == 5:
                 row = cur.execute(
@@ -261,7 +266,6 @@ class RatingStarsModal(Modal):
         except Exception as e:
             logger.warning(f"staff perfect ach: {e}")
 
-        # Лог
         await log_discord(
             title="⭐ Оценка менеджера",
             description=(
@@ -275,7 +279,6 @@ class RatingStarsModal(Modal):
 
         await inter.response.defer(ephemeral=True)
 
-        # Показываем шаг 2
         try:
             buf = await asyncio.to_thread(
                 render_rating_step2,
@@ -289,7 +292,6 @@ class RatingStarsModal(Modal):
         except Exception as e:
             logger.exception(f"rating_step2 render: {e}")
 
-        # Обновляем топ менеджеров
         try:
             from modules.commands_staff import send_manager_top
             await send_manager_top()
@@ -334,7 +336,7 @@ def _is_admin(member: disnake.Member) -> bool:
 
 
 # ============================================================
-# ГЛАВНЫЙ ФЛОУ: показать нужный экран
+# ГЛАВНЫЙ ФЛОУ
 # ============================================================
 async def show_rating_flow(inter: disnake.MessageInteraction):
     """
@@ -356,7 +358,6 @@ async def show_rating_flow(inter: disnake.MessageInteraction):
     manager_id = get_ticket_manager(channel.id)
     existing = get_ticket_review(channel.id)
 
-    # Нет оценки — показываем step1
     if not existing:
         manager_name = "—"
         if manager_id:
@@ -378,7 +379,6 @@ async def show_rating_flow(inter: disnake.MessageInteraction):
             await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
         return
 
-    # Оценка есть — показываем step2
     rating = existing.get("rating", 0) if isinstance(existing, dict) else 0
     manager_name = "—"
     if manager_id:
@@ -406,9 +406,6 @@ async def show_rating_flow(inter: disnake.MessageInteraction):
 # DC-ТИКЕТ: ТОЛЬКО ОТЗЫВ
 # ============================================================
 async def show_dc_close(inter: disnake.MessageInteraction):
-    """
-    Для DC-тикетов: только проверка отзыва. Без оценки менеджера.
-    """
     channel = inter.channel
 
     if not inter.response.is_done():
@@ -434,7 +431,7 @@ async def show_dc_close(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# ПОЛИТИКА — эфемерный рендер
+# ПОЛИТИКА
 # ============================================================
 async def show_policy(inter: disnake.MessageInteraction):
     if not inter.response.is_done():
