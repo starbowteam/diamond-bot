@@ -515,9 +515,15 @@ def _draw_category_tile(d, img, x, y, w, h,
 # ПЛИТКА ТОВАРА
 # ============================================================
 def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
+    owned = bool(item.get("owned"))
     pad = 22
 
-    if active:
+    if owned:
+        # Красный фон + рамка
+        _gradient_box(img, (x, y, x + w, y + h), RED, RED, alpha=8, radius=18)
+        d.rounded_rectangle((x, y, x + w, y + h), radius=18,
+                            outline=RED + (170,), width=3)
+    elif active:
         _gradient_box(img, (x, y, x + w, y + h), SILVER, SILVER_DIM, alpha=14, radius=18)
         d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                             outline=SILVER + (180,), width=3)
@@ -530,19 +536,28 @@ def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
     ib_x = x + pad
     ib_y = y + pad
 
-    _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                SILVER, alpha=25, radius=15)
-    d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=15, outline=SILVER + (110,), width=3)
-    _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               item.get("fa", I_CUBE), 30, SILVER)
+    if owned:
+        _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
+                    RED, alpha=40, radius=15)
+        d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
+                            radius=15, outline=RED + (180,), width=3)
+        _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
+                   item.get("fa", I_CUBE), 30, RED)
+    else:
+        _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
+                    SILVER, alpha=25, radius=15)
+        d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
+                            radius=15, outline=SILVER + (110,), width=3)
+        _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
+                   item.get("fa", I_CUBE), 30, SILVER)
 
     name_x = ib_x + icon_size + 14
     name_w = w - (name_x - x) - pad
     name_font = _font(20)
     name_lines = _wrap_ellipsis(d, item["name"], name_font, name_w, max_lines=2)
+    name_color = RED if owned else TEXT
     for i, line in enumerate(name_lines):
-        d.text((name_x, ib_y + i * 26), line, font=name_font, fill=TEXT)
+        d.text((name_x, ib_y + i * 26), line, font=name_font, fill=name_color)
 
     desc_y = ib_y + icon_size + 16
     desc_font = _font(14)
@@ -559,15 +574,22 @@ def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
     price = item["price"]
     price_str = f"{_fmt(price)}"
     pf = _font(32)
-    d.text((x + pad, foot_y), price_str, font=pf, fill=SILVER_HI)
+    price_color = (74, 74, 82) if owned else SILVER_HI
+    d.text((x + pad, foot_y), price_str, font=pf, fill=price_color)
     pw = _tw(d, price_str, pf)
     d.text((x + pad + pw + 8, foot_y + pf.size - 22),
-           "DC", font=_font(15), fill=SILVER)
+           "DC", font=_font(15), fill=(74, 74, 82) if owned else SILVER)
 
-    can_afford = balance >= price
-    badge_text = "КУПИТЬ" if can_afford else "НЕ ХВАТАЕТ"
-    badge_color = GREEN if can_afford else RED
-    badge_bg = GREEN_BG if can_afford else RED_BG
+    if owned:
+        badge_text = "✓ КУПЛЕНО"
+        badge_color = RED
+        badge_bg = RED_BG
+    else:
+        can_afford = balance >= price
+        badge_text = "КУПИТЬ" if can_afford else "НЕ ХВАТАЕТ"
+        badge_color = GREEN if can_afford else RED
+        badge_bg = GREEN_BG if can_afford else RED_BG
+
     bf = _font(13)
     btw = _tw(d, badge_text, bf)
     bpad = 14
@@ -577,7 +599,6 @@ def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
                         radius=8, fill=badge_bg + (255,),
                         outline=badge_color + (180,), width=2)
     d.text((bx + bpad, by + 9), badge_text, font=bf, fill=badge_color)
-
 
 # ============================================================
 # СТРОКА ОПЕРАЦИИ
@@ -766,7 +787,9 @@ def render_categories(user_id, balance, total_spent, categories, total_items=0):
 # ============================================================
 def render_products(user_id, balance, total_spent,
                     category_key, category_label, items,
-                    page: int = 0, total_pages: int = 1):
+                    page: int = 0, total_pages: int = 1,
+                    owned_count: int = 0, available_count: int = 0,
+                    is_roles_category: bool = False):
     img, d = _base_canvas(user_id, "витрина · dc")
 
     body_y = 140
@@ -779,13 +802,27 @@ def render_products(user_id, balance, total_spent,
     right_x1 = left_x2 + gap
     right_x2 = CANVAS_W - M - PAD_X
 
-    affordable = sum(1 for it in items if balance >= it["price"])
+    affordable = sum(1 for it in items if balance >= it["price"] and not it.get("owned"))
     min_price = min((it["price"] for it in items), default=0)
 
-    _draw_left_panel(
-        img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        user_id, balance, total_spent,
-        extra_blocks=[
+    # Левая панель — блоки зависят от категории
+    if is_roles_category and owned_count > 0:
+        left_blocks = [
+            {
+                "label": "Доступно тебе",
+                "value": f"{available_count} из {len(items)}",
+                "icon": I_CHECK,
+                "color": GREEN,
+            },
+            {
+                "label": "Куплено ролей",
+                "value": f"{owned_count}",
+                "icon": I_MASKS,
+                "color": PURPLE,
+            },
+        ]
+    else:
+        left_blocks = [
             {
                 "label": "Доступно тебе",
                 "value": f"{affordable} из {len(items)}",
@@ -798,7 +835,12 @@ def render_products(user_id, balance, total_spent,
                 "icon": I_TAG,
                 "color": SILVER,
             },
-        ],
+        ]
+
+    _draw_left_panel(
+        img, d, (left_x1, body_y, left_x2, body_y + body_h),
+        user_id, balance, total_spent,
+        extra_blocks=left_blocks,
     )
 
     _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
@@ -844,8 +886,7 @@ def render_products(user_id, balance, total_spent,
     img.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
     return buf
-
-
+                        
 # ============================================================
 # ЭКРАН 3: КАРТОЧКА ТОВАРА
 # ============================================================
