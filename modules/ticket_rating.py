@@ -37,7 +37,7 @@ ADMIN_OVERRIDE_ID = 796293832751972352   # админ — может всё
 # \u2800 (BRAILLE PATTERN BLANK) — шире \u3164 (HANGUL FILLER),
 # поэтому кнопка тянется на бОльшую ширину и соразмерна эмбеду.
 P = "\u2800"
-_BTN_LABEL_MAX = 70   # почти лимит Discord (80), но не в упор
+_BTN_LABEL_MAX = 60   # почти лимит Discord (80), но не в упор
 
 
 EMOJI_OTZIV = PartialEmoji(name="Otziv", id=1541808692314243172)
