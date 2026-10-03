@@ -1798,7 +1798,10 @@ class TicketPanelView(View):
                             color=6776679)
         emb.set_image(url=_IMG_STRIPE)
         await inter.response.send_message(embed=emb, view=CatalogTypeView(), ephemeral=True)
-
+# ============================================================
+# АЛИАСЫ ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ (core/bot.py)
+# ============================================================
+TicketRatingView = RatingWaitingView   # старое имя, теперь → RatingWaitingView
 
 # ============================================================
 # ОБРАБОТЧИК
