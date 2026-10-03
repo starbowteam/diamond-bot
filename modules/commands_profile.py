@@ -1,4 +1,3 @@
-# modules/commands_profile.py
 # -*- coding: utf-8 -*-
 import os
 import json
@@ -67,20 +66,15 @@ IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 
 
 # ============================================================
-# ХЕЛПЕРЫ ДЛЯ ОТПРАВКИ ЭФЕМЕРНЫХ ОТВЕТОВ
+# ХЕЛПЕРЫ
 # ============================================================
 async def _send_ephemeral_file(inter: disnake.MessageInteraction,
                                 buf, filename: str,
                                 error_prefix: str = "❌ Ошибка"):
-    """
-    Отправляет картинку отдельным эфемерным сообщением.
-    НЕ трогает исходное сообщение (профиль остаётся нетронутым).
-    """
     try:
         file = disnake.File(buf, filename=filename)
         embed = disnake.Embed(color=6776679)
         embed.set_image(url=f"attachment://{filename}")
-
         if inter.response.is_done():
             await inter.followup.send(embed=embed, file=file, ephemeral=True)
         else:
@@ -90,20 +84,17 @@ async def _send_ephemeral_file(inter: disnake.MessageInteraction,
         try:
             if inter.response.is_done():
                 await inter.followup.send(
-                    content=f"{error_prefix}: `{str(e)[:200]}`",
-                    ephemeral=True,
+                    content=f"{error_prefix}: `{str(e)[:200]}`", ephemeral=True,
                 )
             else:
                 await inter.response.send_message(
-                    content=f"{error_prefix}: `{str(e)[:200]}`",
-                    ephemeral=True,
+                    content=f"{error_prefix}: `{str(e)[:200]}`", ephemeral=True,
                 )
         except Exception:
             pass
 
 
 async def _send_ephemeral_text(inter: disnake.MessageInteraction, content: str):
-    """Отправляет текст отдельным эфемерным сообщением."""
     try:
         if inter.response.is_done():
             await inter.followup.send(content=content, ephemeral=True)
@@ -114,7 +105,7 @@ async def _send_ephemeral_text(inter: disnake.MessageInteraction, content: str):
 
 
 # ============================================================
-# VIEW КАРТОЧКИ ПРОФИЛЯ (кнопки)
+# VIEW КАРТОЧКИ ПРОФИЛЯ
 # ============================================================
 class ProfileCardView(View):
     def __init__(self):
@@ -127,7 +118,6 @@ class ProfileCardView(View):
         emoji=PartialEmoji(name="prize", id=1539657202170859561)
     )
     async def inv_btn(self, button, inter: disnake.MessageInteraction):
-        # 👇 ack без создания "thinking" в исходном сообщении
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
@@ -160,7 +150,6 @@ class ProfileCardView(View):
                 inter.author.id, balance, total_spent, filtered,
             )
             fname = f"inv_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            # 👇 ОТДЕЛЬНОЕ ЭФЕМЕРНОЕ СООБЩЕНИЕ, профиль не трогаем
             await _send_ephemeral_file(inter, buf, fname)
         except Exception as e:
             logger.exception(f"inv_btn render: {e}")
@@ -369,47 +358,99 @@ async def show_profile_card(
             pass
 
 
+# ============================================================
+# ЕЖЕДНЕВНЫЙ ПОДАРОК — PILLOW
+# ============================================================
+def _daily_gift_stats(user_id: int) -> dict:
+    """Считает по истории: сколько раз забирал + сколько DC всего получил."""
+    count = 0
+    total = 0
+    try:
+        data = get_dc_cache(user_id)
+        for h in data.get("history", []) or []:
+            reason = (h.get("reason", "") or "").strip()
+            amt = h.get("amount", 0) or 0
+            if amt <= 0:
+                continue
+            if reason == "Ежедневный подарок" or reason.startswith("Ежедневный подарок"):
+                count += 1
+                total += amt
+    except Exception as e:
+        logger.warning(f"_daily_gift_stats {user_id}: {e}")
+    return {"count": count, "total": total}
+
+
 async def show_daily_gift(inter: disnake.MessageInteraction):
     user_id = inter.author.id
+
+    # Заранее defer'им — рендер + логирование может занять секунды
+    try:
+        await inter.response.defer(ephemeral=True)
+    except Exception:
+        pass
+
+    # Забираем/проверяем
     result = await claim_daily_gift(user_id)
 
+    # Считаем статы
+    stats = _daily_gift_stats(user_id)
+    daily_count = stats["count"]
+    daily_total = stats["total"]
+
+    # Текущий баланс
+    try:
+        from modules.dc import get_user_balance
+        balance = await get_user_balance(user_id)
+    except Exception:
+        balance = get_dc_cache(user_id).get("balance", 0)
+
+    # EMBED 1 — маленькая картинка-шапка
     embed1 = disnake.Embed(color=6776679)
     embed1.set_image(url=GIFT_IMG_TOP)
 
-    if result["ok"]:
-        amount = result["amount"]
-        next_ts = result["next_ts"]
-        desc = (
-            f"> Возвращайся каждый день — и получай подарок в виде Diamond Coins, "
-            f"каждый раз — разные подарки каждый день! Итого:\n\n"
-            f">  🔥 **Сегодня тебе выпало: {amount} DC**\n\n"
-            f">  📅 **Возвращайся <t:{next_ts}:R>** — ровно 24 часа с момента получения."
-        )
-    else:
-        next_ts = result["next_ts"]
-        desc = (
-            f"> Возвращайся каждый день — и получай подарок в виде Diamond Coins, "
-            f"каждый раз — разные подарки каждый день! Итого:\n\n"
-            f">  ⏳ **Ты уже забрал подарок сегодня.**\n\n"
-            f">  📅 **Следующий подарок будет доступен <t:{next_ts}:R>**"
+    # EMBED 2 — Pillow
+    try:
+        from modules.shop.render_gift import render_daily_gift
+        buf = await asyncio.to_thread(
+            render_daily_gift,
+            user_id, balance, result, daily_count, daily_total,
         )
 
-    embed2 = disnake.Embed(
-        title="Ежедневный подарок в DC!",
-        description=desc,
-        color=6776679,
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed2.set_image(url=GIFT_IMG_STRIPE)
+        fname = f"gift_{user_id}_{int(datetime.now(timezone.utc).timestamp())}.png"
+        file = disnake.File(buf, filename=fname)
 
-    await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
+        embed2 = disnake.Embed(color=6776679)
+        embed2.set_image(url=f"attachment://{fname}")
 
-    if result["ok"]:
+        try:
+            await inter.followup.send(
+                embeds=[embed1, embed2],
+                file=file,
+                ephemeral=True,
+            )
+        except Exception as e:
+            logger.exception(f"show_daily_gift send: {e}")
+            # Фолбэк — текстом
+            if result.get("ok"):
+                txt = f"🎁 Сегодня тебе выпало **{result['amount']} DC**!"
+            else:
+                txt = "⏳ Ты уже забрал подарок сегодня. Возвращайся завтра!"
+            await _send_ephemeral_text(inter, txt)
+            return
+    except Exception as e:
+        logger.exception(f"show_daily_gift render: {e}")
+        await _send_ephemeral_text(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
+        return
+
+    # Лог
+    if result.get("ok"):
         asyncio.create_task(log_discord(
             title="🎁 Ежедневный подарок",
             description=(
                 f"> **Пользователь:** {inter.author.mention} (`{inter.author}`)\n"
                 f"> **Начислено:** `+{result['amount']} DC`\n"
+                f"> **Всего подарков:** `{daily_count}`\n"
+                f"> **Всего DC с подарков:** `{daily_total} DC`\n"
                 f"> **Следующий через 24ч:** <t:{result['next_ts']}:f>"
             ),
             color=0xffaa00,
