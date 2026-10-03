@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Розыгрыши с автоматическим начислением DC.
-Шаблонные розыгрыши выдают DC сразу после завершения, без ручного вмешательства.
+Шаблонные розыгрыши выдают DC сразу после завершения.
+Использует ОБЩУЮ БД (db, cur из core.utils) — те же таблицы invites,
+что и основной бот, поэтому required_invites работает корректно.
 
-Подключение — 1 строка в core/bot.py (setup_hook):
+Подключение — 1 строка в core/bot.py (on_ready):
     from modules.giveaways import setup_giveaways
-    setup_giveaways(self)
+    setup_giveaways(bot)
 """
 import os
 import io
@@ -13,14 +15,13 @@ import re
 import ast
 import random
 import asyncio
-import sqlite3
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict
+from typing import List
 
 import disnake
 from disnake import ui
 
-from core.utils import logger
+from core.utils import db, cur, logger
 
 
 # ============================================================
@@ -41,113 +42,61 @@ GIVEAWAY_FULL_ROLES = [
 
 MSK = timezone(timedelta(hours=3))
 
-# 👇 В шаблоны добавлено поле "amount" — сколько всего DC разыгрывается.
-# Делится на winners поровну.
 GIVEAWAY_TEMPLATES = {
-    "150":  {
-        "prize": "150 DC",
-        "amount": 150,
-        "winners": 1,
-        "description": "🎉 Стандартный розыгрыш 150 Diamond Coins на 1 победителя!",
-    },
-    "400":  {
-        "prize": "400 DC",
-        "amount": 400,
-        "winners": 2,
-        "description": "🎉 Розыгрыш 400 Diamond Coins на 2 победителей!",
-    },
-    "600":  {
-        "prize": "600 DC",
-        "amount": 600,
-        "winners": 3,
-        "description": "🎉 Розыгрыш 600 Diamond Coins на 3 победителей!",
-    },
-    "1000": {
-        "prize": "1000 DC",
-        "amount": 1000,
-        "winners": 5,
-        "description": "👑 Большой розыгрыш 1000 Diamond Coins на 5 победителей!",
-    },
+    "150":  {"prize": "150 DC",  "amount": 150,  "winners": 1,
+             "description": "🎉 Стандартный розыгрыш 150 Diamond Coins на 1 победителя!"},
+    "400":  {"prize": "400 DC",  "amount": 400,  "winners": 2,
+             "description": "🎉 Розыгрыш 400 Diamond Coins на 2 победителей!"},
+    "600":  {"prize": "600 DC",  "amount": 600,  "winners": 3,
+             "description": "🎉 Розыгрыш 600 Diamond Coins на 3 победителей!"},
+    "1000": {"prize": "1000 DC", "amount": 1000, "winners": 5,
+             "description": "👑 Большой розыгрыш 1000 Diamond Coins на 5 победителей!"},
 }
 
 
 # ============================================================
-# БД
+# СОЗДАНИЕ ТАБЛИЦ В ОБЩЕЙ БД (если ещё нет)
 # ============================================================
-DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "giveaways.db",
-)
+def _init_tables():
+    cur.executescript("""
+    CREATE TABLE IF NOT EXISTS giveaways (
+        giveaway_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id           INTEGER,
+        channel_id         INTEGER,
+        message_id         INTEGER,
+        host_id            INTEGER,
+        prize              TEXT,
+        description        TEXT,
+        winners_count      INTEGER,
+        end_time           INTEGER,
+        created_at         INTEGER,
+        required_invites   INTEGER DEFAULT 0,
+        participants       TEXT,
+        winners            TEXT,
+        status             TEXT,
+        valid_participants TEXT,
+        final_embed_id     INTEGER,
+        auto_payout        INTEGER DEFAULT 0,
+        payout_done        INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_giveaways_message ON giveaways(message_id);
+    CREATE INDEX IF NOT EXISTS idx_giveaways_status  ON giveaways(status);
+    """)
+    db.commit()
 
-db = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
-db.row_factory = sqlite3.Row
-db.execute("PRAGMA journal_mode=WAL")
-db.execute("PRAGMA synchronous=NORMAL")
-
-cur = db.cursor()
-cur.executescript("""
-CREATE TABLE IF NOT EXISTS giveaways (
-    giveaway_id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id           INTEGER,
-    channel_id         INTEGER,
-    message_id         INTEGER,
-    host_id            INTEGER,
-    prize              TEXT,
-    description        TEXT,
-    winners_count      INTEGER,
-    end_time           INTEGER,
-    created_at         INTEGER,
-    required_invites   INTEGER DEFAULT 0,
-    participants       TEXT,
-    winners            TEXT,
-    status             TEXT,
-    valid_participants TEXT,
-    final_embed_id     INTEGER,
-    auto_payout        INTEGER DEFAULT 0,
-    payout_done        INTEGER DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_giveaways_message ON giveaways(message_id);
-CREATE INDEX IF NOT EXISTS idx_giveaways_status  ON giveaways(status);
-
-CREATE TABLE IF NOT EXISTS invites (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id    INTEGER,
-    inviter_id  INTEGER,
-    member_id   INTEGER,
-    joined_at   INTEGER,
-    is_bot      INTEGER DEFAULT 0,
-    is_fake     INTEGER DEFAULT 0,
-    left_at     INTEGER DEFAULT NULL
-);
-
-CREATE TABLE IF NOT EXISTS invites_snapshot (
-    invite_code TEXT PRIMARY KEY,
-    guild_id    INTEGER,
-    uses        INTEGER,
-    inviter_id  INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-""")
-db.commit()
-
-# Миграции для старых БД
-for _sql in (
-    "ALTER TABLE giveaways ADD COLUMN auto_payout INTEGER DEFAULT 0",
-    "ALTER TABLE giveaways ADD COLUMN payout_done INTEGER DEFAULT 0",
-):
-    try:
-        cur.execute(_sql)
-        db.commit()
-    except Exception:
-        pass
+    for _sql in (
+        "ALTER TABLE giveaways ADD COLUMN auto_payout INTEGER DEFAULT 0",
+        "ALTER TABLE giveaways ADD COLUMN payout_done INTEGER DEFAULT 0",
+    ):
+        try:
+            cur.execute(_sql)
+            db.commit()
+        except Exception:
+            pass
 
 
 # ============================================================
-# ГЛОБАЛЬНАЯ ССЫЛКА НА БОТА
+# ГЛОБАЛЬНЫЕ ССЫЛКИ
 # ============================================================
 _bot = None
 _setup_done = False
@@ -203,7 +152,7 @@ def _parse_dc_amount(prize: str) -> int:
 
 
 # ============================================================
-# ЛОГ В КАНАЛ
+# ЛОГ
 # ============================================================
 async def log_discord(title: str, description: str, color: int = 0x00ff00, fields: list = None):
     if _bot is None:
@@ -227,98 +176,7 @@ async def log_discord(title: str, description: str, color: int = 0x00ff00, field
 
 
 # ============================================================
-# ИНВАЙТЫ
-# ============================================================
-async def sync_invites(guild: disnake.Guild):
-    try:
-        invites = await guild.invites()
-    except Exception:
-        return
-    for inv in invites:
-        cur.execute(
-            "REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)",
-            (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None)
-        )
-    db.commit()
-
-
-async def _on_member_join(member: disnake.Member):
-    guild = member.guild
-    snapshot_before = {
-        row["invite_code"]: row for row in
-        cur.execute("SELECT * FROM invites_snapshot WHERE guild_id=?", (guild.id,)).fetchall()
-    }
-    try:
-        invites_now = await guild.invites()
-    except Exception:
-        return
-    used_invite = None
-    for inv in invites_now:
-        old = snapshot_before.get(inv.code)
-        if old and inv.uses > old["uses"]:
-            used_invite = inv
-            break
-    for inv in invites_now:
-        cur.execute(
-            "REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)",
-            (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None)
-        )
-    if not used_invite or not used_invite.inviter:
-        db.commit()
-        return
-    inviter_id = used_invite.inviter.id
-    is_bot = 1 if member.bot else 0
-    cur.execute(
-        "INSERT INTO invites (guild_id, inviter_id, member_id, joined_at, is_bot) VALUES (?, ?, ?, ?, ?)",
-        (guild.id, inviter_id, member.id, now_ts(), is_bot)
-    )
-    db.commit()
-    await log_discord(
-        title="📨 Использован инвайт",
-        description=f"> **Пользователь:** {member.mention}\n> **Пригласил:** <@{inviter_id}>\n> **Код:** `{used_invite.code}`",
-        color=0x00aaff
-    )
-
-
-async def _on_member_remove(member: disnake.Member):
-    guild = member.guild
-    cur.execute(
-        "UPDATE invites SET left_at=? WHERE guild_id=? AND member_id=? AND left_at IS NULL",
-        (now_ts(), guild.id, member.id)
-    )
-    row = cur.execute(
-        "SELECT joined_at FROM invites WHERE guild_id=? AND member_id=? ORDER BY joined_at DESC LIMIT 1",
-        (guild.id, member.id)
-    ).fetchone()
-    if row and (now_ts() - row["joined_at"]) < 600:
-        cur.execute(
-            "UPDATE invites SET is_fake=1 WHERE guild_id=? AND member_id=? AND is_fake=0",
-            (guild.id, member.id)
-        )
-        await log_discord(
-            title="⚠️ Фейковый вход",
-            description=f"> **Пользователь:** {member.mention}\n> Ушёл менее чем через 10 минут.",
-            color=0xff6600
-        )
-    db.commit()
-
-
-async def _on_invite_create(invite: disnake.Invite):
-    cur.execute(
-        "REPLACE INTO invites_snapshot VALUES (?, ?, ?, ?)",
-        (invite.code, invite.guild.id, invite.uses,
-         invite.inviter.id if invite.inviter else None)
-    )
-    db.commit()
-
-
-async def _on_invite_delete(invite: disnake.Invite):
-    cur.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
-    db.commit()
-
-
-# ============================================================
-# СТАТИСТИКА ИНВАЙТОВ
+# СТАТИСТИКА ИНВАЙТОВ (читаем из общей БД)
 # ============================================================
 async def get_invite_stats(guild: disnake.Guild, user: disnake.Member, giveaway_id: int = None):
     if giveaway_id is not None:
@@ -395,13 +253,11 @@ def build_finished_giveaway_embed(prize, description, participants_count, winner
 
 
 # ============================================================
-# 💎 КРАСИВЫЕ ЛС ПОБЕДИТЕЛЯМ
+# 💎 ЛС ПОБЕДИТЕЛЯМ
 # ============================================================
-def _build_manual_winner_dm(gid: int, prize: str) -> disnake.Embed:
-    """Ручной розыгрыш — просим отписаться + отзыв."""
+def _build_manual_winner_dm(gid: int, prize: str) -> list:
     e1 = disnake.Embed(color=0xffaa00)
     e1.set_image(url=IMG_BANNER_FIN)
-
     e2 = disnake.Embed(
         title="🏆 Ты победил в розыгрыше!",
         description=(
@@ -421,11 +277,9 @@ def _build_manual_winner_dm(gid: int, prize: str) -> disnake.Embed:
     return [e1, e2]
 
 
-def _build_template_winner_dm(gid: int, prize: str, share: int) -> disnake.Embed:
-    """Шаблонный розыгрыш — приз УЖЕ на балансе, только просим отзыв."""
+def _build_template_winner_dm(gid: int, prize: str, share: int) -> list:
     e1 = disnake.Embed(color=0x00ff88)
     e1.set_image(url=IMG_BANNER_FIN)
-
     e2 = disnake.Embed(
         title="💎 Приз зачислен на баланс!",
         description=(
@@ -444,10 +298,9 @@ def _build_template_winner_dm(gid: int, prize: str, share: int) -> disnake.Embed
     return [e1, e2]
 
 
-def _build_loser_dm(gid: int, prize: str) -> disnake.Embed:
+def _build_loser_dm(gid: int, prize: str) -> list:
     e1 = disnake.Embed(color=0x808080)
     e1.set_image(url=IMG_BANNER_FIN)
-
     e2 = disnake.Embed(
         title="🎲 Розыгрыш завершён",
         description=(
@@ -671,7 +524,7 @@ class GiveawayModal(ui.Modal):
         await log_discord(
             title="🎉 Создан розыгрыш (ручной)",
             description=(
-                f"> **ID:** `{gid}`\n"
+                f"> **ID:** `#{gid}`\n"
                 f"> **Приз:** {prize}\n"
                 f"> **Канал:** {channel.mention}\n"
                 f"> **Создал:** {inter.author.mention}\n"
@@ -721,10 +574,6 @@ async def schedule_end(gid: int):
 # 💰 АВТОНАЧИСЛЕНИЕ DC
 # ============================================================
 async def _auto_payout(gid: int, row, winners: List[int]) -> int:
-    """
-    Начисляет DC победителям. Сумма приза делится на число победителей поровну.
-    Возвращает размер доли (для отчёта).
-    """
     if not row["auto_payout"]:
         return 0
     if row["payout_done"]:
@@ -741,7 +590,7 @@ async def _auto_payout(gid: int, row, winners: List[int]) -> int:
 
     share = total_amount // len(winners)
     if share <= 0:
-        logger.warning(f"[giveaways] сумма слишком мала для деления: {total_amount}/{len(winners)}")
+        logger.warning(f"[giveaways] сумма слишком мала: {total_amount}/{len(winners)}")
         return 0
 
     try:
@@ -758,7 +607,7 @@ async def _auto_payout(gid: int, row, winners: List[int]) -> int:
                 notify=True, log=False, to_clan_pool=True
             )
         except Exception as e:
-            logger.warning(f"[giveaways] не удалось начислить {uid}: {e}")
+            logger.warning(f"[giveaways] не начислить {uid}: {e}")
 
     cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,))
     db.commit()
@@ -774,7 +623,6 @@ async def _auto_payout(gid: int, row, winners: List[int]) -> int:
         ),
         color=0x00ff88
     )
-
     return share
 
 
@@ -828,17 +676,13 @@ async def finish_giveaway(gid: int):
         cur.execute("UPDATE giveaways SET final_embed_id=? WHERE giveaway_id=?", (embed_msg.id, gid))
         db.commit()
 
-        # 💰 АВТОНАЧИСЛЕНИЕ (только для шаблонных)
         share = await _auto_payout(gid, row, winners)
 
-        # 📩 Отчёт в ЛС (владельцу)
         await send_giveaway_report(
-            gid=gid, prize=row["prize"],
-            winners=winners, share=share,
-            is_auto=bool(row["auto_payout"]),
+            gid=gid, prize=row["prize"], winners=winners,
+            share=share, is_auto=bool(row["auto_payout"]),
         )
 
-        # 🎁 ЛС каждому участнику
         prize_name = row["prize"]
         is_auto = bool(row["auto_payout"])
         winner_ids = set(winners)
@@ -847,24 +691,18 @@ async def finish_giveaway(gid: int):
             member = guild.get_member(uid)
             if not member:
                 continue
-
             try:
                 if uid in winner_ids:
                     if is_auto:
-                        dm_embeds = _build_template_winner_dm(
+                        dm = _build_template_winner_dm(
                             gid=gid, prize=prize_name,
                             share=share if share > 0 else (_parse_dc_amount(prize_name) // max(len(winners), 1)),
                         )
                     else:
-                        dm_embeds = _build_manual_winner_dm(
-                            gid=gid, prize=prize_name,
-                        )
+                        dm = _build_manual_winner_dm(gid=gid, prize=prize_name)
                 else:
-                    dm_embeds = _build_loser_dm(
-                        gid=gid, prize=prize_name,
-                    )
-
-                await member.send(embeds=dm_embeds)
+                    dm = _build_loser_dm(gid=gid, prize=prize_name)
+                await member.send(embeds=dm)
             except Exception:
                 pass
 
@@ -874,7 +712,7 @@ async def finish_giveaway(gid: int):
                 f"> **ID:** `#{gid}`\n"
                 f"> **Приз:** {row['prize']}\n"
                 f"> **Победители:** {winners_mentions}\n"
-                f"> **Тип:** {'шаблонный (авто)' if is_auto else 'ручной (вручную)'}"
+                f"> **Тип:** {'шаблонный (авто)' if is_auto else 'ручной'}"
             ),
             color=0xffaa00
         )
@@ -991,19 +829,16 @@ async def reroll_giveaway(inter, gid: int):
     cur.execute("UPDATE giveaways SET final_embed_id=? WHERE giveaway_id=?", (embed_msg.id, gid))
     db.commit()
 
-    # 💰 Если это был шаблонный — начисляем новым победителям (первый раз)
     is_auto = bool(row["auto_payout"])
     share = 0
     if is_auto and not row["payout_done"]:
         share = await _auto_payout(gid, row, new_winners)
 
-    # 📩 Отчёт
     await send_giveaway_report(
         gid=gid, prize=row["prize"],
         winners=new_winners, share=share, is_auto=is_auto,
     )
 
-    # 🎁 ЛС новым победителям
     for uid in new_winners:
         member = guild.get_member(uid)
         if not member:
@@ -1072,7 +907,7 @@ class RerollModal(ui.Modal):
 
 
 # ============================================================
-# ПАНЕЛЬ: ШАБЛОНЫ
+# ШАБЛОНЫ
 # ============================================================
 async def show_templates_panel(inter: disnake.MessageInteraction):
     e = disnake.Embed(
@@ -1144,8 +979,7 @@ class TemplateSelect(disnake.ui.StringSelect):
         await inter.edit_original_response(
             content=(
                 f"✅ Шаблонный розыгрыш **{prize}** создан! ID: `{gid}`\n"
-                f"> 💰 DC начислятся автоматически победителям\n"
-                f"> ⭐ Победителям предложим оставить отзыв"
+                f"> 💰 DC начислятся автоматически победителям"
             ),
             embeds=[], view=None,
         )
@@ -1207,8 +1041,8 @@ async def list_giveaways(inter: disnake.MessageInteraction):
 # ============================================================
 # /invites
 # ============================================================
-async def invites(inter: disnake.ApplicationCommandInteraction,
-                  user: disnake.Member = None, giveaway_id: int = None):
+async def invites_cmd(inter: disnake.ApplicationCommandInteraction,
+                      user: disnake.Member = None, giveaway_id: int = None):
     user = user or inter.author
     stats = await get_invite_stats(inter.guild, user, giveaway_id)
     if stats is None:
@@ -1290,23 +1124,10 @@ async def send_giveaway_panel():
 
 
 # ============================================================
-# ON_READY
+# ON_READY (только восстановление таймеров)
 # ============================================================
 async def _on_ready_giveaways():
     try:
-        for guild in _bot.guilds:
-            missing_roles = []
-            for role_id in GIVEAWAY_FULL_ROLES:
-                if not guild.get_role(role_id):
-                    missing_roles.append(str(role_id))
-            if missing_roles:
-                await log_discord(
-                    "⚠️ Отсутствуют роли розыгрышей",
-                    f"> На сервере **{guild.name}** отсутствуют: {', '.join(missing_roles)}",
-                    color=0xff6600
-                )
-            await sync_invites(guild)
-
         active_rows = cur.execute(
             "SELECT giveaway_id, end_time FROM giveaways WHERE status='active'"
         ).fetchall()
@@ -1324,7 +1145,7 @@ async def _on_ready_giveaways():
 
 
 # ============================================================
-# SETUP — 1 строка из core/bot.py
+# SETUP — вызывается 1 раз из core/bot.py (on_ready)
 # ============================================================
 def setup_giveaways(bot_instance):
     global _bot, _setup_done
@@ -1334,21 +1155,23 @@ def setup_giveaways(bot_instance):
     _setup_done = True
     _bot = bot_instance
 
+    # Создаём таблицу giveaways в ОБЩЕЙ БД
+    _init_tables()
+
     # Глобальные persistent views
     bot_instance.add_view(GiveawayView())
     bot_instance.add_view(GiveawayPanelView())
 
-    # Слушатели
-    bot_instance.add_listener(_on_member_join, "on_member_join")
-    bot_instance.add_listener(_on_member_remove, "on_member_remove")
-    bot_instance.add_listener(_on_invite_create, "on_invite_create")
-    bot_instance.add_listener(_on_invite_delete, "on_invite_delete")
+    # 👇 ВАЖНО: НЕ регистрируем on_member_join / on_invite_create —
+    # они уже есть в core/bot.py и пишут в ту же таблицу invites.
+
+    # Только восстановление таймеров + панель
     bot_instance.add_listener(_on_ready_giveaways, "on_ready")
 
-    # Слэш-команда
+    # Слэш-команда /invites
     try:
-        bot_instance.add_slash_command(invites)
+        bot_instance.add_slash_command(invites_cmd)
     except Exception as e:
         logger.warning(f"[giveaways] не удалось добавить /invites: {e}")
 
-    logger.info("[giveaways] ✅ модуль розыгрышей подключён")
+    logger.info("[giveaways] ✅ модуль розыгрышей подключён (общая БД)")
