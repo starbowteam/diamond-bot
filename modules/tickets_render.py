@@ -3,7 +3,8 @@
 Pillow-рендер для системы тикетов:
   · render_policy       — политика магазина
   · render_rating_step1 — оценка менеджера (без упоминания отзыва)
-  · render_rating_step2 — отзыв в канале (без упоминания оценки)
+  · render_rating_step2 — отзыв в канале (после оценки)
+  · render_review_only  — финальный шаг «отзыв» (без оценки — для DC)
 1800×1000, стиль 1:1 с остальными рендерами.
 """
 import io
@@ -498,7 +499,6 @@ def render_rating_step1(
     _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Оцени работу", "шаг 1 из 2")
 
-    # HERO — весь блок
     hero_y1 = body_y + 118
     hero_y2 = body_y + body_h - 22
     hero_h = hero_y2 - hero_y1
@@ -600,53 +600,10 @@ def render_rating_step1(
 
 
 # ============================================================
-# ШАГ 2: ОТЗЫВ В КАНАЛЕ (без упоминания оценки)
+# ОБЩИЙ РЕНДЕР HERO ДЛЯ ОТЗЫВА (используется в step2 и review_only)
 # ============================================================
-def render_rating_step2(
-    user_id: int,
-    manager_name: str,
-    rating: int,
-    has_review: bool = False,
-) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "отзыв · канал", "шаг 2 из 2")
-
-    body_y = 140
-    body_h = CANVAS_H - M - PAD_Y - body_y - 26
-
-    left_w = 460
-    gap = 30
-    left_x1 = PAD_X
-    left_x2 = left_x1 + left_w
-    right_x1 = left_x2 + gap
-    right_x2 = CANVAS_W - M - PAD_X
-
-    _draw_left_panel(
-        img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        top_icon=I_CHECK if has_review else I_COMMENTS,
-        top_label="Статус",
-        top_value="Отзыв оставлен" if has_review else "Ждём отзыв",
-        blocks=[
-            {"color": PURPLE, "icon": I_COMMENTS, "label": "Следующий шаг", "value": "Отзыв в канале"},
-            {"color": GOLD,   "icon": I_GIFT,     "label": "Бонус за отзыв", "value": "+15 DC"},
-            {"color": GREEN if has_review else SILVER,
-             "icon": I_CHECK,
-             "label": "Проверка отзыва",
-             "value": "Готово" if has_review else "Ожидание"},
-        ],
-    )
-
-    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
-    rx1 = right_x1 + 30
-    rx2 = right_x2 - 30
-
-    _draw_right_head(d, rx1, body_y + 22, rx2,
-                     "Оставь отзыв", "шаг 2 из 2")
-
-    # HERO
-    hero_y1 = body_y + 118
-    hero_y2 = body_y + body_h - 22
-    hero_h = hero_y2 - hero_y1
-
+def _draw_review_hero(img, d, rx1, rx2, hero_y1, hero_y2, has_review: bool):
+    """Рисует hero с просьбой об отзыве. main_color = GREEN (готово) или PURPLE (ждём)."""
     main_color = GREEN if has_review else PURPLE
     _gradient_box(img, (rx1, hero_y1, rx2, hero_y2),
                   main_color, main_color, alpha=18, radius=20)
@@ -707,7 +664,6 @@ def render_rating_step2(
     d.rounded_rectangle((pill_x, pill_y, pill_x + pill_w, pill_y + pill_h),
                         radius=14, outline=main_color + (200,), width=2)
 
-    # FA-иконка алмаза (вместо эмодзи)
     ib_x = pill_x + pill_pad
     ib_y = pill_y + (pill_h - pill_icon_size) // 2
 
@@ -718,7 +674,6 @@ def render_rating_step2(
     _draw_icon(d, ib_x + pill_icon_size // 2, ib_y + pill_icon_size // 2 + 1,
                I_GEM, 18, main_color)
 
-    # Название канала
     d.text((ib_x + pill_icon_size + pill_gap, pill_y + pill_h // 2),
            channel_text, font=channel_font, fill=main_color, anchor="lm")
 
@@ -734,7 +689,7 @@ def render_rating_step2(
         lw = _tw(d, line, sub_font)
         d.text((cx - lw // 2, sub_y + i * 26), line, font=sub_font, fill=TEXT_SOFT)
 
-    # Итоговая плашка снизу
+    # Подсказка снизу
     if not has_review:
         hint_text = "Без отзыва тикет не закроется"
         hint_font = _font(15)
@@ -754,7 +709,114 @@ def render_rating_step2(
         d.text((hint_x + 20 + hint_icon_size // 2 + hint_gap, hint_y + hint_h // 2),
                hint_text, font=hint_font, fill=TEXT_SOFT, anchor="lm")
 
+
+# ============================================================
+# ШАГ 2: ОТЗЫВ (после оценки менеджера)
+# ============================================================
+def render_rating_step2(
+    user_id: int,
+    manager_name: str,
+    rating: int,
+    has_review: bool = False,
+) -> io.BytesIO:
+    img, d = _base_canvas(user_id, "отзыв · канал", "шаг 2 из 2")
+
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    left_w = 460
+    gap = 30
+    left_x1 = PAD_X
+    left_x2 = left_x1 + left_w
+    right_x1 = left_x2 + gap
+    right_x2 = CANVAS_W - M - PAD_X
+
+    _draw_left_panel(
+        img, d, (left_x1, body_y, left_x2, body_y + body_h),
+        top_icon=I_CHECK if has_review else I_COMMENTS,
+        top_label="Статус",
+        top_value="Отзыв оставлен" if has_review else "Ждём отзыв",
+        blocks=[
+            {"color": PURPLE, "icon": I_COMMENTS, "label": "Следующий шаг", "value": "Отзыв в канале"},
+            {"color": GOLD,   "icon": I_GIFT,     "label": "Бонус за отзыв", "value": "+15 DC"},
+            {"color": GREEN if has_review else SILVER,
+             "icon": I_CHECK,
+             "label": "Проверка отзыва",
+             "value": "Готово" if has_review else "Ожидание"},
+        ],
+    )
+
+    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
+    rx1 = right_x1 + 30
+    rx2 = right_x2 - 30
+
+    _draw_right_head(d, rx1, body_y + 22, rx2,
+                     "Оставь отзыв", "шаг 2 из 2")
+
+    hero_y1 = body_y + 118
+    hero_y2 = body_y + body_h - 22
+
+    _draw_review_hero(img, d, rx1, rx2, hero_y1, hero_y2, has_review)
+
     _draw_footer(d, f"Отзыв в канале · данные на {_now_msk_str()} МСК", "отзыв · шаг 2")
+
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
+# ============================================================
+# ФИНАЛЬНЫЙ ШАГ БЕЗ ОЦЕНКИ (для DC-тикетов)
+# ============================================================
+def render_review_only(
+    user_id: int,
+    has_review: bool = False,
+) -> io.BytesIO:
+    """
+    Финальный шаг «оставить отзыв» — БЕЗ упоминания оценки менеджера.
+    Используется для DC-тикетов и ситуаций, где оценку не ставили.
+    """
+    img, d = _base_canvas(user_id, "отзыв · канал", "финальный шаг")
+
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    left_w = 460
+    gap = 30
+    left_x1 = PAD_X
+    left_x2 = left_x1 + left_w
+    right_x1 = left_x2 + gap
+    right_x2 = CANVAS_W - M - PAD_X
+
+    _draw_left_panel(
+        img, d, (left_x1, body_y, left_x2, body_y + body_h),
+        top_icon=I_CHECK if has_review else I_COMMENTS,
+        top_label="Статус",
+        top_value="Отзыв оставлен" if has_review else "Ждём отзыв",
+        blocks=[
+            {"color": PURPLE, "icon": I_COMMENTS, "label": "Следующий шаг", "value": "Отзыв в канале"},
+            {"color": GOLD,   "icon": I_GIFT,     "label": "Бонус за отзыв", "value": "+15 DC"},
+            {"color": GREEN if has_review else SILVER,
+             "icon": I_CHECK,
+             "label": "Проверка отзыва",
+             "value": "Готово" if has_review else "Ожидание"},
+        ],
+    )
+
+    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
+    rx1 = right_x1 + 30
+    rx2 = right_x2 - 30
+
+    _draw_right_head(d, rx1, body_y + 22, rx2,
+                     "Оставь отзыв", "финальный шаг")
+
+    hero_y1 = body_y + 118
+    hero_y2 = body_y + body_h - 22
+
+    _draw_review_hero(img, d, rx1, rx2, hero_y1, hero_y2, has_review)
+
+    _draw_footer(d, f"Отзыв в канале · данные на {_now_msk_str()} МСК", "отзыв · финал")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
