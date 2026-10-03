@@ -1,4 +1,3 @@
-# modules/work_render.py
 # -*- coding: utf-8 -*-
 """
 Pillow-рендер панели «Кодекс магазина»:
@@ -6,7 +5,7 @@ Pillow-рендер панели «Кодекс магазина»:
   · render_work_top     — Топ Sales Manager
   · render_work_tickets — Правила по тикетам
 Размер 1800×1000, стиль 1:1 с shop/render.py и clan/render.py.
-Все суммы зарплат — увеличены ×2.5 от исходных.
+Все суммы зарплат — увеличены ×2.5.
 """
 import io
 import os
@@ -132,7 +131,6 @@ I_BRIEFCASE = 0xf0b1
 I_CALENDAR  = 0xf133
 I_BOOK      = 0xf02d
 I_GAVEL     = 0xf0e3
-I_STAR_OUT  = 0xf005
 
 
 # ============================================================
@@ -310,7 +308,6 @@ def _draw_left_panel(img, d, box, extra_blocks=None, header_icon: int = I_GEM):
     x1, y1, x2, y2 = box
     pad = 28
 
-    # Большая иконка сверху
     icon_size = 96
     ib_x = x1 + pad
     ib_y = y1 + pad
@@ -375,11 +372,7 @@ def _draw_left_panel(img, d, box, extra_blocks=None, header_icon: int = I_GEM):
 # ============================================================
 # SCREEN 1: ЗАРПЛАТА
 # ============================================================
-# 👇 Все суммы ×2.5 от исходных
-# ============================================================
-# SCREEN 1: ЗАРПЛАТА
-# ============================================================
-# 👇 Все суммы ×2.5. Роли и цвета — реальные из zp.json.
+# 👇 Все суммы ×2.5. Роли и цвета — реальные.
 SALARY_ROLES = [
     {
         "role_id": 1471844291595731016,
@@ -387,7 +380,7 @@ SALARY_ROLES = [
         "tag": "CONTROL",
         "advance": 750,
         "salary": 1750,
-        "color": (0xcd, 0xce, 0xd1),   # светлый серо-белый
+        "color": (0xcd, 0xce, 0xd1),
         "icon": I_CROWN,
     },
     {
@@ -396,7 +389,7 @@ SALARY_ROLES = [
         "tag": "ASSIST",
         "advance": 550,
         "salary": 1250,
-        "color": (0xbe, 0x85, 0x85),   # тёплый розово-коричневый
+        "color": (0xbe, 0x85, 0x85),
         "icon": I_USER_TIE,
     },
     {
@@ -405,7 +398,7 @@ SALARY_ROLES = [
         "tag": "SALES",
         "advance": 550,
         "salary": 1250,
-        "color": (0x39, 0xf4, 0x7b),   # ярко-зелёный
+        "color": (0x39, 0xf4, 0x7b),
         "icon": I_HAND,
     },
     {
@@ -414,7 +407,7 @@ SALARY_ROLES = [
         "tag": "EMPLOY",
         "advance": 450,
         "salary": 1000,
-        "color": (0x5c, 0x5c, 0x5c),   # серый
+        "color": (0x5c, 0x5c, 0x5c),
         "icon": I_USERS,
     },
     {
@@ -423,7 +416,7 @@ SALARY_ROLES = [
         "tag": "ADVERT",
         "advance": 375,
         "salary": 875,
-        "color": (0xb1, 0xc5, 0xf6),   # светло-голубой
+        "color": (0xb1, 0xc5, 0xf6),
         "icon": I_SEARCH,
     },
 ]
@@ -434,18 +427,15 @@ def _draw_salary_card(img, d, x, y, w, h, role_data: dict):
     light = _lighten(color, 0.4)
     border = _lighten(color, 0.2)
 
-    # Фон + двойная рамка
     d.rounded_rectangle((x - 3, y - 3, x + w + 3, y + h + 3),
                         radius=19, fill=(8, 8, 10) + (255,))
     _gradient_box(img, (x, y, x + w, y + h), color, color, alpha=28, radius=16)
     d.rounded_rectangle((x, y, x + w, y + h),
                         radius=16, outline=border + (220,), width=3)
 
-    # Цветная полоса слева
     d.rounded_rectangle((x + 6, y + 14, x + 11, y + h - 14),
                         radius=2, fill=color + (255,))
 
-    # Иконка роли
     icon_size = 60
     ib_x = x + 26
     ib_y = y + (h - icon_size) // 2
@@ -457,13 +447,11 @@ def _draw_salary_card(img, d, x, y, w, h, role_data: dict):
     _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
                role_data["icon"], 28, light)
 
-    # Название роли
     tx = ib_x + icon_size + 20
 
     d.text((tx, y + h // 2 - 26), role_data["name"].upper(),
            font=_font(24), fill=light)
 
-    # Тег
     tag = role_data["tag"]
     tag_font = _font(11)
     tag_w = _tw(d, tag, tag_font)
@@ -476,7 +464,6 @@ def _draw_salary_card(img, d, x, y, w, h, role_data: dict):
                         radius=6, outline=light + (200,), width=1)
     d.text((tag_x + 10, tag_y + 4), tag, font=tag_font, fill=light)
 
-    # Правая зона: Аванс | Зарплата
     right_x2 = x + w - 24
     box_w = 220
     box_h = 62
@@ -598,23 +585,18 @@ def _draw_staff_row(img, d, x, y, w, h, rank: int,
                     has_rating: bool):
     if rank == 1:
         medal_color = GOLD
-        medal_bg = GOLD_BG
     elif rank == 2:
         medal_color = SILVER
-        medal_bg = SILVER_BG
     elif rank == 3:
         medal_color = BRONZE
-        medal_bg = (40, 28, 20)
     else:
         medal_color = DIM
-        medal_bg = (28, 28, 34)
 
     _gradient_box(img, (x, y, x + w, y + h), medal_color, medal_color,
                   alpha=15 if rank > 3 else 25, radius=14)
     d.rounded_rectangle((x, y, x + w, y + h),
                         radius=14, outline=medal_color + (170,), width=2)
 
-    # Медаль/номер
     badge_size = 52
     bx = x + 18
     by = y + (h - badge_size) // 2
@@ -635,7 +617,6 @@ def _draw_staff_row(img, d, x, y, w, h, rank: int,
                 by + badge_size // 2 - num_font.size // 2 - 2),
                num_str, font=num_font, fill=medal_color)
 
-    # Имя
     tx = bx + badge_size + 18
     name_str = f"@{name}"
     name_font = _font(24)
@@ -643,7 +624,6 @@ def _draw_staff_row(img, d, x, y, w, h, rank: int,
     name_shown = _ellipsis(d, name_str, name_font, max_name_w)
     d.text((tx, y + h // 2 - 18), name_shown, font=name_font, fill=TEXT)
 
-    # Закрытых заказов
     closed_x = x + w - 470
     d.text((closed_x, y + h // 2 - 30), "ЗАКРЫТО",
            font=_font(11), fill=MUTED)
@@ -651,7 +631,6 @@ def _draw_staff_row(img, d, x, y, w, h, rank: int,
     d.text((closed_x, y + h // 2 - 10), closed_str,
            font=_font(26), fill=medal_color if rank <= 3 else SILVER_HI)
 
-    # Рейтинг
     rating_x = x + w - 240
     d.text((rating_x, y + h // 2 - 30), "РЕЙТИНГ",
            font=_font(11), fill=MUTED)
@@ -688,11 +667,9 @@ def render_work_top(user_id: int, staff_list: List[Dict]) -> io.BytesIO:
 
     total = len(staff_list)
     best_name = "—"
-    best_closed = 0
     if staff_list:
         best = staff_list[0]
         best_name = f"@{best.get('user_name', '—')}"
-        best_closed = best.get("closed_tickets", 0)
 
     with_rating = [s for s in staff_list if s.get("ratings_count", 0) > 0]
     avg_all = 0.0
@@ -742,8 +719,7 @@ def render_work_top(user_id: int, staff_list: List[Dict]) -> io.BytesIO:
     row_h = max(row_h, 60)
 
     if not staff_list:
-        # Заглушка
-        from modules.work_render import _draw_stack_panel  # заглушка для ясности
+        # Заглушка — БЕЗ ошибочного импорта
         box = (rx1, list_y, rx2, list_bottom)
         d.rounded_rectangle(box, radius=16,
                             fill=INNER_BG + (255,),
@@ -799,7 +775,6 @@ def _draw_rule_card(img, d, x, y, w, h, rule: dict):
     d.rounded_rectangle((x, y, x + w, y + h),
                         radius=16, outline=border + (220,), width=3)
 
-    # Иконка в квадрате
     icon_size = 60
     ib_x = x + 24
     ib_y = y + 22
@@ -811,35 +786,36 @@ def _draw_rule_card(img, d, x, y, w, h, rule: dict):
     _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
                rule["icon"], 28, light)
 
-    # Заголовок
     tx = ib_x + icon_size + 20
     d.text((tx, y + 26), rule["title"].upper(),
            font=_font(22), fill=light)
 
-    # Подпись/номер
     d.text((tx, y + 58), rule.get("subtitle", "").upper(),
            font=_font(12), fill=MUTED)
 
-    # Текст
     text_font = _font(16)
     lines = _wrap(d, rule["text"], text_font, w - 48, max_lines=4)
     text_y = y + 100
     for i, line in enumerate(lines):
         d.text((x + 24, text_y + i * 24), line, font=text_font, fill=TEXT_SOFT)
 
-    # Код-пример (если есть)
+    # 👇 Пример — теперь в цвете карточки (без оранжевого)
     example = rule.get("example")
     if example:
-        ex_y = text_y + len(lines) * 24 + 10
+        ex_y = text_y + len(lines) * 24 + 12
         ex_font = _font(15)
-        ex_w = _tw(d, example, ex_font) + 32
-        ex_h = 34
+        ex_w = _tw(d, example, ex_font) + 60
+        ex_h = 36
 
+        # фон — в цвете правила, приглушённый
         _alpha_fill(img, (x + 24, ex_y, x + 24 + ex_w, ex_y + ex_h),
-                    GOLD, alpha=30, radius=8)
+                    color, alpha=45, radius=9)
         d.rounded_rectangle((x + 24, ex_y, x + 24 + ex_w, ex_y + ex_h),
-                            radius=8, outline=GOLD + (180,), width=2)
-        d.text((x + 40, ex_y + 8), example, font=ex_font, fill=GOLD)
+                            radius=9, outline=light + (200,), width=2)
+
+        # иконка «инфо» в цвете правила
+        _draw_icon(d, x + 24 + 16, ex_y + ex_h // 2, I_INFO, 14, light)
+        d.text((x + 24 + 34, ex_y + 9), example, font=ex_font, fill=light)
 
 
 def render_work_tickets(user_id: int) -> io.BytesIO:
@@ -918,7 +894,7 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
                 "Иные названия караются выговором."
             ),
             "color": SILVER,
-            "example": "Пример: Дискорд-нитро-1м",
+            "example": "Например: Дискорд-нитро-1м",
         },
         {
             "icon": I_CHECK,
