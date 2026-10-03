@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+                        # -*- coding: utf-8 -*-
 """Квесты клановой лиги + рендер Pillow."""
 import os
 import io
@@ -93,7 +93,7 @@ QUESTS: Dict[str, dict] = {
     },
     "jackpot": {
         "title": "Джекпот",
-        "desc": "Выиграй 10 000+ DC за одну партию в казино",
+        "desc": "Более 10K DC за раз",
         "reward": 500, "goal": 10000, "type": "once",
         "unit": "DC", "icon": "fa-fire",
     },
