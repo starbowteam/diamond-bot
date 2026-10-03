@@ -27,7 +27,26 @@ from modules.tickets_render import (
 )
 
 
-P = "\u3164"
+P = "\u3164"  # hair space
+
+# Лимит Discord на label кнопки — 80 символов.
+# Используем 78, чтобы был запас.
+_BTN_LABEL_MAX = 78
+
+
+def _btn_label(text: str, total: int = _BTN_LABEL_MAX) -> str:
+    """
+    Центрирует текст внутри строки длиной total через hair spaces.
+    Гарантированно ≤ total символов.
+    """
+    text = text.strip()
+    text_len = len(text)
+    if text_len >= total:
+        return text[:total]
+    padding = total - text_len
+    left = padding // 2
+    right = padding - left
+    return f"{P * left}{text}{P * right}"
 
 
 # ============================================================
@@ -101,7 +120,6 @@ async def _ephemeral(inter: disnake.MessageInteraction, content: str):
 async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
     """
     Финальная логика закрытия: проверяет отзыв в канале, если всё ок — удаляет тикет.
-    Возвращает True если закрыл, False если нет (показал ошибку).
     """
     channel = inter.channel
     owner_id = get_ticket_owner(channel.id)
@@ -118,14 +136,12 @@ async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
         )
         return False
 
-    # Всё ок — закрываем
     await _ephemeral(inter, "✅ Всё готово! Закрываю тикет...")
     await asyncio.sleep(2)
 
     try:
         manager_id = get_ticket_manager(channel.id)
 
-        # Если это RUB/PAID-тикет — засчитать менеджеру
         is_paid = channel.category and channel.category.id == CONFIG.get("PAID_CATEGORY_ID")
         is_rub  = channel.category and channel.category.id == CONFIG.get("TICKET_CATEGORY_ID")
 
@@ -136,7 +152,6 @@ async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
             except Exception as e:
                 logger.warning(f"increment_manager_closed: {e}")
 
-        # Ачивки персонала
         try:
             if manager_id:
                 from clan.achievements import check_and_unlock
@@ -150,7 +165,6 @@ async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
         except Exception as e:
             logger.warning(f"staff tickets ach: {e}")
 
-        # Чистим и удаляем
         _clear_ticket_owner(channel)
         clear_ticket_manager(channel.id)
         clear_ticket_review(channel.id)
@@ -184,7 +198,7 @@ class RatingStep1View(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label=f"{P*40}Оценить менеджера{P*40}",
+        label=_btn_label("Оценить менеджера"),
         style=ButtonStyle.success,
         custom_id="rating_step1:open",
         emoji="⭐",
@@ -307,7 +321,7 @@ class RatingStep2View(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(
-        label=f"{P*40}Завершить заказ{P*40}",
+        label=_btn_label("Завершить заказ"),
         style=ButtonStyle.success,
         custom_id="rating_step2:finish",
         emoji="✅",
@@ -339,10 +353,7 @@ def _is_admin(member: disnake.Member) -> bool:
 # ГЛАВНЫЙ ФЛОУ
 # ============================================================
 async def show_rating_flow(inter: disnake.MessageInteraction):
-    """
-    Вызывается кнопкой «Закрыть» в RUB/PAID-тикетах.
-    Проверяет статус и показывает step1 или step2.
-    """
+    """Вызывается кнопкой «Закрыть» в RUB/PAID-тикетах."""
     channel = inter.channel
 
     if not inter.response.is_done():
