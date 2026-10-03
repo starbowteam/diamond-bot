@@ -45,15 +45,9 @@ DAILY_DEALS_PER_CYCLE = 5
 
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
-# ============================================================
-# 👇 НОВЫЕ ГРАНИЦЫ СТАВОК
-# ============================================================
 CASINO_MIN_BET = 20
 CASINO_MAX_BET = 1000
 
-# ============================================================
-# КАРТИНКИ
-# ============================================================
 IMG_ROULETTE_SPIN = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685793872248842/image.png?ex=6aaf3c2f&is=6aadeaaf&hm=67254a55d5004c897269e64255ad1a54e9a29689a383fda711316592a5bad350&"
 IMG_ROULETTE_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&"
 IMG_ROULETTE_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685884456636527/image.png?ex=6aaf3c45&is=6aadeac5&hm=451731816ed61f6878fba789858bdf5aed0ef69cfe1bfd5ce5378a7f9a1e4a18&"
@@ -216,7 +210,14 @@ async def start_flash_sale(bot):
             return
         channel = bot.get_channel(CONFIG["ACTIONS_CHANNEL_ID"])
         if not channel:
-            channel = await bot.fetch_channel(CONFIG["ACTIONS_CHANNEL_ID"])
+            try:
+                channel = await bot.fetch_channel(CONFIG["ACTIONS_CHANNEL_ID"])
+            except disnake.NotFound:
+                logger.warning("start_flash_sale: канал акций не найден")
+                return
+            except Exception as e:
+                logger.warning(f"start_flash_sale fetch: {e}")
+                return
         if not channel:
             return
 
@@ -278,17 +279,18 @@ def load_action_embed(filename: str):
         logger.error(f"Не удалось загрузить {filename}: {e}")
         return [disnake.Embed(title="Ошибка", description="Не удалось загрузить категорию.", color=0xff0000)]
 
+
 # ============================================================
-# РУЛЕТКА — 70% ПРОИГРЫШ
+# РУЛЕТКА — 55% ПРОИГРЫШ, БЕЗ ПАТТЕРНА
 # ============================================================
 ROULETTE_ROLLS = [
-    {"name": "Проигрыш",        "mult": -1.0, "chance": 70.0, "color": 0xed4245, "emoji": "🎲", "desc": "Ты потерял ставку"},
-    {"name": "Малый выигрыш",   "mult":  0.2, "chance": 15.0, "color": 0x95a5a6, "emoji": "🔹", "desc": "+20% от ставки"},
-    {"name": "Средний выигрыш", "mult":  0.5, "chance":  9.0, "color": 0x149bd0, "emoji": "🔸", "desc": "+50% от ставки"},
-    {"name": "Двойной",         "mult":  1.0, "chance":  4.0, "color": 0x2ecc71, "emoji": "💎", "desc": "х2 — удвоение ставки"},
-    {"name": "Тройной",         "mult":  2.0, "chance":  1.4, "color": 0xf7c991, "emoji": "👑", "desc": "х3 — тройная ставка"},
-    {"name": "JACKPOT",         "mult":  4.0, "chance":  0.5, "color": 0xffaa00, "emoji": "🎰", "desc": "х5 — джекпот!"},
-    {"name": "MEGA JACKPOT",    "mult":  9.0, "chance":  0.1, "color": 0xff00aa, "emoji": "⭐", "desc": "х10 — мега-джекпот!!!"},
+    {"name": "Проигрыш",        "mult": -1.0, "chance": 55.0, "color": 0xed4245, "emoji": "🎲", "desc": "Ты потерял ставку"},
+    {"name": "Малый выигрыш",   "mult":  0.2, "chance": 20.0, "color": 0x95a5a6, "emoji": "🔹", "desc": "+20% от ставки"},
+    {"name": "Средний выигрыш", "mult":  0.5, "chance": 12.0, "color": 0x149bd0, "emoji": "🔸", "desc": "+50% от ставки"},
+    {"name": "Двойной",         "mult":  1.0, "chance":  8.0, "color": 0x2ecc71, "emoji": "💎", "desc": "х2 — удвоение ставки"},
+    {"name": "Тройной",         "mult":  2.0, "chance":  3.0, "color": 0xf7c991, "emoji": "👑", "desc": "х3 — тройная ставка"},
+    {"name": "JACKPOT",         "mult":  4.0, "chance":  1.5, "color": 0xffaa00, "emoji": "🎰", "desc": "х5 — джекпот!"},
+    {"name": "MEGA JACKPOT",    "mult":  9.0, "chance":  0.5, "color": 0xff00aa, "emoji": "⭐", "desc": "х10 — мега-джекпот!!!"},
 ]
 
 def roll_roulette() -> dict:
@@ -415,7 +417,6 @@ class RouletteModal(Modal):
             reason = f"Выигрыш в рулетке: {result['name']}"
             if used:
                 reason += f" ({', '.join(used)})"
-            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
             await add_dc(user_id, payout, reason, to_clan_pool=True)
             if on_casino_win_hook:
                 try:
@@ -506,7 +507,6 @@ class RouletteRetryView(View):
     async def double_callback(self, inter: disnake.MessageInteraction):
         user_id = inter.author.id
         new_bet = self.last_bet * 2
-        # 👇 Проверка лимита
         if new_bet > CASINO_MAX_BET:
             return await inter.response.send_message(
                 f"❌ Двойная ставка превышает лимит ({CASINO_MAX_BET} DC).",
@@ -567,8 +567,9 @@ class RouletteRetryView(View):
                 view=view
             )
 
+
 # ============================================================
-# 🃏 БЛЭКДЖЕК
+# БЛЭКДЖЕК
 # ============================================================
 BLACKJACK_MIN_BET        = CASINO_MIN_BET
 BLACKJACK_MAX_BET        = CASINO_MAX_BET
@@ -867,7 +868,6 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
         payout, used = apply_casino_win(user_id, payout)
         if used:
             reason += f" ({', '.join(used)})"
-        # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
         await add_dc(user_id, payout, reason, to_clan_pool=True)
         if on_casino_win_hook:
             try:
@@ -1004,8 +1004,9 @@ class BlackjackRetryView(View):
         if _hand_value(game["player"]) == 21:
             await _bj_finish(inter, game)
 
+
 # ============================================================
-# 🪙 МОНЕТКА
+# МОНЕТКА
 # ============================================================
 COINFLIP_MIN_BET = CASINO_MIN_BET
 COINFLIP_MAX_BET = CASINO_MAX_BET
@@ -1174,7 +1175,6 @@ class CoinflipChoiceView(View):
             reason = f"Монетка ({result_side})"
             if used:
                 reason += f" ({', '.join(used)})"
-            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
             await add_dc(user_id, payout, reason, to_clan_pool=True)
             if on_casino_win_hook:
                 try:
@@ -1273,6 +1273,7 @@ class CoinflipRetryView(View):
             embeds=_build_coin_choice_embeds(new_bet),
             view=CoinflipChoiceView(new_bet)
         )
+
 
 # ============================================================
 # СЕЛЕКТ ДЛЯ ACTIONS
@@ -1373,6 +1374,7 @@ class ActionView(View):
         super().__init__(timeout=None)
         self.add_item(ActionSelect())
 
+
 # ============================================================
 # ОБРАБОТКА ПОКУПКИ АКЦИИ
 # ============================================================
@@ -1471,6 +1473,7 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
         color=0xff6600
     )
 
+
 # ============================================================
 # ОТПРАВКА ACTIONS ПАНЕЛИ
 # ============================================================
@@ -1478,27 +1481,43 @@ async def send_actions_panel():
     from core.bot import bot
     await bot.wait_until_ready()
 
-    channel = bot.get_channel(CONFIG["ACTIONS_CHANNEL_ID"])
+    channel_id = CONFIG.get("ACTIONS_CHANNEL_ID")
+    if not channel_id:
+        return
+
+    channel = bot.get_channel(channel_id)
     if not channel:
-        channel = await bot.fetch_channel(CONFIG["ACTIONS_CHANNEL_ID"])
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except disnake.NotFound:
+            logger.warning(
+                f"send_actions_panel: канал {channel_id} не найден, пропускаю"
+            )
+            return
+        except Exception as e:
+            logger.warning(f"send_actions_panel fetch err: {e}")
+            return
     if not channel:
         return
 
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            try:
-                await msg.delete()
-            except:
-                pass
-            break
+    try:
+        async for msg in channel.history(limit=50):
+            if msg.author == bot.user and msg.components:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                break
 
-    main_embeds = load_action_embed("menu_actions.json")
-    await channel.send(embeds=main_embeds, view=ActionView())
-    await log_discord(
-        title="🔄 Меню Actions обновлено",
-        description="> Панель действий переотправлена.",
-        color=0x00ff00
-    )
+        main_embeds = load_action_embed("menu_actions.json")
+        await channel.send(embeds=main_embeds, view=ActionView())
+        await log_discord(
+            title="🔄 Меню Actions обновлено",
+            description="> Панель действий переотправлена.",
+            color=0x00ff00
+        )
+    except Exception as e:
+        logger.warning(f"send_actions_panel send err: {e}")
 
 async def refresh_actions_panel():
     await send_actions_panel()
