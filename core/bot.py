@@ -444,12 +444,20 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"giveaways init err: {e}")
 
+        # ============================================================
+        # 📩 ИМПОРТЫ ВСЕХ VIEW
+        # ============================================================
         from modules.commands_tickets import (
             TicketPanelView, TicketPaidView, TicketView, CoinsTicketButtons,
-            TicketRatingView, SelectView, CatalogTypeView, CatalogView,
+            SelectView, CatalogTypeView, CatalogView,
             QuestionTicketView,
         )
-        from modules.commands_profile import send_profile_panel, ProfilePanelView, ProfileCardView
+        from modules.ticket_rating import (
+            RatingStep1View, RatingStep2View,
+        )
+        from modules.commands_profile import (
+            send_profile_panel, ProfilePanelView, ProfileCardView,
+        )
         from modules.commands_staff import (
             send_home_panel, send_tarology_panel, send_ticket_panel,
             send_work_panel, send_staff_panels,
@@ -458,14 +466,21 @@ async def on_ready():
         )
         from modules.commands_buyall import BuyAllView, send_buyall_panel
 
+        # ============================================================
+        # 🎯 РЕГИСТРАЦИЯ VIEW
+        # ============================================================
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
         bot.add_view(TicketView())
         bot.add_view(CoinsTicketButtons())
-        bot.add_view(TicketRatingView())
         bot.add_view(SelectView())
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
+
+        # 👇 Оценка менеджера (шаг 1 и шаг 2)
+        bot.add_view(RatingStep1View())
+        bot.add_view(RatingStep2View())
+
         bot.add_view(HomeView())
         bot.add_view(TarologyView())
         bot.add_view(ProfilePanelView())
@@ -477,6 +492,9 @@ async def on_ready():
         bot.add_view(AdminView())
         bot.add_view(BuyAllView())
 
+        # ============================================================
+        # 🚀 ОТПРАВКА ПАНЕЛЕЙ
+        # ============================================================
         bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
