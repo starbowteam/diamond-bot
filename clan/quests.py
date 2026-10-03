@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Квесты клановой лиги + интеграция достижений."""
+"""Квесты клановой лиги + рендер Pillow."""
 import os
+import io
 import time
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -22,97 +23,108 @@ EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
 
 # ============================================================
-# ОПРЕДЕЛЕНИЕ КВЕСТОВ
+# ОПРЕДЕЛЕНИЕ КВЕСТОВ — 15 разных, без повторов
 # ============================================================
 QUESTS: Dict[str, dict] = {
-    # ---------- DAILY ----------
+    # ---------- DAILY (5 разных) ----------
     "msg_50": {
-        "title": "💬 Болтун",
-        "desc": "Напиши 50 сообщений",
-        "reward": 10, "goal": 50, "type": "daily",
-        "unit": "сообщений", "icon": "💬",
+        "title": "Болтун",
+        "desc": "Напиши 50 сообщений в чате",
+        "reward": 30, "goal": 50, "type": "daily",
+        "unit": "сообщений", "icon": "fa-comment",
     },
     "voice_1h": {
-        "title": "🎙 Голос",
+        "title": "Голос",
         "desc": "Проведи 1 час в голосовых каналах",
-        "reward": 15, "goal": 3600, "type": "daily",
-        "unit": "секунд", "icon": "🎙",
+        "reward": 50, "goal": 3600, "type": "daily",
+        "unit": "секунд", "icon": "fa-microphone",
     },
     "casino_3": {
-        "title": "🎲 Азарт",
+        "title": "Азарт",
         "desc": "Сыграй 3 партии в казино",
-        "reward": 10, "goal": 3, "type": "daily",
-        "unit": "партий", "icon": "🎲",
+        "reward": 30, "goal": 3, "type": "daily",
+        "unit": "партий", "icon": "fa-dice",
     },
     "cmds_5": {
-        "title": "🎯 Активный",
+        "title": "Активный",
         "desc": "5 взаимодействий с панелями клана",
-        "reward": 5, "goal": 5, "type": "daily",
-        "unit": "действий", "icon": "🎯",
+        "reward": 20, "goal": 5, "type": "daily",
+        "unit": "действий", "icon": "fa-computer-mouse",
+    },
+    "shop_buy": {
+        "title": "Покупатель",
+        "desc": "Купи любой товар в DC-магазине",
+        "reward": 40, "goal": 1, "type": "daily",
+        "unit": "покупок", "icon": "fa-cart-shopping",
     },
 
-    # ---------- WEEKLY ----------
-    "review_1": {
-        "title": "📝 Отзыв недели",
-        "desc": "Оставь 1 отзыв в канале отзывов",
-        "reward": 25, "goal": 1, "type": "weekly",
-        "unit": "отзывов", "icon": "📝",
+    # ---------- WEEKLY (5 разных) ----------
+    "msg_1000": {
+        "title": "Мега-болтун",
+        "desc": "1000 сообщений за неделю",
+        "reward": 200, "goal": 1000, "type": "weekly",
+        "unit": "сообщений", "icon": "fa-comments",
     },
-    "msg_300": {
-        "title": "💎 Мега-болтун",
-        "desc": "300 сообщений за неделю",
-        "reward": 50, "goal": 300, "type": "weekly",
-        "unit": "сообщений", "icon": "💎",
+    "voice_10h": {
+        "title": "Марафонец",
+        "desc": "10 часов в голосовых каналах за неделю",
+        "reward": 250, "goal": 36000, "type": "weekly",
+        "unit": "секунд", "icon": "fa-headphones",
     },
-    "voice_5h": {
-        "title": "🎙 Марафонец",
-        "desc": "5 часов в голосовых каналах за неделю",
-        "reward": 60, "goal": 18000, "type": "weekly",
-        "unit": "секунд", "icon": "🎙",
+    "casino_30": {
+        "title": "Азартная неделя",
+        "desc": "Сыграй 30 партий в казино",
+        "reward": 150, "goal": 30, "type": "weekly",
+        "unit": "партий", "icon": "fa-dice-five",
     },
-    "shop_100": {
-        "title": "👑 Инвестор",
-        "desc": "Потрать 100 DC в магазине за неделю",
-        "reward": 30, "goal": 100, "type": "weekly",
-        "unit": "DC", "icon": "👑",
+    "shop_500": {
+        "title": "Инвестор",
+        "desc": "Потрать 500 DC в DC-магазине за неделю",
+        "reward": 200, "goal": 500, "type": "weekly",
+        "unit": "DC", "icon": "fa-sack-dollar",
     },
-    "win_500": {
-        "title": "🎰 Удачливый",
-        "desc": "Выиграй 500+ DC в казино за неделю",
-        "reward": 75, "goal": 500, "type": "weekly",
-        "unit": "DC", "icon": "🎰",
+    "win_3000": {
+        "title": "Удачливый",
+        "desc": "Выиграй 3000 DC в казино за неделю",
+        "reward": 350, "goal": 3000, "type": "weekly",
+        "unit": "DC", "icon": "fa-trophy",
     },
 
-    # ---------- ONCE ----------
+    # ---------- ONCE (5 разных) ----------
     "first_review": {
-        "title": "🌟 Первый отзыв сезона",
+        "title": "Первый отзыв",
         "desc": "Оставь первый отзыв в этом сезоне",
-        "reward": 40, "goal": 1, "type": "once",
-        "unit": "отзывов", "icon": "🌟",
+        "reward": 150, "goal": 1, "type": "once",
+        "unit": "отзывов", "icon": "fa-star",
     },
-    "gift_50": {
-        "title": "🎁 Щедрость",
-        "desc": "Подари кому-то 50 DC через магазин",
-        "reward": 20, "goal": 50, "type": "once",
-        "unit": "DC", "icon": "🎁",
+    "gift_500": {
+        "title": "Щедрость",
+        "desc": "Подари кому-то 500 DC через магазин",
+        "reward": 200, "goal": 500, "type": "once",
+        "unit": "DC", "icon": "fa-gift",
     },
     "jackpot": {
-        "title": "🎰 Джекпот",
-        "desc": "Выиграй 1000+ DC за одну партию в казино",
-        "reward": 100, "goal": 1000, "type": "once",
-        "unit": "DC", "icon": "🎰",
+        "title": "Джекпот",
+        "desc": "Выиграй 10 000+ DC за одну партию в казино",
+        "reward": 500, "goal": 10000, "type": "once",
+        "unit": "DC", "icon": "fa-fire",
     },
     "top_contributor": {
-        "title": "👑 Лидер клана",
+        "title": "Лидер клана",
         "desc": "Стань топ-1 по вкладу в клане хотя бы раз",
-        "reward": 200, "goal": 1, "type": "once",
-        "unit": "раз", "icon": "👑",
+        "reward": 400, "goal": 1, "type": "once",
+        "unit": "раз", "icon": "fa-crown",
+    },
+    "rich_500k": {
+        "title": "Полумиллионер",
+        "desc": "Накопи 500 000 DC на балансе",
+        "reward": 800, "goal": 500000, "type": "once",
+        "unit": "DC", "icon": "fa-money-bill-wave",
     },
 }
 
 
 def init_clan_quests():
-    """Регистрирует квесты в БД."""
     for key, q in QUESTS.items():
         cur.execute(
             "INSERT OR IGNORE INTO quests (key, title, description, reward, goal, type, emoji, active) "
@@ -153,9 +165,6 @@ def _ensure_row(user_id: int, quest_key: str, cycle_id: int):
 
 
 def update_progress(user_id: int, quest_key: str, delta: int = 1, absolute: Optional[int] = None):
-    """
-    Обновляет прогресс квеста. Если достигнут goal — выдаёт награду.
-    """
     if quest_key not in QUESTS:
         return
     quest = QUESTS[quest_key]
@@ -198,13 +207,6 @@ def update_progress(user_id: int, quest_key: str, delta: int = 1, absolute: Opti
 
 
 async def _reward_user(user_id: int, quest_key: str, quest: dict):
-    """
-    Выдаёт награду за квест:
-    - вклад в банк клана по правилу копилки (до 100 DC — вся сумма, больше — 40%)
-    - ЛС юзеру
-    - Лог в канал
-    - 👇 Проверка достижений (квест-достижения)
-    """
     reward = quest["reward"]
 
     from clan.core import add_clan_contribution, get_user_clan, clan_cut
@@ -212,26 +214,21 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
     if not clan:
         return
 
-    # 👇 Выполнил квест — значит действует, сбрасываем счётчик неактивности
     try:
         from modules.dc import touch_activity
         touch_activity(user_id)
     except Exception as e:
         logger.warning(f"quest touch_activity: {e}")
 
-    # 👇 Копилка по правилу: до 100 DC включительно — вся сумма,
-    # больше 100 DC — 40% от награды.
     clan_amount = clan_cut(reward)
     if clan_amount <= 0:
         return
 
     await add_clan_contribution(user_id, clan_amount, f"Квест: {quest['title']}")
 
-    # 👇 Достижения по квестам
     try:
         from clan.achievements import check_and_unlock
         from core.bot import bot
-        # Считаем общее кол-во выполненных квестов у юзера
         total_completed = cur.execute(
             "SELECT COUNT(*) AS c FROM quest_progress WHERE user_id=? AND completed_at IS NOT NULL",
             (user_id,)
@@ -241,7 +238,6 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
     except Exception as e:
         logger.warning(f"quest achievements: {e}")
 
-    # ЛС юзеру
     try:
         from core.bot import bot
         user = bot.get_user(user_id) or await bot.fetch_user(user_id)
@@ -262,7 +258,6 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
     except Exception as e:
         logger.warning(f"quest reward DM {user_id}: {e}")
 
-    # Лог
     await log_discord(
         title="🎯 Квест выполнен",
         description=(
@@ -304,49 +299,57 @@ def get_user_quests(user_id: int) -> List[dict]:
     return result
 
 
-def format_quests_embed(user_id: int) -> List[disnake.Embed]:
-    """Возвращает 2 эмбеда: картинка + список с прогресс-барами."""
-    from clan.core import get_user_clan, make_progress_bar, clan_cut
-    from clan.core import EMBEDS_DIR as CORE_EMBEDS
+# ============================================================
+# ФОРМИРОВАНИЕ EMBED'ОВ С ПИЛЛОW
+# ============================================================
+def build_quests_embeds(user_id: int):
+    """
+    Возвращает (embeds, file) — готовый набор для send_message:
+        await inter.response.send_message(embeds=embeds, file=file, ephemeral=True)
+    """
+    from clan.core import get_user_clan, clan_cut
+
+    try:
+        from modules.shop.render_quests import render_quests
+    except Exception as e:
+        logger.warning(f"render_quests import: {e}")
+        render_quests = None
 
     clan = get_user_clan(user_id)
     quests = get_user_quests(user_id)
 
-    daily = [q for q in quests if q["type"] == "daily"]
-    weekly = [q for q in quests if q["type"] == "weekly"]
-    once = [q for q in quests if q["type"] == "once"]
+    # считаем reward_cut по правилу копилки
+    for q in quests:
+        q["reward_cut"] = clan_cut(q["reward"])
 
-    def render(q):
-        pct = q["progress"] / q["goal"] if q["goal"] > 0 else 0
-        bar = make_progress_bar(pct)
-        status = "✅" if q["completed"] else f"`{q['progress']}/{q['goal']}`"
-        # 👇 показываем реальную сумму, которая уйдёт в копилку по правилу
-        cut = clan_cut(q["reward"])
-        return f"> {q['icon']} **{q['title']}** — {q['desc']}\n> {bar} {status}  ·  +{cut} DC в копилку"
-
-    lines = []
-    if daily:
-        lines.append("**🕐 ЕЖЕДНЕВНЫЕ** (сброс 00:00 МСК)")
-        lines += [render(q) for q in daily]
-    if weekly:
-        lines.append("\n**📅 НЕДЕЛЬНЫЕ** (сброс пн 00:00 МСК)")
-        lines += [render(q) for q in weekly]
-    if once:
-        lines.append("\n**🌟 РАЗОВЫЕ (за цикл)**")
-        lines += [render(q) for q in once]
-
+    # embed 1 — картинка шапки из clan/embeds/quests.json
     e1 = disnake.Embed(color=clan["color"] if clan else 6776679)
     data = load_json(os.path.join(EMBEDS_DIR, "quests.json"), {})
     for e in data.get("embeds", [])[:1]:
-        e1 = disnake.Embed.from_dict(e)
+        try:
+            e1 = disnake.Embed.from_dict(e)
+        except Exception:
+            pass
 
-    e2 = disnake.Embed(
-        title="📋 Твои квесты",
-        description="\n".join(lines),
-        color=clan["color"] if clan else 6776679
-    )
-    e2.set_image(url=IMG_STRIPE)
-    return [e1, e2]
+    # embed 2 — Pillow
+    e2 = disnake.Embed(color=clan["color"] if clan else 6776679)
+    file = None
+
+    if render_quests is not None:
+        try:
+            buf = render_quests(user_id, quests)
+            file = disnake.File(buf, filename=f"quests_{user_id}.png")
+            e2.set_image(url=f"attachment://quests_{user_id}.png")
+        except Exception as e:
+            logger.warning(f"render_quests err: {e}")
+
+    return [e1, e2], file
+
+
+def format_quests_embed(user_id: int):
+    """Обратная совместимость: возвращает только embeds."""
+    embeds, _ = build_quests_embeds(user_id)
+    return embeds
 
 
 # ============================================================
@@ -380,7 +383,6 @@ def reset_weekly_quests():
 # ХУКИ
 # ============================================================
 async def on_message_quest_hook(message: disnake.Message):
-    """Хук от bot.on_message."""
     if message.author.bot:
         return
     if not isinstance(message.channel, disnake.TextChannel):
@@ -397,7 +399,7 @@ async def on_message_quest_hook(message: disnake.Message):
         return
 
     update_progress(user_id, "msg_50", delta=1)
-    update_progress(user_id, "msg_300", delta=1)
+    update_progress(user_id, "msg_1000", delta=1)
 
 
 async def on_voice_quest_hook(user_id: int, seconds: int):
@@ -407,7 +409,7 @@ async def on_voice_quest_hook(user_id: int, seconds: int):
     if seconds <= 0:
         return
     update_progress(user_id, "voice_1h", delta=seconds)
-    update_progress(user_id, "voice_5h", delta=seconds)
+    update_progress(user_id, "voice_10h", delta=seconds)
 
 
 async def on_casino_quest_hook(user_id: int):
@@ -415,6 +417,7 @@ async def on_casino_quest_hook(user_id: int):
     if not get_user_clan(user_id):
         return
     update_progress(user_id, "casino_3", delta=1)
+    update_progress(user_id, "casino_30", delta=1)
 
 
 async def on_casino_win_hook(user_id: int, payout: int, bet: int):
@@ -424,17 +427,16 @@ async def on_casino_win_hook(user_id: int, payout: int, bet: int):
 
     profit = max(payout - bet, 0)
     if profit > 0:
-        update_progress(user_id, "win_500", delta=profit)
+        update_progress(user_id, "win_3000", delta=profit)
 
-    if profit >= 1000:
-        update_progress(user_id, "jackpot", absolute=1000)
+    if profit >= 10000:
+        update_progress(user_id, "jackpot", absolute=10000)
 
 
 async def on_review_quest_hook(user_id: int):
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
-    update_progress(user_id, "review_1", delta=1)
     update_progress(user_id, "first_review", delta=1)
 
 
@@ -442,14 +444,15 @@ async def on_purchase_quest_hook(user_id: int, amount_dc: int):
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
-    update_progress(user_id, "shop_100", delta=amount_dc)
+    update_progress(user_id, "shop_buy", delta=1)
+    update_progress(user_id, "shop_500", delta=amount_dc)
 
 
 async def on_gift_quest_hook(sender_id: int, amount_dc: int):
     from clan.core import get_user_clan
     if not get_user_clan(sender_id):
         return
-    update_progress(sender_id, "gift_50", delta=amount_dc)
+    update_progress(sender_id, "gift_500", delta=amount_dc)
 
 
 async def on_panel_click_quest_hook(user_id: int):
