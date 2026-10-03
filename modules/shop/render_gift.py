@@ -334,110 +334,191 @@ def _draw_right_head(d, x1, y1, x2, title: str, sub: str):
 
 
 # ============================================================
-# HERO — БОЛЬШОЙ БЛОК В ЦЕНТРЕ
+# HERO — БОЛЬШОЙ БЛОК В ЦЕНТРЕ (ИСПРАВЛЕНО)
 # ============================================================
 def _draw_hero(img, d, box, is_success: bool,
                amount: int, hours_str: str, next_ts: int):
     """
     is_success=True  — зелёный, +N DC
     is_success=False — золотой, HH:MM ч
+
+    Layout (сверху вниз):
+      [TAG-бейдж]  ← маленький, с FA-иконкой
+      [Иконка+glow] ← 110px
+      [Заголовок]
+      [ОГРОМНАЯ ЦИФРА]
+      [Подпись]
+    Всё центрируется вертикально внутри hero.
     """
     x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
+    cx = (x1 + x2) // 2
 
+    # ─── Параметры в зависимости от состояния ───
     if is_success:
         main_color = GREEN
-        accent_light = tuple(min(int(c + (255 - c) * 0.35), 255) for c in main_color)
-        tag_text = "✦ ПОДАРОК ЗАБРАН ✦"
-        icon_code = I_GIFT
+        tag_icon = I_CHECK
+        tag_text = "ПОДАРОК ЗАБРАН"
+        hero_icon = I_GIFT
+        title_text = "Тебе выпало"
+        big_str = f"+{amount}"
+        unit_str = " DC"
     else:
         main_color = GOLD
-        accent_light = tuple(min(int(c + (255 - c) * 0.35), 255) for c in main_color)
-        tag_text = "✦ УЖЕ ЗАБРАЛ СЕГОДНЯ ✦"
-        icon_code = I_HOURGLASS
+        tag_icon = I_HOURGLASS
+        tag_text = "УЖЕ ЗАБРАЛ СЕГОДНЯ"
+        hero_icon = I_HOURGLASS
+        title_text = "Ты уже забрал подарок"
+        big_str = hours_str
+        unit_str = " ч"
 
-    # Фон hero + рамка (толстая, в цвет состояния)
+    border_light = tuple(min(int(c + (255 - c) * 0.30), 255) for c in main_color)
+
+    # ─── ФОН HERO ───
     _gradient_box(img, (x1, y1, x2, y2), main_color, main_color, alpha=22, radius=22)
     d.rounded_rectangle((x1, y1, x2, y2),
                         radius=22, outline=main_color + (220,), width=3)
 
-    cx = (x1 + x2) // 2
-    cy = (y1 + y2) // 2
+    # ─── Размеры всех элементов ───
+    TAG_H = 34
+    TAG_PAD = 20
+    TAG_ICON_GAP = 10
+    ICON_SIZE = 110
+    GLOW_SIZE = 130
 
-    # ─── TAG ───
-    tag_font = _font(15)
-    tag_w = _tw(d, tag_text, tag_font)
-    tag_y = y1 + 32
+    TAG_FONT_SIZE = 14
+    TITLE_FONT_SIZE = 22
+    BIG_FONT_SIZE = 82
+    UNIT_FONT_SIZE = 30
+    SUB_FONT_SIZE = 15
 
-    d.text((cx - tag_w // 2, tag_y), tag_text, font=tag_font, fill=main_color)
+    GAP_TAG_ICON   = 24   # между тегом и иконкой
+    GAP_ICON_TITLE = 20   # между иконкой и заголовком
+    GAP_TITLE_BIG  = 36   # между заголовком и большой цифрой
+    GAP_BIG_SUB    = 12   # между большой цифрой и подписью
 
-    # ─── ИКОНКА В ГЛОу ───
-    # Сначала свечение (несколько альфа-кругов)
-    glow_size = 160
-    for i, a in enumerate([40, 55, 70]):
-        gs = glow_size - i * 12
+    # ─── Предварительный расчёт ───
+    tag_font = _font(TAG_FONT_SIZE)
+    title_font = _font(TITLE_FONT_SIZE)
+    sub_font = _font(SUB_FONT_SIZE)
+    unit_font = _font(UNIT_FONT_SIZE)
+
+    tag_text_w = _tw(d, tag_text, tag_font)
+    tag_w = tag_text_w + TAG_PAD * 2 + 18 + TAG_ICON_GAP   # место под иконку
+
+    title_h = title_font.size
+
+    big_font = _font(BIG_FONT_SIZE)
+    # Ужимаем если не влезает
+    while _tw(d, big_str + unit_str, big_font) > w - 100 and big_font.size > 50:
+        big_font = _font(big_font.size - 4)
+
+    big_h = big_font.size
+    sub_h = sub_font.size
+
+    # Полная высота контента
+    total_h = (
+        TAG_H + GAP_TAG_ICON
+        + ICON_SIZE + GAP_ICON_TITLE
+        + title_h + GAP_TITLE_BIG
+        + big_h + GAP_BIG_SUB
+        + sub_h
+    )
+
+    # Стартуем так, чтобы контент был отцентрирован, но минимум 26px от верха
+    start_y = y1 + max((h - total_h) // 2, 26)
+
+    # ═══════════════════════════════════════════════════════
+    # 1. TAG-БЕЙДЖ
+    # ═══════════════════════════════════════════════════════
+    tag_x1 = cx - tag_w // 2
+    tag_y1 = start_y
+    tag_y2 = tag_y1 + TAG_H
+
+    _alpha_fill(img,
+                (tag_x1, tag_y1, tag_x1 + tag_w, tag_y2),
+                main_color, alpha=55, radius=TAG_H // 2)
+    d.rounded_rectangle((tag_x1, tag_y1, tag_x1 + tag_w, tag_y2),
+                        radius=TAG_H // 2,
+                        outline=main_color + (180,), width=2)
+
+    # FA-иконка в теге
+    icon_cx = tag_x1 + TAG_PAD + 7
+    icon_cy = tag_y1 + TAG_H // 2
+    _draw_icon(d, icon_cx, icon_cy, tag_icon, TAG_FONT_SIZE, main_color)
+
+    # Текст тега
+    tag_text_x = icon_cx + 14 + TAG_ICON_GAP
+    d.text((tag_text_x, icon_cy), tag_text,
+           font=tag_font, fill=main_color, anchor="lm")
+
+    # ═══════════════════════════════════════════════════════
+    # 2. ИКОНКА В ГЛОУ
+    # ═══════════════════════════════════════════════════════
+    icon_top = tag_y2 + GAP_TAG_ICON
+    icon_cy = icon_top + ICON_SIZE // 2
+
+    # Мягкое свечение (3 слоя, центрированы строго на иконке)
+    for i, a in enumerate([30, 45, 60]):
+        gs = GLOW_SIZE - i * 10
         _alpha_fill(
             img,
-            (cx - gs // 2, cy - 155 - gs // 2, cx + gs // 2, cy - 155 + gs // 2),
+            (cx - gs // 2, icon_cy - gs // 2, cx + gs // 2, icon_cy + gs // 2),
             main_color, alpha=a, radius=gs // 2,
         )
 
-    # Сама иконка
-    icon_size = 130
-    ib_y = cy - 155 - icon_size // 2
-    ib_x = cx - icon_size // 2
+    # Квадрат с иконкой
+    ib_x = cx - ICON_SIZE // 2
+    ib_y = icon_cy - ICON_SIZE // 2
+    _alpha_fill(img, (ib_x, ib_y, ib_x + ICON_SIZE, ib_y + ICON_SIZE),
+                main_color, alpha=65, radius=28)
+    d.rounded_rectangle((ib_x, ib_y, ib_x + ICON_SIZE, ib_y + ICON_SIZE),
+                        radius=28,
+                        outline=border_light + (240,), width=3)
+    _draw_icon(d, cx, icon_cy + 1, hero_icon, 52, main_color)
 
-    _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                main_color, alpha=60, radius=30)
-    d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=30, outline=main_color + (230,), width=3)
-    _draw_icon(d, cx, ib_y + icon_size // 2 + 1, icon_code, 64, main_color)
+    # ═══════════════════════════════════════════════════════
+    # 3. ЗАГОЛОВОК
+    # ═══════════════════════════════════════════════════════
+    title_y = ib_y + ICON_SIZE + GAP_ICON_TITLE
+    title_w = _tw(d, title_text, title_font)
+    d.text((cx - title_w // 2, title_y),
+           title_text, font=title_font, fill=TEXT_SOFT)
 
-    # ─── TITLE ───
-    title_y = ib_y + icon_size + 14
-    if is_success:
-        title_text = "Тебе выпало"
-    else:
-        title_text = "Ты уже забрал подарок"
-
-    title_font = _font(24)
-    tw = _tw(d, title_text, title_font)
-    d.text((cx - tw // 2, title_y), title_text, font=title_font, fill=TEXT_SOFT)
-
-    # ─── ОГРОМНАЯ ЦИФРА ───
-    if is_success:
-        big_str = f"+{amount}"
-        unit_str = " DC"
-    else:
-        big_str = hours_str
-        unit_str = " ч"
-
-    big_font = _font(92)
-    while _tw(d, big_str + unit_str, big_font) > (x2 - x1) - 120 and big_font.size > 50:
-        big_font = _font(big_font.size - 4)
+    # ═══════════════════════════════════════════════════════
+    # 4. ОГРОМНАЯ ЦИФРА
+    # ═══════════════════════════════════════════════════════
+    big_y = title_y + title_h + GAP_TITLE_BIG
 
     bw_big = _tw(d, big_str, big_font)
-    bw_unit = _tw(d, unit_str, _font(34))
+    bw_unit = _tw(d, unit_str, unit_font)
 
-    total_w = bw_big + bw_unit + 12
-    start_x = cx - total_w // 2
+    total_bw = bw_big + bw_unit + 10
+    big_x = cx - total_bw // 2
 
-    big_y = title_y + 40
-    d.text((start_x, big_y), big_str, font=big_font, fill=main_color)
-    d.text((start_x + bw_big + 12, big_y + big_font.size - 42),
-           unit_str, font=_font(34), fill=main_color)
+    d.text((big_x, big_y), big_str, font=big_font, fill=main_color)
+    d.text((big_x + bw_big + 10, big_y + big_font.size - 38),
+           unit_str, font=unit_font, fill=main_color)
 
-    # ─── ПОДПИСЬ СНИЗУ ───
+    # ═══════════════════════════════════════════════════════
+    # 5. ПОДПИСЬ
+    # ═══════════════════════════════════════════════════════
+    sub_y = big_y + big_h + GAP_BIG_SUB
+
     if is_success:
         sub_text = "Зачислено на баланс · возвращайся завтра"
     else:
         dt = datetime.fromtimestamp(next_ts, timezone.utc)
-        sub_text = f"Следующий подарок будет доступен {dt.strftime('%d.%m в %H:%M')}"
+        sub_text = f"Следующий подарок — {dt.strftime('%d.%m в %H:%M')}"
 
-    sub_font = _font(15)
     sub_w = _tw(d, sub_text, sub_font)
-    sub_y = big_y + big_font.size + 6
-    d.text((cx - sub_w // 2, sub_y), sub_text, font=sub_font, fill=MUTED)
+    # Если подпись не влезает — ужимаем
+    if sub_w > w - 60:
+        sub_text = f"Следующий — {datetime.fromtimestamp(next_ts, timezone.utc).strftime('%d.%m %H:%M')}"
+        sub_w = _tw(d, sub_text, sub_font)
+
+    d.text((cx - sub_w // 2, sub_y), sub_text,
+           font=sub_font, fill=MUTED)
 
 
 # ============================================================
