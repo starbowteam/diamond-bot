@@ -376,23 +376,27 @@ def _draw_left_panel(img, d, box, extra_blocks=None, header_icon: int = I_GEM):
 # SCREEN 1: ЗАРПЛАТА
 # ============================================================
 # 👇 Все суммы ×2.5 от исходных
+# ============================================================
+# SCREEN 1: ЗАРПЛАТА
+# ============================================================
+# 👇 Все суммы ×2.5. Роли и цвета — реальные из zp.json.
 SALARY_ROLES = [
     {
         "role_id": 1471844291595731016,
-        "name": "Администратор",
-        "tag": "ADMIN",
+        "name": "Control Diamond",
+        "tag": "CONTROL",
         "advance": 750,
         "salary": 1750,
-        "color": GOLD,
+        "color": (0xcd, 0xce, 0xd1),   # светлый серо-белый
         "icon": I_CROWN,
     },
     {
         "role_id": 1513935883475226796,
-        "name": "Head Manager",
-        "tag": "HEAD",
+        "name": "Assistant",
+        "tag": "ASSIST",
         "advance": 550,
         "salary": 1250,
-        "color": SILVER,
+        "color": (0xbe, 0x85, 0x85),   # тёплый розово-коричневый
         "icon": I_USER_TIE,
     },
     {
@@ -401,25 +405,25 @@ SALARY_ROLES = [
         "tag": "SALES",
         "advance": 550,
         "salary": 1250,
-        "color": BLUE,
+        "color": (0x39, 0xf4, 0x7b),   # ярко-зелёный
         "icon": I_HAND,
     },
     {
         "role_id": 1471190371181789234,
-        "name": "HR",
-        "tag": "HR",
+        "name": "Employer",
+        "tag": "EMPLOY",
         "advance": 450,
         "salary": 1000,
-        "color": PURPLE,
+        "color": (0x5c, 0x5c, 0x5c),   # серый
         "icon": I_USERS,
     },
     {
         "role_id": 1457964854441672806,
-        "name": "Recruiter",
-        "tag": "RECRUIT",
+        "name": "Advertiser",
+        "tag": "ADVERT",
         "advance": 375,
         "salary": 875,
-        "color": GREEN,
+        "color": (0xb1, 0xc5, 0xf6),   # светло-голубой
         "icon": I_SEARCH,
     },
 ]
