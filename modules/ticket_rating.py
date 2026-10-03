@@ -33,8 +33,11 @@ from modules.tickets_render import (
 # КОНСТАНТЫ
 # ============================================================
 ADMIN_OVERRIDE_ID = 796293832751972352   # админ — может всё
-P = "\u3164"
-_BTN_LABEL_MAX = 40                       # кнопки короткие
+
+# \u2800 (BRAILLE PATTERN BLANK) — шире \u3164 (HANGUL FILLER),
+# поэтому кнопка тянется на бОльшую ширину и соразмерна эмбеду.
+P = "\u2800"
+_BTN_LABEL_MAX = 78   # почти лимит Discord (80), но не в упор
 
 
 EMOJI_OTZIV = PartialEmoji(name="Otziv", id=1541808692314243172)
@@ -46,17 +49,17 @@ EMOJI_OFF = PartialEmoji(name="OffTicket", id=1539657125716824185)
 # ============================================================
 def _btn_label(text: str, total: int = _BTN_LABEL_MAX) -> str:
     """
-    Центрирует текст через hair spaces, гарантированно ≤ total.
-    Справа — на 4 пробела меньше (по просьбе), чтобы кнопка
-    визуально не уезжала влево.
+    Растягивает текст до нужной ширины кнопки.
+    Паддинг СИММЕТРИЧНЫЙ — текст ровно по центру.
     """
     text = text.strip()
     if len(text) >= total:
         return text[:total]
+
     padding = total - len(text)
     left = padding // 2
-    right = padding - left
-    right = max(right - 4, 0)   # 👈 убираем 4 с конца
+    right = padding - left   # если padding нечётный — right на 1 больше
+
     return f"{P * left}{text}{P * right}"
 
 
@@ -332,7 +335,6 @@ class RatingFinishView(View):
     async def finish(self, button: Button, inter: disnake.MessageInteraction):
         channel = inter.channel
 
-        # Права: админ или назначенный менеджер
         manager_id = get_ticket_manager(channel.id)
         is_admin = inter.author.id == ADMIN_OVERRIDE_ID
 
