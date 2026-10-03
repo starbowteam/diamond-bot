@@ -23,12 +23,8 @@ MSK = timezone(timedelta(hours=3))
 
 CLUB_ROLE_ID    = 1284697274655576186
 
-# 👇 Минимальный баланс DC для входа В КЛАН.
 MIN_BALANCE     = 45
 
-# ============================================================
-# 🔒 ЖЁСТКОЕ ИСКЛЮЧЕНИЕ
-# ============================================================
 HARD_EXCLUDED_USERS = {
     1124040555240898631,
     796293832751972352,
@@ -41,9 +37,6 @@ PAYOUT_DAY      = 28
 PAYOUT_HOUR_MSK = 20
 PAYOUT_MINUTE   = 0
 
-# ============================================================
-# 👇 ПРАВИЛО КОПИЛКИ КЛАНА
-# ============================================================
 CLAN_POOL_THRESHOLD = 100
 CLAN_POOL_SMALL     = 1.00
 CLAN_POOL_BIG       = 0.40
@@ -56,20 +49,14 @@ def clan_cut(amount: int) -> int:
         return int(amount * CLAN_POOL_SMALL)
     return int(amount * CLAN_POOL_BIG)
 
-# 👇 Бонусы топ-3 по вкладу
 TOP_BONUSES = [3.00, 2.00, 1.50]
 
-# ============================================================
-# 👇 ПРАВИЛО ВЫПЛАТЫ ПО ИТОГАМ СЕЗОНА
-# ============================================================
 MIN_CONTRIB_FOR_PAYOUT = 50
 
 REPORT_DM_USER_ID = 796293832751972352
 
-# ============================================================
-# 👇 ЛИМИТ ВКЛАДА В БАНК — 1000 DC/СУТКИ
-# ============================================================
-DAILY_CLAN_LIMIT = 1000
+# 👇 ЛИМИТ ВКЛАДА В БАНК — 2500 DC/СУТКИ
+DAILY_CLAN_LIMIT = 2500
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
               "1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&"
@@ -79,7 +66,7 @@ EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
 
 # ============================================================
-# 🏷 НАЗВАНИЯ СЕЗОНОВ
+# НАЗВАНИЯ СЕЗОНОВ
 # ============================================================
 SEASON_NAMES = {
     1: "Начало",
@@ -494,7 +481,7 @@ async def try_auto_assign_clan(user_id: int) -> Optional[dict]:
 
 
 # ============================================================
-# 👇 ЖЁСТКАЯ ПЕРЕСБОРКА КЛАНОВ
+# ЖЁСТКАЯ ПЕРЕСБОРКА КЛАНОВ
 # ============================================================
 async def strip_all_clan_roles(guild: disnake.Guild) -> dict:
     clans = get_all_clans()
@@ -532,10 +519,6 @@ async def strip_all_clan_roles(guild: disnake.Guild) -> dict:
 
 
 async def rebuild_clans_random(guild: disnake.Guild) -> dict:
-    """
-    ПОЛНАЯ ПЕРЕСБОРКА КЛАНОВ.
-    Здесь вклады ЕДУТ ЗА ЧЕЛОВЕКОМ — resync_contribution_clans.
-    """
     stripped = await strip_all_clan_roles(guild)
 
     eligible = []
@@ -702,7 +685,7 @@ def distribute_all_club_members(guild: disnake.Guild) -> Dict[str, int]:
 
 
 # ============================================================
-# 👇 УСЛОВИЯ НАХОЖДЕНИЯ В КЛАНЕ
+# УСЛОВИЯ НАХОЖДЕНИЯ В КЛАНЕ
 # ============================================================
 INACTIVE_DAYS_LIMIT = 30
 
@@ -736,14 +719,6 @@ def clan_block_reason(guild: disnake.Guild, user_id: int) -> Optional[str]:
 
 
 async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
-    """
-    👇 ПРАВИЛО: «ушёл из клана = ушёл со своими DC».
-
-    Убирает из клана всех, кто провалил хотя бы одно условие
-    (баланс, роль покупателя, активность). При исключении вклад
-    за текущий сезон УДАЛЯЕТСЯ из копилки — иначе человек висит
-    в банке клана, из которого уже ушёл.
-    """
     now = int(time.time())
     checked = 0
     removed = []
@@ -850,7 +825,7 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
 
 
 # ============================================================
-# 👇 ПЕРЕСЧЁТ И ОБНОВЛЕНИЕ КЛАНОВ — ОДНА КНОПКА
+# ПЕРЕСЧЁТ И ОБНОВЛЕНИЕ КЛАНОВ
 # ============================================================
 async def recalculate_clan_league(guild: disnake.Guild) -> dict:
     counts = load_json(FILES["review_counts"], {}) or {}
@@ -1165,7 +1140,7 @@ def close_cycle_and_pay(bot) -> bool:
 
 
 # ============================================================
-# ВКЛАДЫ — С ЛИМИТОМ 1000 DC/ДЕНЬ
+# ВКЛАДЫ
 # ============================================================
 async def add_clan_contribution(user_id: int, amount: int, reason: str):
     if is_hard_excluded(user_id):
@@ -1227,7 +1202,7 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
                 f"> • Выполняй квесты в <#1552700973753827509> — **100%** в копилку\n"
                 f"> • Топ-3 по вкладу получат бонус ×3.00 / ×2.00 / ×1.50\n"
                 f"> • В конце цикла банк делится между всеми участниками\n"
-                f"> • Дневной лимит вклада — **1000 DC**\n\n"
+                f"> • Дневной лимит вклада — **2500 DC**\n\n"
                 f"**Где смотреть:**\n"
                 f"> 📊 Копилка — <#1552700960474800128>\n"
                 f"> 📊 Сезон — <#1552700989465956403>\n"
@@ -1248,14 +1223,6 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
 # ТОПЫ / СТАТИСТИКА
 # ============================================================
 def resync_contribution_clans(cycle_id: Optional[int] = None) -> int:
-    """
-    👇 Приводит вклады в соответствие с ТЕКУЩИМ кланом участника.
-    Используется ТОЛЬКО при пересборке (вклады едут за человеком).
-
-    Переписано: явный проход по clan_members, без коррелированного
-    UPDATE с EXISTS — он на «грязной» базе мог не сработать,
-    а cur.rowcount врал.
-    """
     if cycle_id is None:
         cycle = get_current_cycle()
         cycle_id = cycle["id"] if cycle else 0
