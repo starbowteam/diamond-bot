@@ -80,7 +80,6 @@ def _strip_emoji(s: str) -> str:
     return "".join(out).strip()
 
 
-# 👇 Переопределения label категорий
 _LABEL_OVERRIDES = {
     "casino": "Казино",
 }
@@ -138,6 +137,20 @@ def _default_item_description(cat_key: str, name: str) -> str:
     return m.get(cat_key, f"«{name}» — товар из категории магазина Diamond.")
 
 
+# ============================================================
+# ПОЛУЧЕНИЕ СПИСКА
+# ============================================================
+def _resolve_member(inter) -> Optional[disnake.Member]:
+    """Возвращает Member если возможно."""
+    a = inter.author
+    if isinstance(a, disnake.Member):
+        return a
+    try:
+        return inter.guild.get_member(a.id)
+    except Exception:
+        return None
+
+
 def _get_categories_list() -> List[Dict]:
     catalog = load_shop_catalog()
     result = []
@@ -160,7 +173,11 @@ def _get_categories_list() -> List[Dict]:
     return result
 
 
-def _get_items_for_category(cat_key: str) -> List[Dict]:
+def _get_items_for_category(cat_key: str, member: Optional[disnake.Member] = None) -> List[Dict]:
+    """
+    Возвращает все товары категории.
+    Для ролей с role_id — ставит флаг owned=True если роль уже у юзера.
+    """
     catalog = load_shop_catalog()
     cat = catalog.get(cat_key, {})
     items = cat.get("items", {})
@@ -170,12 +187,23 @@ def _get_items_for_category(cat_key: str) -> List[Dict]:
         desc = it.get("description", "") or ""
         if not desc:
             desc = _default_item_description(cat_key, name)
+
+        role_id = it.get("role_id")
+        owned = False
+        if role_id and member is not None:
+            try:
+                owned = member.get_role(int(role_id)) is not None
+            except Exception:
+                owned = False
+
         result.append({
             "key": key,
             "name": name,
             "price": int(it.get("price", 0)),
             "description": desc,
             "fa": shop_render.CATEGORY_FA.get(cat_key, shop_render.I_CUBE),
+            "role_id": role_id,
+            "owned": owned,
         })
     result.sort(key=lambda x: x["price"])
     return result
@@ -271,6 +299,8 @@ async def goto_categories(inter: disnake.MessageInteraction):
 
 async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: int = 0):
     user_id = inter.author.id
+    member = _resolve_member(inter)
+
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
     catalog = load_shop_catalog()
@@ -280,7 +310,11 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: i
             "Категория не найдена.", ephemeral=True
         )
     cat_label = _strip_emoji(_LABEL_OVERRIDES.get(cat_key, cat.get("label", cat_key)))
-    all_items = _get_items_for_category(cat_key)
+    all_items = _get_items_for_category(cat_key, member)
+
+    # Считаем купленные
+    owned_count = sum(1 for it in all_items if it.get("owned"))
+    available_count = len(all_items) - owned_count
 
     total_pages = max(1, (len(all_items) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
@@ -297,6 +331,9 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: i
         items=page_items,
         page=page,
         total_pages=total_pages,
+        owned_count=owned_count,
+        available_count=available_count,
+        is_roles_category=(cat_key == "roles"),
     )
     view = ShopProductsView(cat_key, all_items, balance, page, total_pages)
     await _edit_screen(inter, buf=buf, view=view)
@@ -304,6 +341,8 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: i
 
 async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key: str):
     user_id = inter.author.id
+    member = _resolve_member(inter)
+
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
     catalog = load_shop_catalog()
@@ -311,15 +350,27 @@ async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key:
     item = cat.get("items", {}).get(item_key)
     if not item:
         return await inter.response.send_message("Товар не найден.", ephemeral=True)
+
     cat_label = _strip_emoji(_LABEL_OVERRIDES.get(cat_key, cat.get("label", cat_key)))
     name = _strip_emoji(item.get("name", item_key))
     desc = item.get("description", "") or _default_item_description(cat_key, name)
+
+    role_id = item.get("role_id")
+    owned = False
+    if role_id and member:
+        try:
+            owned = member.get_role(int(role_id)) is not None
+        except Exception:
+            owned = False
+
     item_view = {
         "name": name,
         "price": int(item.get("price", 0)),
         "description": desc,
         "fa": shop_render.CATEGORY_FA.get(cat_key, shop_render.I_CUBE),
+        "owned": owned,
     }
+
     buf = shop_render.render_detail(
         user_id=user_id,
         balance=balance,
@@ -328,7 +379,12 @@ async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key:
         category_label=cat_label,
         item=item_view,
     )
-    view = ShopDetailView(cat_key, item_key, item_view["price"])
+
+    if owned:
+        view = ShopDetailOwnedView(cat_key)
+    else:
+        view = ShopDetailView(cat_key, item_key, item_view["price"])
+
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -357,9 +413,9 @@ async def goto_daily(inter: disnake.MessageInteraction):
 
     deal = refresh_daily_deal()
     slot_seconds = DAILY_DEAL_REFRESH_HOURS * 3600
-    now_ts = int(time.time())
-    next_ts = ((now_ts // slot_seconds) + 1) * slot_seconds
-    hours_left = max((next_ts - now_ts) // 3600, 0)
+    now_ts_val = int(time.time())
+    next_ts = ((now_ts_val // slot_seconds) + 1) * slot_seconds
+    hours_left = max((next_ts - now_ts_val) // 3600, 0)
 
     buf = shop_render.render_daily_deal(
         user_id=user_id,
@@ -399,7 +455,7 @@ async def goto_history(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# ВЫБОР ОУТКОМА ПОСЛЕ ПОКУПКИ
+# ВЫБОР ОУТКОМА
 # ============================================================
 def _build_outcome(cat_key: str, item: dict, name: str, price: int,
                    guild_id: int) -> dict:
@@ -517,11 +573,12 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
 # ============================================================
 async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: str):
     user_id = inter.author.id
+    member = _resolve_member(inter)
 
     lock_key = (user_id, f"{cat_key}:{item_key}")
-    now_ts = time.time()
+    now_val = time.time()
     prev = _BUY_LOCKS.get(lock_key, 0)
-    if now_ts - prev < 8:
+    if now_val - prev < 8:
         try:
             await inter.response.send_message(
                 "⏳ Покупка уже обрабатывается, подожди пару секунд...",
@@ -530,8 +587,8 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
         except Exception:
             pass
         return
-    _BUY_LOCKS[lock_key] = now_ts
-    _prune_locks(now_ts)
+    _BUY_LOCKS[lock_key] = now_val
+    _prune_locks(now_val)
 
     catalog = load_shop_catalog()
     cat = catalog.get(cat_key, {})
@@ -541,6 +598,19 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
 
     price = int(item.get("price", 0))
     name = _strip_emoji(item.get("name", item_key))
+
+    # 👇 Проверка: если роль уже куплена — не даём купить
+    role_id = item.get("role_id")
+    if role_id and member is not None:
+        try:
+            if member.get_role(int(role_id)) is not None:
+                return await inter.response.send_message(
+                    f"⛔ Роль «{name}» уже у тебя на аккаунте.\n"
+                    f"> Повторная покупка невозможна.",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
 
     await inter.response.defer(ephemeral=True)
 
@@ -556,22 +626,20 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
             content="❌ Не удалось списать DC. Попробуй ещё раз."
         )
 
-    # Авто-выдача роли
     auto_role_given = False
     if cat_key == "roles" and item.get("role_id"):
         role = inter.guild.get_role(int(item["role_id"]))
         if role:
             try:
-                member = inter.guild.get_member(user_id)
-                if member and role not in member.roles:
-                    await member.add_roles(role, reason=f"Покупка в DC-Shop: {name}")
+                m = inter.guild.get_member(user_id)
+                if m and role not in m.roles:
+                    await m.add_roles(role, reason=f"Покупка в DC-Shop: {name}")
                     auto_role_given = True
-                elif member:
+                elif m:
                     auto_role_given = True
             except Exception as e:
                 logger.warning(f"shop auto-role give {user_id}: {e}")
 
-    # Активация буста
     if item.get("boost_type"):
         try:
             from core.utils import activate_item
@@ -586,11 +654,9 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
         except Exception as e:
             logger.warning(f"shop boost activate {user_id}: {e}")
 
-    # В инвентарь
     if not (cat_key == "roles" and item.get("role_id")) and not item.get("boost_type"):
         await add_purchase(user_id, cat_key, name)
 
-    # Хуки квестов / достижений
     try:
         from clan.quests import on_purchase_quest_hook
         await on_purchase_quest_hook(user_id, price)
@@ -605,7 +671,6 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     except Exception as e:
         logger.warning(f"shop buy ach: {e}")
 
-    # 👇 красивое логирование
     asyncio.create_task(log_discord(
         title="🛒 Покупка в DC-Shop",
         description=(
