@@ -890,6 +890,7 @@ def render_products(user_id, balance, total_spent,
 # ============================================================
 # ЭКРАН 3: КАРТОЧКА ТОВАРА
 # ============================================================
+
 def render_detail(user_id, balance, total_spent,
                   category_key, category_label, item):
     img, d = _base_canvas(user_id, "витрина · dc")
@@ -905,9 +906,11 @@ def render_detail(user_id, balance, total_spent,
     right_x2 = CANVAS_W - M - PAD_X
 
     price = item["price"]
+    owned = bool(item.get("owned"))
     can_afford = balance >= price
     missing = max(price - balance, 0)
 
+    # ─── Левая панель ───
     blocks = [
         {
             "label": "Навигация",
@@ -916,7 +919,14 @@ def render_detail(user_id, balance, total_spent,
             "color": BLUE,
         },
     ]
-    if not can_afford:
+    if owned:
+        blocks.append({
+            "label": "Статус",
+            "value": "Уже у тебя",
+            "icon": I_CHECK,
+            "color": RED,
+        })
+    elif not can_afford:
         blocks.append({
             "label": "Не хватает",
             "value": f"{_fmt(missing)} DC",
@@ -933,32 +943,51 @@ def render_detail(user_id, balance, total_spent,
     rx1 = right_x1 + 30
     rx2 = right_x2 - 30
 
+    # ─── Заголовок ───
+    if owned:
+        head_sub = "уже у тебя на аккаунте"
+    elif can_afford:
+        head_sub = "готов к покупке"
+    else:
+        head_sub = "недостаточно dc"
+
     _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Информация о товаре",
-                     "готов к покупке" if can_afford else "недостаточно dc")
+                     head_sub)
 
+    # ─── Верхний блок: иконка + имя + описание ───
     top_y = body_y + 110
     icon_size = 220
     ix = rx1
     iy = top_y
 
-    _gradient_box(img, (ix, iy, ix + icon_size, iy + icon_size),
-                  SILVER, SILVER_DIM, alpha=38, radius=22)
-    d.rounded_rectangle((ix, iy, ix + icon_size, iy + icon_size),
-                        radius=22, outline=SILVER + (170,), width=3)
-    _draw_icon(d, ix + icon_size // 2, iy + icon_size // 2 + 1,
-               item.get("fa", I_CUBE), 92, SILVER_HI)
+    if owned:
+        _gradient_box(img, (ix, iy, ix + icon_size, iy + icon_size),
+                      RED, RED, alpha=25, radius=22)
+        d.rounded_rectangle((ix, iy, ix + icon_size, iy + icon_size),
+                            radius=22, outline=RED + (200,), width=3)
+        _draw_icon(d, ix + icon_size // 2, iy + icon_size // 2 + 1,
+                   item.get("fa", I_CUBE), 92, RED)
+    else:
+        _gradient_box(img, (ix, iy, ix + icon_size, iy + icon_size),
+                      SILVER, SILVER_DIM, alpha=38, radius=22)
+        d.rounded_rectangle((ix, iy, ix + icon_size, iy + icon_size),
+                            radius=22, outline=SILVER + (170,), width=3)
+        _draw_icon(d, ix + icon_size // 2, iy + icon_size // 2 + 1,
+                   item.get("fa", I_CUBE), 92, SILVER_HI)
 
     tx = ix + icon_size + 32
     tx_max = rx2 - tx
 
-    d.text((tx, iy + 6), category_label.upper(), font=_font(15), fill=SILVER)
+    d.text((tx, iy + 6), category_label.upper(),
+           font=_font(15), fill=RED if owned else SILVER)
 
     name = item["name"]
     name_font = _font(44)
     name_lines = _wrap_ellipsis(d, name, name_font, tx_max, max_lines=2)
     for i, line in enumerate(name_lines):
-        d.text((tx, iy + 32 + i * 52), line, font=name_font, fill=TEXT)
+        d.text((tx, iy + 32 + i * 52), line, font=name_font,
+               fill=RED if owned else TEXT)
 
     desc = item.get("description") or "Описание не указано."
     desc_font = _font(17)
@@ -966,6 +995,7 @@ def render_detail(user_id, balance, total_spent,
     for i, line in enumerate(lines):
         d.text((tx, iy + 145 + i * 26), line, font=desc_font, fill=TEXT_SOFT)
 
+    # ─── Спек-блок: ЦЕНА / НАЛИЧИЕ / СРОК ───
     spec_y = iy + icon_size + 28
     spec_h = 110
     spec_x1 = rx1
@@ -977,11 +1007,19 @@ def render_detail(user_id, balance, total_spent,
     cols_count = 3
     cell_w = (spec_x2 - spec_x1) // cols_count
 
+    if owned:
+        availability_text = "Уже у тебя"
+        availability_color = RED
+    elif can_afford:
+        availability_text = "Хватает DC"
+        availability_color = GREEN
+    else:
+        availability_text = f"Не хватает {_fmt(missing)}"
+        availability_color = RED
+
     specs = [
-        ("ЦЕНА", f"{_fmt(price)} DC", SILVER_HI),
-        ("НАЛИЧИЕ",
-         "Хватает DC" if can_afford else f"Не хватает {_fmt(missing)}",
-         GREEN if can_afford else RED),
+        ("ЦЕНА", f"{_fmt(price)} DC", (74, 74, 82) if owned else SILVER_HI),
+        ("НАЛИЧИЕ", availability_text, availability_color),
         ("СРОК", "до 2 дней", BLUE),
     ]
     for i, (k, v, color) in enumerate(specs):
@@ -993,15 +1031,29 @@ def render_detail(user_id, balance, total_spent,
                     spec_x1 + (i + 1) * cell_w, spec_y + spec_h - 24),
                    fill=INNER_BRD + (255,), width=2)
 
+    # ─── Финальный блок: красный если owned, зелёный если купить, красный если не хватает ───
     foot_y = spec_y + spec_h + 24
     foot_h = 100
-    if can_afford:
+
+    if owned:
+        d.rounded_rectangle((rx1, foot_y, rx2, foot_y + foot_h),
+                            radius=15, fill=RED_BG + (200,),
+                            outline=RED + (170,), width=2)
+        _draw_icon(d, rx1 + 42, foot_y + foot_h // 2, I_CHECK, 26, RED)
+        d.text((rx1 + 76, foot_y + 22),
+               "Роль уже у тебя на аккаунте",
+               font=_font(20), fill=RED)
+        d.text((rx1 + 76, foot_y + 54),
+               "Повторная покупка невозможна — просто закрой это окно",
+               font=_font(14), fill=RED)
+    elif can_afford:
         d.rounded_rectangle((rx1, foot_y, rx2, foot_y + foot_h),
                             radius=15, fill=GREEN_BG + (200,),
                             outline=GREEN + (170,), width=2)
         _draw_icon(d, rx1 + 42, foot_y + foot_h // 2, I_CHECK, 26, GREEN)
         d.text((rx1 + 76, foot_y + 22),
-               "Товар доступен для покупки", font=_font(20), fill=GREEN)
+               "Товар доступен для покупки",
+               font=_font(20), fill=GREEN)
         d.text((rx1 + 76, foot_y + 54),
                "Нажми «Купить» в меню ниже — товар появится в инвентаре, оформишь в тикете",
                font=_font(14), fill=GREEN)
@@ -1017,7 +1069,12 @@ def render_detail(user_id, balance, total_spent,
                "Заработай DC активностью или выбери другой товар",
                font=_font(14), fill=RED)
 
-    _draw_footer(d, "Нажми «Купить» в меню ниже", "стр. 3 / 6")
+    # ─── Футер ───
+    if owned:
+        footer_text = "Роль уже у тебя — повторная покупка невозможна"
+    else:
+        footer_text = "Нажми «Купить» в меню ниже"
+    _draw_footer(d, footer_text, "стр. 3 / 6")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
