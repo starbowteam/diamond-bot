@@ -23,10 +23,10 @@ EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
 
 # ============================================================
-# ОПРЕДЕЛЕНИЕ КВЕСТОВ — 15 разных, без повторов
+# ОПРЕДЕЛЕНИЕ КВЕСТОВ — 12 уникальных, по 4 на категорию
 # ============================================================
 QUESTS: Dict[str, dict] = {
-    # ---------- DAILY (5 разных) ----------
+    # ---------- DAILY (4) ----------
     "msg_50": {
         "title": "Болтун",
         "desc": "Напиши 50 сообщений в чате",
@@ -51,14 +51,8 @@ QUESTS: Dict[str, dict] = {
         "reward": 20, "goal": 5, "type": "daily",
         "unit": "действий", "icon": "fa-computer-mouse",
     },
-    "shop_buy": {
-        "title": "Покупатель",
-        "desc": "Купи любой товар в DC-магазине",
-        "reward": 40, "goal": 1, "type": "daily",
-        "unit": "покупок", "icon": "fa-cart-shopping",
-    },
 
-    # ---------- WEEKLY (5 разных) ----------
+    # ---------- WEEKLY (4) ----------
     "msg_1000": {
         "title": "Мега-болтун",
         "desc": "1000 сообщений за неделю",
@@ -77,12 +71,6 @@ QUESTS: Dict[str, dict] = {
         "reward": 150, "goal": 30, "type": "weekly",
         "unit": "партий", "icon": "fa-dice-five",
     },
-    "shop_500": {
-        "title": "Инвестор",
-        "desc": "Потрать 500 DC в DC-магазине за неделю",
-        "reward": 200, "goal": 500, "type": "weekly",
-        "unit": "DC", "icon": "fa-sack-dollar",
-    },
     "win_3000": {
         "title": "Удачливый",
         "desc": "Выиграй 3000 DC в казино за неделю",
@@ -90,7 +78,7 @@ QUESTS: Dict[str, dict] = {
         "unit": "DC", "icon": "fa-trophy",
     },
 
-    # ---------- ONCE (5 разных) ----------
+    # ---------- ONCE (4) ----------
     "first_review": {
         "title": "Первый отзыв",
         "desc": "Оставь первый отзыв в этом сезоне",
@@ -114,12 +102,6 @@ QUESTS: Dict[str, dict] = {
         "desc": "Стань топ-1 по вкладу в клане хотя бы раз",
         "reward": 400, "goal": 1, "type": "once",
         "unit": "раз", "icon": "fa-crown",
-    },
-    "rich_500k": {
-        "title": "Полумиллионер",
-        "desc": "Накопи 500 000 DC на балансе",
-        "reward": 800, "goal": 500000, "type": "once",
-        "unit": "DC", "icon": "fa-money-bill-wave",
     },
 }
 
@@ -300,13 +282,9 @@ def get_user_quests(user_id: int) -> List[dict]:
 
 
 # ============================================================
-# ФОРМИРОВАНИЕ EMBED'ОВ С ПИЛЛОW
+# ФОРМИРОВАНИЕ EMBED'ОВ С PILLOW
 # ============================================================
 def build_quests_embeds(user_id: int):
-    """
-    Возвращает (embeds, file) — готовый набор для send_message:
-        await inter.response.send_message(embeds=embeds, file=file, ephemeral=True)
-    """
     from clan.core import get_user_clan, clan_cut
 
     try:
@@ -318,11 +296,9 @@ def build_quests_embeds(user_id: int):
     clan = get_user_clan(user_id)
     quests = get_user_quests(user_id)
 
-    # считаем reward_cut по правилу копилки
     for q in quests:
         q["reward_cut"] = clan_cut(q["reward"])
 
-    # embed 1 — картинка шапки из clan/embeds/quests.json
     e1 = disnake.Embed(color=clan["color"] if clan else 6776679)
     data = load_json(os.path.join(EMBEDS_DIR, "quests.json"), {})
     for e in data.get("embeds", [])[:1]:
@@ -331,7 +307,6 @@ def build_quests_embeds(user_id: int):
         except Exception:
             pass
 
-    # embed 2 — Pillow
     e2 = disnake.Embed(color=clan["color"] if clan else 6776679)
     file = None
 
@@ -347,7 +322,6 @@ def build_quests_embeds(user_id: int):
 
 
 def format_quests_embed(user_id: int):
-    """Обратная совместимость: возвращает только embeds."""
     embeds, _ = build_quests_embeds(user_id)
     return embeds
 
@@ -444,8 +418,6 @@ async def on_purchase_quest_hook(user_id: int, amount_dc: int):
     from clan.core import get_user_clan
     if not get_user_clan(user_id):
         return
-    update_progress(user_id, "shop_buy", delta=1)
-    update_progress(user_id, "shop_500", delta=amount_dc)
 
 
 async def on_gift_quest_hook(sender_id: int, amount_dc: int):
