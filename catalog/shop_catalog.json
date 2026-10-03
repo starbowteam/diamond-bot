@@ -41,6 +41,8 @@
       "role_legend":          {"name": "Роль «Легенда»",                  "price": 210, "description": "Легендарная роль",            "role_id": 1535638212557541438},
       "role_newbie":          {"name": "Роль «Новичок месяца»",           "price": 225, "description": "Роль для новичков",           "role_id": 1536948841394212934},
 
+      "role_dc_magnate":      {"name": "Роль «DC-Магнат»",                "price": 500, "description": "Роль для магнатов валюты",    "role_id": 1555987193502236792},
+
       "role_crystalized":     {"name": "Роль «Кристализированный»",        "price": 120, "description": "Особая роль от Diamond",       "role_id": 1553243214750687322},
       "role_mega_buyer":      {"name": "Роль «Мега-Скупщик»",             "price": 120, "description": "Особая роль от Diamond",       "role_id": 1553243179296366652},
       "role_reseller":        {"name": "Роль «Перекуп»",                  "price": 120, "description": "Особая роль от Diamond",       "role_id": 1553243215870558269},
