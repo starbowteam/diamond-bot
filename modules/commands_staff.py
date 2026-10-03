@@ -37,6 +37,11 @@ from modules.dc import (
     sync_dc_to_json
 )
 from modules.commands_profile import load_embed_from_file
+from modules.work_render import (
+    render_work_salary,
+    render_work_top,
+    render_work_tickets,
+)
 
 
 STAFF_PANEL_CHANNEL_ID  = 1551276116679860314
@@ -174,7 +179,6 @@ class TakeDcModal(Modal):
                 user_id = int(m.group(1))
         if not user_id:
             return await inter.response.send_message("❌ Не удалось определить пользователя.", ephemeral=True)
-        # 👇 mark_activity=False: списание делает персонал, это не действие юзера
         success = await remove_dc(user_id, amount, reason, notify=True, mark_activity=False)
         if success:
             await inter.response.send_message(f"✅ Снято {amount} DC у <@{user_id}>.", ephemeral=True)
@@ -450,12 +454,6 @@ class AdminView(disnake.ui.View):
 
 
 async def recalc_all_roles(inter: disnake.MessageInteraction):
-    """
-    Пересчёт отзывов и ролей:
-    - пробегает по всем участникам сервера
-    - снимает устаревшие роли (emerald, legendary)
-    - применяет актуальные роли по количеству отзывов
-    """
     guild = inter.guild
     counts = load_json(FILES["review_counts"], {})
 
@@ -740,8 +738,62 @@ async def send_ticket_panel():
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 7: КОДЕКС МАГАЗИНА (Work) ═══
+# ═══ СЕКЦИЯ 7: КОДЕКС МАГАЗИНА (Work) — PILLOW ═══
 # ============================================================
+async def _send_work_screen(inter: disnake.MessageInteraction, buf, fname: str):
+    """Отправка эфемерного PNG — не трогает исходное сообщение."""
+    try:
+        file = disnake.File(buf, filename=fname)
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{fname}")
+        await inter.followup.send(embed=embed, file=file, ephemeral=True)
+    except Exception as e:
+        logger.exception(f"_send_work_screen: {e}")
+        try:
+            await inter.followup.send(
+                content=f"❌ Ошибка рендера: `{str(e)[:200]}`",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+
+def _collect_staff_list(inter: disnake.MessageInteraction) -> list:
+    """Собирает список менеджеров Sales с их статистикой."""
+    guild = inter.guild
+    sales_role = guild.get_role(1154757071330365490)
+    if not sales_role:
+        return []
+
+    rows = cur.execute(
+        "SELECT user_id, closed_tickets, total_rating, ratings_count "
+        "FROM manager_stats"
+    ).fetchall()
+    stats = {row["user_id"]: row for row in rows}
+
+    members = [m for m in guild.members if sales_role in m.roles and not m.bot]
+
+    data = []
+    for m in members:
+        s = stats.get(m.id)
+        closed = s["closed_tickets"] if s else 0
+        tr = s["total_rating"] if s else 0
+        rc = s["ratings_count"] if s else 0
+        data.append({
+            "user_id": m.id,
+            "user_name": m.display_name,
+            "closed_tickets": closed,
+            "total_rating": tr,
+            "ratings_count": rc,
+        })
+
+    data.sort(key=lambda x: (
+        -x["closed_tickets"],
+        -(x["total_rating"] / x["ratings_count"] if x["ratings_count"] else 0),
+    ))
+    return data
+
+
 class WorkSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -756,58 +808,61 @@ class WorkSelect(disnake.ui.StringSelect):
                          options=options, custom_id="work_select")
 
     async def callback(self, inter: disnake.MessageInteraction):
-        await log_discord(
-            title="📂 Выбор в панели Кодекса",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
-            color=0x00aaff
-        )
         value = inter.data.values[0]
+
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        asyncio.create_task(log_discord(
+            title="📂 Выбор в панели Кодекса",
+            description=(
+                f"> **Пользователь:** {inter.author.mention}\n"
+                f"> **Выбрано:** `{value}`"
+            ),
+            color=0x00aaff
+        ))
+
         if value == "salary":
-            await inter.response.send_message(embeds=load_embed_from_file("zp.json"), ephemeral=True)
-        elif value == "top":
-            await self.send_top(inter)
-        elif value == "tickets":
-            await inter.response.send_message(embeds=load_embed_from_file("ticket.json"), ephemeral=True)
-
-    async def send_top(self, inter):
-        guild = inter.guild
-        sales_role = guild.get_role(1154757071330365490)
-        if not sales_role:
-            return await inter.response.send_message("❌ Роль Sales Manager не найдена.", ephemeral=True)
-
-        rows = cur.execute("SELECT user_id, closed_tickets, total_rating, ratings_count FROM manager_stats").fetchall()
-        stats = {row["user_id"]: row for row in rows}
-        members = [m for m in guild.members if sales_role in m.roles and not m.bot]
-
-        data = []
-        for m in members:
-            s = stats.get(m.id)
-            closed = s["closed_tickets"] if s else 0
-            tr = s["total_rating"] if s else 0
-            rc = s["ratings_count"] if s else 0
-            avg = tr / rc if rc else 0
-            data.append((m, closed, avg))
-        data.sort(key=lambda x: (-x[1], -x[2]))
-
-        lines = [f"> {m.mention} - **{closed}** закрытых заказов. [Рейтинг: **{avg:.1f}**]" for m, closed, avg in data]
-        best = data[0] if data else None
-
-        embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1541810014463729724/image.png?ex=6a8ef1f8&is=6a8da078&hm=21f7a8bd88c0787fbefd0568f073761b139879ac3fa156962f5b0abded608351&")
-
-        description = "> Предоставлены актуальные данные работы, после каждого выполненого заказа - таблица обновляется.\n\n"
-        description += "\n".join(lines) + "\n" if lines else "> Пока нет данных.\n"
-
-        embed2 = disnake.Embed(title="Таблиц работников на роли Sales Manager.\n",
-                               description=description, color=6776679)
-        embed2.set_image(url=IMG_STRIPE)
-        if best:
-            embed2.add_field(
-                name="По актуальным данным, работником недели является ",
-                value=f"<@&1154757071330365490> - {best[0].mention}, уверенное повышение!",
-                inline=False
+            try:
+                buf = render_work_salary(inter.author.id)
+            except Exception as e:
+                logger.exception(f"render_work_salary: {e}")
+                return await inter.followup.send(
+                    f"❌ Ошибка рендера: `{str(e)[:200]}`",
+                    ephemeral=True,
+                )
+            await _send_work_screen(
+                inter, buf, f"work_salary_{inter.author.id}.png"
             )
-        await inter.response.send_message(embeds=[embed1, embed2], ephemeral=True)
+
+        elif value == "top":
+            try:
+                staff = _collect_staff_list(inter)
+                buf = render_work_top(inter.author.id, staff)
+            except Exception as e:
+                logger.exception(f"render_work_top: {e}")
+                return await inter.followup.send(
+                    f"❌ Ошибка рендера: `{str(e)[:200]}`",
+                    ephemeral=True,
+                )
+            await _send_work_screen(
+                inter, buf, f"work_top_{inter.author.id}.png"
+            )
+
+        elif value == "tickets":
+            try:
+                buf = render_work_tickets(inter.author.id)
+            except Exception as e:
+                logger.exception(f"render_work_tickets: {e}")
+                return await inter.followup.send(
+                    f"❌ Ошибка рендера: `{str(e)[:200]}`",
+                    ephemeral=True,
+                )
+            await _send_work_screen(
+                inter, buf, f"work_tickets_{inter.author.id}.png"
+            )
 
 
 class WorkView(disnake.ui.View):
@@ -957,7 +1012,6 @@ async def send_staff_panels():
     admin_embed2.set_image(url=IMG_STRIPE)
     await channel.send(embeds=[admin_embed1, admin_embed2], view=AdminView())
 
-    # 👇 Панель клановой лиги
     try:
         from clan.panels import send_clan_admin_panel
         await send_clan_admin_panel(bot)
