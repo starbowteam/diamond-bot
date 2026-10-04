@@ -22,8 +22,10 @@ from modules.dc import (
 
 P = "\u3164"
 
-GIFT_IMG_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1552379792311975956/image.png?ex=6ab565d8&is=6ab41458&hm=299a632c1ee124df327afdf7e401e91463dddba89aa36c30cdcc2fafd86dc5f6&"
-GIFT_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1532434728056131695/pisk.png?ex=6a8f1d8e&is=6a8dcc0e&hm=2ae99e47c47afa88c941afcfd1c827370f8c0f3ab08c69a00820bd4da8ac78f1&"
+_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
+
+IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
+IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
 
 def load_embed_from_file(filename: str):
@@ -57,12 +59,6 @@ def _role_info(count: int):
         else:
             break
     return cur[1], cur[2]
-
-
-_IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-
-IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
-IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
 
 # ============================================================
@@ -359,10 +355,9 @@ async def show_profile_card(
 
 
 # ============================================================
-# ЕЖЕДНЕВНЫЙ ПОДАРОК — PILLOW
+# ЕЖЕДНЕВНЫЙ ПОДАРОК — PILLOW (без embed 1)
 # ============================================================
 def _daily_gift_stats(user_id: int) -> dict:
-    """Считает по истории: сколько раз забирал + сколько DC всего получил."""
     count = 0
     total = 0
     try:
@@ -383,32 +378,24 @@ def _daily_gift_stats(user_id: int) -> dict:
 async def show_daily_gift(inter: disnake.MessageInteraction):
     user_id = inter.author.id
 
-    # Заранее defer'им — рендер + логирование может занять секунды
     try:
         await inter.response.defer(ephemeral=True)
     except Exception:
         pass
 
-    # Забираем/проверяем
     result = await claim_daily_gift(user_id)
 
-    # Считаем статы
     stats = _daily_gift_stats(user_id)
     daily_count = stats["count"]
     daily_total = stats["total"]
 
-    # Текущий баланс
     try:
         from modules.dc import get_user_balance
         balance = await get_user_balance(user_id)
     except Exception:
         balance = get_dc_cache(user_id).get("balance", 0)
 
-    # EMBED 1 — маленькая картинка-шапка
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=GIFT_IMG_TOP)
-
-    # EMBED 2 — Pillow
+    # 👇 ТОЛЬКО PILLOW — без embed 1
     try:
         from modules.shop.render_gift import render_daily_gift
         buf = await asyncio.to_thread(
@@ -419,18 +406,17 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
         fname = f"gift_{user_id}_{int(datetime.now(timezone.utc).timestamp())}.png"
         file = disnake.File(buf, filename=fname)
 
-        embed2 = disnake.Embed(color=6776679)
-        embed2.set_image(url=f"attachment://{fname}")
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{fname}")
 
         try:
             await inter.followup.send(
-                embeds=[embed1, embed2],
+                embed=embed,
                 file=file,
                 ephemeral=True,
             )
         except Exception as e:
             logger.exception(f"show_daily_gift send: {e}")
-            # Фолбэк — текстом
             if result.get("ok"):
                 txt = f"🎁 Сегодня тебе выпало **{result['amount']} DC**!"
             else:
@@ -442,7 +428,6 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
         await _send_ephemeral_text(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
         return
 
-    # Лог
     if result.get("ok"):
         asyncio.create_task(log_discord(
             title="🎁 Ежедневный подарок",
