@@ -1,7 +1,4 @@
 #!/bin/bash
-# run.sh — запуск обоих ботов через main.py
-# AI-бот теперь стартует из main.py, отдельного ai_main.py больше нет
-
 cd "$(dirname "$0")" || exit 1
 
 PYTHONUNBUFFERED=1 stdbuf -oL -eL python main.py 2>&1 | grep --line-buffered -v -E \
