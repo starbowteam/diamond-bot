@@ -1,29 +1,30 @@
 # -*- coding: utf-8 -*-
+"""Казино + товар дня. Флеш-акции и панель Action удалены."""
 import os
-import json
 import time
 import random
 import asyncio
-import disnake
-from disnake import SelectOption, PartialEmoji
-from disnake.ui import View, Select, Button, Modal, TextInput
-from disnake import ButtonStyle, Embed
 from datetime import datetime, timezone
+
+import disnake
+from disnake import PartialEmoji
+from disnake.ui import View, Button, Modal, TextInput
+from disnake import ButtonStyle, Embed
 
 from core.utils import (
     BASE_DIR, DATA_DIR, CONFIG, logger, log_discord,
-    clean_embed_for_discohook,
     load_json, save_json,
-    get_dc_cache, save_dc_cache, sync_dc_to_json
 )
+
 from modules.dc import (
     load_shop_catalog,
-    get_user_balance, remove_dc, add_purchase,
-    add_dc, get_user_dc_data, get_user_purchases
+    get_user_balance, remove_dc,
+    add_dc, get_user_purchases,
 )
-# 👇 ИЗ ОБЪЕДИНЁННОГО МОДУЛЯ
+
+# 👇 Из объединённого others — только живое
 from modules.others import (
-    apply_casino_win, has_insurance, try_insurance, get_casino_multiplier,
+    apply_casino_win, try_insurance,
 )
 
 try:
@@ -35,16 +36,11 @@ except Exception:
 ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 
 DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
-FLASH_SALE_FILE = os.path.join(DATA_DIR, "flash_sale.json")
 ROULETTE_STATS_FILE = os.path.join(DATA_DIR, "roulette_stats.json")
 
 DAILY_DEAL_REFRESH_HOURS = 5
-FLASH_SALE_DURATION_HOURS = 1
 DAILY_DEAL_DISCOUNT = 30
-FLASH_SALE_DISCOUNT = 70
 DAILY_DEALS_PER_CYCLE = 5
-
-REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
 CASINO_MIN_BET = 20
 CASINO_MAX_BET = 4000
@@ -66,37 +62,21 @@ IMG_COIN_FLIP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 IMG_COIN_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296698964377781/image.png?ex=6ab17522&is=6ab023a2&hm=ef1cd116093f11594be461116cb2d2c11d7ae0f2f36d5e8ee88e82349d79de70&"
 IMG_COIN_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296699820023989/image.png?ex=6ab17522&is=6ab023a2&hm=ca876fcb9981a13bff89958dfbd4061abec6dfad28a6e6e578c2563bbeb3ac97&"
 
-# ─── Игровые эмодзи (внутри игры) ───
 EMOJI_BJ_HIT    = PartialEmoji(name="adde", id=1551288309240696954)
 EMOJI_BJ_STAND  = PartialEmoji(name="PAM", id=1551288362822795434)
 
 EMOJI_COIN_HEADS  = PartialEmoji(name="image", id=1551296060729725019)
 EMOJI_COIN_TAILS  = PartialEmoji(name="2313", id=1551296094468575366)
 
-# ─── Эмодзи для кнопок retry (единые для всех игр) ───
-EMOJI_REPLAY = PartialEmoji(name="image",  id=1555994370933653544)   # Играть ещё
-EMOJI_REPEAT = PartialEmoji(name="povtor", id=1555993533629071360)   # Повтор ставки
-EMOJI_DOUBLE = PartialEmoji(name="flas",   id=1551289202279325756)   # Двойная ставка
+EMOJI_REPLAY = PartialEmoji(name="image",  id=1555994370933653544)
+EMOJI_REPEAT = PartialEmoji(name="povtor", id=1555993533629071360)
+EMOJI_DOUBLE = PartialEmoji(name="flas",   id=1551289202279325756)
 
 P = "\u3164"
 
 
 # ============================================================
-# ХЕЛПЕР — ЛС об отзыве
-# ============================================================
-async def _send_role_review_dm(member: disnake.Member, role_name: str):
-    try:
-        await member.send(
-            f"**Спасибо за покупку роли «{role_name}»!**\n\n"
-            f"Не забудь оставить отзыв в <#{REVIEW_CHANNEL_ID}> — "
-            f"это очень помогает нам расти 💎"
-        )
-    except Exception as e:
-        logger.warning(f"_send_role_review_dm {member.id}: {e}")
-
-
-# ============================================================
-# ХЕЛПЕР — достижения казино
+# ДОСТИЖЕНИЯ КАЗИНО
 # ============================================================
 async def _check_casino_achievements(user_id: int, bet: int = 0, profit: int = 0):
     try:
@@ -114,7 +94,7 @@ async def _check_casino_achievements(user_id: int, bet: int = 0, profit: int = 0
 
 
 # ============================================================
-# DAILY DEAL / FLASH SALE
+# ТОВАР ДНЯ
 # ============================================================
 def load_daily_deal() -> dict:
     return load_json(DAILY_DEAL_FILE, {})
@@ -174,7 +154,6 @@ def refresh_daily_deal(force: bool = False):
             "slot": current_slot,
             "item": old_item,
             "counter": 0,
-            "flash_slot": True,
             "updated_at": int(time.time())
         })
         return old_item
@@ -188,83 +167,9 @@ def refresh_daily_deal(force: bool = False):
         "slot": current_slot,
         "item": deal,
         "counter": counter,
-        "flash_slot": False,
         "updated_at": int(time.time())
     })
     return deal
-
-
-def load_flash_sale() -> dict:
-    return load_json(FLASH_SALE_FILE, {
-        "active": False, "item": None,
-        "started_at": 0, "message_id": 0, "channel_id": 0
-    })
-
-
-def save_flash_sale(data: dict):
-    save_json(FLASH_SALE_FILE, data)
-
-
-def get_flash_sale_item():
-    data = load_flash_sale()
-    if data.get("active") and data.get("item"):
-        if data["item"].get("discount") != FLASH_SALE_DISCOUNT:
-            return None
-        if time.time() - data.get("started_at", 0) < FLASH_SALE_DURATION_HOURS * 3600:
-            return data["item"]
-    return None
-
-
-async def start_flash_sale(bot):
-    try:
-        deal = generate_random_deal(discount=FLASH_SALE_DISCOUNT)
-        if not deal:
-            return
-        channel = bot.get_channel(CONFIG["ACTIONS_CHANNEL_ID"])
-        if not channel:
-            try:
-                channel = await bot.fetch_channel(CONFIG["ACTIONS_CHANNEL_ID"])
-            except disnake.NotFound:
-                logger.warning("start_flash_sale: канал акций не найден")
-                return
-            except Exception as e:
-                logger.warning(f"start_flash_sale fetch: {e}")
-                return
-        if not channel:
-            return
-
-        ping_text = f"<@&1127428607606796290> - ***Огромная скидка в акционных товарах, успей купить!***"
-        embed = disnake.Embed(
-            title="⚡ МЕГА-СКИДКА ТОЛЬКО СЕЙЧАС!",
-            description=(
-                f"**Товар:** {deal['item_data']['name']}\n"
-                f"**Категория:** {deal['category_label']}\n"
-                f"**Старая цена:** ~~{deal['original_price']} DC~~\n"
-                f"**Новая цена:** **{deal['new_price']} DC**\n"
-                f"**Скидка:** {FLASH_SALE_DISCOUNT}%\n\n"
-                f"⏰ **Действует {FLASH_SALE_DURATION_HOURS} час!**"
-            ),
-            color=0xff0000,
-            timestamp=datetime.now(timezone.utc)
-        )
-        embed.set_image(url=IMG_STRIPE)
-        embed.set_footer(text="Купить можно в акционных товарах")
-
-        msg = await channel.send(content=ping_text, embed=embed)
-        save_flash_sale({
-            "active": True,
-            "item": deal,
-            "started_at": int(time.time()),
-            "message_id": msg.id,
-            "channel_id": channel.id
-        })
-        await log_discord(
-            title="⚡ Flash sale запущен",
-            description=f"> **Товар:** {deal['item_data']['name']}\n> **Скидка:** {FLASH_SALE_DISCOUNT}%",
-            color=0xff0000
-        )
-    except Exception as e:
-        logger.exception(f"start_flash_sale error: {e}")
 
 
 # ============================================================
@@ -278,23 +183,6 @@ def load_roulette_stats() -> dict:
 
 def save_roulette_stats(data: dict):
     save_json(ROULETTE_STATS_FILE, data)
-
-
-# ============================================================
-# ЗАГРУЗКА EMBED'ОВ
-# ============================================================
-def load_action_embed(filename: str):
-    path = os.path.join(ACTIONS_DIR, filename)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        embeds = []
-        for e in data.get("embeds", []):
-            embeds.append(disnake.Embed.from_dict(clean_embed_for_discohook(e)))
-        return embeds
-    except Exception as e:
-        logger.error(f"Не удалось загрузить {filename}: {e}")
-        return [disnake.Embed(title="Ошибка", description="Не удалось загрузить категорию.", color=0xff0000)]
 
 
 # ============================================================
@@ -1292,257 +1180,3 @@ class CoinflipRetryView(View):
             )
         await _coinflip_play(inter, new_bet,
                              reason="Двойная ставка в монетке")
-
-
-# ============================================================
-# СЕЛЕКТ ДЛЯ ACTIONS
-# ============================================================
-class ActionSelect(Select):
-    def __init__(self):
-        options = [
-            SelectOption(
-                label="・Акционный товар",
-                description="Неимоверные скидки на товары!",
-                emoji="<:box:1536972791432220712>",
-                value="deals"
-            ),
-        ]
-        super().__init__(
-            placeholder="Выберите категорию...",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="action_select"
-        )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        value = inter.data.values[0]
-
-        if value == "deals":
-            daily = refresh_daily_deal()
-            flash_item = get_flash_sale_item()
-
-            now_ts = int(time.time())
-            slot_seconds = DAILY_DEAL_REFRESH_HOURS * 3600
-            next_update_ts = ((now_ts // slot_seconds) + 1) * slot_seconds
-            minutes_left = max((next_update_ts - now_ts) // 60, 0)
-
-            embeds = []
-            view = View(timeout=300)
-
-            if daily:
-                embed = disnake.Embed(
-                    title="Акционный товар дня",
-                    description=(
-                        f"**Товар:** {daily['item_data']['name']}\n"
-                        f"**Категория:** {daily['category_label']}\n"
-                        f"**Старая цена:** ~~{daily['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
-                        f"**Новая цена:** **{daily['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
-                        f"**Скидка:** {daily['discount']}%\n\n"
-                        f"Обновится через **{minutes_left} мин**"
-                    ),
-                    color=0xff6600,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                embed.set_image(url=IMG_STRIPE)
-                embeds.append(embed)
-                view.add_item(Button(
-                    label=f"Купить {daily['item_data']['name']} за {daily['new_price']} DC",
-                    style=ButtonStyle.gray,
-                    custom_id=f"flash_buy|{daily['cat_key']}|{daily['item_key']}|{daily['new_price']}"
-                ))
-
-            if flash_item:
-                fs_data = load_flash_sale()
-                elapsed = now_ts - fs_data.get("started_at", now_ts)
-                fs_left = max((FLASH_SALE_DURATION_HOURS * 3600 - elapsed) // 60, 0)
-
-                flash_embed = disnake.Embed(
-                    title="МЕГА-СКИДКА! (только сейчас)",
-                    description=(
-                        f"**Товар:** {flash_item['item_data']['name']}\n"
-                        f"**Категория:** {flash_item['category_label']}\n"
-                        f"**Старая цена:** ~~{flash_item['original_price']} <:moneyPhotoroom:1531701289518628964>~~\n"
-                        f"**Новая цена:** **{flash_item['new_price']} <:moneyPhotoroom:1531701289518628964>**\n"
-                        f"**Скидка:** {flash_item['discount']}%\n\n"
-                        f"Истекает через **{fs_left} мин**"
-                    ),
-                    color=0xff0000,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                flash_embed.set_image(url=IMG_STRIPE)
-                embeds.append(flash_embed)
-                view.add_item(Button(
-                    label=f"Купить {flash_item['item_data']['name']} за {flash_item['new_price']} DC",
-                    style=ButtonStyle.danger,
-                    custom_id=f"flash_buy|{flash_item['cat_key']}|{flash_item['item_key']}|{flash_item['new_price']}"
-                ))
-
-            if not embeds:
-                return await inter.response.send_message(
-                    "❌ Нет доступных товаров для акции.", ephemeral=True
-                )
-
-            await inter.response.send_message(embeds=embeds, view=view, ephemeral=True)
-            await log_discord(
-                title="📂 Просмотр акции",
-                description=f"> **Пользователь:** {inter.author.mention}",
-                color=0x00aaff
-            )
-
-
-class ActionView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(ActionSelect())
-
-
-# ============================================================
-# ОБРАБОТКА ПОКУПКИ АКЦИИ
-# ============================================================
-async def handle_flash_interaction(inter: disnake.MessageInteraction):
-    custom_id = inter.data.get("custom_id")
-    if not custom_id:
-        return
-
-    if custom_id in (
-        "roulette_retry", "roulette_repeat", "roulette_double",
-        "bj_hit", "bj_stand", "bj_double",
-        "bj_retry", "bj_repeat", "bj_double_next",
-        "coin_heads", "coin_tails",
-        "coin_retry", "coin_repeat", "coin_double",
-    ):
-        return
-
-    if not custom_id.startswith("flash_buy|"):
-        return
-
-    parts = custom_id.split("|")
-    if len(parts) != 4:
-        return
-    cat_key = parts[1]
-    item_key = parts[2]
-    try:
-        price = int(parts[3])
-    except ValueError:
-        return
-
-    if cat_key in ("boosts", "casino", "gifts"):
-        return await inter.response.send_message(
-            "❌ Данный товар нельзя купить по акции.", ephemeral=True
-        )
-
-    catalog = load_shop_catalog()
-    cat_data = catalog.get(cat_key, {})
-    item_data = cat_data.get("items", {}).get(item_key)
-    if not item_data:
-        return await inter.response.send_message("❌ Товар не найден.", ephemeral=True)
-
-    user_id = inter.author.id
-
-    existing = await get_user_purchases(user_id, only_unused=False)
-    for p in existing:
-        if p.get("from_action") and p.get("value") == item_data["name"]:
-            return await inter.response.send_message(
-                "❌ **Этот акционный товар уже куплен.**\n"
-                "> Акцию можно использовать только **один раз**.",
-                ephemeral=True
-            )
-
-    balance = await get_user_balance(user_id)
-    if balance < price:
-        return await inter.response.send_message(
-            f"❌ Недостаточно DC. Нужно: **{price}**, у вас: **{balance}**.", ephemeral=True
-        )
-
-    success = await remove_dc(user_id, price, f"Покупка по акции: {item_data['name']}")
-    if not success:
-        return await inter.response.send_message("❌ Ошибка списания DC.", ephemeral=True)
-
-    if cat_key == "roles" and item_data.get("role_id"):
-        role = inter.guild.get_role(item_data["role_id"])
-        if role:
-            try:
-                await inter.author.add_roles(role)
-                await inter.response.send_message(
-                    f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Роль выдана.\n"
-                    f"📩 Проверьте ЛС — там информация об отзыве.\n"
-                    f"⚠️ Это **акционный** товар — возврату не подлежит.",
-                    ephemeral=True
-                )
-                await _send_role_review_dm(inter.author, item_data["name"])
-                await log_discord(
-                    title="🔥 Покупка по акции (роль)",
-                    description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item_data['name']}\n> **Цена:** {price} DC",
-                    color=0xff6600
-                )
-                return
-            except Exception as e:
-                await add_dc(user_id, price, "Возврат DC (ошибка выдачи роли)")
-                await inter.response.send_message(f"❌ Не удалось выдать роль: {e}", ephemeral=True)
-                return
-        else:
-            await add_dc(user_id, price, "Возврат DC (роль не найдена)")
-            return await inter.response.send_message("❌ Роль не найдена на сервере.", ephemeral=True)
-
-    await add_purchase(user_id, cat_key, item_data["name"], from_action=True)
-    await inter.response.send_message(
-        f"✅ Вы купили **{item_data['name']}** по акции за **{price} DC**! Активируйте товар в <#1462136361711829053>.\n"
-        f"⚠️ Это **акционный** товар — возврату не подлежит.",
-        ephemeral=True
-    )
-    await log_discord(
-        title="🔥 Покупка по акции",
-        description=f"> **Пользователь:** {inter.author.mention}\n> **Товар:** {item_data['name']}\n> **Цена:** {price} DC",
-        color=0xff6600
-    )
-
-
-# ============================================================
-# ОТПРАВКА ACTIONS ПАНЕЛИ
-# ============================================================
-async def send_actions_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-
-    channel_id = CONFIG.get("ACTIONS_CHANNEL_ID")
-    if not channel_id:
-        return
-
-    channel = bot.get_channel(channel_id)
-    if not channel:
-        try:
-            channel = await bot.fetch_channel(channel_id)
-        except disnake.NotFound:
-            logger.warning(
-                f"send_actions_panel: канал {channel_id} не найден, пропускаю"
-            )
-            return
-        except Exception as e:
-            logger.warning(f"send_actions_panel fetch err: {e}")
-            return
-    if not channel:
-        return
-
-    try:
-        async for msg in channel.history(limit=50):
-            if msg.author == bot.user and msg.components:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                break
-
-        main_embeds = load_action_embed("menu_actions.json")
-        await channel.send(embeds=main_embeds, view=ActionView())
-        await log_discord(
-            title="🔄 Меню Actions обновлено",
-            description="> Панель действий переотправлена.",
-            color=0x00ff00
-        )
-    except Exception as e:
-        logger.warning(f"send_actions_panel send err: {e}")
-
-
-async def refresh_actions_panel():
-    await send_actions_panel()
