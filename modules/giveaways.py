@@ -42,20 +42,56 @@ GIVEAWAY_FULL_ROLES = [
 
 MSK = timezone(timedelta(hours=3))
 
+
+# ============================================================
+# ШАБЛОНЫ РОЗЫГРЫШЕЙ
+# ============================================================
 GIVEAWAY_TEMPLATES = {
-    "150":  {"prize": "150 DC",  "amount": 150,  "winners": 1,
-             "description": "🎉 Стандартный розыгрыш 150 Diamond Coins на 1 победителя!"},
-    "400":  {"prize": "400 DC",  "amount": 400,  "winners": 2,
-             "description": "🎉 Розыгрыш 400 Diamond Coins на 2 победителей!"},
-    "600":  {"prize": "600 DC",  "amount": 600,  "winners": 3,
-             "description": "🎉 Розыгрыш 600 Diamond Coins на 3 победителей!"},
-    "1000": {"prize": "1000 DC", "amount": 1000, "winners": 5,
-             "description": "👑 Большой розыгрыш 1000 Diamond Coins на 5 победителей!"},
+    "150": {
+        "prize": "150 DC", "amount": 150, "winners": 1,
+        "description": "🎉 Стандартный розыгрыш 150 Diamond Coins на 1 победителя!",
+    },
+    "400": {
+        "prize": "400 DC", "amount": 400, "winners": 2,
+        "description": "🎉 Розыгрыш 400 Diamond Coins на 2 победителей!",
+    },
+    "600": {
+        "prize": "600 DC", "amount": 600, "winners": 3,
+        "description": "🎉 Розыгрыш 600 Diamond Coins на 3 победителей!",
+    },
+    "1000": {
+        "prize": "1000 DC", "amount": 1000, "winners": 5,
+        "description": "👑 Большой розыгрыш 1000 Diamond Coins на 5 победителей!",
+    },
+    "1400": {
+        "prize": "1400 DC", "amount": 1400, "winners": 7,
+        "description": "🔥 Розыгрыш 1400 Diamond Coins на 7 победителей!",
+    },
+    "1800": {
+        "prize": "1800 DC", "amount": 1800, "winners": 9,
+        "description": "🔥 Розыгрыш 1800 Diamond Coins на 9 победителей!",
+    },
+    "2400": {
+        "prize": "2400 DC", "amount": 2400, "winners": 12,
+        "description": "💎 Розыгрыш 2400 Diamond Coins на 12 победителей!",
+    },
+    "3000": {
+        "prize": "3000 DC", "amount": 3000, "winners": 15,
+        "description": "💎 Розыгрыш 3000 Diamond Coins на 15 победителей!",
+    },
+    "3600": {
+        "prize": "3600 DC", "amount": 3600, "winners": 18,
+        "description": "👑 Огромный розыгрыш 3600 Diamond Coins на 18 победителей!",
+    },
+    "4000": {
+        "prize": "4000 DC", "amount": 4000, "winners": 20,
+        "description": "👑 Огромный розыгрыш 4000 Diamond Coins на 20 победителей!",
+    },
 }
 
 
 # ============================================================
-# СОЗДАНИЕ ТАБЛИЦ В ОБЩЕЙ БД
+# СОЗДАНИЕ ТАБЛИЦ
 # ============================================================
 def _init_tables():
     cur.executescript("""
@@ -907,7 +943,7 @@ class RerollModal(ui.Modal):
 
 
 # ============================================================
-# ШАБЛОНЫ
+# ШАБЛОНЫ — 10 вариантов
 # ============================================================
 async def show_templates_panel(inter: disnake.MessageInteraction):
     e = disnake.Embed(
@@ -917,7 +953,8 @@ async def show_templates_panel(inter: disnake.MessageInteraction):
             "> ⏱ **Длительность:** 1 день\n"
             "> 🚫 **Инвайты:** не требуются\n"
             "> 💰 **Автовыдача:** DC начисляются победителям автоматически\n"
-            "> ⭐ **Отзыв:** победителям предложим оставить отзыв"
+            "> ⭐ **Отзыв:** победителям предложим оставить отзыв\n\n"
+            "**Доступные шаблоны:** 1, 2, 3, 5, 7, 9, 12, 15, 18, 20 победителей"
         ),
         color=6776679
     )
@@ -932,6 +969,12 @@ class TemplateSelect(disnake.ui.StringSelect):
             disnake.SelectOption(label="400 DC · 2 победителя", description="Розыгрыш на двоих", value="400"),
             disnake.SelectOption(label="600 DC · 3 победителя", description="Розыгрыш на троих", value="600"),
             disnake.SelectOption(label="1000 DC · 5 победителей", description="Большой розыгрыш", value="1000"),
+            disnake.SelectOption(label="1400 DC · 7 победителей", description="Средний розыгрыш", value="1400"),
+            disnake.SelectOption(label="1800 DC · 9 победителей", description="Расширенный розыгрыш", value="1800"),
+            disnake.SelectOption(label="2400 DC · 12 победителей", description="Массовый розыгрыш", value="2400"),
+            disnake.SelectOption(label="3000 DC · 15 победителей", description="Большой массовый розыгрыш", value="3000"),
+            disnake.SelectOption(label="3600 DC · 18 победителей", description="Огромный розыгрыш", value="3600"),
+            disnake.SelectOption(label="4000 DC · 20 победителей", description="Мега-розыгрыш", value="4000"),
         ]
         super().__init__(placeholder="Выберите шаблон розыгрыша...", min_values=1, max_values=1,
                          options=options, custom_id="giveaway_template_select")
@@ -979,7 +1022,7 @@ class TemplateSelect(disnake.ui.StringSelect):
         await inter.edit_original_response(
             content=(
                 f"✅ Шаблонный розыгрыш **{prize}** создан! ID: `{gid}`\n"
-                f"> 💰 DC начислятся автоматически победителям"
+                f"> 💰 DC начислятся автоматически победителям ({winners_count} чел.)"
             ),
             embeds=[], view=None,
         )
@@ -1039,43 +1082,6 @@ async def list_giveaways(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# /invites
-# ============================================================
-async def invites_cmd(inter: disnake.ApplicationCommandInteraction,
-                      user: disnake.Member = None, giveaway_id: int = None):
-    user = user or inter.author
-    stats = await get_invite_stats(inter.guild, user, giveaway_id)
-    if stats is None:
-        return await inter.send("❌ Не удалось получить статистику.", ephemeral=True)
-
-    if giveaway_id is not None:
-        g_row = cur.execute(
-            "SELECT created_at, end_time FROM giveaways WHERE giveaway_id=? AND guild_id=?",
-            (giveaway_id, inter.guild.id)
-        ).fetchone()
-        if not g_row:
-            return await inter.send("❌ Розыгрыш не найден.", ephemeral=True)
-        title = f"📨 Инвайты в розыгрыше #{giveaway_id} — {user.display_name}"
-        footer = f"Период: <t:{g_row['created_at']}:d> – <t:{g_row['end_time']}:d>"
-        embed = disnake.Embed(title=title, color=6776679, description=(
-            f"> **Приглашено:** {stats['total']}\n"
-            f"> **На сервере:** {stats['remaining']}\n"
-            f"> **Ушло:** {stats['left']}\n"
-            f"> **Ботов:** {stats['bots']}"
-        ))
-    else:
-        title = f"📨 Инвайты — {user.display_name}"
-        footer = "Глобальная статистика (Discord API)"
-        embed = disnake.Embed(title=title, color=6776679, description=(
-            f"> **Всего использований инвайтов:** {stats['total']}"
-        ))
-
-    embed.set_thumbnail(url=user.display_avatar.url)
-    embed.set_footer(text=footer)
-    await inter.send(embed=embed, ephemeral=True)
-
-
-# ============================================================
 # ПАНЕЛЬ В СТАФФ-КАНАЛ
 # ============================================================
 async def send_giveaway_panel():
@@ -1087,7 +1093,6 @@ async def send_giveaway_panel():
             logger.warning("[giveaways] канал панели не найден")
             return
 
-        # Удаляем старую панель розыгрышей (только её, не трогаем остальные панели)
         try:
             async for msg in ch.history(limit=50):
                 if msg.author == _bot.user and msg.embeds:
@@ -1125,17 +1130,13 @@ async def send_giveaway_panel():
 
 
 # ============================================================
-# ОТЛОЖЕННАЯ ИНИЦИАЛИЗАЦИЯ (восстановление таймеров + панель)
+# ОТЛОЖЕННАЯ ИНИЦИАЛИЗАЦИЯ
 # ============================================================
 async def _delayed_init_and_panel():
-    """Запускается из setup_giveaways. Ждёт пока send_staff_panels закончит,
-    потом восстанавливает таймеры активных розыгрышей и постит панель."""
     try:
         await _bot.wait_until_ready()
-        # Ждём main on_ready + send_staff_panels (который стирает сообщения бота в канале)
         await asyncio.sleep(8)
 
-        # Восстанавливаем таймеры активных розыгрышей
         try:
             active_rows = cur.execute(
                 "SELECT giveaway_id, end_time FROM giveaways WHERE status='active'"
@@ -1150,14 +1151,13 @@ async def _delayed_init_and_panel():
         except Exception as e:
             logger.exception(f"[giveaways] restore timers: {e}")
 
-        # Постим панель
         await send_giveaway_panel()
     except Exception as e:
         logger.exception(f"[giveaways] _delayed_init_and_panel: {e}")
 
 
 # ============================================================
-# SETUP — 1 строка из core/bot.py
+# SETUP
 # ============================================================
 def setup_giveaways(bot_instance):
     global _bot, _setup_done
@@ -1167,21 +1167,51 @@ def setup_giveaways(bot_instance):
     _setup_done = True
     _bot = bot_instance
 
-    # Создаём таблицу giveaways в ОБЩЕЙ БД
     _init_tables()
 
-    # Глобальные persistent views
     bot_instance.add_view(GiveawayView())
     bot_instance.add_view(GiveawayPanelView())
 
-    # Слэш-команда /invites
-    try:
-        bot_instance.add_slash_command(invites_cmd)
-    except Exception as e:
-        logger.warning(f"[giveaways] не удалось добавить /invites: {e}")
+    @bot_instance.slash_command(
+        name="invites",
+        description="Статистика инвайтов пользователя",
+    )
+    async def invites_cmd(
+        inter: disnake.ApplicationCommandInteraction,
+        user: disnake.Member = None,
+        giveaway_id: int = None,
+    ):
+        target = user or inter.author
+        stats = await get_invite_stats(inter.guild, target, giveaway_id)
+        if stats is None:
+            return await inter.send("❌ Не удалось получить статистику.", ephemeral=True)
 
-    # 👇 Отложенная инициализация — восстановит таймеры и постит панель
-    # через 8 секунд после старта (после того как send_staff_panels закончит)
+        if giveaway_id is not None:
+            g_row = cur.execute(
+                "SELECT created_at, end_time FROM giveaways WHERE giveaway_id=? AND guild_id=?",
+                (giveaway_id, inter.guild.id)
+            ).fetchone()
+            if not g_row:
+                return await inter.send("❌ Розыгрыш не найден.", ephemeral=True)
+            title = f"📨 Инвайты в розыгрыше #{giveaway_id} — {target.display_name}"
+            footer = f"Период: <t:{g_row['created_at']}:d> – <t:{g_row['end_time']}:d>"
+            embed = disnake.Embed(title=title, color=6776679, description=(
+                f"> **Приглашено:** {stats['total']}\n"
+                f"> **На сервере:** {stats['remaining']}\n"
+                f"> **Ушло:** {stats['left']}\n"
+                f"> **Ботов:** {stats['bots']}"
+            ))
+        else:
+            title = f"📨 Инвайты — {target.display_name}"
+            footer = "Глобальная статистика (Discord API)"
+            embed = disnake.Embed(title=title, color=6776679, description=(
+                f"> **Всего использований инвайтов:** {stats['total']}"
+            ))
+
+        embed.set_thumbnail(url=target.display_avatar.url)
+        embed.set_footer(text=footer)
+        await inter.send(embed=embed, ephemeral=True)
+
     try:
         bot_instance.loop.create_task(_delayed_init_and_panel())
     except Exception as e:
