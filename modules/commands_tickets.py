@@ -36,16 +36,15 @@ from modules.dc import (
 )
 from modules.actions import load_action_embed
 
-# 👇 Новая логика тикетов (Pillow + оценка)
-from modules.ticket_rating import (
+# 👇 ОБЪЕДИНЁННЫЙ МОДУЛЬ ТИКЕТОВ (оценка, отзыв, политика, счёт)
+from modules.tickets import (
     show_rating_flow,
     show_dc_close,
     show_policy,
     RatingStep1View,
-    RatingFinishView,   # ← переименовано
+    RatingFinishView,
+    ReceiptView,
 )
-
-from modules.receipt_view import ReceiptView
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
@@ -1139,7 +1138,6 @@ class TicketActionSelect(disnake.ui.StringSelect):
                 )
             await inter.response.send_modal(InvoiceModal())
         elif value == "policy":
-            # 👇 Новая Pillow-политика (эфемерно)
             await show_policy(inter)
         elif value == "rename":
             if not _is_paid_ticket(inter.channel):
@@ -1215,7 +1213,8 @@ class InvoiceModal(Modal):
 
     async def callback(self, inter: disnake.ModalInteraction):
         await inter.response.defer(ephemeral=True)
-        from modules.receipt import generate_receipt_png, generate_receipt_id
+        # 👇 ИМПОРТ ИЗ ОБЪЕДИНЁННОГО МОДУЛЯ
+        from modules.tickets import generate_receipt_png, generate_receipt_id
         product_name = inter.text_values["product"].strip()
         amount_str = inter.text_values["amount"].strip()
         discount_str = inter.text_values.get("discount", "").strip()
@@ -1349,7 +1348,6 @@ class TicketView(View):
         manager_id = get_ticket_manager(channel.id)
         if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
-        # 👇 Новая логика оценки/отзыва
         await _do_close_ticket(inter, check_reviews=True)
 
     async def pay_callback(self, inter: disnake.MessageInteraction):
@@ -1575,7 +1573,6 @@ class TicketPaidView(View):
         manager_id = get_ticket_manager(channel.id)
         if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
-        # 👇 Новая логика оценки/отзыва
         await _do_close_ticket(inter, check_reviews=True)
 
 
@@ -1594,7 +1591,6 @@ class CoinsTicketButtons(View):
         row=0
     )
     async def policy(self, button, inter: disnake.MessageInteraction):
-        # 👇 Pillow-политика
         await show_policy(inter)
 
     @disnake.ui.button(
@@ -1611,7 +1607,6 @@ class CoinsTicketButtons(View):
         manager_id = get_ticket_manager(channel.id)
         if manager_id and inter.author.id != manager_id and not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Тикет ведёт другой менеджер.", ephemeral=True)
-        # 👇 DC-тикет — только проверка отзыва
         await _do_close_ticket(inter, check_reviews=True)
 
 
@@ -1643,7 +1638,6 @@ class CatalogTypeSelect(disnake.ui.StringSelect):
             embed.set_image(url=_IMG_STRIPE)
             await inter.response.edit_message(content=None, embeds=[embed], view=CatalogView())
         elif value == "coins":
-            # Открываем новую витрину DC-Shop (Pillow + селекты)
             from modules.shop import open_shop
             await open_shop(inter)
 
