@@ -21,7 +21,8 @@ from modules.dc import (
     get_user_balance, remove_dc, add_purchase,
     add_dc, get_user_dc_data, get_user_purchases
 )
-from modules.boosts import (
+# 👇 ИЗ ОБЪЕДИНЁННОГО МОДУЛЯ
+from modules.others import (
     apply_casino_win, has_insurance, try_insurance, get_casino_multiplier,
 )
 
@@ -381,10 +382,6 @@ def _build_lose_embeds(result: dict, bet: int, new_balance: int, refund: int = 0
     return [embed1, embed2]
 
 
-# ────────────────────────────────────────────────────────────
-# Общая логика: сыграть раунд рулетки с указанной ставкой
-# Используется в модалке, повторной и двойной ставках
-# ────────────────────────────────────────────────────────────
 async def _roulette_play(inter, bet: int, reason: str = "Ставка в рулетке монет"):
     user_id = inter.author.id
 
@@ -517,9 +514,6 @@ class RouletteModal(Modal):
         await _roulette_play(inter, bet, reason="Ставка в рулетке монет")
 
 
-# ────────────────────────────────────────────────────────────
-# Retry View: 3 кнопки — Играть ещё / Повтор ставки / Двойная
-# ────────────────────────────────────────────────────────────
 class RouletteRetryView(View):
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
@@ -669,9 +663,6 @@ def _build_bj_embeds(game: dict, hide_dealer: bool = True,
     return [embed1, embed2]
 
 
-# ────────────────────────────────────────────────────────────
-# Общая логика: старт раунда блэкджека с указанной ставкой
-# ────────────────────────────────────────────────────────────
 async def _blackjack_play(inter, bet: int, reason: str = "Ставка в блэкджеке"):
     user_id = inter.author.id
 
@@ -961,9 +952,6 @@ async def _bj_finish(inter: disnake.MessageInteraction, game: dict):
     await _bj_payout(inter, game, outcome)
 
 
-# ────────────────────────────────────────────────────────────
-# Retry View блэкджека: 3 кнопки
-# ────────────────────────────────────────────────────────────
 class BlackjackRetryView(View):
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
@@ -1101,9 +1089,6 @@ def _build_coin_result_embeds(bet: int, result_side: str, user_choice: str,
     return [embed1, embed2]
 
 
-# ────────────────────────────────────────────────────────────
-# Общая логика: старт раунда монетки с указанной ставкой
-# ────────────────────────────────────────────────────────────
 async def _coinflip_play(inter, bet: int, reason: str = "Ставка в монетке"):
     user_id = inter.author.id
 
@@ -1256,9 +1241,6 @@ class CoinflipChoiceView(View):
         await self._play(inter, "tails")
 
 
-# ────────────────────────────────────────────────────────────
-# Retry View монетки: 3 кнопки
-# ────────────────────────────────────────────────────────────
 class CoinflipRetryView(View):
     def __init__(self, last_bet: int):
         super().__init__(timeout=300)
@@ -1423,7 +1405,6 @@ async def handle_flash_interaction(inter: disnake.MessageInteraction):
     if not custom_id:
         return
 
-    # Игнорируем игровые кнопки — их обрабатывают views
     if custom_id in (
         "roulette_retry", "roulette_repeat", "roulette_double",
         "bj_hit", "bj_stand", "bj_double",
