@@ -386,7 +386,7 @@ async def daily_activity_payout_task():
 @bot.event
 async def on_ready():
     try:
-        await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
+        await bot.change_presence(activity=disnake.Game(name="Магазин и экономика"))
 
         try:
             from modules.giveaways import setup_giveaways
