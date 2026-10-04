@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Объединённый модуль служебных панелей и админ-функций.
-Без Home (канал 1532398684074016870 удалён).
-"""
+"""Служебные панели и админ-функции. Home-панель удалена."""
 import os
 import json
 import io
@@ -38,8 +35,6 @@ from modules.dc import (
     sync_dc_to_json
 )
 from modules.commands_profile import load_embed_from_file
-
-# 👇 ОБЪЕДИНЁННЫЙ МОДУЛЬ ТИКЕТОВ: счёт, рейтинг, отзыв, кодекс магазина
 from modules.tickets import (
     render_work_salary,
     render_work_top,
@@ -55,25 +50,8 @@ TICKET_PANEL_CHANNEL_ID = 1462136361711829053
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
 
-def load_board_embed() -> list:
-    path = os.path.join(ADD_DIR, "board.json")
-    if not os.path.exists(path):
-        return [disnake.Embed(
-            title="📋 Доска объявлений",
-            description="> Здесь будет важная информация. Пока данных нет.",
-            color=6776679
-        )]
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
-    except Exception as e:
-        logger.error(f"Ошибка загрузки board.json: {e}")
-        return [disnake.Embed(title="❌ Ошибка", description="Не удалось загрузить доску.", color=0xff0000)]
-
-
 # ============================================================
-# ═══ СЕКЦИЯ 1: ЭКОНОМИКА ═══
+# ЭКОНОМИКА
 # ============================================================
 promo_codes = get_promo_codes()
 
@@ -231,7 +209,7 @@ class ManagePurchasesModal(Modal):
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 2: ПРОМОКОДЫ ═══
+# ПРОМОКОДЫ
 # ============================================================
 class PromoSelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -331,7 +309,7 @@ class PromoRemoveSelectView(View):
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 3: АДМИН-ПАНЕЛЬ ═══
+# АДМИН-ПАНЕЛЬ
 # ============================================================
 class ClearModal(Modal):
     def __init__(self):
@@ -525,7 +503,7 @@ async def recalc_all_roles(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 4: TAROLOGY ═══
+# TAROLOGY
 # ============================================================
 class TarologySelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -608,7 +586,7 @@ async def send_tarology_panel():
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 5: ТИКЕТ-ПАНЕЛЬ ═══
+# ТИКЕТ-ПАНЕЛЬ
 # ============================================================
 async def send_ticket_panel():
     from core.bot import bot
@@ -661,7 +639,7 @@ async def send_ticket_panel():
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 6: КОДЕКС МАГАЗИНА (PILLOW) ═══
+# КОДЕКС МАГАЗИНА
 # ============================================================
 async def _send_work_screen(inter: disnake.MessageInteraction, buf, fname: str):
     try:
@@ -827,7 +805,7 @@ async def send_work_panel():
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 7: СПИСАНИЕ ЗАКАЗА ═══
+# СПИСАНИЕ ЗАКАЗА
 # ============================================================
 class SpisatZakazModal(Modal):
     def __init__(self):
@@ -879,7 +857,7 @@ class SpisatZakazModal(Modal):
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 8: СЛУЖЕБНЫЕ ПАНЕЛИ В КАНАЛ ═══
+# СЛУЖЕБНЫЕ ПАНЕЛИ
 # ============================================================
 async def send_staff_panels():
     from core.bot import bot
@@ -947,7 +925,7 @@ async def send_staff_panels():
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 9: СЛЭШ-КОМАНДЫ ═══
+# СЛЭШ-КОМАНДЫ
 # ============================================================
 @commands.slash_command(name="say", description="Отправить сообщение от бота (админ)")
 async def say(
@@ -1087,7 +1065,7 @@ async def dc_file(
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 10: ТОП МЕНЕДЖЕРОВ ═══
+# ТОП МЕНЕДЖЕРОВ
 # ============================================================
 class ResetStatsView(View):
     def __init__(self):
