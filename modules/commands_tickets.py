@@ -34,7 +34,7 @@ from modules.dc import (
     get_user_balance,
     load_shop_catalog
 )
-from modules.actions import load_action_embed
+
 
 # 👇 ОБЪЕДИНЁННЫЙ МОДУЛЬ ТИКЕТОВ (оценка, отзыв, политика, счёт)
 from modules.tickets import (
