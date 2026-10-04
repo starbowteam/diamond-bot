@@ -4,6 +4,8 @@ Diamond AI — отдельный бот-консультант магазина
 
 Запускается как отдельный процесс через ai_main.py.
 Не импортирует core.bot — не клонирует основной.
+
+LLM: OpenRouter (переменная окружения — MISTRAL_API_KEY).
 """
 import os
 import re
@@ -48,14 +50,26 @@ AI_TOKEN = os.getenv("AI_TOKEN")
 if not AI_TOKEN:
     print("❌ AI_TOKEN не установлен — процесс AI завершится.")
 
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
-if not MISTRAL_API_KEY:
-    print("⚠️ MISTRAL_API_KEY не задан — AI не сможет отвечать.")
+# ⚠️ Имя переменной оставлено прежним, но теперь это ключ OpenRouter.
+# Старый Mistral-ключ больше не используется — можно удалить.
+OPENROUTER_API_KEY = os.getenv("MISTRAL_API_KEY")
+if not OPENROUTER_API_KEY:
+    print("⚠️ MISTRAL_API_KEY (OpenRouter) не задан — AI не сможет отвечать.")
+
+# Ссылка на проект — OpenRouter требует для статистики (можно любой твой URL)
+OPENROUTER_REFERER = os.getenv("OPENROUTER_REFERER", "https://diamond.shop")
+OPENROUTER_TITLE   = os.getenv("OPENROUTER_TITLE", "Diamond AI")
+
+# Модель OpenRouter.
+# Хорошие варианты (от дешёвого к дорогому):
+#   "openai/gpt-4o-mini"                    — быстрый, умный, дешёвый  ← выбрал его
+#   "anthropic/claude-3.5-haiku"            — умнее, чуть дороже
+#   "google/gemini-flash-1.5"               — очень дешёвый
+#   "mistralai/mistral-small-24b-instruct-2501" — если хочется остаться на Mistral
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 
 ALLOWED_CHANNEL_ID = 1462064375862005845
 AI_LOG_CHANNEL_ID = 1530453871581855744
-
-MISTRAL_MODEL = "mistral-small-latest"
 
 MAX_CHANNEL_CTX = 10
 MAX_USER_HISTORY = 6
@@ -431,11 +445,11 @@ def choose_style(mood: str, text: str) -> str:
 
 
 # ============================================================
-# MISTRAL
+# LLM (OpenRouter)
 # ============================================================
-async def ask_mistral(user_message: str, username: str, style: str,
-                     user_id: int, context_block: str) -> str:
-    if not MISTRAL_API_KEY:
+async def ask_llm(user_message: str, username: str, style: str,
+                  user_id: int, context_block: str) -> str:
+    if not OPENROUTER_API_KEY:
         return "прости, мой мозг сейчас отключён. попробуй позже."
 
     style_extra = MOOD_PROMPTS.get(style, "")
@@ -447,44 +461,52 @@ async def ask_mistral(user_message: str, username: str, style: str,
     messages.append({"role": "user", "content": f"{username}: {user_message}"})
 
     payload = {
-        "model": MISTRAL_MODEL,
+        "model": OPENROUTER_MODEL,
         "messages": messages,
         "temperature": 0.85,
         "max_tokens": 600,
     }
     headers = {
-        "Authorization": f"Bearer {MISTRAL_API_KEY}",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
+        # Опциональные заголовки OpenRouter — для статистики и приоритета
+        "HTTP-Referer": OPENROUTER_REFERER,
+        "X-Title": OPENROUTER_TITLE,
     }
 
     for attempt in range(2):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://api.mistral.ai/v1/chat/completions",
+                    "https://openrouter.ai/api/v1/chat/completions",
                     json=payload, headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=30),
+                    timeout=aiohttp.ClientTimeout(total=40),
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
+                        # OpenRouter может вернуть ошибку внутри 200
+                        if "error" in data:
+                            err_msg = data["error"].get("message", "unknown")
+                            logger.error(f"openrouter error: {err_msg}")
+                            return "что-то сломалось у провайдера, попробуй ещё."
                         reply = data["choices"][0]["message"]["content"].strip()
                         _push_user(user_id, "user", f"{username}: {user_message}")
                         _push_user(user_id, "assistant", reply)
                         return reply
 
                     err = await resp.text()
-                    logger.error(f"mistral {resp.status}: {err[:300]}")
+                    logger.error(f"openrouter {resp.status}: {err[:300]}")
                     if resp.status == 429 and attempt == 0:
                         await asyncio.sleep(2)
                         continue
                     return "что-то пошло не так, давай ещё раз."
         except asyncio.TimeoutError:
-            logger.warning("mistral timeout")
+            logger.warning("openrouter timeout")
             if attempt == 0:
                 continue
             return "слишком долго думал, попробуй короче."
         except Exception as e:
-            logger.exception(f"mistral err: {e}")
+            logger.exception(f"openrouter err: {e}")
             return "ой, я запутался. давай по новой."
 
     return "не получается ответить."
@@ -619,6 +641,7 @@ async def cleanup_contexts():
 @bot.event
 async def on_ready():
     logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
+    logger.info(f"LLM: OpenRouter · модель: {OPENROUTER_MODEL}")
     try:
         await bot.change_presence(
             status=disnake.Status.online,
@@ -676,7 +699,7 @@ async def on_message(message: disnake.Message):
     try:
         async with message.channel.typing():
             await asyncio.sleep(random.uniform(0.5, 1.5))
-            reply = await ask_mistral(
+            reply = await ask_llm(
                 user_message=text,
                 username=message.author.display_name,
                 style=style,
