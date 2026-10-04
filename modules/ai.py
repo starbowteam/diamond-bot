@@ -51,21 +51,15 @@ AI_TOKEN = os.getenv("AI_TOKEN")
 if not AI_TOKEN:
     print("❌ AI_TOKEN не установлен — процесс AI завершится.")
 
-# ⚠️ Переменная оставлена прежней — MISTRAL_API_KEY.
-# Внутри — ключ Google Gemini (AI Studio).
 GEMINI_API_KEY = os.getenv("MISTRAL_API_KEY")
 if not GEMINI_API_KEY:
     print("⚠️ MISTRAL_API_KEY (Gemini) не задан — AI не сможет отвечать.")
 
-# ─── Модели Gemini (по приоритету) ───
-# Мы держим ТОЛЬКО gemini-flash-latest как основную —
-# она всегда указывает на актуальную flash-модель.
-# Остальные подтягиваются динамически из ListModels.
+# ─── Модели Gemini ───
 GEMINI_MODELS_PRIORITY = [
     "gemini-flash-latest",
 ]
 
-# Можно переопределить через env: GEMINI_MODEL="a,b,c"
 _env_model = os.getenv("GEMINI_MODEL")
 if _env_model:
     GEMINI_MODELS_PRIORITY = [m.strip() for m in _env_model.split(",") if m.strip()]
@@ -75,7 +69,7 @@ GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 # ─── Кэш доступных моделей ───
 _AVAILABLE_MODELS: List[str] = []
 _AVAILABLE_MODELS_FETCHED_AT: float = 0.0
-_MODELS_CACHE_TTL = 3600  # 1 час
+_MODELS_CACHE_TTL = 3600
 
 ALLOWED_CHANNEL_ID = 1462064375862005845
 AI_LOG_CHANNEL_ID = 1530453871581855744
@@ -117,8 +111,15 @@ SYSTEM_PROMPT = """
 твой характер:
 - пишешь прямо, без пафоса и фальшивой вежливости
 - можешь быть дружелюбным, деловым или чуть ироничным — зависит от настроения собеседника
-- никогда не выдумываешь цифры и факты: если что-то есть в блоке [данные] — используешь оттуда, если нет — честно говоришь "не знаю, уточни у менеджера"
+- НЕ ВЫДУМЫВАЕШЬ цифры и факты. если что-то есть в блоке [данные] — используешь оттуда. если нет — честно говоришь "не знаю, уточни у менеджера"
 - не читаешь лекций, не философствуешь, не выходишь за рамки магазина, если только это не уместный смежный вопрос
+
+🔴 ЖЁСТКОЕ ПРАВИЛО ПРО РОЛИ:
+если в блоке [данные] написано "текущая роль покупателя: X" — ТЫ ОБЯЗАН использовать именно X. не придумывай другую роль. если у пользователя написано "Покупатель Века" — значит у него Покупатель Века, и никак иначе. не спорь с фактом из [данные].
+если в [данные] ничего про роль не написано — не придумывай вообще.
+
+🔴 ПРАВИЛО ПРО ДЛИНУ ОТВЕТА:
+отвечай ПОЛНОСТЬЮ. не обрывай мысль на полуслове. если рассказываешь про человека — перечисли всё: баланс, отзывы, роль, клан, вклад, место в клане. если про магазин — назови ключевые механики. не сокращай до "и так далее".
 
 что ты знаешь про магазин (всегда актуально):
 
@@ -169,10 +170,11 @@ SYSTEM_PROMPT = """
 если пользователь просит — вежливо откажись.
 
 **как отвечать**:
-- если в блоке [данные] есть информация о пользователе — используй её
+- если в блоке [данные] есть информация о пользователе — используй её ЦЕЛИКОМ, не выборочно
 - точные цены отправляй в витрину
-- на личный прогресс — конкретные цифры
+- на личный прогресс — конкретные цифры из [данные]
 - не уверен — «уточни у менеджера в тикете»
+- НЕ ПРИВЕТСТВУЙ и НЕ ЗАКАНЧИВАЙ дежурными фразами, если это не уместно
 """.strip()
 
 
@@ -282,6 +284,20 @@ def _push_user(user_id: int, role: str, content: str):
 # ============================================================
 # РЕАЛЬНЫЕ ДАННЫЕ
 # ============================================================
+ROLE_IDS = CONFIG.get("ROLE_IDS", {})
+
+# Приоритет от старшей к младшей — как показывать в [данные]
+ROLE_PRIORITY = [
+    ("pka",       "Покупатель Века"),
+    ("crystalis", "Crystalis Buyer"),
+    ("diamond",   "Diamond Buyer"),
+    ("gold",      "Gold Buyer"),
+    ("silver",    "Silver Buyer"),
+    ("bronze",    "Bronze Buyer"),
+    ("club",      "Клуб"),
+]
+
+
 def _role_key_for_reviews(reviews: int) -> str:
     if reviews >= 26:  return "pka"
     if reviews >= 21:  return "crystalis"
@@ -292,33 +308,52 @@ def _role_key_for_reviews(reviews: int) -> str:
     return "none"
 
 
-ROLE_LABELS = {
-    "pka":       "Покупатель Века",
-    "crystalis": "Crystalis Buyer",
-    "diamond":   "Diamond Buyer",
-    "gold":      "Gold Buyer",
-    "silver":    "Silver Buyer",
-    "bronze":    "Bronze Buyer",
-    "none":      "нет роли покупателя",
-}
+def _role_label_from_member(member: Optional[disnake.Member]) -> Optional[str]:
+    """
+    Определяет роль по фактическим ролям в Discord.
+    Возвращает название роли или None, если ни одной не найдено.
+    """
+    if member is None:
+        return None
+    try:
+        member_role_ids = {r.id for r in member.roles}
+    except Exception:
+        return None
+
+    for key, label in ROLE_PRIORITY:
+        rid = ROLE_IDS.get(key)
+        if rid and rid in member_role_ids:
+            return label
+    return None
 
 
-def build_user_data(user_id: int) -> str:
+def build_user_data(user_id: int, member: Optional[disnake.Member]) -> str:
+    # ─── Баланс ───
     try:
         data = get_dc_cache(user_id)
         balance = data.get("balance", 0)
     except Exception:
         balance = 0
 
+    # ─── Отзывы ───
     try:
         counts = load_json(FILES["review_counts"], {})
         reviews = int(counts.get(str(user_id), 0))
     except Exception:
         reviews = 0
 
-    role_key = _role_key_for_reviews(reviews)
-    role_label = ROLE_LABELS.get(role_key, "—")
+    # ─── Роль: сначала из Discord, если нет — по отзывам ───
+    role_from_discord = _role_label_from_member(member)
+    if role_from_discord:
+        role_label = role_from_discord
+    else:
+        role_key = _role_key_for_reviews(reviews)
+        if role_key == "none":
+            role_label = "нет роли покупателя"
+        else:
+            role_label = dict(ROLE_PRIORITY).get(role_key, "—")
 
+    # ─── Клан ───
     clan_name = "—"
     clan_contrib = 0
     clan_rank = "—"
@@ -391,9 +426,9 @@ def build_clan_data() -> str:
         return ""
 
 
-def build_context_block(user_id: int) -> str:
+def build_context_block(user_id: int, member: Optional[disnake.Member]) -> str:
     parts = []
-    user_block = build_user_data(user_id)
+    user_block = build_user_data(user_id, member)
     if user_block:
         parts.append(user_block)
     shop_block = build_shop_data()
@@ -457,16 +492,12 @@ def choose_style(mood: str, text: str) -> str:
 # СПИСОК МОДЕЛЕЙ — ДИНАМИЧЕСКИЙ
 # ============================================================
 async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
-    """
-    Запрашивает у Gemini список моделей, поддерживающих generateContent.
-    Кэширует на час.
-    """
     global _AVAILABLE_MODELS, _AVAILABLE_MODELS_FETCHED_AT
     now = time.time()
     if _AVAILABLE_MODELS and now - _AVAILABLE_MODELS_FETCHED_AT < _MODELS_CACHE_TTL:
         return _AVAILABLE_MODELS
 
-    url = GEMINI_API_BASE  # без :generateContent — это ListModels
+    url = GEMINI_API_BASE
     headers = {"X-goog-api-key": GEMINI_API_KEY}
 
     try:
@@ -476,7 +507,7 @@ async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
         ) as resp:
             if resp.status != 200:
                 logger.warning(f"listModels {resp.status}")
-                return _AVAILABLE_MODELS  # вернём прошлый кэш (даже пустой)
+                return _AVAILABLE_MODELS
 
             data = await resp.json()
             models = []
@@ -490,26 +521,21 @@ async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
                 if "generateContent" not in methods:
                     continue
 
-                # Только flash — pro слишком дорогой/медленный для чата
                 n_low = short.lower()
                 if "flash" not in n_low:
                     continue
 
                 models.append(short)
 
-            # Сортируем по «приоритету»: latest вперёд, потом по версии
             def sort_key(n):
                 n_low = n.lower()
                 score = 0
                 if "latest" in n_low: score -= 1000
-                # Извлекаем версию
                 m = re.search(r"gemini-(\d+)", n_low)
                 if m:
                     score -= int(m.group(1)) * 10
-                # Preview / exp в конец
                 if "preview" in n_low or "exp" in n_low:
                     score += 500
-                # 8b обычно слабее — в конец
                 if "8b" in n_low:
                     score += 100
                 return score
@@ -555,18 +581,13 @@ def _build_gemini_payload(system_content: str, history: List[Dict[str, str]],
         "contents": contents,
         "generationConfig": {
             "temperature": 0.85,
-            "maxOutputTokens": 600,
+            "maxOutputTokens": 1500,  # ← было 600, поднял
         },
     }
 
 
 async def _try_model(session: aiohttp.ClientSession, model: str,
                      payload: dict) -> tuple[bool, str, int]:
-    """
-    Пробует одну модель Gemini.
-    Возвращает (успех, ответ_или_ошибка, http_status).
-    http_status=-1 означает сетевое/parse исключение.
-    """
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
     headers = {
         "Content-Type": "application/json",
@@ -576,14 +597,14 @@ async def _try_model(session: aiohttp.ClientSession, model: str,
     try:
         async with session.post(
             url, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=40),
+            timeout=aiohttp.ClientTimeout(total=60),
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 if "error" in data:
                     err_msg = data["error"].get("message", "unknown")
                     logger.warning(f"[{model}] gemini error: {err_msg}")
-                    return False, err_msg, 200  # не 404, но логика выше уже поймает
+                    return False, err_msg, 200
 
                 try:
                     candidates = data.get("candidates", [])
@@ -631,32 +652,27 @@ async def ask_llm(user_message: str, username: str, style: str,
     )
 
     async with aiohttp.ClientSession() as session:
-        # ─── Формируем список для попыток ───
         models_to_try: List[str] = []
         seen = set()
 
-        # 1) Приоритетные (жёстко заданные) — в начале
         for m in GEMINI_MODELS_PRIORITY:
             if m not in seen:
                 seen.add(m)
                 models_to_try.append(m)
 
-        # 2) Динамические — добавляем в конец
         dynamic = await _fetch_available_models(session)
         for m in dynamic:
             if m not in seen:
                 seen.add(m)
                 models_to_try.append(m)
 
-        # Ограничиваем число попыток, чтобы не жечь лимиты
         models_to_try = models_to_try[:6]
 
         if not models_to_try:
             logger.error("нет доступных моделей Gemini")
             return "сейчас мой провайдер лежит. попробуй через минуту."
 
-        # ─── Идём по списку ───
-        attempt_503 = False  # флаг, что уже ловили 503
+        attempt_503 = False
         for model in models_to_try:
             ok, result, status = await _try_model(session, model, payload)
 
@@ -666,9 +682,7 @@ async def ask_llm(user_message: str, username: str, style: str,
                 _push_user(user_id, "assistant", result)
                 return result
 
-            # Обрабатываем коды ошибок
             if status == 503 and not attempt_503:
-                # Первый 503 — ретрай через 2 секунды на той же модели
                 attempt_503 = True
                 logger.info(f"[{model}] 503 — повтор через 2с")
                 await asyncio.sleep(2)
@@ -679,7 +693,6 @@ async def ask_llm(user_message: str, username: str, style: str,
                     _push_user(user_id, "assistant", result2)
                     return result2
 
-            # 404 — модель устарела, можно выкинуть из кэша
             if status == 404:
                 global _AVAILABLE_MODELS
                 if model in _AVAILABLE_MODELS:
@@ -823,7 +836,6 @@ async def on_ready():
     logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
     logger.info(f"LLM: Gemini · приоритет: {GEMINI_MODELS_PRIORITY}")
 
-    # Прогреваем список моделей один раз при старте
     try:
         async with aiohttp.ClientSession() as session:
             models = await _fetch_available_models(session)
@@ -874,17 +886,24 @@ async def on_message(message: disnake.Message):
     users_who_talked.add(user_id)
 
     if is_technical_request(text):
-        await message.reply(
-            "извини, на технические темы не отвечаю — я консультант магазина. "
-            "могу помочь с товарами, ролями, dc, кланом, казино, тикетами и промокодами."
-        )
+        try:
+            await message.channel.send(
+                "извини, на технические темы не отвечаю — я консультант магазина. "
+                "могу помочь с товарами, ролями, dc, кланом, казино, тикетами и промокодами.",
+                reference=message,
+                mention_author=False,
+            )
+        except Exception:
+            pass
         return
 
     _push_channel(message.author.display_name, text)
 
     mood = detect_mood(text)
     style = choose_style(mood, text)
-    context_block = build_context_block(user_id)
+
+    member = message.author if isinstance(message.author, disnake.Member) else None
+    context_block = build_context_block(user_id, member)
 
     try:
         async with message.channel.typing():
@@ -903,11 +922,16 @@ async def on_message(message: disnake.Message):
     if not reply:
         reply = "что-то я не могу ответить. попробуй иначе."
 
+    # ─── Отправка БЕЗ пинга ───
     try:
-        await message.reply(reply)
+        await message.channel.send(
+            reply,
+            reference=message,
+            mention_author=False,
+        )
     except Exception:
         try:
-            await message.channel.send(f"{message.author.mention}, {reply}")
+            await message.channel.send(reply)
         except Exception as e:
             logger.error(f"send reply: {e}")
             return
@@ -931,7 +955,6 @@ async def on_message(message: disnake.Message):
 # RUN
 # ============================================================
 def run_ai():
-    """Запуск AI-бота. Вызывается из ai_main.py."""
     if not AI_TOKEN:
         print("❌ AI_TOKEN не установлен — процесс AI завершается.")
         raise SystemExit(1)
