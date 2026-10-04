@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Объединённый модуль служебных панелей и админ-функций.
+УДАЛЕНО: Home panel (1532398684074016870), BuyAll panel.
 """
 import os
 import json
@@ -45,29 +46,11 @@ from modules.work_render import (
 
 
 STAFF_PANEL_CHANNEL_ID  = 1551276116679860314
-HOME_CHANNEL_ID         = 1532398684074016870
 TAROLOGY_CHANNEL_ID     = 1536796929873420308
 WORK_CHANNEL_ID         = 1532435807242289314
 TICKET_PANEL_CHANNEL_ID = 1462136361711829053
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-
-
-def load_board_embed() -> list:
-    path = os.path.join(ADD_DIR, "board.json")
-    if not os.path.exists(path):
-        return [disnake.Embed(
-            title="📋 Доска объявлений",
-            description="> Здесь будет важная информация. Пока данных нет.",
-            color=6776679
-        )]
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return [disnake.Embed.from_dict(clean_embed_for_discohook(e)) for e in data.get("embeds", [])]
-    except Exception as e:
-        logger.error(f"Ошибка загрузки board.json: {e}")
-        return [disnake.Embed(title="❌ Ошибка", description="Не удалось загрузить доску.", color=0xff0000)]
 
 
 # ============================================================
@@ -523,84 +506,6 @@ async def recalc_all_roles(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# ═══ СЕКЦИЯ 4: СПРАВОЧНИК ═══
-# ============================================================
-class HomeSelect(disnake.ui.StringSelect):
-    def __init__(self):
-        options = [
-            disnake.SelectOption(label="・Работа в Diamond", description="Карьера・Заработная плата",
-                                 emoji="<:working:1538767619602120744>", value="work"),
-            disnake.SelectOption(label="・Экосистема Diamond", description="Наши сайты・Лучшая жизнь",
-                                 emoji="<:site:1538768985602916352>", value="eco"),
-            disnake.SelectOption(label="・Роли покупателей", description="Достоинства・Разделение прав",
-                                 emoji="<:roles:1540046665984249878>", value="roles"),
-            disnake.SelectOption(label="・Доска", description="Знай о важном・Информация",
-                                 emoji="<:banne1:1538551829246513312>", value="board"),
-        ]
-        super().__init__(placeholder="Выберите раздел...", min_values=1, max_values=1,
-                         options=options, custom_id="home_select")
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        await log_discord(
-            title="📖 Выбор в справочнике",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{inter.data.values[0]}`",
-            color=0x00aaff
-        )
-        value = inter.data.values[0]
-        if value == "work":
-            await inter.response.send_message(embeds=load_embed_from_file("work.json"), ephemeral=True)
-        elif value == "eco":
-            await inter.response.send_message(embeds=load_embed_from_file("eco.json"), ephemeral=True)
-        elif value == "roles":
-            await inter.response.send_message(embeds=load_embed_from_file("role.json"), ephemeral=True)
-        elif value == "board":
-            await inter.response.send_message(embeds=load_board_embed(), ephemeral=True)
-
-
-class HomeView(disnake.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(HomeSelect())
-
-
-async def send_home_panel():
-    from core.bot import bot
-    await bot.wait_until_ready()
-    channel = bot.get_channel(HOME_CHANNEL_ID)
-    if not channel:
-        try:
-            channel = await bot.fetch_channel(HOME_CHANNEL_ID)
-        except Exception:
-            channel = None
-    if not channel:
-        logger.warning("Home panel channel not found")
-        return
-
-    async for msg in channel.history(limit=50):
-        if msg.author == bot.user and msg.components:
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-            break
-
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1538771484778958898/image.png?ex=6a83e41e&is=6a82929e&hm=78e0190f6955969d2c2f630b4e9d560557c5c08d4f0c5caf8b32fbfd520332ab&")
-    embed2 = disnake.Embed(
-        title="Справочник посетителя Diamond",
-        description="Справочник посетителя Diamond, в нем можно ознакомиться о нас, нашей экосистемой, узнать о важном, способе получения валюты сервера, достоинствах ролей покупателя и многом другом!",
-        color=6776679
-    )
-    embed2.set_image(url=IMG_STRIPE)
-    await channel.send(embeds=[embed1, embed2], view=HomeView())
-    await log_discord(
-        title="📖 Справочник отправлен",
-        description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00
-    )
-
-
-# ============================================================
 # ═══ СЕКЦИЯ 5: TAROLOGY ═══
 # ============================================================
 class TarologySelect(disnake.ui.StringSelect):
@@ -741,7 +646,6 @@ async def send_ticket_panel():
 # ═══ СЕКЦИЯ 7: КОДЕКС МАГАЗИНА (Work) — PILLOW ═══
 # ============================================================
 async def _send_work_screen(inter: disnake.MessageInteraction, buf, fname: str):
-    """Отправка эфемерного PNG — не трогает исходное сообщение."""
     try:
         file = disnake.File(buf, filename=fname)
         embed = disnake.Embed(color=6776679)
@@ -759,7 +663,6 @@ async def _send_work_screen(inter: disnake.MessageInteraction, buf, fname: str):
 
 
 def _collect_staff_list(inter: disnake.MessageInteraction) -> list:
-    """Собирает список менеджеров Sales с их статистикой."""
     guild = inter.guild
     sales_role = guild.get_role(1154757071330365490)
     if not sales_role:
