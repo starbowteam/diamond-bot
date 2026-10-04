@@ -435,7 +435,7 @@ async def on_ready():
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
         # ============================================================
-        # 🎁 МОДУЛЬ РОЗЫГРЫШЕЙ — использует ОБЩУЮ БД
+        # 🎁 МОДУЛЬ РОЗЫГРЫШЕЙ
         # ============================================================
         try:
             from modules.giveaways import setup_giveaways
@@ -460,12 +460,11 @@ async def on_ready():
             send_profile_panel, ProfilePanelView, ProfileCardView,
         )
         from modules.commands_staff import (
-            send_home_panel, send_tarology_panel, send_ticket_panel,
+            send_tarology_panel, send_ticket_panel,
             send_work_panel, send_staff_panels,
-            HomeView, TarologyView, WorkView,
+            TarologyView, WorkView,
             DCView, PromoView, AdminView,
         )
-        from modules.commands_buyall import BuyAllView, send_buyall_panel
 
         # ============================================================
         # 🎯 РЕГИСТРАЦИЯ VIEW
@@ -478,14 +477,11 @@ async def on_ready():
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
 
-        # 👇 Оценка менеджера + финальное закрытие
         bot.add_view(RatingStep1View())
         bot.add_view(RatingFinishView())
 
-        # 👇 Кнопки реквизитов в счёте
         bot.add_view(ReceiptView())
 
-        bot.add_view(HomeView())
         bot.add_view(TarologyView())
         bot.add_view(ProfilePanelView())
         bot.add_view(ProfileCardView())
@@ -494,19 +490,16 @@ async def on_ready():
         bot.add_view(DCView())
         bot.add_view(PromoView())
         bot.add_view(AdminView())
-        bot.add_view(BuyAllView())
 
         # ============================================================
         # 🚀 ОТПРАВКА ПАНЕЛЕЙ
         # ============================================================
-        bot.loop.create_task(send_home_panel())
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
         bot.loop.create_task(send_work_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_staff_panels())
-        bot.loop.create_task(send_buyall_panel())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         counts = {}
@@ -529,7 +522,6 @@ async def on_ready():
 
         await update_review_counter(silent=False)
 
-        # CATCH-UP зарплат
         try:
             paid_advance = await try_pay_advance()
             if paid_advance:
@@ -727,8 +719,6 @@ async def on_member_join(member: disnake.Member):
                         f"> В панели профиля <#1540018373503483934> выбери пункт "
                         f"**«Ежедневный подарок»** — каждый день получай от **10 до 30 DC**. "
                         f"Кулдаун — ровно 24 часа с момента получения.\n\n"
-                        f"**📖 С чего начать?**\n"
-                        f"> Справочник — <#1532398684074016870>.\n"
                         f"> Удачи и приятных покупок!"
                     ),
                     color=6776679,
