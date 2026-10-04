@@ -706,7 +706,7 @@ async def on_ready():
     try:
         await bot.change_presence(
             status=disnake.Status.online,
-            activity=disnake.Game("консультант diamond shop"),
+            activity=disnake.Game("Нейросеть сервера"),
         )
     except Exception:
         pass
