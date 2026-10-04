@@ -45,6 +45,8 @@ from modules.ticket_rating import (
     RatingFinishView,   # ← переименовано
 )
 
+from modules.receipt_view import ReceiptView
+
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
@@ -1249,7 +1251,7 @@ class InvoiceModal(Modal):
         file = disnake.File(buf, filename=f"receipt_{order_id}.png")
         embed = disnake.Embed(title=f"Счёт для оплаты создан: к оплате {total} Р", color=6776679)
         embed.set_image(url=f"attachment://receipt_{order_id}.png")
-        await inter.channel.send(embed=embed, file=file)
+        await inter.channel.send(embed=embed, file=file, view=ReceiptView())
         await inter.edit_original_response(content="✅ Счёт отправлен в тикет.")
         await log_discord(
             title="🧾 Создан счёт",
