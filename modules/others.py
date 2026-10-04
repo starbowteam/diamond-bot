@@ -3,27 +3,11 @@
 Единый модуль вспомогательных систем Diamond.
 
 Объединяет:
-  · Бусты DC + казино-предметы (бывший modules/boosts.py)
-  · Анонс акции дня в канал витрины (бывший modules/deal_announce.py)
-  · Подарки DC между юзерами (бывший modules/gifts.py)
-  · Автозамена ссылок страйпа (бывший modules/fix_stripe.py)
-
-Импортируется как:
-    from modules.others import (
-        # boosts
-        format_remaining, get_multiplier, apply_boost,
-        get_review_cooldown, can_activate, do_activate,
-        get_casino_multiplier, has_insurance, has_next_mult,
-        apply_casino_win, try_insurance, get_boosts_summary,
-        # deal announce
-        process_deal_announce,
-        # gifts
-        process_gift_dc, GIFT_FEE_PERCENT,
-        # fix_stripe
-        run_fix,
-    )
+  · Бусты DC + казино-предметы
+  · Анонс акции дня
+  · Подарки DC
+  · Автозамена ссылок страйпа
 """
-
 import os
 import re
 import time
@@ -36,7 +20,6 @@ from core.utils import (
     DATA_DIR, CONFIG,
     logger, log_discord,
     load_json, save_json,
-    # для boosts
     get_item, get_active_items, activate_item, consume_use, clear_item,
     get_dc_cache, save_dc_cache, sync_dc_to_json,
 )
@@ -44,11 +27,8 @@ from modules.dc import get_user_balance, remove_dc, add_dc
 
 
 # ============================================================
-# ═══════════════════════════════════════════════════════════
-# БЛОК 1: БУСТЫ DC + КАЗИНО-ПРЕДМЕТЫ
-# ═══════════════════════════════════════════════════════════
+# БЛОК 1: БУСТЫ
 # ============================================================
-
 def format_remaining(seconds: int) -> str:
     if seconds <= 0:
         return "истёк"
@@ -63,10 +43,7 @@ def format_remaining(seconds: int) -> str:
 
 
 def get_multiplier(user_id: int, kind: str) -> float:
-    """
-    Множитель начисления. kind: 'messages' | 'voice' | 'review'
-    Берёт максимум из boost_all_x2 и специфичного.
-    """
+    """kind: 'messages' | 'voice' | 'review'"""
     m_all = 1.0
     m_spec = 1.0
 
@@ -94,7 +71,6 @@ def apply_boost(user_id: int, kind: str, base: int) -> int:
 
 
 def get_review_cooldown(user_id: int) -> int:
-    """120 сек по умолчанию, 60 сек с boost_cooldown_half."""
     item = get_item(user_id, "boost_cooldown_half")
     if item and item["value"]:
         try:
@@ -104,14 +80,7 @@ def get_review_cooldown(user_id: int) -> int:
     return 120
 
 
-# ============================================================
-# ПРОВЕРКА + АКТИВАЦИЯ
-# ============================================================
 def can_activate(user_id: int, item_key: str) -> tuple[bool, str]:
-    """
-    Проверяет, можно ли купить/активировать предмет.
-    Возвращает (True, "") либо (False, "причина с временем остатка").
-    """
     existing = get_item(user_id, item_key)
     if existing:
         if existing["expires_at"] > 0:
@@ -124,10 +93,6 @@ def can_activate(user_id: int, item_key: str) -> tuple[bool, str]:
 
 
 async def do_activate(user_id: int, item_key: str, item: dict) -> str:
-    """
-    Активирует предмет. Возвращает текст для показа юзеру.
-    """
-    # ─── Мгновенный сброс лимита ───
     if item_key == "boost_daily_reset":
         data = get_dc_cache(user_id)
         data["messages_today"] = 0
@@ -137,7 +102,6 @@ async def do_activate(user_id: int, item_key: str, item: dict) -> str:
         sync_dc_to_json()
         return "✅ Лимит сообщений и войса **обнулён на сегодня**!"
 
-    # ─── Обычные предметы ───
     duration = int(item.get("duration_hours", 0) or 0)
     uses = int(item.get("uses", -1))
     activate_item(
@@ -159,22 +123,6 @@ async def do_activate(user_id: int, item_key: str, item: dict) -> str:
 # ============================================================
 # КАЗИНО
 # ============================================================
-def get_casino_multiplier(user_id: int) -> float:
-    mult = 1.0
-    lh = get_item(user_id, "casino_lucky_hour")
-    if lh:
-        mult *= float(lh["value"] or 1.0)
-    return mult
-
-
-def has_insurance(user_id: int) -> bool:
-    return get_item(user_id, "casino_insurance") is not None
-
-
-def has_next_mult(user_id: int) -> bool:
-    return get_item(user_id, "casino_boost_x2") is not None
-
-
 def apply_casino_win(user_id: int, base_payout: int) -> tuple[int, list]:
     used = []
     payout = base_payout
@@ -203,55 +151,20 @@ def try_insurance(user_id: int, bet: int) -> int:
 
 
 # ============================================================
-# ПРОФИЛЬ — витрина
-# ============================================================
-def get_boosts_summary(user_id: int) -> list:
-    now = int(time.time())
-    items = get_active_items(user_id)
-    name_map = {
-        "boost_messages_x2":     "x2 к сообщениям",
-        "boost_voice_x2":        "x2 к войсу",
-        "boost_all_x2":          "x2 ко всему",
-        "boost_review_x2":       "x2 к отзывам",
-        "boost_cooldown_half":   "Кулдаун отзыва 60с",
-        "casino_insurance":      "Страховка ставки",
-        "casino_boost_x2":       "x2 к выигрышу",
-        "casino_lucky_hour":     "Удачный час",
-        "casino_jackpot_ticket": "Билет джекпота",
-    }
-    out = []
-    for it in items:
-        key = it["item_key"]
-        name = name_map.get(key, key)
-        if it["expires_at"] > 0:
-            left = max(it["expires_at"] - now, 0)
-            out.append({"name": name, "time": format_remaining(left)})
-        elif it["uses_left"] > 0:
-            out.append({"name": name, "time": f"{it['uses_left']} исп."})
-    return out
-
-
-# ============================================================
-# ═══════════════════════════════════════════════════════════
 # БЛОК 2: АНОНС АКЦИИ ДНЯ
-# ═══════════════════════════════════════════════════════════
 # ============================================================
-
 ANNOUNCE_CHANNEL_ID = 1462136361711829053
 PING_ROLE_ID = 1127428607606796290
 
 DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
 STATE_FILE = os.path.join(DATA_DIR, "deal_announce.json")
 
-ANNOUNCE_LIFETIME = 3600   # 1 час
+ANNOUNCE_LIFETIME = 3600
 
 
 def _load_state() -> dict:
     return load_json(STATE_FILE, {
-        "slot": 0,
-        "message_id": 0,
-        "sent_at": 0,
-        "channel_id": 0,
+        "slot": 0, "message_id": 0, "sent_at": 0, "channel_id": 0,
     })
 
 
@@ -326,11 +239,6 @@ async def announce_deal(bot, deal: dict, slot: int):
 
 
 async def process_deal_announce(bot):
-    """
-    1) если анонс висит больше часа — удалить
-    2) если слот сменился и акция свежая (< 1 ч) — отправить новый анонс
-    3) если слот сменился, но акция старая — слот запомнить, не отправлять
-    """
     try:
         deal_data = load_json(DAILY_DEAL_FILE, {})
         cur_slot = deal_data.get("slot", 0)
@@ -340,21 +248,16 @@ async def process_deal_announce(bot):
         state = _load_state()
         now = time.time()
 
-        # ---- 1) старое сообщение старше часа — удалить ----
         if state.get("message_id") and state.get("sent_at"):
             if now - state["sent_at"] > ANNOUNCE_LIFETIME:
                 await _delete_announce(bot, state)
 
-        # ---- 2) новый слот ----
         if cur_deal and cur_slot and cur_slot != state.get("slot"):
-            # проверим свежесть акции
             if (now - updated_at) < ANNOUNCE_LIFETIME:
-                # старое сообщение (если ещё висит) убираем
                 if state.get("message_id"):
                     await _delete_announce(bot, state)
                 await announce_deal(bot, cur_deal, cur_slot)
             else:
-                # опоздали — просто запоминаем слот, чтобы не спамить
                 state["slot"] = cur_slot
                 _save_state(state)
                 logger.info(
@@ -367,12 +270,9 @@ async def process_deal_announce(bot):
 
 
 # ============================================================
-# ═══════════════════════════════════════════════════════════
 # БЛОК 3: ПОДАРКИ DC
-# ═══════════════════════════════════════════════════════════
 # ============================================================
-
-GIFT_FEE_PERCENT = 5  # комиссия магазина
+GIFT_FEE_PERCENT = 5
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
 
@@ -382,13 +282,6 @@ async def process_gift_dc(
     amount: int,
     price_paid: int,
 ) -> tuple[bool, str]:
-    """
-    Проводит подарок:
-    - sender уже списан на price_paid (снаружи)
-    - recipient получает amount DC
-    - recipient получает ЛС с эмбедом
-    Возврат: (success, message)
-    """
     guild = sender.guild
     recipient = guild.get_member(recipient_id)
 
@@ -404,7 +297,6 @@ async def process_gift_dc(
         await add_dc(sender.id, price_paid, "Возврат — сам себе")
         return False, "Нельзя подарить самому себе"
 
-    # Начисляем получателю
     try:
         await add_dc(recipient.id, amount, f"Подарок от {sender.display_name}")
     except Exception as e:
@@ -412,19 +304,15 @@ async def process_gift_dc(
         await add_dc(sender.id, price_paid, "Возврат — ошибка начисления")
         return False, f"Ошибка начисления: {e}"
 
-    # 👇 Хук квестов клан-лиги
     try:
         from clan.quests import on_gift_quest_hook
         await on_gift_quest_hook(sender.id, amount)
     except Exception as e:
         logger.warning(f"clan gift hook: {e}")
 
-    # 👇 Достижение "Щедрый" — суммарные подарки
     try:
         from clan.achievements import check_and_unlock
         from core.bot import bot
-
-        # Считаем общую сумму подарков от юзера (по истории DC)
         from core.utils import get_dc_cache
         data = get_dc_cache(sender.id)
         total_gifted = 0
@@ -433,14 +321,11 @@ async def process_gift_dc(
             amt = h.get("amount", 0)
             if reason.startswith("Подарок от") and amt > 0:
                 total_gifted += amt
-        # Плюс только что сделанный
         total_gifted += amount
-
         await check_and_unlock(sender.id, "gift_total", value=total_gifted, bot=bot)
     except Exception as e:
         logger.warning(f"gift ach: {e}")
 
-    # ЛС получателю
     try:
         dm_embed = disnake.Embed(
             title="🎁 Вам подарили Diamond Coins!",
@@ -457,7 +342,6 @@ async def process_gift_dc(
     except Exception as e:
         logger.warning(f"gift: не удалось отправить ЛС получателю {recipient.id}: {e}")
 
-    # Лог в служебный канал
     await log_discord(
         title="🎁 Подарок DC",
         description=(
@@ -474,11 +358,8 @@ async def process_gift_dc(
 
 
 # ============================================================
-# ═══════════════════════════════════════════════════════════
 # БЛОК 4: АВТОЗАМЕНА ССЫЛОК СТРАЙПА
-# ═══════════════════════════════════════════════════════════
 # ============================================================
-
 NEW_URL = (
     "https://cdn.discordapp.com/attachments/1527006158282555412/"
     "1537851307757539390/image.png"
@@ -509,7 +390,6 @@ def should_skip(path: Path) -> bool:
 
 
 def fix_content(content: str) -> tuple[str, int]:
-    """Возвращает (новое содержимое, число замен)."""
     matches = STRIPE_URL_RE.findall(content)
     count = len(matches)
     if count == 0:
@@ -519,7 +399,6 @@ def fix_content(content: str) -> tuple[str, int]:
 
 
 def run_fix(verbose: bool = True) -> dict:
-    """Проходит по всем файлам, чинит ссылки. Возвращает статистику."""
     stats = {
         "scanned": 0,
         "changed": 0,
