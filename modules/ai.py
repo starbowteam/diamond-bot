@@ -5,7 +5,9 @@ Diamond AI — отдельный бот-консультант магазина
 Запускается как отдельный процесс через ai_main.py.
 Не импортирует core.bot — не клонирует основной.
 
-LLM: OpenRouter (переменная окружения — MISTRAL_API_KEY).
+LLM: Google Gemini (AI Studio free tier).
+Переменная окружения — MISTRAL_API_KEY (внутри ключ Gemini).
+Используется НАТИВНЫЙ endpoint Gemini (generateContent).
 """
 import os
 import re
@@ -50,23 +52,28 @@ AI_TOKEN = os.getenv("AI_TOKEN")
 if not AI_TOKEN:
     print("❌ AI_TOKEN не установлен — процесс AI завершится.")
 
-# ⚠️ Имя переменной оставлено прежним, но теперь это ключ OpenRouter.
-# Старый Mistral-ключ больше не используется — можно удалить.
-OPENROUTER_API_KEY = os.getenv("MISTRAL_API_KEY")
-if not OPENROUTER_API_KEY:
-    print("⚠️ MISTRAL_API_KEY (OpenRouter) не задан — AI не сможет отвечать.")
+# ⚠️ Переменная оставлена прежней — MISTRAL_API_KEY.
+# Внутри — ключ Google Gemini (AI Studio).
+GEMINI_API_KEY = os.getenv("MISTRAL_API_KEY")
+if not GEMINI_API_KEY:
+    print("⚠️ MISTRAL_API_KEY (Gemini) не задан — AI не сможет отвечать.")
 
-# Ссылка на проект — OpenRouter требует для статистики (можно любой твой URL)
-OPENROUTER_REFERER = os.getenv("OPENROUTER_REFERER", "https://diamond.shop")
-OPENROUTER_TITLE   = os.getenv("OPENROUTER_TITLE", "Diamond AI")
+# ─── Модели Gemini (по приоритету) ───
+# Если первая перегружена — код пробует следующую.
+GEMINI_MODELS = [
+    "gemini-flash-latest",     # основная — то, что ты дал в curl
+    "gemini-2.0-flash",        # фолбэк
+    "gemini-1.5-flash",        # второй фолбэк
+    "gemini-1.5-flash-8b",     # на крайний случай
+]
 
-# Модель OpenRouter.
-# Хорошие варианты (от дешёвого к дорогому):
-#   "openai/gpt-4o-mini"                    — быстрый, умный, дешёвый  ← выбрал его
-#   "anthropic/claude-3.5-haiku"            — умнее, чуть дороже
-#   "google/gemini-flash-1.5"               — очень дешёвый
-#   "mistralai/mistral-small-24b-instruct-2501" — если хочется остаться на Mistral
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+# Можно переопределить через env: GEMINI_MODEL="a,b,c"
+_env_model = os.getenv("GEMINI_MODEL")
+if _env_model:
+    GEMINI_MODELS = [m.strip() for m in _env_model.split(",") if m.strip()]
+
+# Базовый URL (нативный Gemini API)
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 ALLOWED_CHANNEL_ID = 1462064375862005845
 AI_LOG_CHANNEL_ID = 1530453871581855744
@@ -445,71 +452,125 @@ def choose_style(mood: str, text: str) -> str:
 
 
 # ============================================================
-# LLM (OpenRouter)
+# LLM (Gemini — нативный endpoint)
 # ============================================================
+def _build_gemini_payload(system_content: str, history: List[Dict[str, str]],
+                          user_message: str) -> dict:
+    """
+    Формирует payload для Gemini API.
+      · systemInstruction — системный промпт
+      · contents — история реплик
+    """
+    contents = []
+
+    # История пользователя
+    for msg in history[-MAX_USER_HISTORY:]:
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append({
+            "role": role,
+            "parts": [{"text": msg["content"]}],
+        })
+
+    # Текущее сообщение
+    contents.append({
+        "role": "user",
+        "parts": [{"text": user_message}],
+    })
+
+    return {
+        "systemInstruction": {
+            "parts": [{"text": system_content}],
+        },
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.85,
+            "maxOutputTokens": 600,
+        },
+    }
+
+
+async def _try_model(session: aiohttp.ClientSession, model: str,
+                     payload: dict) -> tuple[bool, str]:
+    """
+    Пробует одну модель Gemini.
+    Возвращает (успех, ответ_или_ошибка).
+    """
+    url = f"{GEMINI_API_BASE}/{model}:generateContent"
+    headers = {
+        "Content-Type": "application/json",
+        "X-goog-api-key": GEMINI_API_KEY,
+    }
+
+    try:
+        async with session.post(
+            url, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=40),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if "error" in data:
+                    err_msg = data["error"].get("message", "unknown")
+                    logger.warning(f"[{model}] gemini error: {err_msg}")
+                    return False, err_msg
+                try:
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        return False, "no candidates"
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if not parts:
+                        # Может быть заблокировано фильтром
+                        finish = candidates[0].get("finishReason", "")
+                        logger.warning(f"[{model}] empty parts, finish={finish}")
+                        return False, f"empty, finish={finish}"
+                    reply = parts[0].get("text", "").strip()
+                except Exception as e:
+                    logger.warning(f"[{model}] parse error: {e}")
+                    return False, "parse error"
+                if not reply:
+                    return False, "empty reply"
+                return True, reply
+
+            err = await resp.text()
+            logger.warning(f"[{model}] {resp.status}: {err[:200]}")
+            if resp.status in (429, 500, 502, 503, 504):
+                return False, f"http {resp.status}"
+            return False, f"http {resp.status}"
+
+    except asyncio.TimeoutError:
+        logger.warning(f"[{model}] timeout")
+        return False, "timeout"
+    except Exception as e:
+        logger.warning(f"[{model}] {type(e).__name__}: {e}")
+        return False, str(e)
+
+
 async def ask_llm(user_message: str, username: str, style: str,
                   user_id: int, context_block: str) -> str:
-    if not OPENROUTER_API_KEY:
+    if not GEMINI_API_KEY:
         return "прости, мой мозг сейчас отключён. попробуй позже."
 
     style_extra = MOOD_PROMPTS.get(style, "")
     system_content = SYSTEM_PROMPT + style_extra + "\n\n" + context_block
 
-    messages = [{"role": "system", "content": system_content}]
-    for msg in user_ctx.get(user_id, [])[-MAX_USER_HISTORY:]:
-        messages.append(msg)
-    messages.append({"role": "user", "content": f"{username}: {user_message}"})
+    history = user_ctx.get(user_id, [])
+    payload = _build_gemini_payload(
+        system_content=system_content,
+        history=history,
+        user_message=f"{username}: {user_message}",
+    )
 
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": messages,
-        "temperature": 0.85,
-        "max_tokens": 600,
-    }
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        # Опциональные заголовки OpenRouter — для статистики и приоритета
-        "HTTP-Referer": OPENROUTER_REFERER,
-        "X-Title": OPENROUTER_TITLE,
-    }
+    async with aiohttp.ClientSession() as session:
+        for model in GEMINI_MODELS:
+            ok, result = await _try_model(session, model, payload)
+            if ok:
+                logger.info(f"[ai] ответ получен от {model}")
+                _push_user(user_id, "user", f"{username}: {user_message}")
+                _push_user(user_id, "assistant", result)
+                return result
+            await asyncio.sleep(0.3)
 
-    for attempt in range(2):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    json=payload, headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=40),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        # OpenRouter может вернуть ошибку внутри 200
-                        if "error" in data:
-                            err_msg = data["error"].get("message", "unknown")
-                            logger.error(f"openrouter error: {err_msg}")
-                            return "что-то сломалось у провайдера, попробуй ещё."
-                        reply = data["choices"][0]["message"]["content"].strip()
-                        _push_user(user_id, "user", f"{username}: {user_message}")
-                        _push_user(user_id, "assistant", reply)
-                        return reply
-
-                    err = await resp.text()
-                    logger.error(f"openrouter {resp.status}: {err[:300]}")
-                    if resp.status == 429 and attempt == 0:
-                        await asyncio.sleep(2)
-                        continue
-                    return "что-то пошло не так, давай ещё раз."
-        except asyncio.TimeoutError:
-            logger.warning("openrouter timeout")
-            if attempt == 0:
-                continue
-            return "слишком долго думал, попробуй короче."
-        except Exception as e:
-            logger.exception(f"openrouter err: {e}")
-            return "ой, я запутался. давай по новой."
-
-    return "не получается ответить."
+    logger.error("все модели Gemini недоступны")
+    return "сейчас все мои мозги перегружены. попробуй через минуту."
 
 
 # ============================================================
@@ -641,7 +702,7 @@ async def cleanup_contexts():
 @bot.event
 async def on_ready():
     logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
-    logger.info(f"LLM: OpenRouter · модель: {OPENROUTER_MODEL}")
+    logger.info(f"LLM: Gemini · модели: {', '.join(GEMINI_MODELS)}")
     try:
         await bot.change_presence(
             status=disnake.Status.online,
