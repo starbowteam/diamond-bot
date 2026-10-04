@@ -38,7 +38,9 @@ from modules.dc import (
     sync_dc_to_json
 )
 from modules.commands_profile import load_embed_from_file
-from modules.work_render import (
+
+# 👇 ОБЪЕДИНЁННЫЙ МОДУЛЬ ТИКЕТОВ: счёт, рейтинг, отзыв, кодекс магазина
+from modules.tickets import (
     render_work_salary,
     render_work_top,
     render_work_tickets,
