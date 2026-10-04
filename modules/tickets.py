@@ -28,8 +28,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict
 
 import disnake
-from disnake import ButtonStyle, PartialEmoji
-from disnake.ui import View, Button, Modal, Select, TextInput, SelectOption
+from disnake import ButtonStyle, PartialEmoji, SelectOption
+from disnake.ui import View, Button, Modal, Select, TextInput
 
 from PIL import Image, ImageDraw, ImageFont
 
