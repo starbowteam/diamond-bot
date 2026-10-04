@@ -2,14 +2,8 @@
 """
 Diamond AI — отдельный бот-консультант магазина.
 
-Особенности:
-  · Свой токен (AI_TOKEN), отдельный процесс
-  · Работает ТОЛЬКО в одном канале (ALLOWED_CHANNEL_ID)
-  · Не импортирует core.bot — не клонирует основной
-  · Читает реальные данные: баланс, отзывы, клан, каталог
-  · Отвечает на все сообщения в канале
-  · Автосообщение в чат — каждые 5 часов (если тихо)
-  · ЛС разным людям — каждые 2 часа (лимит 10/день, кулдаун 7 дней/юзер)
+Запускается из main.py через asyncio.gather вместе с основным ботом.
+У AI свой токен, свой процесс событий, свой on_message.
 """
 import os
 import re
@@ -52,37 +46,28 @@ except Exception:
 # ============================================================
 AI_TOKEN = os.getenv("AI_TOKEN")
 if not AI_TOKEN:
-    print("❌ AI_TOKEN не установлен.")
-    raise SystemExit(1)
+    print("⚠️ AI_TOKEN не установлен — AI-бот не будет запущен.")
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 if not MISTRAL_API_KEY:
     print("⚠️ MISTRAL_API_KEY не задан — AI не сможет отвечать.")
 
-# Куда AI пишет (только этот канал)
 ALLOWED_CHANNEL_ID = 1462064375862005845
-
-# Лог-канал AI (общий с основным ботом)
 AI_LOG_CHANNEL_ID = 1530453871581855744
 
-# Модель
 MISTRAL_MODEL = "mistral-small-latest"
 
-# История в промпт
 MAX_CHANNEL_CTX = 10
 MAX_USER_HISTORY = 6
 
-# Авто-сообщения в чат
-CHAT_AUTO_INTERVAL_HOURS = 5      # раз в 5 часов
-CHAT_AUTO_IDLE_HOURS = 3          # если тихо последние 3 часа
+CHAT_AUTO_INTERVAL_HOURS = 5
+CHAT_AUTO_IDLE_HOURS = 3
 
-# ЛС-рассылка
-DM_INTERVAL_HOURS = 2             # раз в 2 часа
-DM_DAILY_LIMIT = 10               # не больше 10 в день
-DM_USER_COOLDOWN_DAYS = 7         # одному юзеру — раз в 7 дней
-DM_MIN_DAYS_ON_SERVER = 1         # юзер должен быть на сервере минимум 1 день
+DM_INTERVAL_HOURS = 2
+DM_DAILY_LIMIT = 10
+DM_USER_COOLDOWN_DAYS = 7
+DM_MIN_DAYS_ON_SERVER = 1
 
-# Глобальный ID гильдии (для поиска участников)
 GUILD_ID = int(CONFIG["GUILD_ID"])
 
 
@@ -116,14 +101,14 @@ SYSTEM_PROMPT = """
 
 **diamond coin (dc)** — внутренняя валюта.
 - заработок: 1 dc за каждые 10 сообщений (максимум 30 dc/день), 3 dc за час в голосе (максимум 15 dc/день)
-- отзыв о покупке = +15 dc (проверяется модерацией)
+- отзыв о покупке = +15 dc
 - ежедневный бонус с ролью «клуб» = +10 dc, только если за сутки была активность
-- ежедневный подарок в панели профиля = от 10 до 30 dc, кулдаун ровно 24 часа
+- ежедневный подарок в панели профиля = от 10 до 30 dc, кулдаун 24 часа
 - казино: рулетка, блэкджек, монетка — ставки от 20 до 4000 dc
-- зарплаты сотрудникам: аванс 15 числа, зарплата 29 числа
+- зарплаты: аванс 15 числа, зарплата 29 числа
 
 **роли покупателей** — по количеству отзывов:
-- 1–5 отзывов → клуб + bronze buyer
+- 1–5 → клуб + bronze buyer
 - 6–10 → silver buyer
 - 11–15 → gold buyer
 - 16–20 → diamond buyer
@@ -145,12 +130,12 @@ SYSTEM_PROMPT = """
 - 3 клана: окаменелости, сияние, кристализация
 - сезон 28 дней, выплата 28 числа в 20:00 мск
 - вклад: до 100 dc за раз — вся сумма, больше — 40% в копилку
-- топ-3 по вкладу: бонусы ×3.00 / ×2.00 / ×1.50
+- топ-3 по вкладу: ×3.00 / ×2.00 / ×1.50
 - дневной лимит вклада — 2500 dc
-- условия: баланс ≥ 45 dc, есть роль покупателя, активность за 30 дней
+- условия: баланс ≥ 45 dc, роль покупателя, активность за 30 дней
 
 **казино**:
-- рулетка: множители от x0 до x10, джекпот 0.5%
+- рулетка: множители x0–x10, джекпот 0.5%
 - блэкджек: выплата x2, блэкджек x2.5, удвоение на первых двух картах
 - монетка: выплата x1.9
 
@@ -158,13 +143,13 @@ SYSTEM_PROMPT = """
 - программирование, код, скрипты
 - пароли, токены, api-ключи, ssh, серверная инфраструктура
 - любые технические задачи за пределами магазина
-если пользователь просит — вежливо откажись и напомни, что ты консультант по магазину.
+если пользователь просит — вежливо откажись.
 
 **как отвечать**:
 - если в блоке [данные] есть информация о пользователе — используй её
-- точные цены всегда отправляй в витрину
-- на личный прогресс — говори конкретные цифры
-- не уверен — скажи «уточни у менеджера в тикете»
+- точные цены отправляй в витрину
+- на личный прогресс — конкретные цифры
+- не уверен — «уточни у менеджера в тикете»
 """.strip()
 
 
@@ -177,7 +162,7 @@ MOOD_PROMPTS = {
 
 
 # ============================================================
-# АВТО-ФРАЗЫ (новые, живые)
+# АВТО-ФРАЗЫ
 # ============================================================
 CHAT_AUTO_PHRASES = [
     "тут так тихо, что я успел перечитать все свои настройки. что-то нужно?",
@@ -214,9 +199,9 @@ DM_PHRASES = [
 # ============================================================
 async def log_to_discord(title: str, description: str, color: int = 0x00ff00):
     try:
-        ch = bot.get_channel(AI_LOG_CHANNEL_ID)
+        ch = ai_bot.get_channel(AI_LOG_CHANNEL_ID)
         if not ch:
-            ch = await bot.fetch_channel(AI_LOG_CHANNEL_ID)
+            ch = await ai_bot.fetch_channel(AI_LOG_CHANNEL_ID)
         if not ch:
             return
         embed = disnake.Embed(
@@ -231,7 +216,7 @@ async def log_to_discord(title: str, description: str, color: int = 0x00ff00):
 
 
 # ============================================================
-# BOT
+# BOT (AI)
 # ============================================================
 intents = disnake.Intents.default()
 intents.messages = True
@@ -239,7 +224,7 @@ intents.guilds = True
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!ai", intents=intents)
+ai_bot = commands.Bot(command_prefix="!ai", intents=intents)
 
 
 # ============================================================
@@ -249,15 +234,12 @@ channel_ctx: List[Dict[str, str]] = []
 user_ctx: Dict[int, List[Dict[str, str]]] = {}
 last_activity: Dict[int, float] = {}
 
-# Кто хоть раз писал AI (для ЛС-рассылки)
 users_who_talked: set = set()
 
-# Кулдауны и счётчики для ЛС
 last_dm_time: Dict[int, float] = {}
 dm_daily_counter = 0
 dm_daily_date = datetime.now(timezone.utc).date()
 
-# Для авто-сообщений в чат
 last_chat_auto = 0.0
 
 
@@ -509,18 +491,17 @@ async def ask_mistral(user_message: str, username: str, style: str,
 
 
 # ============================================================
-# АВТО-СООБЩЕНИЯ В ЧАТ (каждые 5ч, если тихо)
+# АВТО-СООБЩЕНИЯ В ЧАТ
 # ============================================================
 @tasks.loop(hours=CHAT_AUTO_INTERVAL_HOURS)
 async def auto_chat_task():
     global last_chat_auto
-    await bot.wait_until_ready()
+    await ai_bot.wait_until_ready()
 
-    # Проверяем, не писали ли в канал за последние CHAT_AUTO_IDLE_HOURS
     try:
-        ch = bot.get_channel(ALLOWED_CHANNEL_ID)
+        ch = ai_bot.get_channel(ALLOWED_CHANNEL_ID)
         if not ch:
-            ch = await bot.fetch_channel(ALLOWED_CHANNEL_ID)
+            ch = await ai_bot.fetch_channel(ALLOWED_CHANNEL_ID)
         if not ch:
             return
 
@@ -532,7 +513,7 @@ async def auto_chat_task():
                 break
 
         if has_recent:
-            return  # не мешаем живому общению
+            return
 
         phrase = random.choice(CHAT_AUTO_PHRASES)
         await ch.send(phrase)
@@ -548,14 +529,13 @@ async def auto_chat_task():
 
 
 # ============================================================
-# ЛС-РАССЫЛКА (каждые 2ч, лимит 10/день)
+# ЛС-РАССЫЛКА
 # ============================================================
 @tasks.loop(hours=DM_INTERVAL_HOURS)
 async def auto_dm_task():
     global dm_daily_counter, dm_daily_date
-    await bot.wait_until_ready()
+    await ai_bot.wait_until_ready()
 
-    # Сброс дневного счётчика
     today = datetime.now(timezone.utc).date()
     if today != dm_daily_date:
         dm_daily_counter = 0
@@ -564,20 +544,20 @@ async def auto_dm_task():
     if dm_daily_counter >= DM_DAILY_LIMIT:
         return
 
-    guild = bot.get_guild(GUILD_ID)
+    guild = ai_bot.get_guild(GUILD_ID)
     if not guild:
         return
 
-    # Кандидаты: только те, кто когда-либо писал AI (opt-in)
     if not users_who_talked:
         return
 
     now_ts = time.time()
     cooldown = DM_USER_COOLDOWN_DAYS * 86400
+    bot_user_id = ai_bot.user.id if ai_bot.user else 0
 
     candidates = []
     for uid in users_who_talked:
-        if uid == bot.user.id:
+        if uid == bot_user_id:
             continue
         if last_dm_time.get(uid, 0) > now_ts - cooldown:
             continue
@@ -615,13 +595,13 @@ async def auto_dm_task():
         )
     except disnake.Forbidden:
         logger.info(f"ЛС закрыты у {target_id}")
-        last_dm_time[target_id] = now_ts  # не пытаемся снова
+        last_dm_time[target_id] = now_ts
     except Exception as e:
         logger.warning(f"auto_dm {target_id}: {e}")
 
 
 # ============================================================
-# ОЧИСТКА КОНТЕКСТОВ
+# ОЧИСТКА
 # ============================================================
 @tasks.loop(hours=6)
 async def cleanup_contexts():
@@ -630,17 +610,17 @@ async def cleanup_contexts():
         if now - last_activity.get(uid, 0) > 7 * 86400:
             user_ctx.pop(uid, None)
             last_activity.pop(uid, None)
-    logger.info(f"cleanup: {len(user_ctx)} активных юзеров в контексте")
+    logger.info(f"ai cleanup: {len(user_ctx)} активных юзеров в контексте")
 
 
 # ============================================================
 # ON READY
 # ============================================================
-@bot.event
+@ai_bot.event
 async def on_ready():
-    logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
+    logger.info(f"diamond ai запущен как {ai_bot.user} (id={ai_bot.user.id})")
     try:
-        await bot.change_presence(
+        await ai_bot.change_presence(
             status=disnake.Status.online,
             activity=disnake.Game("консультант diamond shop"),
         )
@@ -656,7 +636,7 @@ async def on_ready():
 
     await log_to_discord(
         title="✅ Diamond AI запущен",
-        description=f"> **{bot.user}** готов. Отвечаю только в <#{ALLOWED_CHANNEL_ID}>.",
+        description=f"> **{ai_bot.user}** готов. Отвечаю только в <#{ALLOWED_CHANNEL_ID}>.",
         color=0x00ff00,
     )
 
@@ -664,7 +644,7 @@ async def on_ready():
 # ============================================================
 # ON MESSAGE
 # ============================================================
-@bot.event
+@ai_bot.event
 async def on_message(message: disnake.Message):
     if message.author.bot:
         return
@@ -678,9 +658,8 @@ async def on_message(message: disnake.Message):
 
     user_id = message.author.id
     last_activity[user_id] = time.time()
-    users_who_talked.add(user_id)   # opt-in для ЛС-рассылки
+    users_who_talked.add(user_id)
 
-    # Технические запросы — отказ
     if is_technical_request(text):
         await message.reply(
             "извини, на технические темы не отвечаю — я консультант магазина. "
@@ -733,16 +712,3 @@ async def on_message(message: disnake.Message):
         )
     except Exception:
         pass
-
-
-# ============================================================
-# RUN
-# ============================================================
-def run_ai():
-    if not AI_TOKEN:
-        print("❌ AI_TOKEN не установлен.")
-        return
-    try:
-        bot.run(AI_TOKEN)
-    except Exception as e:
-        logger.exception(f"Ошибка запуска AI: {e}")
