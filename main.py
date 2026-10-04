@@ -8,7 +8,7 @@ sys.path.insert(0, BASE_DIR)
 
 # Автозамена ссылок страйпа при каждом запуске
 try:
-    from modules.fix_stripe import run_fix
+    from modules.others import run_fix
     _stripe_stats = run_fix(verbose=False)
     if _stripe_stats["changed"] > 0:
         print(f"🔧 fix_stripe: обновлено {_stripe_stats['total_replacements']} ссылок в {_stripe_stats['changed']} файлах")
