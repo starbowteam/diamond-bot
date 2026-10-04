@@ -24,13 +24,9 @@ from core.utils import (
     add_closed_order
 )
 
-from modules.actions import (
-    send_actions_panel, handle_flash_interaction,
-    refresh_daily_deal, load_flash_sale, save_flash_sale,
-    generate_random_deal, FLASH_SALE_FILE,
-    FLASH_SALE_DURATION_HOURS, DAILY_DEAL_REFRESH_HOURS,
-    start_flash_sale,
-)
+# 👇 Из actions берём только живое: товар дня (витрина)
+from modules.actions import refresh_daily_deal
+
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
@@ -57,10 +53,6 @@ _REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
 REVIEW_REWARD_DC = 15
-
-FLASH_SALE_ROLE_ID = 1127428607606796290
-FLASH_SALE_DURATION = FLASH_SALE_DURATION_HOURS * 3600
-FLASH_SALE_CHECK_MINUTES = 30
 
 WELCOME_BONUS_DC = 50
 
@@ -101,11 +93,11 @@ SALARY_ROLES = {
 }
 
 SALARY_ROLE_ORDER = [
-    1471844291595731016,   # Control Diamond — приоритет выше всех
-    1513935883475226796,   # Assistant
-    1154757071330365490,   # Sales Manager
-    1471190371181789234,   # Employer
-    1457964854441672806,   # Advertiser
+    1471844291595731016,
+    1513935883475226796,
+    1154757071330365490,
+    1471190371181789234,
+    1457964854441672806,
 ]
 
 
@@ -329,49 +321,10 @@ async def daily_deal_task():
         deal = refresh_daily_deal()
         after = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
         if before.get("slot") != after.get("slot"):
-            if after.get("flash_slot"):
-                await start_flash_sale(bot)
-            elif deal:
+            if deal:
                 logger.info(f"Товар дня: {deal['item_data']['name']}")
     except Exception as e:
         logger.exception(f"daily_deal_task error: {e}")
-
-
-@tasks.loop(minutes=FLASH_SALE_CHECK_MINUTES)
-async def flash_sale_task():
-    await bot.wait_until_ready()
-    try:
-        data = load_flash_sale()
-        now = time.time()
-        if data.get("active"):
-            if now - data.get("started_at", 0) >= FLASH_SALE_DURATION:
-                ch_id = data.get("channel_id")
-                msg_id = data.get("message_id")
-                if ch_id and msg_id:
-                    try:
-                        ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
-                        msg = await ch.fetch_message(msg_id)
-                        await msg.delete()
-                    except Exception as e:
-                        logger.warning(f"flash msg delete: {e}")
-                save_flash_sale({"active": False, "item": None,
-                                 "started_at": 0, "message_id": 0, "channel_id": 0})
-                await log_discord(title="⚡ Flash sale завершён",
-                                  description=f"> **Товар:** {data.get('item', {}).get('item_data', {}).get('name', '—')}",
-                                  color=0xff6600)
-    except Exception as e:
-        logger.exception(f"flash_sale_task error: {e}")
-
-
-@tasks.loop(minutes=2)
-async def deal_announce_task():
-    await bot.wait_until_ready()
-    try:
-        # 👇 ИЗ ОБЪЕДИНЁННОГО МОДУЛЯ
-        from modules.others import process_deal_announce
-        await process_deal_announce(bot)
-    except Exception as e:
-        logger.exception(f"deal_announce_task: {e}")
 
 
 @tasks.loop(minutes=1)
@@ -435,9 +388,6 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Основной бот + DC"))
 
-        # ============================================================
-        # 🎁 МОДУЛЬ РОЗЫГРЫШЕЙ
-        # ============================================================
         try:
             from modules.giveaways import setup_giveaways
             setup_giveaways(bot)
@@ -445,9 +395,6 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"giveaways init err: {e}")
 
-        # ============================================================
-        # 📩 ИМПОРТЫ ВСЕХ VIEW
-        # ============================================================
         from modules.commands_tickets import (
             TicketPanelView, TicketPaidView, TicketView, CoinsTicketButtons,
             SelectView, CatalogTypeView, CatalogView,
@@ -466,9 +413,6 @@ async def on_ready():
             DCView, PromoView, AdminView,
         )
 
-        # ============================================================
-        # 🎯 РЕГИСТРАЦИЯ VIEW
-        # ============================================================
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
         bot.add_view(TicketView())
@@ -491,9 +435,6 @@ async def on_ready():
         bot.add_view(PromoView())
         bot.add_view(AdminView())
 
-        # ============================================================
-        # 🚀 ОТПРАВКА ПАНЕЛЕЙ
-        # ============================================================
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
@@ -536,7 +477,6 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"catch-up salary err: {e}")
 
-        # КЛАН-ЛИГА + ДОСТИЖЕНИЯ
         try:
             from clan import init_clan_league
             from clan.panels import (
@@ -575,17 +515,12 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"clan league init err: {e}")
 
-        # Запуск тасок
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
             daily_bonus_task.start()
         if not daily_deal_task.is_running():
             daily_deal_task.start()
-        if not flash_sale_task.is_running():
-            flash_sale_task.start()
-        if not deal_announce_task.is_running():
-            deal_announce_task.start()
         if not salary_advance_task.is_running():
             salary_advance_task.start()
         if not salary_main_task.is_running():
@@ -737,7 +672,6 @@ async def on_member_join(member: disnake.Member):
     except Exception as e:
         logger.exception(f"welcome bonus err: {e}")
 
-    # Инвайты
     guild = member.guild
     snapshot_before = {row["invite_code"]: row for row in db.execute(
         "SELECT * FROM invites_snapshot WHERE guild_id=?", (guild.id,)).fetchall()}
@@ -1006,9 +940,7 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
 
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
-    from modules.commands_tickets import handle_interaction
-    await handle_interaction(inter)
-    await handle_flash_interaction(inter)
+    # Flash/actions больше нет — обработчик убран
     try:
         from clan.panels import handle_clan_interaction
         await handle_clan_interaction(inter)
