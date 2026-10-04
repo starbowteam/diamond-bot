@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Persistent view с кнопками-реквизитами для счёта.
-4 кнопки: Т-Банк / СБП / ОзонБанк / АльфаБанк — на row 0.
-Серая, длина 46, без эмодзи. При нажатии — эфемерно номер карты.
+4 кнопки: Т-Банк / СБП / ОзонБанк / АльфаБанк — все на row 0.
+Серая, длина каждой ~11 (суммарно ~46). Без эмодзи.
 """
 import disnake
 from disnake import ButtonStyle
@@ -11,9 +11,11 @@ from disnake.ui import View, Button
 from core.utils import logger
 
 
-# \u2800 (BRAILLE PATTERN BLANK) — широкий пробел для растяжки
+# \u2800 (BRAILLE PATTERN BLANK) — широкий пробел
 P = "\u2800"
-_BTN_LABEL_MAX = 46
+
+# 4 кнопки × 11 = 44 символа (с запасом до 46)
+_BTN_LABEL_MAX = 11
 
 
 def _btn_label(text: str, total: int = _BTN_LABEL_MAX) -> str:
@@ -31,25 +33,21 @@ def _btn_label(text: str, total: int = _BTN_LABEL_MAX) -> str:
 # ============================================================
 REQUISITES = {
     "tbank": {
-        "label": "Т-Банк",
         "title": "Т-Банк",
         "value": "2200 7020 8029 9345",
         "type": "Карта",
     },
     "sbp": {
-        "label": "СБП",
         "title": "СБП (Система быстрых платежей)",
         "value": "+7 983 694 76 41",
         "type": "Телефон",
     },
     "ozon": {
-        "label": "ОзонБанк",
         "title": "ОзонБанк",
         "value": "2204 3204 4881 5151",
         "type": "Карта",
     },
     "alfa": {
-        "label": "АльфаБанк",
         "title": "АльфаБанк",
         "value": "2200 1545 6426 7465",
         "type": "Карта",
@@ -59,7 +57,7 @@ REQUISITES = {
 
 class ReceiptView(View):
     """
-    Persistent view. Не зависит от сообщения — работает на всех счётах.
+    Persistent view. Все 4 кнопки на row 0, компактно.
     """
 
     def __init__(self):
