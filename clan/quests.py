@@ -1,4 +1,4 @@
-                        # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Квесты клановой лиги + рендер Pillow."""
 import os
 import io
@@ -23,83 +23,66 @@ EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
 
 
 # ============================================================
-# ОПРЕДЕЛЕНИЕ КВЕСТОВ — 12 уникальных, по 4 на категорию
+# ОПРЕДЕЛЕНИЕ КВЕСТОВ
 # ============================================================
 QUESTS: Dict[str, dict] = {
-    # ---------- DAILY (4) ----------
     "msg_50": {
-        "title": "Болтун",
-        "desc": "Напиши 50 сообщений в чате",
+        "title": "Болтун", "desc": "Напиши 50 сообщений в чате",
         "reward": 30, "goal": 50, "type": "daily",
         "unit": "сообщений", "icon": "fa-comment",
     },
     "voice_1h": {
-        "title": "Голос",
-        "desc": "Проведи 1 час в голосовых каналах",
+        "title": "Голос", "desc": "Проведи 1 час в голосовых каналах",
         "reward": 50, "goal": 3600, "type": "daily",
         "unit": "секунд", "icon": "fa-microphone",
     },
     "casino_3": {
-        "title": "Азарт",
-        "desc": "Сыграй 3 партии в казино",
+        "title": "Азарт", "desc": "Сыграй 3 партии в казино",
         "reward": 30, "goal": 3, "type": "daily",
         "unit": "партий", "icon": "fa-dice",
     },
     "cmds_5": {
-        "title": "Активный",
-        "desc": "5 взаимодействий с панелями клана",
+        "title": "Активный", "desc": "5 взаимодействий с панелями клана",
         "reward": 20, "goal": 5, "type": "daily",
         "unit": "действий", "icon": "fa-computer-mouse",
     },
-
-    # ---------- WEEKLY (4) ----------
     "msg_1000": {
-        "title": "Мега-болтун",
-        "desc": "1000 сообщений за неделю",
+        "title": "Мега-болтун", "desc": "1000 сообщений за неделю",
         "reward": 200, "goal": 1000, "type": "weekly",
         "unit": "сообщений", "icon": "fa-comments",
     },
     "voice_10h": {
-        "title": "Марафонец",
-        "desc": "10 часов в ГЧ",
+        "title": "Марафонец", "desc": "10 часов в ГЧ",
         "reward": 250, "goal": 36000, "type": "weekly",
         "unit": "секунд", "icon": "fa-headphones",
     },
     "casino_30": {
-        "title": "Азартная неделя",
-        "desc": "Сыграй 30 партий в казино",
+        "title": "Азартная неделя", "desc": "Сыграй 30 партий в казино",
         "reward": 150, "goal": 30, "type": "weekly",
         "unit": "партий", "icon": "fa-dice-five",
     },
     "win_3000": {
-        "title": "Удачливый",
-        "desc": "Выиграй 3000 DC в казино за неделю",
+        "title": "Удачливый", "desc": "Выиграй 3000 DC в казино за неделю",
         "reward": 350, "goal": 3000, "type": "weekly",
         "unit": "DC", "icon": "fa-trophy",
     },
-
-    # ---------- ONCE (4) ----------
     "first_review": {
-        "title": "Первый отзыв",
-        "desc": "Оставь первый отзыв в этом сезоне",
+        "title": "Первый отзыв", "desc": "Оставь первый отзыв в этом сезоне",
         "reward": 150, "goal": 1, "type": "once",
         "unit": "отзывов", "icon": "fa-star",
     },
     "gift_500": {
-        "title": "Щедрость",
-        "desc": "Подари кому-то 500 DC через магазин",
+        "title": "Щедрость", "desc": "Подари кому-то 500 DC через магазин",
         "reward": 200, "goal": 500, "type": "once",
         "unit": "DC", "icon": "fa-gift",
     },
     "jackpot": {
-        "title": "Джекпот",
-        "desc": "Более 10K DC за раз",
+        "title": "Джекпот", "desc": "Более 10K DC за раз",
         "reward": 500, "goal": 10000, "type": "once",
         "unit": "DC", "icon": "fa-fire",
     },
     "top_contributor": {
-        "title": "Лидер клана",
-        "desc": "Стань топ-1 клана",
+        "title": "Лидер клана", "desc": "Стань топ-1 клана",
         "reward": 400, "goal": 1, "type": "once",
         "unit": "раз", "icon": "fa-crown",
     },
@@ -224,9 +207,7 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
         from core.bot import bot
         user = bot.get_user(user_id) or await bot.fetch_user(user_id)
         if user:
-            e1 = disnake.Embed(color=clan["color"])
-            e1.set_image(url=IMG_STRIPE)
-            e2 = disnake.Embed(
+            e = disnake.Embed(
                 title="✅ Квест выполнен!",
                 description=(
                     f"> **Квест:** {quest['title']}\n"
@@ -235,8 +216,8 @@ async def _reward_user(user_id: int, quest_key: str, quest: dict):
                 ),
                 color=clan["color"]
             )
-            e2.set_image(url=IMG_STRIPE)
-            await user.send(embeds=[e1, e2])
+            e.set_image(url=IMG_STRIPE)
+            await user.send(embed=e)
     except Exception as e:
         logger.warning(f"quest reward DM {user_id}: {e}")
 
@@ -282,7 +263,7 @@ def get_user_quests(user_id: int) -> List[dict]:
 
 
 # ============================================================
-# ФОРМИРОВАНИЕ EMBED'ОВ С PILLOW
+# ФОРМИРОВАНИЕ EMBED'ОВ С PILLOW (без embed 1)
 # ============================================================
 def build_quests_embeds(user_id: int):
     from clan.core import get_user_clan, clan_cut
@@ -299,26 +280,19 @@ def build_quests_embeds(user_id: int):
     for q in quests:
         q["reward_cut"] = clan_cut(q["reward"])
 
-    e1 = disnake.Embed(color=clan["color"] if clan else 6776679)
-    data = load_json(os.path.join(EMBEDS_DIR, "quests.json"), {})
-    for e in data.get("embeds", [])[:1]:
-        try:
-            e1 = disnake.Embed.from_dict(e)
-        except Exception:
-            pass
-
-    e2 = disnake.Embed(color=clan["color"] if clan else 6776679)
+    # 👇 ТОЛЬКО PILLOW — без первого embed с картинкой
+    e = disnake.Embed(color=clan["color"] if clan else 6776679)
     file = None
 
     if render_quests is not None:
         try:
             buf = render_quests(user_id, quests)
             file = disnake.File(buf, filename=f"quests_{user_id}.png")
-            e2.set_image(url=f"attachment://quests_{user_id}.png")
-        except Exception as e:
-            logger.warning(f"render_quests err: {e}")
+            e.set_image(url=f"attachment://quests_{user_id}.png")
+        except Exception as ex:
+            logger.warning(f"render_quests err: {ex}")
 
-    return [e1, e2], file
+    return [e], file
 
 
 def format_quests_embed(user_id: int):
