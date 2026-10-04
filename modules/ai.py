@@ -2,8 +2,8 @@
 """
 Diamond AI — отдельный бот-консультант магазина.
 
-Запускается из main.py через asyncio.gather вместе с основным ботом.
-У AI свой токен, свой процесс событий, свой on_message.
+Запускается как отдельный процесс через ai_main.py.
+Не импортирует core.bot — не клонирует основной.
 """
 import os
 import re
@@ -46,7 +46,7 @@ except Exception:
 # ============================================================
 AI_TOKEN = os.getenv("AI_TOKEN")
 if not AI_TOKEN:
-    print("⚠️ AI_TOKEN не установлен — AI-бот не будет запущен.")
+    print("❌ AI_TOKEN не установлен — процесс AI завершится.")
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 if not MISTRAL_API_KEY:
@@ -199,9 +199,9 @@ DM_PHRASES = [
 # ============================================================
 async def log_to_discord(title: str, description: str, color: int = 0x00ff00):
     try:
-        ch = ai_bot.get_channel(AI_LOG_CHANNEL_ID)
+        ch = bot.get_channel(AI_LOG_CHANNEL_ID)
         if not ch:
-            ch = await ai_bot.fetch_channel(AI_LOG_CHANNEL_ID)
+            ch = await bot.fetch_channel(AI_LOG_CHANNEL_ID)
         if not ch:
             return
         embed = disnake.Embed(
@@ -216,7 +216,7 @@ async def log_to_discord(title: str, description: str, color: int = 0x00ff00):
 
 
 # ============================================================
-# BOT (AI)
+# BOT
 # ============================================================
 intents = disnake.Intents.default()
 intents.messages = True
@@ -224,7 +224,7 @@ intents.guilds = True
 intents.message_content = True
 intents.members = True
 
-ai_bot = commands.Bot(command_prefix="!ai", intents=intents)
+bot = commands.Bot(command_prefix="!ai", intents=intents)
 
 
 # ============================================================
@@ -496,12 +496,12 @@ async def ask_mistral(user_message: str, username: str, style: str,
 @tasks.loop(hours=CHAT_AUTO_INTERVAL_HOURS)
 async def auto_chat_task():
     global last_chat_auto
-    await ai_bot.wait_until_ready()
+    await bot.wait_until_ready()
 
     try:
-        ch = ai_bot.get_channel(ALLOWED_CHANNEL_ID)
+        ch = bot.get_channel(ALLOWED_CHANNEL_ID)
         if not ch:
-            ch = await ai_bot.fetch_channel(ALLOWED_CHANNEL_ID)
+            ch = await bot.fetch_channel(ALLOWED_CHANNEL_ID)
         if not ch:
             return
 
@@ -534,7 +534,7 @@ async def auto_chat_task():
 @tasks.loop(hours=DM_INTERVAL_HOURS)
 async def auto_dm_task():
     global dm_daily_counter, dm_daily_date
-    await ai_bot.wait_until_ready()
+    await bot.wait_until_ready()
 
     today = datetime.now(timezone.utc).date()
     if today != dm_daily_date:
@@ -544,7 +544,7 @@ async def auto_dm_task():
     if dm_daily_counter >= DM_DAILY_LIMIT:
         return
 
-    guild = ai_bot.get_guild(GUILD_ID)
+    guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
 
@@ -553,7 +553,7 @@ async def auto_dm_task():
 
     now_ts = time.time()
     cooldown = DM_USER_COOLDOWN_DAYS * 86400
-    bot_user_id = ai_bot.user.id if ai_bot.user else 0
+    bot_user_id = bot.user.id if bot.user else 0
 
     candidates = []
     for uid in users_who_talked:
@@ -616,11 +616,11 @@ async def cleanup_contexts():
 # ============================================================
 # ON READY
 # ============================================================
-@ai_bot.event
+@bot.event
 async def on_ready():
-    logger.info(f"diamond ai запущен как {ai_bot.user} (id={ai_bot.user.id})")
+    logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
     try:
-        await ai_bot.change_presence(
+        await bot.change_presence(
             status=disnake.Status.online,
             activity=disnake.Game("консультант diamond shop"),
         )
@@ -636,7 +636,7 @@ async def on_ready():
 
     await log_to_discord(
         title="✅ Diamond AI запущен",
-        description=f"> **{ai_bot.user}** готов. Отвечаю только в <#{ALLOWED_CHANNEL_ID}>.",
+        description=f"> **{bot.user}** готов. Отвечаю только в <#{ALLOWED_CHANNEL_ID}>.",
         color=0x00ff00,
     )
 
@@ -644,7 +644,7 @@ async def on_ready():
 # ============================================================
 # ON MESSAGE
 # ============================================================
-@ai_bot.event
+@bot.event
 async def on_message(message: disnake.Message):
     if message.author.bot:
         return
@@ -712,3 +712,19 @@ async def on_message(message: disnake.Message):
         )
     except Exception:
         pass
+
+
+# ============================================================
+# RUN
+# ============================================================
+def run_ai():
+    """Запуск AI-бота. Вызывается из ai_main.py."""
+    if not AI_TOKEN:
+        print("❌ AI_TOKEN не установлен — процесс AI завершается.")
+        raise SystemExit(1)
+
+    try:
+        bot.run(AI_TOKEN)
+    except Exception as e:
+        logger.exception(f"Ошибка запуска AI: {e}")
+        raise
