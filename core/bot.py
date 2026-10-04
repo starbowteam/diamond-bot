@@ -452,10 +452,10 @@ async def on_ready():
             SelectView, CatalogTypeView, CatalogView,
             QuestionTicketView,
         )
-        from modules.ticket_rating import (
-            RatingStep1View, RatingFinishView,
+        # 👇 ОБЪЕДИНЁННЫЙ МОДУЛЬ ТИКЕТОВ
+        from modules.tickets import (
+            RatingStep1View, RatingFinishView, ReceiptView,
         )
-        from modules.receipt_view import ReceiptView
         from modules.commands_profile import (
             send_profile_panel, ProfilePanelView, ProfileCardView,
         )
