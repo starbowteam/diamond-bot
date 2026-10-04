@@ -4,11 +4,12 @@ Diamond AI — отдельный бот-консультант магазина
 
 Особенности:
   · Свой токен (AI_TOKEN), отдельный процесс
-  · Работает ТОЛЬКО в одном канале
+  · Работает ТОЛЬКО в одном канале (ALLOWED_CHANNEL_ID)
   · Не импортирует core.bot — не клонирует основной
   · Читает реальные данные: баланс, отзывы, клан, каталог
-  · Никаких ЛС, авто-сообщений, триггер-слов
   · Отвечает на все сообщения в канале
+  · Автосообщение в чат — каждые 5 часов (если тихо)
+  · ЛС разным людям — каждые 2 часа (лимит 10/день, кулдаун 7 дней/юзер)
 """
 import os
 import re
@@ -29,17 +30,15 @@ from core.utils import (
     get_dc_cache,
 )
 
-# Реальные данные — читаются из БД/файлов, bot не нужен
 try:
     from clan.core import (
         get_user_clan, get_user_contribution, get_clan_top,
         get_clan_bank, get_current_cycle, get_season_title,
+        get_all_clans,
     )
     _CLAN_OK = True
 except Exception as _e:
     _CLAN_OK = False
-    get_user_clan = None
-    get_user_contribution = None
 
 try:
     from modules.dc import load_shop_catalog
@@ -60,18 +59,31 @@ MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 if not MISTRAL_API_KEY:
     print("⚠️ MISTRAL_API_KEY не задан — AI не сможет отвечать.")
 
-# Куда разрешено писать AI (только этот канал)
+# Куда AI пишет (только этот канал)
 ALLOWED_CHANNEL_ID = 1462064375862005845
 
-# Куда AI пишет логи (отдельно от логов основного бота)
-AI_LOG_CHANNEL_ID = int(os.getenv("AI_LOG_CHANNEL_ID", "0"))
+# Лог-канал AI (общий с основным ботом)
+AI_LOG_CHANNEL_ID = 1530453871581855744
 
 # Модель
 MISTRAL_MODEL = "mistral-small-latest"
 
-# История
-MAX_CHANNEL_CTX = 10    # последних сообщений канала — в промпт
-MAX_USER_HISTORY = 6    # реплик диалога юзера — в промпт
+# История в промпт
+MAX_CHANNEL_CTX = 10
+MAX_USER_HISTORY = 6
+
+# Авто-сообщения в чат
+CHAT_AUTO_INTERVAL_HOURS = 5      # раз в 5 часов
+CHAT_AUTO_IDLE_HOURS = 3          # если тихо последние 3 часа
+
+# ЛС-рассылка
+DM_INTERVAL_HOURS = 2             # раз в 2 часа
+DM_DAILY_LIMIT = 10               # не больше 10 в день
+DM_USER_COOLDOWN_DAYS = 7         # одному юзеру — раз в 7 дней
+DM_MIN_DAYS_ON_SERVER = 1         # юзер должен быть на сервере минимум 1 день
+
+# Глобальный ID гильдии (для поиска участников)
+GUILD_ID = int(CONFIG["GUILD_ID"])
 
 
 # ============================================================
@@ -96,7 +108,6 @@ SYSTEM_PROMPT = """
 
 твой характер:
 - пишешь прямо, без пафоса и фальшивой вежливости
-- с маленькой буквы, без эмодзи, если только пользователь сам не настроен на них
 - можешь быть дружелюбным, деловым или чуть ироничным — зависит от настроения собеседника
 - никогда не выдумываешь цифры и факты: если что-то есть в блоке [данные] — используешь оттуда, если нет — честно говоришь "не знаю, уточни у менеджера"
 - не читаешь лекций, не философствуешь, не выходишь за рамки магазина, если только это не уместный смежный вопрос
@@ -104,10 +115,9 @@ SYSTEM_PROMPT = """
 что ты знаешь про магазин (всегда актуально):
 
 **diamond coin (dc)** — внутренняя валюта.
-- 1 dc ≈ 0.85 ₽ (курс не фиксирован, но близко)
 - заработок: 1 dc за каждые 10 сообщений (максимум 30 dc/день), 3 dc за час в голосе (максимум 15 dc/день)
 - отзыв о покупке = +15 dc (проверяется модерацией)
-- ежедневный бонус с ролью «клуб» = +10 dc, но только если за сутки была активность
+- ежедневный бонус с ролью «клуб» = +10 dc, только если за сутки была активность
 - ежедневный подарок в панели профиля = от 10 до 30 dc, кулдаун ровно 24 часа
 - казино: рулетка, блэкджек, монетка — ставки от 20 до 4000 dc
 - зарплаты сотрудникам: аванс 15 числа, зарплата 29 числа
@@ -119,46 +129,42 @@ SYSTEM_PROMPT = """
 - 16–20 → diamond buyer
 - 21–25 → crystalis buyer
 - 26+ → покупатель века (pka, не снимается)
-роль «клуб» даётся с первого отзыва и нужна для ежедневного бонуса.
 
 **покупки**:
-- в витрине нажать «каталог» → выбрать валюту (diamond coins или реальные деньги)
-- в dc-магазине выбрать товар → он попадает в инвентарь → оформить тикет
-- в real-магазине выбрать категорию → создать тикет → менеджер выставит счёт → оплатить → получить товар
+- витрина → «каталог» → выбрать валюту (dc или реальные деньги)
+- dc-магазин: выбрать товар → инвентарь → оформить тикет
+- real-магазин: категория → тикет → счёт от менеджера → оплата → выдача
 
 **тикеты**:
-- создаются через кнопку «купить» в панели витрины
-- менеджер назначается автоматически первым, кто ответит
+- создаются через кнопку «купить» в витрине
+- менеджер назначается первым, кто ответил
 - после выдачи и отзыва тикет закрывается
-- за отзыв о покупке +15 dc
+- за отзыв +15 dc
 
 **клан-лига**:
 - 3 клана: окаменелости, сияние, кристализация
 - сезон 28 дней, выплата 28 числа в 20:00 мск
-- вклад в копилку: до 100 dc за раз — вся сумма, больше — 40%
-- топ-3 по вкладу получают бонусы ×3.00 / ×2.00 / ×1.50 при делении банка
+- вклад: до 100 dc за раз — вся сумма, больше — 40% в копилку
+- топ-3 по вкладу: бонусы ×3.00 / ×2.00 / ×1.50
 - дневной лимит вклада — 2500 dc
-- условия нахождения в клане: баланс ≥ 45 dc, есть роль покупателя, активность за 30 дней
+- условия: баланс ≥ 45 dc, есть роль покупателя, активность за 30 дней
 
 **казино**:
-- рулетка: множители от x0 до x10, шанс джекпота 0.5%
-- блэкджек: выплата x2, блэкджек x2.5, удвоение доступно на первых двух картах
-- монетка: выплата x1.9, ставка на орла или решку
-- усилители: страховка ставки, x2 к выигрышу, удачный час, билет джекпота
-
-**промокоды** — публикуются в новостном канале, активируются в тикете.
+- рулетка: множители от x0 до x10, джекпот 0.5%
+- блэкджек: выплата x2, блэкджек x2.5, удвоение на первых двух картах
+- монетка: выплата x1.9
 
 **категорически запрещено**:
-- программирование, код, скрипты, автоматизация
+- программирование, код, скрипты
 - пароли, токены, api-ключи, ssh, серверная инфраструктура
 - любые технические задачи за пределами магазина
-если пользователь просит такое — вежливо откажись и напомни, что ты консультант по магазину.
+если пользователь просит — вежливо откажись и напомни, что ты консультант по магазину.
 
 **как отвечать**:
-- если в блоке [данные] есть готовая информация о пользователе — используй её, не выдумывай
-- если пользователь спросил про цену — можно дать примерную вилку, но точную цену всегда отправляй в витрину
-- если вопрос про его личный прогресс (баланс, отзывы, клан) — говори конкретно его цифры
-- если не уверен — не выдумывай, а скажи «уточни у менеджера в тикете»
+- если в блоке [данные] есть информация о пользователе — используй её
+- точные цены всегда отправляй в витрину
+- на личный прогресс — говори конкретные цифры
+- не уверен — скажи «уточни у менеджера в тикете»
 """.strip()
 
 
@@ -171,11 +177,42 @@ MOOD_PROMPTS = {
 
 
 # ============================================================
-# ЛОГ В DISCORD (свой, для своего бота)
+# АВТО-ФРАЗЫ (новые, живые)
+# ============================================================
+CHAT_AUTO_PHRASES = [
+    "тут так тихо, что я успел перечитать все свои настройки. что-то нужно?",
+    "если есть вопросы по магазину — я на месте, спрашивай.",
+    "все молчат. ну ладно, я подожду.",
+    "кто-нибудь живой? могу подсказать по товарам.",
+    "между прочим, у меня в голове сейчас лежит весь каталог. спроси что-нибудь.",
+    "тишина — это тоже неплохо. но если что, я здесь.",
+    "напоминаю: могу рассказать про dc, роли, клан, тикеты.",
+    "может, обсудим что-нибудь по магазину? я не кусаюсь.",
+    "в канале пусто. я даже немного заскучал.",
+    "если потерялся в каталоге — просто спроси меня.",
+    "иногда полезно спросить, а не гадать. я для этого тут.",
+    "тишина. наверное, все покупают. ну и правильно.",
+]
+
+
+DM_PHRASES = [
+    "привет, просто проверяю, всё ли у тебя нормально с магазином.",
+    "эй, как дела? если что — я на связи.",
+    "если есть вопросы по покупкам или dc — пиши, помогу.",
+    "напоминаю, что я тут. не пропадай.",
+    "как ты? надеюсь, всё ок.",
+    "если хочешь узнать про акции или роли — скажи.",
+    "просто заглянул проверить, как дела.",
+    "я сегодня в хорошем настроении, если хочешь — поболтаем.",
+    "если что-то нужно по магазину — обращайся.",
+    "иногда полезно просто спросить. я тут.",
+]
+
+
+# ============================================================
+# ЛОГ
 # ============================================================
 async def log_to_discord(title: str, description: str, color: int = 0x00ff00):
-    if not AI_LOG_CHANNEL_ID:
-        return
     try:
         ch = bot.get_channel(AI_LOG_CHANNEL_ID)
         if not ch:
@@ -212,6 +249,17 @@ channel_ctx: List[Dict[str, str]] = []
 user_ctx: Dict[int, List[Dict[str, str]]] = {}
 last_activity: Dict[int, float] = {}
 
+# Кто хоть раз писал AI (для ЛС-рассылки)
+users_who_talked: set = set()
+
+# Кулдауны и счётчики для ЛС
+last_dm_time: Dict[int, float] = {}
+dm_daily_counter = 0
+dm_daily_date = datetime.now(timezone.utc).date()
+
+# Для авто-сообщений в чат
+last_chat_auto = 0.0
+
 
 def _push_channel(author: str, content: str):
     channel_ctx.append({"author": author, "content": content[:400]})
@@ -227,7 +275,7 @@ def _push_user(user_id: int, role: str, content: str):
 
 
 # ============================================================
-# СБОР РЕАЛЬНЫХ ДАННЫХ
+# РЕАЛЬНЫЕ ДАННЫЕ
 # ============================================================
 def _role_key_for_reviews(reviews: int) -> str:
     if reviews >= 26:  return "pka"
@@ -250,7 +298,7 @@ ROLE_LABELS = {
 }
 
 
-def build_user_data(user_id: int, member: Optional[disnake.Member]) -> str:
+def build_user_data(user_id: int) -> str:
     try:
         data = get_dc_cache(user_id)
         balance = data.get("balance", 0)
@@ -305,29 +353,14 @@ def build_shop_data() -> str:
 
     lines = ["краткая справка по ценам в dc-магазине:"]
 
-    if "discounts" in catalog:
-        items = catalog["discounts"].get("items", {})
-        prices = [it["price"] for it in items.values()]
-        if prices:
-            lines.append(f"- скидки: от {min(prices)} до {max(prices)} dc")
-
-    if "roles" in catalog:
-        items = catalog["roles"].get("items", {})
-        prices = [it["price"] for it in items.values() if it.get("price")]
-        if prices:
-            lines.append(f"- роли: от {min(prices)} до {max(prices)} dc")
-
-    if "design" in catalog:
-        items = catalog["design"].get("items", {})
-        prices = [it["price"] for it in items.values()]
-        if prices:
-            lines.append(f"- дизайн: от {min(prices)} до {max(prices)} dc")
-
-    if "boosts" in catalog:
-        items = catalog["boosts"].get("items", {})
-        prices = [it["price"] for it in items.values()]
-        if prices:
-            lines.append(f"- бусты: от {min(prices)} до {max(prices)} dc")
+    for key, label in [("discounts", "скидки"), ("roles", "роли"),
+                       ("design", "дизайн"), ("boosts", "бусты"),
+                       ("ads", "реклама")]:
+        if key in catalog:
+            items = catalog[key].get("items", {})
+            prices = [it["price"] for it in items.values() if it.get("price")]
+            if prices:
+                lines.append(f"- {label}: от {min(prices)} до {max(prices)} dc")
 
     return "\n".join(lines)
 
@@ -341,7 +374,6 @@ def build_clan_data() -> str:
             return "клан-лига: сезон не запущен"
         title = get_season_title(cycle["number"])
         lines = [f"клан-лига сейчас: {title}"]
-        from clan.core import get_all_clans
         for c in get_all_clans():
             try:
                 bank = get_clan_bank(c["id"])
@@ -354,22 +386,18 @@ def build_clan_data() -> str:
         return ""
 
 
-def build_context_block(user_id: int, member: Optional[disnake.Member]) -> str:
+def build_context_block(user_id: int) -> str:
     parts = []
-
-    user_block = build_user_data(user_id, member)
+    user_block = build_user_data(user_id)
     if user_block:
         parts.append(user_block)
-
     shop_block = build_shop_data()
     if shop_block:
         parts.append(shop_block)
-
-    if random.random() < 0.3:  # клан-данные — не всегда, чтобы промпт не раздувался
+    if random.random() < 0.3:
         clan_block = build_clan_data()
         if clan_block:
             parts.append(clan_block)
-
     return "\n\n[данные]\n" + "\n\n".join(parts) + "\n[/данные]\n"
 
 
@@ -432,15 +460,9 @@ async def ask_mistral(user_message: str, username: str, style: str,
     system_content = SYSTEM_PROMPT + style_extra + "\n\n" + context_block
 
     messages = [{"role": "system", "content": system_content}]
-
-    # Последние реплики юзера
     for msg in user_ctx.get(user_id, [])[-MAX_USER_HISTORY:]:
         messages.append(msg)
-
-    messages.append({
-        "role": "user",
-        "content": f"{username}: {user_message}",
-    })
+    messages.append({"role": "user", "content": f"{username}: {user_message}"})
 
     payload = {
         "model": MISTRAL_MODEL,
@@ -487,7 +509,119 @@ async def ask_mistral(user_message: str, username: str, style: str,
 
 
 # ============================================================
-# ОЧИСТКА СТАРЫХ КОНТЕКСТОВ
+# АВТО-СООБЩЕНИЯ В ЧАТ (каждые 5ч, если тихо)
+# ============================================================
+@tasks.loop(hours=CHAT_AUTO_INTERVAL_HOURS)
+async def auto_chat_task():
+    global last_chat_auto
+    await bot.wait_until_ready()
+
+    # Проверяем, не писали ли в канал за последние CHAT_AUTO_IDLE_HOURS
+    try:
+        ch = bot.get_channel(ALLOWED_CHANNEL_ID)
+        if not ch:
+            ch = await bot.fetch_channel(ALLOWED_CHANNEL_ID)
+        if not ch:
+            return
+
+        since = datetime.now(timezone.utc) - timedelta(hours=CHAT_AUTO_IDLE_HOURS)
+        has_recent = False
+        async for msg in ch.history(limit=50, after=since):
+            if not msg.author.bot:
+                has_recent = True
+                break
+
+        if has_recent:
+            return  # не мешаем живому общению
+
+        phrase = random.choice(CHAT_AUTO_PHRASES)
+        await ch.send(phrase)
+        last_chat_auto = time.time()
+
+        await log_to_discord(
+            title="💬 Авто-сообщение (чат)",
+            description=f"> **Сообщение:** {phrase}",
+            color=0x00aaff,
+        )
+    except Exception as e:
+        logger.exception(f"auto_chat_task: {e}")
+
+
+# ============================================================
+# ЛС-РАССЫЛКА (каждые 2ч, лимит 10/день)
+# ============================================================
+@tasks.loop(hours=DM_INTERVAL_HOURS)
+async def auto_dm_task():
+    global dm_daily_counter, dm_daily_date
+    await bot.wait_until_ready()
+
+    # Сброс дневного счётчика
+    today = datetime.now(timezone.utc).date()
+    if today != dm_daily_date:
+        dm_daily_counter = 0
+        dm_daily_date = today
+
+    if dm_daily_counter >= DM_DAILY_LIMIT:
+        return
+
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+
+    # Кандидаты: только те, кто когда-либо писал AI (opt-in)
+    if not users_who_talked:
+        return
+
+    now_ts = time.time()
+    cooldown = DM_USER_COOLDOWN_DAYS * 86400
+
+    candidates = []
+    for uid in users_who_talked:
+        if uid == bot.user.id:
+            continue
+        if last_dm_time.get(uid, 0) > now_ts - cooldown:
+            continue
+        member = guild.get_member(uid)
+        if not member or member.bot:
+            continue
+        if member.joined_at:
+            days_on_server = (datetime.now(timezone.utc) - member.joined_at).days
+            if days_on_server < DM_MIN_DAYS_ON_SERVER:
+                continue
+        candidates.append(uid)
+
+    if not candidates:
+        return
+
+    target_id = random.choice(candidates)
+    target = guild.get_member(target_id)
+    if not target:
+        return
+
+    phrase = random.choice(DM_PHRASES)
+    try:
+        await target.send(phrase)
+        last_dm_time[target_id] = now_ts
+        dm_daily_counter += 1
+
+        await log_to_discord(
+            title="💌 ЛС-сообщение",
+            description=(
+                f"> **Получатель:** {target.mention}\n"
+                f"> **Сообщение:** {phrase}\n"
+                f"> **Дневной счётчик:** {dm_daily_counter}/{DM_DAILY_LIMIT}"
+            ),
+            color=0xffaa00,
+        )
+    except disnake.Forbidden:
+        logger.info(f"ЛС закрыты у {target_id}")
+        last_dm_time[target_id] = now_ts  # не пытаемся снова
+    except Exception as e:
+        logger.warning(f"auto_dm {target_id}: {e}")
+
+
+# ============================================================
+# ОЧИСТКА КОНТЕКСТОВ
 # ============================================================
 @tasks.loop(hours=6)
 async def cleanup_contexts():
@@ -515,6 +649,10 @@ async def on_ready():
 
     if not cleanup_contexts.is_running():
         cleanup_contexts.start()
+    if not auto_chat_task.is_running():
+        auto_chat_task.start()
+    if not auto_dm_task.is_running():
+        auto_dm_task.start()
 
     await log_to_discord(
         title="✅ Diamond AI запущен",
@@ -531,7 +669,6 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
-    # Только один канал — и ничего больше
     if message.channel.id != ALLOWED_CHANNEL_ID:
         return
 
@@ -541,6 +678,7 @@ async def on_message(message: disnake.Message):
 
     user_id = message.author.id
     last_activity[user_id] = time.time()
+    users_who_talked.add(user_id)   # opt-in для ЛС-рассылки
 
     # Технические запросы — отказ
     if is_technical_request(text):
@@ -550,18 +688,12 @@ async def on_message(message: disnake.Message):
         )
         return
 
-    # Контекст канала
     _push_channel(message.author.display_name, text)
 
-    # Определяем настроение и стиль
     mood = detect_mood(text)
     style = choose_style(mood, text)
+    context_block = build_context_block(user_id)
 
-    # Собираем реальные данные о юзере
-    member = message.author if isinstance(message.author, disnake.Member) else None
-    context_block = build_context_block(user_id, member)
-
-    # Запрос
     try:
         async with message.channel.typing():
             await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -588,7 +720,6 @@ async def on_message(message: disnake.Message):
             logger.error(f"send reply: {e}")
             return
 
-    # Лог в свой канал
     try:
         await log_to_discord(
             title="💬 Ответ AI",
@@ -608,7 +739,6 @@ async def on_message(message: disnake.Message):
 # RUN
 # ============================================================
 def run_ai():
-    """Точка входа для ai_main.py."""
     if not AI_TOKEN:
         print("❌ AI_TOKEN не установлен.")
         return
