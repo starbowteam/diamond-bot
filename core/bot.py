@@ -455,6 +455,7 @@ async def on_ready():
         from modules.ticket_rating import (
             RatingStep1View, RatingFinishView,
         )
+        from modules.receipt_view import ReceiptView
         from modules.commands_profile import (
             send_profile_panel, ProfilePanelView, ProfileCardView,
         )
@@ -477,9 +478,12 @@ async def on_ready():
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
 
-        # 👇 Оценка менеджера (шаг 1 и шаг 2)
+        # 👇 Оценка менеджера + финальное закрытие
         bot.add_view(RatingStep1View())
         bot.add_view(RatingFinishView())
+
+        # 👇 Кнопки реквизитов в счёте
+        bot.add_view(ReceiptView())
 
         bot.add_view(HomeView())
         bot.add_view(TarologyView())
