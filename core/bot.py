@@ -367,7 +367,8 @@ async def flash_sale_task():
 async def deal_announce_task():
     await bot.wait_until_ready()
     try:
-        from modules.deal_announce import process_deal_announce
+        # 👇 ИЗ ОБЪЕДИНЁННОГО МОДУЛЯ
+        from modules.others import process_deal_announce
         await process_deal_announce(bot)
     except Exception as e:
         logger.exception(f"deal_announce_task: {e}")
@@ -452,7 +453,6 @@ async def on_ready():
             SelectView, CatalogTypeView, CatalogView,
             QuestionTicketView,
         )
-        # 👇 ОБЪЕДИНЁННЫЙ МОДУЛЬ ТИКЕТОВ
         from modules.tickets import (
             RatingStep1View, RatingFinishView, ReceiptView,
         )
