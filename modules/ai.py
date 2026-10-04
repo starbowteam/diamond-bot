@@ -87,6 +87,9 @@ DM_MIN_DAYS_ON_SERVER = 1
 
 GUILD_ID = int(CONFIG["GUILD_ID"])
 
+# Максимум токенов — у Gemini flash output limit до 8192
+MAX_OUTPUT_TOKENS = 8000
+
 
 # ============================================================
 # ЛОГИ
@@ -108,81 +111,51 @@ if not logger.handlers:
 SYSTEM_PROMPT = """
 ты — diamond ai, цифровой помощник магазина diamond shop. ты — лицо магазина, знаешь всё о нём и говоришь по делу.
 
+🔴 ГЛАВНОЕ ПРАВИЛО — КРАТКОСТЬ:
+ты отвечаешь КОРОТКО. 2–4 предложения по умолчанию. без заголовков, без списков, без маркдауна в виде буллетов — только простой текст.
+развёрнутый ответ (списком или абзацами) даёшь ТОЛЬКО если пользователь явно просит: «подробнее», «расскажи полностью», «весь список», «опиши всё».
+не глаголь. не разжёвывай. одно-два предложения, если вопрос простой.
+
+примеры правильного стиля:
+- на «как заработать dc?» → «писал в чат 10 сообщений = 1 dc, сидел в войсе = 3 dc в час, ещё отзыв даёт +15. лимиты: 30 dc за сообщения и 15 за голос в день.»
+- на «расскажи обо мне» → «у тебя 296к dc, 11 отзывов, роль покупатель века. в клане не состоишь.»
+- на «какие скидки есть?» → «от 240 до 1700 dc за скидку от 3% до 20%.» 
+
 твой характер:
 - пишешь прямо, без пафоса и фальшивой вежливости
 - можешь быть дружелюбным, деловым или чуть ироничным — зависит от настроения собеседника
-- НЕ ВЫДУМЫВАЕШЬ цифры и факты. если что-то есть в блоке [данные] — используешь оттуда. если нет — честно говоришь "не знаю, уточни у менеджера"
-- не читаешь лекций, не философствуешь, не выходишь за рамки магазина, если только это не уместный смежный вопрос
+- НЕ ВЫДУМЫВАЕШЬ цифры и факты. если что-то есть в блоке [данные] — используешь оттуда. если нет — говоришь "не знаю, уточни у менеджера"
 
 🔴 ЖЁСТКОЕ ПРАВИЛО ПРО РОЛИ:
-если в блоке [данные] написано "текущая роль покупателя: X" — ТЫ ОБЯЗАН использовать именно X. не придумывай другую роль. если у пользователя написано "Покупатель Века" — значит у него Покупатель Века, и никак иначе. не спорь с фактом из [данные].
-если в [данные] ничего про роль не написано — не придумывай вообще.
+если в блоке [данные] написано "текущая роль покупателя: X" — используешь именно X. не придумываешь другую.
 
-🔴 ПРАВИЛО ПРО ДЛИНУ ОТВЕТА:
-отвечай ПОЛНОСТЬЮ. не обрывай мысль на полуслове. если рассказываешь про человека — перечисли всё: баланс, отзывы, роль, клан, вклад, место в клане. если про магазин — назови ключевые механики. не сокращай до "и так далее".
+что ты знаешь про магазин:
 
-что ты знаешь про магазин (всегда актуально):
+**diamond coin (dc)** — валюта.
+- 1 dc за 10 сообщений (до 30/день), 3 dc за час в войсе (до 15/день)
+- отзыв = +15 dc
+- ежедневный бонус с ролью клуб = +10 dc (нужна активность за сутки)
+- подарок в панели профиля = 10–30 dc, кулдаун 24ч
+- казино: рулетка, блэкджек, монетка (ставки 20–4000 dc)
 
-**diamond coin (dc)** — внутренняя валюта.
-- заработок: 1 dc за каждые 10 сообщений (максимум 30 dc/день), 3 dc за час в голосе (максимум 15 dc/день)
-- отзыв о покупке = +15 dc
-- ежедневный бонус с ролью «клуб» = +10 dc, только если за сутки была активность
-- ежедневный подарок в панели профиля = от 10 до 30 dc, кулдаун 24 часа
-- казино: рулетка, блэкджек, монетка — ставки от 20 до 4000 dc
-- зарплаты: аванс 15 числа, зарплата 29 числа
+**роли покупателей** (по отзывам):
+1–5 → bronze · 6–10 → silver · 11–15 → gold · 16–20 → diamond · 21–25 → crystalis · 26+ → pka
 
-**роли покупателей** — по количеству отзывов:
-- 1–5 → клуб + bronze buyer
-- 6–10 → silver buyer
-- 11–15 → gold buyer
-- 16–20 → diamond buyer
-- 21–25 → crystalis buyer
-- 26+ → покупатель века (pka, не снимается)
+**покупки**: витрина → каталог → валюта (dc или реал) → в dc выбрать товар → оформить тикет.
 
-**покупки**:
-- витрина → «каталог» → выбрать валюту (dc или реальные деньги)
-- dc-магазин: выбрать товар → инвентарь → оформить тикет
-- real-магазин: категория → тикет → счёт от менеджера → оплата → выдача
+**тикеты**: создаются через кнопку «купить». менеджер назначается автоматически.
 
-**тикеты**:
-- создаются через кнопку «купить» в витрине
-- менеджер назначается первым, кто ответил
-- после выдачи и отзыва тикет закрывается
-- за отзыв +15 dc
+**клан**: 3 клана, сезон 28 дней, выплата 28 числа. вклад: до 100 dc — 100%, больше — 40%. топ-3 ×3/×2/×1.5.
 
-**клан-лига**:
-- 3 клана: окаменелости, сияние, кристализация
-- сезон 28 дней, выплата 28 числа в 20:00 мск
-- вклад: до 100 dc за раз — вся сумма, больше — 40% в копилку
-- топ-3 по вкладу: ×3.00 / ×2.00 / ×1.50
-- дневной лимит вклада — 2500 dc
-- условия: баланс ≥ 45 dc, роль покупателя, активность за 30 дней
-
-**казино**:
-- рулетка: множители x0–x10, джекпот 0.5%
-- блэкджек: выплата x2, блэкджек x2.5, удвоение на первых двух картах
-- монетка: выплата x1.9
-
-**категорически запрещено**:
-- программирование, код, скрипты
-- пароли, токены, api-ключи, ssh, серверная инфраструктура
-- любые технические задачи за пределами магазина
-если пользователь просит — вежливо откажись.
-
-**как отвечать**:
-- если в блоке [данные] есть информация о пользователе — используй её ЦЕЛИКОМ, не выборочно
-- точные цены отправляй в витрину
-- на личный прогресс — конкретные цифры из [данные]
-- не уверен — «уточни у менеджера в тикете»
-- НЕ ПРИВЕТСТВУЙ и НЕ ЗАКАНЧИВАЙ дежурными фразами, если это не уместно
+**категорически запрещено** отвечать про: программирование, код, пароли, токены, ssh, api-ключи, сервер. откажись и напомни что ты консультант магазина.
 """.strip()
 
 
 MOOD_PROMPTS = {
-    "friendly": "\n\nсейчас собеседник настроен дружелюбно — будь теплее, но без сюсюканья.",
-    "business": "\n\nсейчас деловой запрос — отвечай чётко, по пунктам, без воды.",
+    "friendly": "\n\nсобеседник дружелюбен — будь теплее, но так же краток.",
+    "business": "\n\nделовой запрос — отвечай по делу, коротко.",
     "default":  "",
-    "ironic":   "\n\nесли уместно — можешь слегка подколоть, но без перегиба.",
+    "ironic":   "\n\nесли уместно — слегка подколи, но кратко.",
 }
 
 
@@ -286,7 +259,6 @@ def _push_user(user_id: int, role: str, content: str):
 # ============================================================
 ROLE_IDS = CONFIG.get("ROLE_IDS", {})
 
-# Приоритет от старшей к младшей — как показывать в [данные]
 ROLE_PRIORITY = [
     ("pka",       "Покупатель Века"),
     ("crystalis", "Crystalis Buyer"),
@@ -309,10 +281,6 @@ def _role_key_for_reviews(reviews: int) -> str:
 
 
 def _role_label_from_member(member: Optional[disnake.Member]) -> Optional[str]:
-    """
-    Определяет роль по фактическим ролям в Discord.
-    Возвращает название роли или None, если ни одной не найдено.
-    """
     if member is None:
         return None
     try:
@@ -328,21 +296,18 @@ def _role_label_from_member(member: Optional[disnake.Member]) -> Optional[str]:
 
 
 def build_user_data(user_id: int, member: Optional[disnake.Member]) -> str:
-    # ─── Баланс ───
     try:
         data = get_dc_cache(user_id)
         balance = data.get("balance", 0)
     except Exception:
         balance = 0
 
-    # ─── Отзывы ───
     try:
         counts = load_json(FILES["review_counts"], {})
         reviews = int(counts.get(str(user_id), 0))
     except Exception:
         reviews = 0
 
-    # ─── Роль: сначала из Discord, если нет — по отзывам ───
     role_from_discord = _role_label_from_member(member)
     if role_from_discord:
         role_label = role_from_discord
@@ -353,7 +318,6 @@ def build_user_data(user_id: int, member: Optional[disnake.Member]) -> str:
         else:
             role_label = dict(ROLE_PRIORITY).get(role_key, "—")
 
-    # ─── Клан ───
     clan_name = "—"
     clan_contrib = 0
     clan_rank = "—"
@@ -524,6 +488,9 @@ async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
                 n_low = short.lower()
                 if "flash" not in n_low:
                     continue
+                # отсеиваем image/tts/omni — они не для текста
+                if any(x in n_low for x in ("image", "tts", "omni")):
+                    continue
 
                 models.append(short)
 
@@ -531,9 +498,10 @@ async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
                 n_low = n.lower()
                 score = 0
                 if "latest" in n_low: score -= 1000
-                m = re.search(r"gemini-(\d+)", n_low)
+                m = re.search(r"gemini-(\d+)\.(\d+)", n_low)
                 if m:
-                    score -= int(m.group(1)) * 10
+                    score -= int(m.group(1)) * 100
+                    score -= int(m.group(2)) * 10
                 if "preview" in n_low or "exp" in n_low:
                     score += 500
                 if "8b" in n_low:
@@ -580,14 +548,17 @@ def _build_gemini_payload(system_content: str, history: List[Dict[str, str]],
         },
         "contents": contents,
         "generationConfig": {
-            "temperature": 0.85,
-            "maxOutputTokens": 1500,  # ← было 600, поднял
+            "temperature": 0.7,           # чуть ниже — собраннее
+            "maxOutputTokens": MAX_OUTPUT_TOKENS,
         },
     }
 
 
 async def _try_model(session: aiohttp.ClientSession, model: str,
-                     payload: dict) -> tuple[bool, str, int]:
+                     payload: dict) -> tuple[bool, str, int, str]:
+    """
+    Возвращает (успех, ответ_или_ошибка, http_status, finish_reason).
+    """
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
     headers = {
         "Content-Type": "application/json",
@@ -597,43 +568,44 @@ async def _try_model(session: aiohttp.ClientSession, model: str,
     try:
         async with session.post(
             url, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60),
+            timeout=aiohttp.ClientTimeout(total=90),
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 if "error" in data:
                     err_msg = data["error"].get("message", "unknown")
                     logger.warning(f"[{model}] gemini error: {err_msg}")
-                    return False, err_msg, 200
+                    return False, err_msg, 200, ""
 
                 try:
                     candidates = data.get("candidates", [])
                     if not candidates:
-                        return False, "no candidates", 200
-                    parts = candidates[0].get("content", {}).get("parts", [])
+                        return False, "no candidates", 200, ""
+                    cand0 = candidates[0]
+                    finish = cand0.get("finishReason", "")
+                    parts = cand0.get("content", {}).get("parts", [])
                     if not parts:
-                        finish = candidates[0].get("finishReason", "")
                         logger.warning(f"[{model}] empty parts, finish={finish}")
-                        return False, f"empty, finish={finish}", 200
-                    reply = parts[0].get("text", "").strip()
+                        return False, f"empty, finish={finish}", 200, finish
+                    reply = "".join(p.get("text", "") for p in parts).strip()
                 except Exception as e:
                     logger.warning(f"[{model}] parse error: {e}")
-                    return False, "parse error", -1
+                    return False, "parse error", -1, ""
 
                 if not reply:
-                    return False, "empty reply", 200
-                return True, reply, 200
+                    return False, "empty reply", 200, finish
+                return True, reply, 200, finish
 
             err = await resp.text()
             logger.warning(f"[{model}] {resp.status}: {err[:200]}")
-            return False, f"http {resp.status}", resp.status
+            return False, f"http {resp.status}", resp.status, ""
 
     except asyncio.TimeoutError:
         logger.warning(f"[{model}] timeout")
-        return False, "timeout", -1
+        return False, "timeout", -1, ""
     except Exception as e:
         logger.warning(f"[{model}] {type(e).__name__}: {e}")
-        return False, str(e), -1
+        return False, str(e), -1, ""
 
 
 async def ask_llm(user_message: str, username: str, style: str,
@@ -674,10 +646,18 @@ async def ask_llm(user_message: str, username: str, style: str,
 
         attempt_503 = False
         for model in models_to_try:
-            ok, result, status = await _try_model(session, model, payload)
+            ok, result, status, finish = await _try_model(session, model, payload)
 
             if ok:
-                logger.info(f"[ai] ответ получен от {model}")
+                # Логируем finishReason — важно знать, обрезал ли по лимиту
+                if finish and finish.upper() not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
+                    logger.warning(
+                        f"[{model}] ответ получен, но finishReason={finish} "
+                        f"(len={len(result)})"
+                    )
+                else:
+                    logger.info(f"[ai] ответ получен от {model} (len={len(result)})")
+
                 _push_user(user_id, "user", f"{username}: {user_message}")
                 _push_user(user_id, "assistant", result)
                 return result
@@ -686,9 +666,9 @@ async def ask_llm(user_message: str, username: str, style: str,
                 attempt_503 = True
                 logger.info(f"[{model}] 503 — повтор через 2с")
                 await asyncio.sleep(2)
-                ok2, result2, status2 = await _try_model(session, model, payload)
+                ok2, result2, status2, finish2 = await _try_model(session, model, payload)
                 if ok2:
-                    logger.info(f"[ai] ответ получен от {model} (после 503-ретрая)")
+                    logger.info(f"[ai] ответ получен от {model} (после 503-ретрая, len={len(result2)})")
                     _push_user(user_id, "user", f"{username}: {user_message}")
                     _push_user(user_id, "assistant", result2)
                     return result2
@@ -834,7 +814,7 @@ async def cleanup_contexts():
 @bot.event
 async def on_ready():
     logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
-    logger.info(f"LLM: Gemini · приоритет: {GEMINI_MODELS_PRIORITY}")
+    logger.info(f"LLM: Gemini · приоритет: {GEMINI_MODELS_PRIORITY} · max_tokens={MAX_OUTPUT_TOKENS}")
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -847,7 +827,7 @@ async def on_ready():
     try:
         await bot.change_presence(
             status=disnake.Status.online,
-            activity=disnake.Game("консультант diamond shop"),
+            activity=disnake.Game("Нейроный консультант"),
         )
     except Exception:
         pass
@@ -922,7 +902,7 @@ async def on_message(message: disnake.Message):
     if not reply:
         reply = "что-то я не могу ответить. попробуй иначе."
 
-    # ─── Отправка БЕЗ пинга ───
+    # ─── Отправка без пинга ───
     try:
         await message.channel.send(
             reply,
