@@ -6,8 +6,7 @@ Diamond AI — отдельный бот-консультант магазина
 Не импортирует core.bot — не клонирует основной.
 
 LLM: Google Gemini (AI Studio free tier).
-Переменная окружения — MISTRAL_API_KEY (внутри ключ Gemini).
-Используется НАТИВНЫЙ endpoint Gemini (generateContent).
+Нативный endpoint + динамический список моделей + retry на 503.
 """
 import os
 import re
@@ -59,21 +58,24 @@ if not GEMINI_API_KEY:
     print("⚠️ MISTRAL_API_KEY (Gemini) не задан — AI не сможет отвечать.")
 
 # ─── Модели Gemini (по приоритету) ───
-# Если первая перегружена — код пробует следующую.
-GEMINI_MODELS = [
-    "gemini-flash-latest",     # основная — то, что ты дал в curl
-    "gemini-2.0-flash",        # фолбэк
-    "gemini-1.5-flash",        # второй фолбэк
-    "gemini-1.5-flash-8b",     # на крайний случай
+# Мы держим ТОЛЬКО gemini-flash-latest как основную —
+# она всегда указывает на актуальную flash-модель.
+# Остальные подтягиваются динамически из ListModels.
+GEMINI_MODELS_PRIORITY = [
+    "gemini-flash-latest",
 ]
 
 # Можно переопределить через env: GEMINI_MODEL="a,b,c"
 _env_model = os.getenv("GEMINI_MODEL")
 if _env_model:
-    GEMINI_MODELS = [m.strip() for m in _env_model.split(",") if m.strip()]
+    GEMINI_MODELS_PRIORITY = [m.strip() for m in _env_model.split(",") if m.strip()]
 
-# Базовый URL (нативный Gemini API)
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+# ─── Кэш доступных моделей ───
+_AVAILABLE_MODELS: List[str] = []
+_AVAILABLE_MODELS_FETCHED_AT: float = 0.0
+_MODELS_CACHE_TTL = 3600  # 1 час
 
 ALLOWED_CHANNEL_ID = 1462064375862005845
 AI_LOG_CHANNEL_ID = 1530453871581855744
@@ -452,18 +454,88 @@ def choose_style(mood: str, text: str) -> str:
 
 
 # ============================================================
+# СПИСОК МОДЕЛЕЙ — ДИНАМИЧЕСКИЙ
+# ============================================================
+async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
+    """
+    Запрашивает у Gemini список моделей, поддерживающих generateContent.
+    Кэширует на час.
+    """
+    global _AVAILABLE_MODELS, _AVAILABLE_MODELS_FETCHED_AT
+    now = time.time()
+    if _AVAILABLE_MODELS and now - _AVAILABLE_MODELS_FETCHED_AT < _MODELS_CACHE_TTL:
+        return _AVAILABLE_MODELS
+
+    url = GEMINI_API_BASE  # без :generateContent — это ListModels
+    headers = {"X-goog-api-key": GEMINI_API_KEY}
+
+    try:
+        async with session.get(
+            url, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            if resp.status != 200:
+                logger.warning(f"listModels {resp.status}")
+                return _AVAILABLE_MODELS  # вернём прошлый кэш (даже пустой)
+
+            data = await resp.json()
+            models = []
+            for m in data.get("models", []):
+                name = m.get("name", "")
+                if not name.startswith("models/"):
+                    continue
+                short = name[len("models/"):]
+
+                methods = m.get("supportedGenerationMethods", [])
+                if "generateContent" not in methods:
+                    continue
+
+                # Только flash — pro слишком дорогой/медленный для чата
+                n_low = short.lower()
+                if "flash" not in n_low:
+                    continue
+
+                models.append(short)
+
+            # Сортируем по «приоритету»: latest вперёд, потом по версии
+            def sort_key(n):
+                n_low = n.lower()
+                score = 0
+                if "latest" in n_low: score -= 1000
+                # Извлекаем версию
+                m = re.search(r"gemini-(\d+)", n_low)
+                if m:
+                    score -= int(m.group(1)) * 10
+                # Preview / exp в конец
+                if "preview" in n_low or "exp" in n_low:
+                    score += 500
+                # 8b обычно слабее — в конец
+                if "8b" in n_low:
+                    score += 100
+                return score
+
+            models.sort(key=sort_key)
+
+            _AVAILABLE_MODELS = models
+            _AVAILABLE_MODELS_FETCHED_AT = now
+            logger.info(
+                f"gemini listModels: найдено {len(models)} моделей. "
+                f"топ-3: {models[:3]}"
+            )
+            return models
+
+    except Exception as e:
+        logger.warning(f"listModels err: {e}")
+        return _AVAILABLE_MODELS
+
+
+# ============================================================
 # LLM (Gemini — нативный endpoint)
 # ============================================================
 def _build_gemini_payload(system_content: str, history: List[Dict[str, str]],
                           user_message: str) -> dict:
-    """
-    Формирует payload для Gemini API.
-      · systemInstruction — системный промпт
-      · contents — история реплик
-    """
     contents = []
 
-    # История пользователя
     for msg in history[-MAX_USER_HISTORY:]:
         role = "user" if msg["role"] == "user" else "model"
         contents.append({
@@ -471,7 +543,6 @@ def _build_gemini_payload(system_content: str, history: List[Dict[str, str]],
             "parts": [{"text": msg["content"]}],
         })
 
-    # Текущее сообщение
     contents.append({
         "role": "user",
         "parts": [{"text": user_message}],
@@ -490,10 +561,11 @@ def _build_gemini_payload(system_content: str, history: List[Dict[str, str]],
 
 
 async def _try_model(session: aiohttp.ClientSession, model: str,
-                     payload: dict) -> tuple[bool, str]:
+                     payload: dict) -> tuple[bool, str, int]:
     """
     Пробует одну модель Gemini.
-    Возвращает (успех, ответ_или_ошибка).
+    Возвращает (успех, ответ_или_ошибка, http_status).
+    http_status=-1 означает сетевое/parse исключение.
     """
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
     headers = {
@@ -511,37 +583,36 @@ async def _try_model(session: aiohttp.ClientSession, model: str,
                 if "error" in data:
                     err_msg = data["error"].get("message", "unknown")
                     logger.warning(f"[{model}] gemini error: {err_msg}")
-                    return False, err_msg
+                    return False, err_msg, 200  # не 404, но логика выше уже поймает
+
                 try:
                     candidates = data.get("candidates", [])
                     if not candidates:
-                        return False, "no candidates"
+                        return False, "no candidates", 200
                     parts = candidates[0].get("content", {}).get("parts", [])
                     if not parts:
-                        # Может быть заблокировано фильтром
                         finish = candidates[0].get("finishReason", "")
                         logger.warning(f"[{model}] empty parts, finish={finish}")
-                        return False, f"empty, finish={finish}"
+                        return False, f"empty, finish={finish}", 200
                     reply = parts[0].get("text", "").strip()
                 except Exception as e:
                     logger.warning(f"[{model}] parse error: {e}")
-                    return False, "parse error"
+                    return False, "parse error", -1
+
                 if not reply:
-                    return False, "empty reply"
-                return True, reply
+                    return False, "empty reply", 200
+                return True, reply, 200
 
             err = await resp.text()
             logger.warning(f"[{model}] {resp.status}: {err[:200]}")
-            if resp.status in (429, 500, 502, 503, 504):
-                return False, f"http {resp.status}"
-            return False, f"http {resp.status}"
+            return False, f"http {resp.status}", resp.status
 
     except asyncio.TimeoutError:
         logger.warning(f"[{model}] timeout")
-        return False, "timeout"
+        return False, "timeout", -1
     except Exception as e:
         logger.warning(f"[{model}] {type(e).__name__}: {e}")
-        return False, str(e)
+        return False, str(e), -1
 
 
 async def ask_llm(user_message: str, username: str, style: str,
@@ -560,16 +631,64 @@ async def ask_llm(user_message: str, username: str, style: str,
     )
 
     async with aiohttp.ClientSession() as session:
-        for model in GEMINI_MODELS:
-            ok, result = await _try_model(session, model, payload)
+        # ─── Формируем список для попыток ───
+        models_to_try: List[str] = []
+        seen = set()
+
+        # 1) Приоритетные (жёстко заданные) — в начале
+        for m in GEMINI_MODELS_PRIORITY:
+            if m not in seen:
+                seen.add(m)
+                models_to_try.append(m)
+
+        # 2) Динамические — добавляем в конец
+        dynamic = await _fetch_available_models(session)
+        for m in dynamic:
+            if m not in seen:
+                seen.add(m)
+                models_to_try.append(m)
+
+        # Ограничиваем число попыток, чтобы не жечь лимиты
+        models_to_try = models_to_try[:6]
+
+        if not models_to_try:
+            logger.error("нет доступных моделей Gemini")
+            return "сейчас мой провайдер лежит. попробуй через минуту."
+
+        # ─── Идём по списку ───
+        attempt_503 = False  # флаг, что уже ловили 503
+        for model in models_to_try:
+            ok, result, status = await _try_model(session, model, payload)
+
             if ok:
                 logger.info(f"[ai] ответ получен от {model}")
                 _push_user(user_id, "user", f"{username}: {user_message}")
                 _push_user(user_id, "assistant", result)
                 return result
+
+            # Обрабатываем коды ошибок
+            if status == 503 and not attempt_503:
+                # Первый 503 — ретрай через 2 секунды на той же модели
+                attempt_503 = True
+                logger.info(f"[{model}] 503 — повтор через 2с")
+                await asyncio.sleep(2)
+                ok2, result2, status2 = await _try_model(session, model, payload)
+                if ok2:
+                    logger.info(f"[ai] ответ получен от {model} (после 503-ретрая)")
+                    _push_user(user_id, "user", f"{username}: {user_message}")
+                    _push_user(user_id, "assistant", result2)
+                    return result2
+
+            # 404 — модель устарела, можно выкинуть из кэша
+            if status == 404:
+                global _AVAILABLE_MODELS
+                if model in _AVAILABLE_MODELS:
+                    _AVAILABLE_MODELS = [m for m in _AVAILABLE_MODELS if m != model]
+                    logger.info(f"[{model}] выкинул из кэша (404)")
+
             await asyncio.sleep(0.3)
 
-    logger.error("все модели Gemini недоступны")
+    logger.error("все модели Gemini недоступны (все попытки исчерпаны)")
     return "сейчас все мои мозги перегружены. попробуй через минуту."
 
 
@@ -702,11 +821,21 @@ async def cleanup_contexts():
 @bot.event
 async def on_ready():
     logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
-    logger.info(f"LLM: Gemini · модели: {', '.join(GEMINI_MODELS)}")
+    logger.info(f"LLM: Gemini · приоритет: {GEMINI_MODELS_PRIORITY}")
+
+    # Прогреваем список моделей один раз при старте
+    try:
+        async with aiohttp.ClientSession() as session:
+            models = await _fetch_available_models(session)
+            if models:
+                logger.info(f"доступные модели: {models}")
+    except Exception as e:
+        logger.warning(f"прогрев моделей: {e}")
+
     try:
         await bot.change_presence(
             status=disnake.Status.online,
-            activity=disnake.Game("Нейросеть сервера"),
+            activity=disnake.Game("консультант diamond shop"),
         )
     except Exception:
         pass
