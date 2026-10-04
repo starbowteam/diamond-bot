@@ -15,7 +15,7 @@ from core.utils import logger
 P = "\u2800"
 
 # 4 кнопки × 11 = 44 символа (с запасом до 46)
-_BTN_LABEL_MAX = 11
+_BTN_LABEL_MAX = 9
 
 
 def _btn_label(text: str, total: int = _BTN_LABEL_MAX) -> str:
