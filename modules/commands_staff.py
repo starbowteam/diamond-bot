@@ -574,7 +574,7 @@ async def send_tarology_panel():
             break
 
     embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1536977317912518677/image.png?ex=6a834bec&is=6a81fa6c&hm=a2a91a7975af349270ec5d97d17f7814e87de0da7943103eceb10dbbb3725978&=&format=webp&quality=lossless&width=1536&height=597")
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735385063919657/image.png?backend=b2&ex=6ac53e4e&is=6ac3ecce&hm=98e9e0fc9866798b813c2c6c69f933805a7ac857167224c7e4de467ef31e0908&")
 
     embed2 = disnake.Embed(
         title="Early Tarology от Diamond Lady",
