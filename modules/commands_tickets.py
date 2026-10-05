@@ -909,7 +909,7 @@ class QuestionModal(Modal):
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
 
         embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1064857845838925865/1544369476475158629/image.png?ex=6a9841a8&is=6a96f028&hm=e2f80206537e8c87820b03cccdb39f120cdc1452055767b4e122f455b3f66e1b&")
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735388092203191/image.png?backend=b2&ex=6ac53e4f&is=6ac3eccf&hm=990684ba1d817e183ea64f7483e8ef0b3476bd86ff3f8645cab1b129fa492580&")
 
         current_time = int(_time.time())
         embed2 = disnake.Embed(
