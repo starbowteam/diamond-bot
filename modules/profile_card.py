@@ -495,10 +495,16 @@ def _draw_clan_badge(d, img, x, y, w, h, clan: Optional[dict]):
         return
 
     clan_data = next((c for c in CLANS_DATA if c["id"] == clan["id"]), None)
-    if clan_data:
-        c1 = _hex_to_rgb(clan_data.get("color", 0xb3e1b9))
-        c2 = _hex_to_rgb(clan_data.get("color_dark", clan_data.get("color", 0xb3e1b9)))
-        clan_icon = I_STAR if clan_data["name"] == "Сияние" else I_GEM
+        if clan_data:
+            c1 = _hex_to_rgb(clan_data.get("color", 0xb3e1b9))
+            c2 = _hex_to_rgb(clan_data.get("color_dark", clan_data.get("color", 0xb3e1b9)))
+            _clan_name = clan_data.get("name", "")
+        if _clan_name == "Сияние":
+            clan_icon = I_STAR
+        elif _clan_name == "Мультяшности":
+            clan_icon = 0xf11b   # fa-gamepad
+        else:
+            clan_icon = I_GEM
     else:
         c1 = _hex_to_rgb(clan.get("color", 0xb3e1b9))
         c2 = c1
