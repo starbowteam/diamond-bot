@@ -595,7 +595,7 @@ async def send_profile_panel():
             break
 
     embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1540035577997561968/image.png?ex=6a887d66&is=6a872be6&hm=1bcc66c5be7dda618d9041cea46a5f6e5bb7d6f26ce9ad5bfae8e7ccd93f0e51&")
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735380877746368/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=2f257e6fbd905bcfc836b4cecef7048e3608a14cb0af356a7e8868ca1c6ed110&")
     embed2 = disnake.Embed(
         title="Твой профиль на сервере Diamond Shop",
         description="> Здесь можно увидеть свой профиль, чужой профиль, забрать ежедневный подарок, посмотреть инвентарь, кастомные роли и рассчитать скидку.",
