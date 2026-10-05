@@ -3,14 +3,14 @@
   "embeds": [
     {
       "image": {
-        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007501684572282/image.png?ex=6a5f06ce&is=6a5db54e&hm=9bc5880f5a5be1cfc4523d6facdd5303862823eed187390a2fd0398efa017121&=&format=webp&quality=lossless&width=1766&height=686"
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1556726988469960825/image.png?backend=b2&ex=6ac5367c&is=6ac3e4fc&hm=ee5bb8abe25cce7d8d746d61f085a4b26a91d6297e5b9a9b50b0c41b1abd324e&=&format=webp&quality=lossless"
       },
       "color": 6776679,
       "type": "rich"
     },
     {
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
@@ -61,7 +61,7 @@
     },
     {
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
@@ -127,7 +127,7 @@
     },
     {
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
@@ -150,15 +150,6 @@
       "type": "rich",
       "description": "> Прекрасно видеть себя, подсвеченным изыскано. Ниже представлены цены в формате - цены дискорда - ниже наши.",
       "title": "Бейджики Discord"
-    },
-    {
-      "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
-      },
-      "color": 6776679,
-      "type": "rich",
-      "description": "> Мы рады вашим заказам!",
-      "title": "Помните - главное украшения магазина, это вы! < 3. Прайс уточняется каждый день"
     }
   ]
 }
