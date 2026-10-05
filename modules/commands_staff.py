@@ -794,7 +794,7 @@ async def send_work_panel():
             break
 
     embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1550864427455356938/image.png?ex=6aafe28d&is=6aae910d&hm=37683a13a82f6430ea83e49b010d5537d1cdc47b0563fb0d8ef9d50f2232d3c7&")
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735374062129162/image.png?backend=b2&ex=6ac53e4b&is=6ac3eccb&hm=a6b5d66f108d62b6f54ca025140b223a5ffb0a9a7e3d730fa71a71b383d8fd51&")
     embed2 = disnake.Embed(
         title="Кодекс магазина",
         description="> В данном разделе прописаны зарплаты сотрудников, рейтинг менеджеров, а также - устав, которому стоит придерживаться сотруднику по тикету.",
