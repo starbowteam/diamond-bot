@@ -4,12 +4,21 @@
     {
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1539870101099257876/image.png?ex=6a87e349&is=6a8691c9&hm=b63948875044c63d9b1d439b5773a8267eb6d23369dd01847cd922fcc216b66f&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1556710644345077761/image.png?backend=b2&ex=6ac52743&is=6ac3d5c3&hm=37fd019602099851f44ff3e0c2014c36d6b68fe622d36293333ba2d01e7bf132&"
       }
     },
     {
       "title": "Дизайн и монтаж",
       "description": "> Получи себе на сервер прекрасный дизайн от Diamond. Мы выслушаем все ваши пожелания и сделаем отличный дизайн. Точную цену узнавать в тикете.\n\n> Также, можешь получить и монтаж, на нужное тебе видео, обговори с <@&1539523399611580476> всю суть в тикете!",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a87cb63&is=6a8679e3&hm=eea681bea860e0ddcd761e63d3d427ce7e6d9e84bbe163b582a8041ebe337376&"
+      },
+      "fields": []
+    },
+    {
+      "title": "Боты",
+      "description": "> Закажи в Diamond разработку собственного бота в Discord. Мы сделаем так - как ты скажешь, получиться красиво! Узнавать цену в тикете.\"\n\n> Разработка, поставка на хостинг, обслуживание и многое другое!",
       "color": 6776679,
       "image": {
         "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307090772079/image.png?ex=6a87cb63&is=6a8679e3&hm=eea681bea860e0ddcd761e63d3d427ce7e6d9e84bbe163b582a8041ebe337376&"
