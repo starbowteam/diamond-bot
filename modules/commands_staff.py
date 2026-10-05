@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Служебные панели и админ-функции. Home-панель удалена."""
+"""
+Служебные панели и админ-функции. Home-панель удалена.
+"""
 import os
 import json
 import io
@@ -857,7 +859,7 @@ class SpisatZakazModal(Modal):
 
 
 # ============================================================
-# СЛУЖЕБНЫЕ ПАНЕЛИ
+# СЛУЖЕБНЫЕ ПАНЕЛИ (без embed1, короткое описание)
 # ============================================================
 async def send_staff_panels():
     from core.bot import bot
@@ -874,43 +876,54 @@ async def send_staff_panels():
         logger.warning("Staff panel channel not found")
         return
 
-    async for msg in channel.history(limit=50):
+    # Чистим старые сообщения бота
+    async for msg in channel.history(limit=100):
         if msg.author == bot.user:
             try:
                 await msg.delete()
             except Exception:
                 pass
 
-    dc_embed1 = disnake.Embed(color=6776679)
-    dc_embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1538202627005874318/image.png?ex=6a81d254&is=6a8080d4&hm=638d4a0af652ad4a72f25c2d193abff8e74879cf2dd173079a863484559c1dca&=&format=webp&quality=lossless")
-    dc_embed2 = disnake.Embed(
+    # ─── ЭКОНОМИКА DC ───
+    dc_embed = disnake.Embed(
         title="Экономическая панель Diamond Coins",
-        description="> В данном разделе, происходит ручная корректировка валютного дела, связанного с акциями, и самой валютой, ниже - кнопки. Нажимай с умом.",
+        description=(
+            "> Управление балансом DC вручную: начисление, списание, просмотр покупок.\n"
+            "> Работает через модальные окна — вводишь ID и сумму, ничего лишнего.\n"
+            "> Все действия логируются в служебный канал."
+        ),
         color=6776679
     )
-    dc_embed2.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851307371667506/image.png?ex=6a8133e3&is=6a7fe263&hm=2af0f26a823ea59af3001dc16ce84920759e966bc40824095314e6cd1d9b38ca&")
-    await channel.send(embeds=[dc_embed1, dc_embed2], view=DCView())
+    dc_embed.set_image(url=IMG_STRIPE)
+    await channel.send(embed=dc_embed, view=DCView())
 
-    promo_embed1 = disnake.Embed(color=6776679)
-    promo_embed1.set_image(url="https://media.discordapp.net/attachments/1527006158282555412/1537853007754957021/image.png?ex=6a808cb8&is=6a7f3b38&hm=9a8ed29d187e151fe6fe207910dd8665d74b9e2ab794c62e364e72e17079d7f6&=&format=webp&quality=lossless")
-    promo_embed2 = disnake.Embed(
+    # ─── ПРОМОКОДЫ ───
+    promo_embed = disnake.Embed(
         title="Управление промокодами",
-        description="> Используй данную панель, для управления промокодами.",
+        description=(
+            "> Создание, удаление и просмотр промокодов сервера.\n"
+            "> Каждый код — скидка на заказ (например `10%`), активируется в тикете.\n"
+            "> Список кодов доступен без выхода из панели."
+        ),
         color=6776679
     )
-    promo_embed2.set_image(url=IMG_STRIPE)
-    await channel.send(embeds=[promo_embed1, promo_embed2], view=PromoView())
+    promo_embed.set_image(url=IMG_STRIPE)
+    await channel.send(embed=promo_embed, view=PromoView())
 
-    admin_embed1 = disnake.Embed(color=6776679)
-    admin_embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1537851161233596556/image.png?ex=6a808b00&is=6a7f3980&hm=e19375ab0a3d1eae8df69da1ddcc71ded19ed8a6c53267f930e7bc8550a82796&")
-    admin_embed2 = disnake.Embed(
-        title="Панель управление сервером",
-        description="> С помощью данной панели, происходит управление сервером, старые команды, были заменены одной панелью, что дает доступ, в одном виде. Ниже - предоставлены кнопки. Используй с умом.",
+    # ─── АДМИН ───
+    admin_embed = disnake.Embed(
+        title="Панель управления сервером",
+        description=(
+            "> Центральная панель: очистка сообщений, выгрузка JSON, пересчёт ролей, списание заказов.\n"
+            "> Заменила старые отдельные команды — всё в одном месте.\n"
+            "> Требует прав администратора, используй с умом."
+        ),
         color=6776679
     )
-    admin_embed2.set_image(url=IMG_STRIPE)
-    await channel.send(embeds=[admin_embed1, admin_embed2], view=AdminView())
+    admin_embed.set_image(url=IMG_STRIPE)
+    await channel.send(embed=admin_embed, view=AdminView())
 
+    # ─── КЛАН-ЛИГА (админ-панель) ───
     try:
         from clan.panels import send_clan_admin_panel
         await send_clan_admin_panel(bot)
