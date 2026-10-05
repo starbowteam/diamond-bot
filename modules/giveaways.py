@@ -250,7 +250,7 @@ async def get_invite_stats(guild: disnake.Guild, user: disnake.Member, giveaway_
 # ============================================================
 IMG_BANNER_GW  = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735389618798632/image.png?backend=b2&ex=6ac53e4f&is=6ac3eccf&hm=ed4085879047dc6da3c00fc5a55edf0fe24d334f55f7086339380e0364a0ee09&"
 IMG_STRIPE_GW  = "https://cdn.discordapp.com/attachments/1527006158282555412/1530795801268453447/pisk.png?ex=6a66e02f&is=6a658eaf&hm=79e41273327d2e1048ba42df62868cbb88f5b06b112ca864de2c7a02326523e9&"
-IMG_BANNER_FIN = "https://cdn.discordapp.com/attachments/1462418981825810535/1529721309880258660/image.png?ex=6a62f77d&is=6a61a5fd&hm=195de5a268f76548d304db161adc041513e051f0938fcb62588ccd6801e374b2&"
+IMG_BANNER_FIN = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735391875203082/image.png?backend=b2&ex=6ac53e50&is=6ac3ecd0&hm=b331ed1665f81621e08ee916aaabaf5bb78430e86de1d7a51c0ce7072ec175f9&"
 
 
 def build_giveaway_embeds(prize, description, winners_count, participants_count, end_dt, required_invites=0):
