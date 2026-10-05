@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Казино + товар дня. Флеш-акции и панель Action удалены."""
+"""
+Казино Diamond: рулетка, блэкджек, монетка.
+Всё рисуется Pillow-ом (см. modules/casino_render.py), эмбеды убраны.
+Плюс — товар дня (refresh_daily_deal) для витрины.
+"""
 import os
 import time
 import random
@@ -9,7 +13,7 @@ from datetime import datetime, timezone
 import disnake
 from disnake import PartialEmoji
 from disnake.ui import View, Button, Modal, TextInput
-from disnake import ButtonStyle, Embed
+from disnake import ButtonStyle
 
 from core.utils import (
     BASE_DIR, DATA_DIR, CONFIG, logger, log_discord,
@@ -22,9 +26,15 @@ from modules.dc import (
     add_dc, get_user_purchases,
 )
 
-# 👇 Из объединённого others — только живое
 from modules.others import (
     apply_casino_win, try_insurance,
+)
+
+# 👇 Pillow-рендеры казино
+from modules.casino_render import (
+    render_roulette_spin, render_roulette_win, render_roulette_lose,
+    render_blackjack_table, render_blackjack_result,
+    render_coinflip_choice, render_coinflip_win, render_coinflip_lose,
 )
 
 try:
@@ -33,8 +43,11 @@ except Exception:
     on_casino_quest_hook = None
     on_casino_win_hook = None
 
-ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 
+# ============================================================
+# КОНСТАНТЫ
+# ============================================================
+ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
 ROULETTE_STATS_FILE = os.path.join(DATA_DIR, "roulette_stats.json")
 
@@ -45,34 +58,50 @@ DAILY_DEALS_PER_CYCLE = 5
 CASINO_MIN_BET = 20
 CASINO_MAX_BET = 4000
 
-IMG_ROULETTE_SPIN = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685793872248842/image.png?ex=6aaf3c2f&is=6aadeaaf&hm=67254a55d5004c897269e64255ad1a54e9a29689a383fda711316592a5bad350&"
-IMG_ROULETTE_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685830727598130/image.png?ex=6aaf3c38&is=6aadeab8&hm=bda99953d1ea04a3799aa0378691ba4ba793ef2c2919ab7f9bdbef63a33cbc19&"
-IMG_ROULETTE_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1550685884456636527/image.png?ex=6aaf3c45&is=6aadeac5&hm=451731816ed61f6878fba789858bdf5aed0ef69cfe1bfd5ce5378a7f9a1e4a18&"
-
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-
-IMG_BJ_TABLE = "https://media.discordapp.net/attachments/1527006158282555412/1551293759461920808/image.png?ex=6ab17265&is=6ab020e5&hm=d6e9e598b1981259566f329a2b43f19ab5bbd49440d6c9a6a8f1c31d6b2f9d38&=&format=webp&quality=lossless"
-IMG_BJ_WIN   = "https://media.discordapp.net/attachments/1527006158282555412/1551293759893930094/image.png?ex=6ab17266&is=6ab020e6&hm=2de3752ae558bf824c547cb08167e4fcd5b6e66ebec440a42d64130ee84a42ef&=&format=webp&quality=lossless"
-IMG_BJ_LOSE  = "https://media.discordapp.net/attachments/1527006158282555412/1551293760237736026/image.png?ex=6ab17266&is=6ab020e6&hm=f6a28c4d5dc0e0a758d1fa910c6107fba488c75045cdc072a395ae7a4e644160&=&format=webp&quality=lossless"
-IMG_BJ_PUSH  = "https://media.discordapp.net/attachments/1527006158282555412/1551293760611160164/image.png?ex=6ab17266&is=6ab020e6&hm=d196fde297e142ac026bed1295a1311b03e44de3e8b7060c863e4962eea224be&=&format=webp&quality=lossless"
-IMG_BJ_BUST  = "https://media.discordapp.net/attachments/1527006158282555412/1551293761059823666/image.png?ex=6ab17266&is=6ab020e6&hm=cf6f037552d279906a3ef039621b52ada29c481a18c4eba86971380b72a57b1e&=&format=webp&quality=lossless"
-
-IMG_COIN_WAIT = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296470286860308/image.png?ex=6ab174ec&is=6ab0236c&hm=9a3e8e1cfa2d069d888e2bbcae69fbd2de05fcd4d8564b5856c85c14e6db3a9d&"
-IMG_COIN_FLIP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296470722940948/image.png?ex=6ab174ec&is=6ab0236c&hm=b7fbb9f71639147c3f67199c535648efa7df7e2fcda2ab3e039ddd29b121f335&"
-IMG_COIN_WIN  = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296698964377781/image.png?ex=6ab17522&is=6ab023a2&hm=ef1cd116093f11594be461116cb2d2c11d7ae0f2f36d5e8ee88e82349d79de70&"
-IMG_COIN_LOSE = "https://cdn.discordapp.com/attachments/1527006158282555412/1551296699820023989/image.png?ex=6ab17522&is=6ab023a2&hm=ca876fcb9981a13bff89958dfbd4061abec6dfad28a6e6e578c2563bbeb3ac97&"
-
-EMOJI_BJ_HIT    = PartialEmoji(name="adde", id=1551288309240696954)
-EMOJI_BJ_STAND  = PartialEmoji(name="PAM", id=1551288362822795434)
-
-EMOJI_COIN_HEADS  = PartialEmoji(name="image", id=1551296060729725019)
-EMOJI_COIN_TAILS  = PartialEmoji(name="2313", id=1551296094468575366)
-
-EMOJI_REPLAY = PartialEmoji(name="image",  id=1555994370933653544)
-EMOJI_REPEAT = PartialEmoji(name="povtor", id=1555993533629071360)
-EMOJI_DOUBLE = PartialEmoji(name="flas",   id=1551289202279325756)
-
 P = "\u3164"
+
+
+# ============================================================
+# ХЕЛПЕРЫ ДЛЯ ОТПРАВКИ PILLOW-КАРТИНОК
+# ============================================================
+async def _send_game_screen(inter, buf, fname: str, view=None):
+    """
+    Универсальная отправка Pillow-картинки в текущее сообщение.
+    Работает и при response, и после defer — через edit_original_response.
+    """
+    file = disnake.File(buf, filename=fname)
+    embed = disnake.Embed(color=6776679)
+    embed.set_image(url=f"attachment://{fname}")
+    kwargs = dict(content=None, embed=embed, file=file, attachments=[], view=view)
+    try:
+        if inter.response.is_done():
+            await inter.edit_original_response(**kwargs)
+        else:
+            await inter.response.edit_message(**kwargs)
+    except disnake.InteractionResponded:
+        await inter.edit_original_response(**kwargs)
+
+
+def _suit_code(suit: str) -> int:
+    """Юникод FA-иконки для масти."""
+    return {
+        "♠️": 0xf2f4,
+        "♥️": 0xf004,
+        "♦️": 0xf219,
+        "♣️": 0xf327,
+    }.get(suit, 0xf2f4)
+
+
+def _suit_color(suit: str):
+    return (211, 47, 47) if suit in ("♥️", "♦️") else (26, 26, 30)
+
+
+def _cards_for_render(cards: list) -> list:
+    """Превращает список карт в формат рендера."""
+    return [
+        {"rank": c[0], "suit": _suit_code(c[1]), "color": _suit_color(c[1])}
+        for c in cards
+    ]
 
 
 # ============================================================
@@ -154,7 +183,7 @@ def refresh_daily_deal(force: bool = False):
             "slot": current_slot,
             "item": old_item,
             "counter": 0,
-            "updated_at": int(time.time())
+            "updated_at": int(time.time()),
         })
         return old_item
 
@@ -167,7 +196,7 @@ def refresh_daily_deal(force: bool = False):
         "slot": current_slot,
         "item": deal,
         "counter": counter,
-        "updated_at": int(time.time())
+        "updated_at": int(time.time()),
     })
     return deal
 
@@ -177,7 +206,7 @@ def refresh_daily_deal(force: bool = False):
 # ============================================================
 def load_roulette_stats() -> dict:
     return load_json(ROULETTE_STATS_FILE, {
-        "total_bets": 0, "total_won": 0, "total_lost": 0, "rolls": 0
+        "total_bets": 0, "total_won": 0, "total_lost": 0, "rolls": 0,
     })
 
 
@@ -210,66 +239,6 @@ def roll_roulette() -> dict:
     return ROULETTE_ROLLS[0]
 
 
-def _build_spin_embeds() -> list:
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=IMG_ROULETTE_SPIN)
-    embed2 = disnake.Embed(
-        title="Идет прокрутка слота, ожидайте ⌛",
-        description="> 🎰 Прокручиваем барабан, подбираем слоты, ставим ставку",
-        color=6776679
-    )
-    embed2.set_image(url=IMG_STRIPE)
-    return [embed1, embed2]
-
-
-def _build_win_embeds(result: dict, bet: int, net: int, new_balance: int) -> list:
-    total_payout = bet + net
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=IMG_ROULETTE_WIN)
-    embed2 = disnake.Embed(
-        title=f"{result['emoji']}  {result['name'].upper()}!",
-        description=(
-            f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
-            f"> 📊 Множитель: **x{1 + result['mult']:.1f}**\n\n"
-            f"> 💵 Твоя ставка: **{bet} DC**\n"
-            f"> ✅ Возврат: **+{total_payout} DC**\n"
-            f"> 📈 Чистый профит: **+{net} DC**\n"
-            f"> 💎 Новый баланс: **{new_balance} DC**"
-        ),
-        color=result["color"],
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed2.add_field(name="📌  Детали", value=f"> `{result['desc']}`", inline=False)
-    embed2.set_footer(text=f"Ставка: {bet} DC · Удача на твоей стороне!")
-    embed2.set_image(url=IMG_STRIPE)
-    return [embed1, embed2]
-
-
-def _build_lose_embeds(result: dict, bet: int, new_balance: int, refund: int = 0) -> list:
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=IMG_ROULETTE_LOSE)
-    extra = ""
-    if refund > 0:
-        extra = f"> 🛡 Страховка: **+{refund} DC**\n"
-    embed2 = disnake.Embed(
-        title=f"{result['emoji']}  ПРОИГРЫШ",
-        description=(
-            f"> 🎰 Выпало: **{result['emoji']} {result['name']}**\n"
-            f"> 📊 Множитель: **x0**\n\n"
-            f"> 💵 Твоя ставка: **{bet} DC**\n"
-            f"{extra}"
-            f"> 💸 Потеряно: **−{bet - refund} DC**\n"
-            f"> 💎 Новый баланс: **{new_balance} DC**"
-        ),
-        color=0xed4245,
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed2.add_field(name="📌  Детали", value="> `Не расстраивайся, повезёт в следующий раз!`", inline=False)
-    embed2.set_footer(text=f"Ставка: {bet} DC · Попробуешь ещё?")
-    embed2.set_image(url=IMG_STRIPE)
-    return [embed1, embed2]
-
-
 async def _roulette_play(inter, bet: int, reason: str = "Ставка в рулетке монет"):
     user_id = inter.author.id
 
@@ -286,7 +255,7 @@ async def _roulette_play(inter, bet: int, reason: str = "Ставка в рул�
     if bet > balance:
         return await inter.response.send_message(
             f"❌ Недостаточно DC.\n> **Твой баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
-            ephemeral=True
+            ephemeral=True,
         )
 
     if not inter.response.is_done():
@@ -294,11 +263,16 @@ async def _roulette_play(inter, bet: int, reason: str = "Ставка в рул�
 
     success = await remove_dc(user_id, bet, reason)
     if not success:
-        return await inter.edit_original_response(
-            content="❌ Не удалось списать DC. Попробуй позже."
-        )
+        return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуй позже.")
 
-    await inter.edit_original_response(embeds=_build_spin_embeds())
+    # Спин
+    try:
+        buf = render_roulette_spin(user_id, balance, bet)
+        await _send_game_screen(inter, buf, f"roulette_spin_{user_id}.png")
+    except Exception as e:
+        logger.exception(f"render_roulette_spin: {e}")
+        await inter.edit_original_response(content="🎰 Крутим барабан...")
+
     await asyncio.sleep(2.2)
 
     result = roll_roulette()
@@ -325,12 +299,15 @@ async def _roulette_play(inter, bet: int, reason: str = "Ставка в рул�
                 await on_casino_win_hook(user_id, payout, bet)
             except Exception as e:
                 logger.warning(f"casino_win_hook roulette: {e}")
+
         new_balance = await get_user_balance(user_id)
         view = RouletteRetryView(bet)
-        await inter.edit_original_response(
-            embeds=_build_win_embeds(result, bet, net, new_balance),
-            view=view
-        )
+
+        try:
+            buf = render_roulette_win(user_id, new_balance, bet, result["name"], mult, net, payout)
+            await _send_game_screen(inter, buf, f"roulette_win_{user_id}.png", view=view)
+        except Exception as e:
+            logger.exception(f"render_roulette_win: {e}")
 
         if net >= 10000:
             await _check_casino_achievements(user_id, profit=net)
@@ -340,6 +317,7 @@ async def _roulette_play(inter, bet: int, reason: str = "Ставка в рул�
         stats["total_won"] = stats.get("total_won", 0) + net
         stats["rolls"] = stats.get("rolls", 0) + 1
         save_roulette_stats(stats)
+
         asyncio.create_task(log_discord(
             title=f"🎰 Рулетка: {result['name']}",
             description=(
@@ -349,23 +327,28 @@ async def _roulette_play(inter, bet: int, reason: str = "Ставка в рул�
                 f"> **Чистый профит:** `+{net} DC`\n"
                 f"> **Новый баланс:** `{new_balance} DC`"
             ),
-            color=result["color"]
+            color=result["color"],
         ))
     else:
         refund = try_insurance(user_id, bet)
         if refund > 0:
             await add_dc(user_id, refund, "Страховка ставки (рулетка)")
+
         new_balance = await get_user_balance(user_id)
         view = RouletteRetryView(bet)
-        await inter.edit_original_response(
-            embeds=_build_lose_embeds(result, bet, new_balance, refund),
-            view=view
-        )
+
+        try:
+            buf = render_roulette_lose(user_id, new_balance, bet, refund, result["name"])
+            await _send_game_screen(inter, buf, f"roulette_lose_{user_id}.png", view=view)
+        except Exception as e:
+            logger.exception(f"render_roulette_lose: {e}")
+
         stats = load_roulette_stats()
         stats["total_bets"] = stats.get("total_bets", 0) + bet
         stats["total_lost"] = stats.get("total_lost", 0) + (bet - refund)
         stats["rolls"] = stats.get("rolls", 0) + 1
         save_roulette_stats(stats)
+
         asyncio.create_task(log_discord(
             title="🎰 Рулетка: проигрыш",
             description=(
@@ -375,7 +358,7 @@ async def _roulette_play(inter, bet: int, reason: str = "Ставка в рул�
                 f"> **Страховка:** `+{refund} DC`\n"
                 f"> **Новый баланс:** `{new_balance} DC`"
             ),
-            color=0xed4245
+            color=0xed4245,
         ))
 
 
@@ -387,7 +370,7 @@ class RouletteModal(Modal):
                 placeholder=f"От {CASINO_MIN_BET} до {CASINO_MAX_BET}",
                 custom_id="bet",
                 min_length=1,
-                max_length=10
+                max_length=10,
             )
         ]
         super().__init__(title="🎰 Рулетка монет", components=components)
@@ -411,8 +394,8 @@ class RouletteRetryView(View):
             label="Играть ещё",
             style=ButtonStyle.gray,
             custom_id="roulette_retry",
-            emoji=EMOJI_REPLAY,
-            row=0
+            emoji=PartialEmoji(name="image", id=1555994370933653544),
+            row=0,
         )
         btn_replay.callback = self.replay_callback
         self.add_item(btn_replay)
@@ -421,8 +404,8 @@ class RouletteRetryView(View):
             label="Повтор ставки",
             style=ButtonStyle.gray,
             custom_id="roulette_repeat",
-            emoji=EMOJI_REPEAT,
-            row=0
+            emoji=PartialEmoji(name="povtor", id=1555993533629071360),
+            row=0,
         )
         btn_repeat.callback = self.repeat_callback
         self.add_item(btn_repeat)
@@ -431,8 +414,8 @@ class RouletteRetryView(View):
             label="Двойная ставка",
             style=ButtonStyle.danger,
             custom_id="roulette_double",
-            emoji=EMOJI_DOUBLE,
-            row=0
+            emoji=PartialEmoji(name="flas", id=1551289202279325756),
+            row=0,
         )
         btn_double.callback = self.double_callback
         self.add_item(btn_double)
@@ -441,18 +424,16 @@ class RouletteRetryView(View):
         await inter.response.send_modal(RouletteModal())
 
     async def repeat_callback(self, inter: disnake.MessageInteraction):
-        await _roulette_play(inter, self.last_bet,
-                             reason="Повтор ставки в рулетке")
+        await _roulette_play(inter, self.last_bet, reason="Повтор ставки в рулетке")
 
     async def double_callback(self, inter: disnake.MessageInteraction):
         new_bet = self.last_bet * 2
         if new_bet > CASINO_MAX_BET:
             return await inter.response.send_message(
                 f"❌ Двойная ставка превышает лимит ({CASINO_MAX_BET} DC).",
-                ephemeral=True
+                ephemeral=True,
             )
-        await _roulette_play(inter, new_bet,
-                             reason="Двойная ставка в рулетке")
+        await _roulette_play(inter, new_bet, reason="Двойная ставка в рулетке")
 
 
 # ============================================================
@@ -472,14 +453,6 @@ def _new_deck() -> list:
     deck = [(r, s) for r in RANKS for s in SUITS]
     random.shuffle(deck)
     return deck
-
-
-def _card_str(card) -> str:
-    return f"`{card[0]}{card[1]}`"
-
-
-def _hand_str(hand: list) -> str:
-    return "  ".join(_card_str(c) for c in hand)
 
 
 def _hand_value(hand: list) -> int:
@@ -504,261 +477,11 @@ def _dealer_play(game: dict):
         game["dealer"].append(game["deck"].pop())
 
 
-def _build_bj_embeds(game: dict, hide_dealer: bool = True,
-                     result_title: str = None, result_color: int = None,
-                     result_kind: str = "table") -> list:
-    player_val = _hand_value(game["player"])
-    dealer_val = _hand_value(game["dealer"]) if not hide_dealer else _hand_value([game["dealer"][0]])
-
-    img_map = {
-        "win":   IMG_BJ_WIN,
-        "lose":  IMG_BJ_LOSE,
-        "push":  IMG_BJ_PUSH,
-        "bust":  IMG_BJ_BUST,
-        "table": IMG_BJ_TABLE,
-    }
-    img = img_map.get(result_kind, IMG_BJ_TABLE)
-
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=img)
-
-    if hide_dealer:
-        dealer_line = f"{_card_str(game['dealer'][0])}  🂠"
-    else:
-        dealer_line = _hand_str(game["dealer"])
-
-    player_line = _hand_str(game["player"])
-    title = result_title or "Блэкджек"
-    color = result_color or 6776679
-
-    desc = (
-        f"**Дилер:** {dealer_line}\n"
-        f"**Очки дилера:** `{dealer_val if not hide_dealer else '?'}`\n\n"
-        f"**Ваши карты:** {player_line}\n"
-        f"**Ваши очки:** `{player_val}`\n\n"
-        f"**Ставка:** `{game['bet']} DC`"
-    )
-    if game.get("doubled"):
-        desc += f"\n**Удвоено:** `{game['bet']} DC` (итого в банке)"
-
-    embed2 = disnake.Embed(
-        title=title,
-        description=desc,
-        color=color,
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed2.set_image(url=IMG_STRIPE)
-    return [embed1, embed2]
-
-
-async def _blackjack_play(inter, bet: int, reason: str = "Ставка в блэкджеке"):
-    user_id = inter.author.id
-
-    if bet < BLACKJACK_MIN_BET:
-        return await inter.response.send_message(
-            f"❌ Минимальная ставка — **{BLACKJACK_MIN_BET} DC**.", ephemeral=True
-        )
-    if bet > BLACKJACK_MAX_BET:
-        return await inter.response.send_message(
-            f"❌ Максимальная ставка — **{BLACKJACK_MAX_BET} DC**.", ephemeral=True
-        )
-
-    balance = await get_user_balance(user_id)
-    if bet > balance:
-        return await inter.response.send_message(
-            f"❌ Недостаточно DC.\n> **Баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
-            ephemeral=True
-        )
-
-    if not inter.response.is_done():
-        await inter.response.defer(ephemeral=True)
-
-    ok = await remove_dc(user_id, bet, reason)
-    if not ok:
-        return await inter.edit_original_response(
-            content="❌ Не удалось списать DC. Попробуй позже."
-        )
-
-    deck = _new_deck()
-    game = {
-        "user_id": user_id,
-        "bet": bet,
-        "deck": deck,
-        "player": [deck.pop(), deck.pop()],
-        "dealer": [deck.pop(), deck.pop()],
-        "doubled": False,
-        "finished": False,
-    }
-
-    if on_casino_quest_hook:
-        try:
-            await on_casino_quest_hook(user_id)
-        except Exception:
-            pass
-
-    await _check_casino_achievements(user_id, bet=bet)
-
-    await inter.edit_original_response(
-        embeds=_build_bj_embeds(game, hide_dealer=True),
-        view=BlackjackView(game)
-    )
-
-    if _hand_value(game["player"]) == 21:
-        await _bj_finish(inter, game)
-
-
-class BlackjackBetModal(Modal):
-    def __init__(self):
-        components = [
-            TextInput(
-                label=f"Ставка ({BLACKJACK_MIN_BET}-{BLACKJACK_MAX_BET} DC)",
-                placeholder=f"От {BLACKJACK_MIN_BET} до {BLACKJACK_MAX_BET}",
-                custom_id="bet",
-                min_length=1,
-                max_length=10
-            )
-        ]
-        super().__init__(title="Блэкджек — ставка", components=components)
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        bet_str = inter.text_values["bet"].strip()
-        if not bet_str.isdigit():
-            return await inter.response.send_message(
-                "❌ Ставка должна быть целым числом.", ephemeral=True
-            )
-        bet = int(bet_str)
-        await _blackjack_play(inter, bet, reason="Ставка в блэкджеке")
-
-
-class BlackjackView(View):
-    def __init__(self, game: dict):
-        super().__init__(timeout=300)
-        self.game = game
-
-        btn_hit = Button(
-            label=f"{P}{P}Взять{P}{P}",
-            style=ButtonStyle.gray,
-            custom_id="bj_hit",
-            emoji=EMOJI_BJ_HIT,
-            row=0
-        )
-        btn_hit.callback = self.hit_callback
-        self.add_item(btn_hit)
-
-        btn_stand = Button(
-            label=f"{P}{P}Хватит{P}{P}",
-            style=ButtonStyle.gray,
-            custom_id="bj_stand",
-            emoji=EMOJI_BJ_STAND,
-            row=0
-        )
-        btn_stand.callback = self.stand_callback
-        self.add_item(btn_stand)
-
-        btn_double = Button(
-            label=f"{P}{P}Удвоить{P}{P}",
-            style=ButtonStyle.danger,
-            custom_id="bj_double",
-            emoji=EMOJI_DOUBLE,
-            row=0
-        )
-        btn_double.callback = self.double_callback
-        self.add_item(btn_double)
-
-    async def _check_owner(self, inter: disnake.MessageInteraction) -> bool:
-        if inter.author.id != self.game["user_id"]:
-            await inter.response.send_message("⛔ Это не ваша игра.", ephemeral=True)
-            return False
-        if self.game["finished"]:
-            await inter.response.send_message("⛔ Игра уже завершена.", ephemeral=True)
-            return False
-        return True
-
-    async def hit_callback(self, inter: disnake.MessageInteraction):
-        if not await self._check_owner(inter):
-            return
-        self.game["player"].append(self.game["deck"].pop())
-        value = _hand_value(self.game["player"])
-        if value > 21:
-            self.game["finished"] = True
-            await inter.response.edit_message(
-                embeds=_build_bj_embeds(
-                    self.game, hide_dealer=False,
-                    result_title="ПЕРЕБОР!",
-                    result_color=0xed4245,
-                    result_kind="bust"
-                ),
-                view=BlackjackRetryView(self.game["bet"])
-            )
-            await _bj_payout(inter, self.game, "bust")
-        elif value == 21:
-            await self._stand_logic(inter)
-        else:
-            await inter.response.edit_message(
-                embeds=_build_bj_embeds(self.game, hide_dealer=True),
-                view=self
-            )
-
-    async def stand_callback(self, inter: disnake.MessageInteraction):
-        if not await self._check_owner(inter):
-            return
-        await self._stand_logic(inter)
-
-    async def _stand_logic(self, inter: disnake.MessageInteraction):
-        _dealer_play(self.game)
-        self.game["finished"] = True
-        player_val = _hand_value(self.game["player"])
-        dealer_val = _hand_value(self.game["dealer"])
-
-        if dealer_val > 21:
-            title, color, outcome = "ДИЛЕР ПЕРЕБРАЛ — ВЫ ВЫИГРАЛИ!", 0x2ecc71, "win"
-        elif player_val > dealer_val:
-            title, color, outcome = "ПОБЕДА!", 0x2ecc71, "win"
-        elif player_val == dealer_val:
-            title, color, outcome = "НИЧЬЯ (возврат)", 0xf7c991, "push"
-        else:
-            title, color, outcome = "ВЫ ПРОИГРАЛИ", 0xed4245, "lose"
-
-        await inter.response.edit_message(
-            embeds=_build_bj_embeds(
-                self.game, hide_dealer=False,
-                result_title=title, result_color=color,
-                result_kind=outcome
-            ),
-            view=BlackjackRetryView(self.game["bet"])
-        )
-        await _bj_payout(inter, self.game, outcome)
-
-    async def double_callback(self, inter: disnake.MessageInteraction):
-        if not await self._check_owner(inter):
-            return
-        if self.game.get("doubled"):
-            return await inter.response.send_message("⛔ Уже удвоено.", ephemeral=True)
-        if len(self.game["player"]) != 2:
-            return await inter.response.send_message("⛔ Удвоить можно только на первых двух картах.", ephemeral=True)
-
-        user_id = self.game["user_id"]
-        bet = self.game["bet"]
-        new_total = bet * 2
-        if new_total > CASINO_MAX_BET:
-            return await inter.response.send_message(
-                f"❌ Удвоение превышает лимит ({CASINO_MAX_BET} DC).", ephemeral=True
-            )
-        balance = await get_user_balance(user_id)
-        if balance < bet:
-            return await inter.response.send_message(
-                f"❌ Недостаточно DC для удвоения.\n> Нужно ещё: `{bet} DC`", ephemeral=True
-            )
-        ok = await remove_dc(user_id, bet, "Удвоение в блэкджеке")
-        if not ok:
-            return await inter.response.send_message("❌ Ошибка списания.", ephemeral=True)
-        self.game["doubled"] = True
-        self.game["player"].append(self.game["deck"].pop())
-        await self._stand_logic(inter)
-
-
-async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str):
-    user_id = game["user_id"]
+async def _bj_settle(user_id: int, game: dict, outcome: str) -> dict:
+    """
+    Начисляет выплату, пишет лог, возвращает {payout, net, new_balance, total_bet}.
+    НЕ трогает UI — рендер делает вызывающий код.
+    """
     bet = game["bet"]
     total_bet = bet * 2 if game.get("doubled") else bet
 
@@ -775,6 +498,7 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
         payout = 0
         reason = "Проигрыш в блэкджеке"
 
+    refund = 0
     if payout > 0:
         payout, used = apply_casino_win(user_id, payout)
         if used:
@@ -809,35 +533,301 @@ async def _bj_payout(inter: disnake.MessageInteraction, game: dict, outcome: str
     asyncio.create_task(log_discord(
         title=f"🃏 Блэкджек: {outcome}",
         description=(
-            f"> **Пользователь:** {inter.author.mention}\n"
+            f"> **Пользователь:** <@{user_id}>\n"
             f"> **Ставка:** `{total_bet} DC`\n"
             f"> **Выплата:** `{payout} DC`\n"
             f"> **Профит:** `{'+' if net >= 0 else ''}{net} DC`\n"
             f"> **Баланс:** `{new_balance} DC`"
         ),
-        color=0x2ecc71 if payout > 0 else 0xed4245
+        color=0x2ecc71 if payout > 0 else 0xed4245,
     ))
+
+    return {
+        "payout": payout,
+        "net": net,
+        "new_balance": new_balance,
+        "total_bet": total_bet,
+    }
+
+
+async def _bj_show_table(inter, game: dict, edit_response: bool = False):
+    """Перерисовывает текущий стол."""
+    user_id = game["user_id"]
+    balance = game.get("balance", 0)
+
+    dealer_cards = [
+        {"rank": game["dealer"][0][0],
+         "suit": _suit_code(game["dealer"][0][1]),
+         "color": _suit_color(game["dealer"][0][1])},
+        {"back": True},
+    ]
+    player_cards = _cards_for_render(game["player"])
+
+    try:
+        buf = render_blackjack_table(
+            user_id, balance, game["bet"],
+            dealer_cards, player_cards,
+            _hand_value(game["player"]), game["dealer"][0],
+        )
+        file = disnake.File(buf, filename=f"bj_{user_id}.png")
+        e = disnake.Embed(color=6776679)
+        e.set_image(url=f"attachment://{file.filename}")
+        await inter.response.edit_message(
+            content=None, embed=e, file=file, attachments=[],
+            view=BlackjackView(game),
+        )
+    except Exception as e:
+        logger.exception(f"_bj_show_table: {e}")
+
+
+async def _bj_show_result(inter, game: dict, outcome: str):
+    """Считает выплату и показывает финальную картинку с картами."""
+    user_id = game["user_id"]
+
+    settle = await _bj_settle(user_id, game, outcome)
+
+    dealer_cards = _cards_for_render(game["dealer"])
+    player_cards = _cards_for_render(game["player"])
+
+    try:
+        buf = render_blackjack_result(
+            user_id,
+            settle["new_balance"],
+            game["bet"],
+            settle["total_bet"],
+            settle["payout"],
+            settle["net"],
+            dealer_cards, player_cards,
+            _hand_value(game["dealer"]),
+            _hand_value(game["player"]),
+            outcome,
+        )
+        file = disnake.File(buf, filename=f"bj_res_{user_id}.png")
+        e = disnake.Embed(color=6776679)
+        e.set_image(url=f"attachment://{file.filename}")
+        await inter.response.edit_message(
+            content=None, embed=e, file=file, attachments=[],
+            view=BlackjackRetryView(game["bet"]),
+        )
+    except Exception as e:
+        logger.exception(f"render_blackjack_result: {e}")
+
+
+async def _blackjack_play(inter, bet: int, reason: str = "Ставка в блэкджеке"):
+    user_id = inter.author.id
+
+    if bet < BLACKJACK_MIN_BET:
+        return await inter.response.send_message(
+            f"❌ Минимальная ставка — **{BLACKJACK_MIN_BET} DC**.", ephemeral=True
+        )
+    if bet > BLACKJACK_MAX_BET:
+        return await inter.response.send_message(
+            f"❌ Максимальная ставка — **{BLACKJACK_MAX_BET} DC**.", ephemeral=True
+        )
+
+    balance = await get_user_balance(user_id)
+    if bet > balance:
+        return await inter.response.send_message(
+            f"❌ Недостаточно DC.\n> **Баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
+            ephemeral=True,
+        )
+
+    if not inter.response.is_done():
+        await inter.response.defer(ephemeral=True)
+
+    ok = await remove_dc(user_id, bet, reason)
+    if not ok:
+        return await inter.edit_original_response(content="❌ Не удалось списать DC. Попробуй позже.")
+
+    deck = _new_deck()
+    game = {
+        "user_id": user_id,
+        "bet": bet,
+        "deck": deck,
+        "player": [deck.pop(), deck.pop()],
+        "dealer": [deck.pop(), deck.pop()],
+        "doubled": False,
+        "finished": False,
+        "balance": balance - bet,  # для рендера — сразу после списания
+    }
+
+    if on_casino_quest_hook:
+        try:
+            await on_casino_quest_hook(user_id)
+        except Exception:
+            pass
+
+    await _check_casino_achievements(user_id, bet=bet)
+
+    # Показываем начальный стол
+    try:
+        dealer_cards = [
+            {"rank": game["dealer"][0][0],
+             "suit": _suit_code(game["dealer"][0][1]),
+             "color": _suit_color(game["dealer"][0][1])},
+            {"back": True},
+        ]
+        player_cards = _cards_for_render(game["player"])
+        buf = render_blackjack_table(
+            user_id, game["balance"], bet,
+            dealer_cards, player_cards,
+            _hand_value(game["player"]), game["dealer"][0],
+        )
+        await _send_game_screen(
+            inter, buf, f"bj_{user_id}.png", view=BlackjackView(game)
+        )
+    except Exception as e:
+        logger.exception(f"render_blackjack_table (start): {e}")
+        await inter.edit_original_response(content="🃏 Раздача карт...")
+
+    # Блэкджек сразу
+    if _hand_value(game["player"]) == 21:
+        await _bj_finish(inter, game)
+
+
+class BlackjackBetModal(Modal):
+    def __init__(self):
+        components = [
+            TextInput(
+                label=f"Ставка ({BLACKJACK_MIN_BET}-{BLACKJACK_MAX_BET} DC)",
+                placeholder=f"От {BLACKJACK_MIN_BET} до {BLACKJACK_MAX_BET}",
+                custom_id="bet",
+                min_length=1,
+                max_length=10,
+            )
+        ]
+        super().__init__(title="Блэкджек — ставка", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        bet_str = inter.text_values["bet"].strip()
+        if not bet_str.isdigit():
+            return await inter.response.send_message(
+                "❌ Ставка должна быть целым числом.", ephemeral=True
+            )
+        bet = int(bet_str)
+        await _blackjack_play(inter, bet, reason="Ставка в блэкджеке")
+
+
+class BlackjackView(View):
+    def __init__(self, game: dict):
+        super().__init__(timeout=300)
+        self.game = game
+
+        btn_hit = Button(
+            label=f"{P}{P}Взять{P}{P}",
+            style=ButtonStyle.gray,
+            custom_id="bj_hit",
+            emoji=PartialEmoji(name="adde", id=1551288309240696954),
+            row=0,
+        )
+        btn_hit.callback = self.hit_callback
+        self.add_item(btn_hit)
+
+        btn_stand = Button(
+            label=f"{P}{P}Хватит{P}{P}",
+            style=ButtonStyle.gray,
+            custom_id="bj_stand",
+            emoji=PartialEmoji(name="PAM", id=1551288362822795434),
+            row=0,
+        )
+        btn_stand.callback = self.stand_callback
+        self.add_item(btn_stand)
+
+        btn_double = Button(
+            label=f"{P}{P}Удвоить{P}{P}",
+            style=ButtonStyle.danger,
+            custom_id="bj_double",
+            emoji=PartialEmoji(name="flas", id=1551289202279325756),
+            row=0,
+        )
+        btn_double.callback = self.double_callback
+        self.add_item(btn_double)
+
+    async def _check_owner(self, inter: disnake.MessageInteraction) -> bool:
+        if inter.author.id != self.game["user_id"]:
+            await inter.response.send_message("⛔ Это не ваша игра.", ephemeral=True)
+            return False
+        if self.game["finished"]:
+            await inter.response.send_message("⛔ Игра уже завершена.", ephemeral=True)
+            return False
+        return True
+
+    async def hit_callback(self, inter: disnake.MessageInteraction):
+        if not await self._check_owner(inter):
+            return
+        self.game["player"].append(self.game["deck"].pop())
+        value = _hand_value(self.game["player"])
+
+        if value > 21:
+            self.game["finished"] = True
+            await _bj_show_result(inter, self.game, "bust")
+        elif value == 21:
+            await self._stand_logic(inter)
+        else:
+            await _bj_show_table(inter, self.game)
+
+    async def stand_callback(self, inter: disnake.MessageInteraction):
+        if not await self._check_owner(inter):
+            return
+        await self._stand_logic(inter)
+
+    async def _stand_logic(self, inter: disnake.MessageInteraction):
+        _dealer_play(self.game)
+        self.game["finished"] = True
+        player_val = _hand_value(self.game["player"])
+        dealer_val = _hand_value(self.game["dealer"])
+
+        if dealer_val > 21 or player_val > dealer_val:
+            outcome = "win"
+        elif player_val == dealer_val:
+            outcome = "push"
+        else:
+            outcome = "lose"
+
+        await _bj_show_result(inter, self.game, outcome)
+
+    async def double_callback(self, inter: disnake.MessageInteraction):
+        if not await self._check_owner(inter):
+            return
+        if self.game.get("doubled"):
+            return await inter.response.send_message("⛔ Уже удвоено.", ephemeral=True)
+        if len(self.game["player"]) != 2:
+            return await inter.response.send_message(
+                "⛔ Удвоить можно только на первых двух картах.", ephemeral=True
+            )
+
+        user_id = self.game["user_id"]
+        bet = self.game["bet"]
+        new_total = bet * 2
+        if new_total > CASINO_MAX_BET:
+            return await inter.response.send_message(
+                f"❌ Удвоение превышает лимит ({CASINO_MAX_BET} DC).", ephemeral=True
+            )
+        balance = await get_user_balance(user_id)
+        if balance < bet:
+            return await inter.response.send_message(
+                f"❌ Недостаточно DC для удвоения.\n> Нужно ещё: `{bet} DC`", ephemeral=True
+            )
+        ok = await remove_dc(user_id, bet, "Удвоение в блэкджеке")
+        if not ok:
+            return await inter.response.send_message("❌ Ошибка списания.", ephemeral=True)
+        self.game["doubled"] = True
+        self.game["player"].append(self.game["deck"].pop())
+        await self._stand_logic(inter)
 
 
 async def _bj_finish(inter: disnake.MessageInteraction, game: dict):
+    """Блэкджек с раздачи — сразу финал."""
     _dealer_play(game)
     game["finished"] = True
     dealer_val = _hand_value(game["dealer"])
 
     if dealer_val == 21 and len(game["dealer"]) == 2:
-        title, outcome, color, kind = "ДВОЙНОЙ БЛЭКДЖЕК — НИЧЬЯ", "push", 0xf7c991, "push"
+        outcome = "push"
     else:
-        title, outcome, color, kind = "БЛЭКДЖЕК! x2.5", "blackjack", 0x2ecc71, "win"
+        outcome = "blackjack"
 
-    await inter.edit_original_response(
-        embeds=_build_bj_embeds(
-            game, hide_dealer=False,
-            result_title=title, result_color=color,
-            result_kind=kind
-        ),
-        view=BlackjackRetryView(game["bet"])
-    )
-    await _bj_payout(inter, game, outcome)
+    await _bj_show_result(inter, game, outcome)
 
 
 class BlackjackRetryView(View):
@@ -849,8 +839,8 @@ class BlackjackRetryView(View):
             label=f"{P}Играть ещё{P}",
             style=ButtonStyle.gray,
             custom_id="bj_retry",
-            emoji=EMOJI_REPLAY,
-            row=0
+            emoji=PartialEmoji(name="image", id=1555994370933653544),
+            row=0,
         )
         btn_replay.callback = self.replay_callback
         self.add_item(btn_replay)
@@ -859,8 +849,8 @@ class BlackjackRetryView(View):
             label=f"{P}Повтор ставки{P}",
             style=ButtonStyle.gray,
             custom_id="bj_repeat",
-            emoji=EMOJI_REPEAT,
-            row=0
+            emoji=PartialEmoji(name="povtor", id=1555993533629071360),
+            row=0,
         )
         btn_repeat.callback = self.repeat_callback
         self.add_item(btn_repeat)
@@ -869,8 +859,8 @@ class BlackjackRetryView(View):
             label=f"{P}Двойная ставка{P}",
             style=ButtonStyle.danger,
             custom_id="bj_double_next",
-            emoji=EMOJI_DOUBLE,
-            row=0
+            emoji=PartialEmoji(name="flas", id=1551289202279325756),
+            row=0,
         )
         btn_double.callback = self.double_callback
         self.add_item(btn_double)
@@ -879,18 +869,16 @@ class BlackjackRetryView(View):
         await inter.response.send_modal(BlackjackBetModal())
 
     async def repeat_callback(self, inter: disnake.MessageInteraction):
-        await _blackjack_play(inter, self.last_bet,
-                              reason="Повтор ставки в блэкджеке")
+        await _blackjack_play(inter, self.last_bet, reason="Повтор ставки в блэкджеке")
 
     async def double_callback(self, inter: disnake.MessageInteraction):
         new_bet = self.last_bet * 2
         if new_bet > CASINO_MAX_BET:
             return await inter.response.send_message(
                 f"❌ Двойная ставка превышает лимит ({CASINO_MAX_BET} DC).",
-                ephemeral=True
+                ephemeral=True,
             )
-        await _blackjack_play(inter, new_bet,
-                              reason="Двойная ставка в блэкджеке")
+        await _blackjack_play(inter, new_bet, reason="Двойная ставка в блэкджеке")
 
 
 # ============================================================
@@ -899,82 +887,6 @@ class BlackjackRetryView(View):
 COINFLIP_MIN_BET = CASINO_MIN_BET
 COINFLIP_MAX_BET = CASINO_MAX_BET
 COINFLIP_WIN_MULT = 1.9
-
-
-def _build_coin_choice_embeds(bet: int) -> list:
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=IMG_COIN_WAIT)
-    embed2 = disnake.Embed(
-        title="Монетка — выбор стороны",
-        description=(
-            f"> Выберите сторону, на которую ставите:\n\n"
-            f"> **Орёл** — или — **Решка**\n\n"
-            f"**Ставка:** `{bet} DC`\n"
-            f"**Выплата при победе:** `x{COINFLIP_WIN_MULT}`\n\n"
-            f"У вас 60 секунд на выбор."
-        ),
-        color=6776679,
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed2.set_image(url=IMG_STRIPE)
-    return [embed1, embed2]
-
-
-def _build_coin_spin_embeds() -> list:
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=IMG_COIN_FLIP)
-    embed2 = disnake.Embed(
-        title="Монетка крутится...",
-        description="> Ждём результата...",
-        color=6776679
-    )
-    embed2.set_image(url=IMG_STRIPE)
-    return [embed1, embed2]
-
-
-def _build_coin_result_embeds(bet: int, result_side: str, user_choice: str,
-                              won: bool, payout: int, new_balance: int, refund: int = 0) -> list:
-    name = "ОРЁЛ" if result_side == "heads" else "РЕШКА"
-    user_name = "Орёл" if user_choice == "heads" else "Решка"
-
-    img = IMG_COIN_WIN if won else IMG_COIN_LOSE
-
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=img)
-
-    if won:
-        net = payout - bet
-        embed2 = disnake.Embed(
-            title=f"{name} — ВЫ ПОБЕДИЛИ!",
-            description=(
-                f"> Выпало: **{name}**\n"
-                f"> Ваш выбор: **{user_name}**\n\n"
-                f"> **Ставка:** `{bet} DC`\n"
-                f"> **Выплата:** `+{payout} DC`\n"
-                f"> **Профит:** `+{net} DC`\n"
-                f"> **Баланс:** `{new_balance} DC`"
-            ),
-            color=0x2ecc71,
-            timestamp=datetime.now(timezone.utc)
-        )
-    else:
-        extra = ""
-        if refund > 0:
-            extra = f"> **Страховка:** `+{refund} DC`\n"
-        embed2 = disnake.Embed(
-            title=f"{name} — МИМО!",
-            description=(
-                f"> Выпало: **{name}**\n"
-                f"> Ваш выбор: **{user_name}**\n\n"
-                f"> **Потеряно:** `−{bet - refund} DC`\n"
-                f"{extra}"
-                f"> **Баланс:** `{new_balance} DC`"
-            ),
-            color=0xed4245,
-            timestamp=datetime.now(timezone.utc)
-        )
-    embed2.set_image(url=IMG_STRIPE)
-    return [embed1, embed2]
 
 
 async def _coinflip_play(inter, bet: int, reason: str = "Ставка в монетке"):
@@ -993,7 +905,7 @@ async def _coinflip_play(inter, bet: int, reason: str = "Ставка в мон�
     if bet > balance:
         return await inter.response.send_message(
             f"❌ Недостаточно DC.\n> **Баланс:** `{balance} DC`\n> **Ставка:** `{bet} DC`",
-            ephemeral=True
+            ephemeral=True,
         )
 
     if not inter.response.is_done():
@@ -1001,16 +913,18 @@ async def _coinflip_play(inter, bet: int, reason: str = "Ставка в мон�
 
     ok = await remove_dc(user_id, bet, reason)
     if not ok:
-        return await inter.edit_original_response(
-            content="❌ Не удалось списать DC."
-        )
+        return await inter.edit_original_response(content="❌ Не удалось списать DC.")
 
     await _check_casino_achievements(user_id, bet=bet)
 
-    await inter.edit_original_response(
-        embeds=_build_coin_choice_embeds(bet),
-        view=CoinflipChoiceView(bet)
-    )
+    try:
+        buf = render_coinflip_choice(user_id, balance, bet)
+        await _send_game_screen(
+            inter, buf, f"coin_choice_{user_id}.png",
+            view=CoinflipChoiceView(bet),
+        )
+    except Exception as e:
+        logger.exception(f"render_coinflip_choice: {e}")
 
 
 class CoinflipBetModal(Modal):
@@ -1021,7 +935,7 @@ class CoinflipBetModal(Modal):
                 placeholder=f"От {COINFLIP_MIN_BET} до {COINFLIP_MAX_BET}",
                 custom_id="bet",
                 min_length=1,
-                max_length=10
+                max_length=10,
             )
         ]
         super().__init__(title="Монетка — ставка", components=components)
@@ -1045,8 +959,8 @@ class CoinflipChoiceView(View):
             label=f"{P}{P}{P}{P}Орёл{P}{P}{P}{P}",
             style=ButtonStyle.gray,
             custom_id="coin_heads",
-            emoji=EMOJI_COIN_HEADS,
-            row=0
+            emoji=PartialEmoji(name="image", id=1551296060729725019),
+            row=0,
         )
         btn_heads.callback = self.heads_callback
         self.add_item(btn_heads)
@@ -1055,14 +969,21 @@ class CoinflipChoiceView(View):
             label=f"{P}{P}{P}{P}Решка{P}{P}{P}{P}",
             style=ButtonStyle.gray,
             custom_id="coin_tails",
-            emoji=EMOJI_COIN_TAILS,
-            row=0
+            emoji=PartialEmoji(name="2313", id=1551296094468575366),
+            row=0,
         )
         btn_tails.callback = self.tails_callback
         self.add_item(btn_tails)
 
     async def _play(self, inter: disnake.MessageInteraction, user_choice: str):
-        await inter.response.edit_message(embeds=_build_coin_spin_embeds(), view=None)
+        # короткая пауза, покажем «крутится»
+        try:
+            await inter.response.edit_message(
+                content="🪙 Монетка крутится...", embed=None, view=None,
+                attachments=[],
+            )
+        except Exception:
+            pass
         await asyncio.sleep(1.8)
 
         result_side = random.choice(["heads", "tails"])
@@ -1098,28 +1019,45 @@ class CoinflipChoiceView(View):
             refund = try_insurance(user_id, bet)
             if refund > 0:
                 await add_dc(user_id, refund, "Страховка ставки (монетка)")
+            net = -bet + refund
 
         new_balance = await get_user_balance(user_id)
 
-        await inter.edit_original_response(
-            embeds=_build_coin_result_embeds(
-                bet, result_side, user_choice,
-                won, payout, new_balance, refund
-            ),
-            view=CoinflipRetryView(bet)
-        )
+        result_side_ru = "Орёл" if result_side == "heads" else "Решка"
+        user_choice_ru = "Орёл" if user_choice == "heads" else "Решка"
+
+        try:
+            if won:
+                buf = render_coinflip_win(
+                    user_id, new_balance, bet, payout, payout - bet,
+                    result_side_ru, user_choice_ru,
+                )
+            else:
+                buf = render_coinflip_lose(
+                    user_id, new_balance, bet, refund,
+                    result_side_ru, user_choice_ru,
+                )
+            file = disnake.File(buf, filename=f"coin_res_{user_id}.png")
+            e = disnake.Embed(color=6776679)
+            e.set_image(url=f"attachment://{file.filename}")
+            await inter.edit_original_response(
+                content=None, embed=e, file=file, attachments=[],
+                view=CoinflipRetryView(bet),
+            )
+        except Exception as e:
+            logger.exception(f"render coinflip result: {e}")
 
         asyncio.create_task(log_discord(
             title=f"🪙 Монетка: {'победа' if won else 'проигрыш'}",
             description=(
-                f"> **Пользователь:** {inter.author.mention}\n"
+                f"> **Пользователь:** <@{user_id}>\n"
                 f"> **Ставка:** `{bet} DC`\n"
                 f"> **Выбор:** `{user_choice}` → выпало `{result_side}`\n"
                 f"> **Выплата:** `{payout} DC`\n"
                 f"> **Страховка:** `{refund} DC`\n"
                 f"> **Баланс:** `{new_balance} DC`"
             ),
-            color=0x2ecc71 if won else 0xed4245
+            color=0x2ecc71 if won else 0xed4245,
         ))
 
     async def heads_callback(self, inter: disnake.MessageInteraction):
@@ -1138,8 +1076,8 @@ class CoinflipRetryView(View):
             label=f"{P}Играть ещё{P}",
             style=ButtonStyle.gray,
             custom_id="coin_retry",
-            emoji=EMOJI_REPLAY,
-            row=0
+            emoji=PartialEmoji(name="image", id=1555994370933653544),
+            row=0,
         )
         btn_replay.callback = self.replay_callback
         self.add_item(btn_replay)
@@ -1148,8 +1086,8 @@ class CoinflipRetryView(View):
             label=f"{P}Повтор ставки{P}",
             style=ButtonStyle.gray,
             custom_id="coin_repeat",
-            emoji=EMOJI_REPEAT,
-            row=0
+            emoji=PartialEmoji(name="povtor", id=1555993533629071360),
+            row=0,
         )
         btn_repeat.callback = self.repeat_callback
         self.add_item(btn_repeat)
@@ -1158,8 +1096,8 @@ class CoinflipRetryView(View):
             label=f"{P}Двойная ставка{P}",
             style=ButtonStyle.danger,
             custom_id="coin_double",
-            emoji=EMOJI_DOUBLE,
-            row=0
+            emoji=PartialEmoji(name="flas", id=1551289202279325756),
+            row=0,
         )
         btn_double.callback = self.double_callback
         self.add_item(btn_double)
@@ -1168,15 +1106,13 @@ class CoinflipRetryView(View):
         await inter.response.send_modal(CoinflipBetModal())
 
     async def repeat_callback(self, inter: disnake.MessageInteraction):
-        await _coinflip_play(inter, self.last_bet,
-                             reason="Повтор ставки в монетке")
+        await _coinflip_play(inter, self.last_bet, reason="Повтор ставки в монетке")
 
     async def double_callback(self, inter: disnake.MessageInteraction):
         new_bet = self.last_bet * 2
         if new_bet > CASINO_MAX_BET:
             return await inter.response.send_message(
                 f"❌ Двойная ставка превышает лимит ({CASINO_MAX_BET} DC).",
-                ephemeral=True
+                ephemeral=True,
             )
-        await _coinflip_play(inter, new_bet,
-                             reason="Двойная ставка в монетке")
+        await _coinflip_play(inter, new_bet, reason="Двойная ставка в монетке")
