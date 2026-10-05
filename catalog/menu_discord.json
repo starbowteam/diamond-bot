@@ -3,14 +3,14 @@
   "embeds": [
     {
       "image": {
-        "url": "https://media.discordapp.net/attachments/1527006158282555412/1527007500052988125/image.png?ex=6a5f06ce&is=6a5db54e&hm=85691a1888307277087653d35beb5e66f1f4192bc846fec17a3f0213efbc2378&=&format=webp&quality=lossless&width=1766&height=686"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1556726984837435493/image.png?backend=b2&ex=6ac5367b&is=6ac3e4fb&hm=de9de4fa0bb5ec89d3142353448500f68b7f9059c080bd4614c1df27bb923df9&"
       },
       "color": 6776679,
       "type": "rich"
     },
     {
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
@@ -46,7 +46,7 @@
     },
     {
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
@@ -67,7 +67,7 @@
     },
     {
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
@@ -97,11 +97,8 @@
       "title": "Discord Nitro Gift"
     },
     {
-      "footer": {
-        "text": "Бусты покупаются строго от 2-х штук, и в количестве кратном двум."
-      },
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1530459984117235753/pisk.png?ex=6a65a76e&is=6a6455ee&hm=967f621d4400a3d51669107323f800cc734ae25261184142b6b2857dfe1ec2d2&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
