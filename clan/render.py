@@ -161,7 +161,7 @@ I_GIFT       = 0xf06b
 I_DICE       = 0xf522
 I_MESSAGE    = 0xf075
 I_GAUGE      = 0xf624
-I_MOUNTAIN   = 0xf6fc
+I_GAMEPAD    = 0xf11b
 I_CUBE       = 0xf1b2
 I_CALENDAR   = 0xf133
 I_SHIELD     = 0xf3ed
@@ -198,7 +198,7 @@ def _reason_icon(reason: str) -> int:
 
 
 CLAN_FA = {
-    1: I_MOUNTAIN,
+    1: I_GAMEPAD,
     2: I_STAR,
     3: I_GEM,
 }
