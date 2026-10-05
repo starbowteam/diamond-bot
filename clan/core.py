@@ -99,13 +99,13 @@ def get_season_title(number: int) -> str:
 CLANS_DATA = [
     {
         "id": 1,
-        "name": "Окаменелости",
-        "emoji": "🪨",
+        "name": "Мультяшности",
+        "emoji": "🎮",
         "role_id": 1552707675257831525,
         "color": 0xb3e1b9,
         "color_dark": 0x749472,
-        "fa_icon": "fa-gem",
-        "description": "Стойкие, как камень. Непоколебимая воля и вековая мудрость.",
+        "fa_icon": "fa-gamepad",
+        "description": "Яркие, как мультфильмы. Энергия, юмор и лёгкость на подъём.",
     },
     {
         "id": 2,
