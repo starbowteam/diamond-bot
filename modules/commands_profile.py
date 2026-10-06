@@ -578,6 +578,9 @@ class ProfilePanelView(View):
 PROFILE_CHANNEL_ID = 1540018373503483934
 
 
+# ============================================================
+# ОТПРАВКА ПАНЕЛИ (Components V2)
+# ============================================================
 async def send_profile_panel():
     from core.bot import bot
     await bot.wait_until_ready()
@@ -586,6 +589,7 @@ async def send_profile_panel():
         logger.warning("Profile panel channel not found")
         return
 
+    # Чистим старые сообщения бота
     async for msg in channel.history(limit=50):
         if msg.author == bot.user and msg.components:
             try:
@@ -594,18 +598,108 @@ async def send_profile_panel():
                 pass
             break
 
-    embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735380877746368/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=2f257e6fbd905bcfc836b4cecef7048e3608a14cb0af356a7e8868ca1c6ed110&")
-    embed2 = disnake.Embed(
-        title="Твой профиль на сервере Diamond Shop",
-        description="> Здесь можно увидеть свой профиль, чужой профиль, забрать ежедневный подарок, посмотреть инвентарь, кастомные роли и рассчитать скидку.",
-        color=6776679
+    # ── Собираем контейнер V2 ──
+    container = disnake.ui.Container(
+        disnake.ui.TextDisplay(
+            content=(
+                "## Твой профиль на сервере Diamond Shop\n"
+                "> Здесь можно увидеть свой профиль, чужой профиль, "
+                "забрать ежедневный подарок, посмотреть инвентарь, "
+                "кастомные роли и рассчитать скидку."
+            )
+        ),
+        disnake.ui.Separator(),
+        disnake.ui.Section(
+            disnake.ui.TextDisplay(
+                content="**・Мой профиль** — открыть карточку профиля"
+            ),
+            accessory=disnake.ui.Button(
+                label="Открыть",
+                style=ButtonStyle.primary,
+                custom_id="profile_panel:my"
+            )
+        ),
+        disnake.ui.Section(
+            disnake.ui.TextDisplay(
+                content="**・Чужой профиль** — карточка профиля другого пользователя"
+            ),
+            accessory=disnake.ui.Button(
+                label="Ввести ID",
+                style=ButtonStyle.secondary,
+                custom_id="profile_panel:other"
+            )
+        ),
+        disnake.ui.Section(
+            disnake.ui.TextDisplay(
+                content="**・Ежедневный подарок** — забери свой подарок в DC и возвращайся каждый день"
+            ),
+            accessory=disnake.ui.Button(
+                label="Забрать",
+                style=ButtonStyle.success,
+                custom_id="profile_panel:daily_gift"
+            )
+        ),
+        disnake.ui.Section(
+            disnake.ui.TextDisplay(
+                content="**・Расчёт скидки** — посчитать итоговую цену со скидкой"
+            ),
+            accessory=disnake.ui.Button(
+                label="Посчитать",
+                style=ButtonStyle.secondary,
+                custom_id="profile_panel:discount"
+            )
+        ),
+        disnake.ui.Separator(),
+        disnake.ui.ActionRow(
+            disnake.ui.Button(
+                label="Инвентарь DC",
+                style=ButtonStyle.gray,
+                custom_id="pcard:inv",
+                emoji=PartialEmoji(name="prize", id=1539657202170859561)
+            ),
+            disnake.ui.Button(
+                label="Кастомные роли",
+                style=ButtonStyle.gray,
+                custom_id="pcard:roles",
+                emoji=PartialEmoji(name="image", id=1550869363266027641)
+            ),
+            disnake.ui.Button(
+                label="О валюте",
+                style=ButtonStyle.gray,
+                custom_id="pcard:coin",
+                emoji=PartialEmoji(name="pravil", id=1544388874497687622)
+            ),
+        ),
+        accent_colour=disnake.Colour.from_rgb(103, 118, 177),
     )
-    embed2.set_image(url=_IMG_STRIPE)
 
-    await channel.send(embeds=[embed1, embed2], view=ProfilePanelView())
+    # Селект — ОБЯЗАТЕЛЬНО вне контейнера (ограничение Discord)
+    select_row = disnake.ui.ActionRow(
+        ProfilePanelSelect()
+    )
+
+    try:
+        await channel.send(
+            components=[container, select_row],
+            flags=disnake.MessageFlags(is_components_v2=True)
+        )
+        logger.info("Панель профиля (V2) отправлена")
+    except Exception as e:
+        logger.exception(f"send_profile_panel V2: {e}")
+        # Fallback на старый формат
+        embed1 = disnake.Embed(color=6776679)
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735380877746368/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=2f257e6fbd905bcfc836b4cecef7048e3608a14cb0af356a7e8868ca1c6ed110&")
+        embed2 = disnake.Embed(
+            title="Твой профиль на сервере Diamond Shop",
+            description="> Здесь можно увидеть свой профиль, чужой профиль, забрать ежедневный подарок, посмотреть инвентарь, кастомные роли и рассчитать скидку.",
+            color=6776679
+        )
+        embed2.set_image(url=_IMG_STRIPE)
+        await channel.send(embeds=[embed1, embed2], view=ProfilePanelView())
+        logger.warning("Панель профиля отправлена в старом формате (V2 не сработал)")
+
     await log_discord(
-        title="👤 Панель Профиль отправлена",
+        title="👤 Панель Профиль отправлена (V2)",
         description=f"> Сообщение отправлено в {channel.mention}",
         color=0x00ff00
     )
