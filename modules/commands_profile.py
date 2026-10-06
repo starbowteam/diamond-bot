@@ -22,6 +22,9 @@ from modules.dc import (
 
 P = "\u3164"
 
+# ─── Цвет акцента V2-контейнера (0x676767 = RGB(103, 103, 103)) ───
+V2_ACCENT = disnake.Colour(0x676767)
+
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 _IMG_PANEL_BANNER = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735380877746368/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=2f257e6fbd905bcfc836b4cecef7048e3608a14cb0af356a7e8868ca1c6ed110&"
 
@@ -32,65 +35,8 @@ IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 V2_AVAILABLE = (
     hasattr(disnake.ui, "Container")
     and hasattr(disnake.ui, "TextDisplay")
-    and hasattr(disnake.ui, "MediaGallery")
     and hasattr(disnake.ui, "ActionRow")
 )
-
-
-# ============================================================
-# ХЕЛПЕРЫ ДЛЯ V2 MEDIA (совместимость между версиями disnake)
-# ============================================================
-def _make_media_item(url: str):
-    """
-    Создаёт MediaGalleryItem, пробуя разные API:
-      · disnake dev  →  MediaGalleryItem(media="...")
-      · disnake 2.12 →  MediaGalleryItem(url="...")
-      · старые сборки → позиционный аргумент
-    """
-    cls = disnake.MediaGalleryItem
-
-    # 1. media=
-    try:
-        return cls(media=url)
-    except TypeError:
-        pass
-
-    # 2. url=
-    try:
-        return cls(url=url)
-    except TypeError:
-        pass
-
-    # 3. позиционный
-    try:
-        return cls(url)
-    except TypeError:
-        pass
-
-    # 4. UnfurledMediaItem внутри media
-    try:
-        from disnake import UnfurledMediaItem
-        return cls(media=UnfurledMediaItem(url=url))
-    except Exception:
-        pass
-
-    return None
-
-
-def _make_media_gallery(*urls: str):
-    """
-    Создаёт MediaGallery из картинок. Если не удалось — вернёт None.
-    """
-    items = []
-    for u in urls:
-        item = _make_media_item(u)
-        if item is None:
-            return None
-        items.append(item)
-    try:
-        return disnake.MediaGallery(*items)
-    except Exception:
-        return None
 
 
 def load_embed_from_file(filename: str):
@@ -396,18 +342,10 @@ async def show_profile_card(
         filename = f"profile_{user.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
         file = disnake.File(buf, filename=filename)
 
-        # ─── V2: картинка + кнопки внутри контейнера ───
+        # ─── V2: кнопки внутри контейнера, картинка — отдельным вложением ───
         if V2_AVAILABLE and show_view:
             try:
-                children = []
-
-                # Картинка профиля
-                card_gallery = _make_media_gallery(f"attachment://{filename}")
-                if card_gallery is not None:
-                    children.append(card_gallery)
-
-                # Кнопки внутри контейнера
-                children.append(
+                container = disnake.ui.Container(
                     disnake.ui.ActionRow(
                         disnake.ui.Button(
                             label="Инвентарь DC",
@@ -427,12 +365,8 @@ async def show_profile_card(
                             custom_id="pcard_v2:coin",
                             emoji=PartialEmoji(name="pravil", id=1544388874497687622),
                         ),
-                    )
-                )
-
-                container = disnake.ui.Container(
-                    *children,
-                    accent_colour=disnake.Colour.from_rgb(103, 118, 177),
+                    ),
+                    accent_colour=V2_ACCENT,
                 )
                 await inter.edit_original_response(
                     components=[container],
@@ -736,18 +670,10 @@ async def send_profile_panel():
                 pass
             break
 
-    # ─── V2: селект внутри контейнера ───
+    # ─── V2: селект внутри контейнера, баннер и страйп — двумя эмбедами ───
     if V2_AVAILABLE:
         try:
-            children = []
-
-            # Баннер-шапка
-            banner_gallery = _make_media_gallery(_IMG_PANEL_BANNER)
-            if banner_gallery is not None:
-                children.append(banner_gallery)
-
-            # Описание
-            children.append(
+            container = disnake.ui.Container(
                 disnake.ui.TextDisplay(
                     content=(
                         "## Твой профиль на сервере Diamond Shop\n"
@@ -755,21 +681,20 @@ async def send_profile_panel():
                         "забрать ежедневный подарок, посмотреть инвентарь, "
                         "кастомные роли и рассчитать скидку."
                     )
-                )
+                ),
+                disnake.ui.ActionRow(ProfilePanelSelect()),
+                accent_colour=V2_ACCENT,
             )
 
-            # Страйп
-            stripe_gallery = _make_media_gallery(_IMG_STRIPE)
-            if stripe_gallery is not None:
-                children.append(stripe_gallery)
+            # Баннер и страйп — двумя отдельными embed-сообщениями ПЕРЕД контейнером
+            # (это тот же визуал, что у тебя был раньше, но селект теперь в V2-контейнере)
+            embed_banner = disnake.Embed(color=6776679)
+            embed_banner.set_image(url=_IMG_PANEL_BANNER)
 
-            # Селект внутри контейнера
-            children.append(disnake.ui.ActionRow(ProfilePanelSelect()))
+            embed_desc = disnake.Embed(color=6776679)
+            embed_desc.set_image(url=_IMG_STRIPE)
 
-            container = disnake.ui.Container(
-                *children,
-                accent_colour=disnake.Colour.from_rgb(103, 118, 177),
-            )
+            await channel.send(embeds=[embed_banner, embed_desc])
             await channel.send(components=[container])
             logger.info("Панель профиля (V2) отправлена — селект внутри контейнера")
             await log_discord(
