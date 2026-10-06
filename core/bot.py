@@ -63,8 +63,6 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
-# 👇 Приветствие новичку — картинка-шапка для ЛС
-IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1556733201970626732/image.png?backend=b2&ex=6ac5e506&is=6ac49386&hm=574cd55b0658621f44bee53d8ed386f3b7e7372997e73326c327efef482daca5&"
 SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
 
 _LAST_PAYOUT_DATE = None
@@ -437,19 +435,12 @@ async def on_ready():
         bot.add_view(PromoView())
         bot.add_view(AdminView())
 
-
-        from modules.commands_profile import setup_profile_v2_listeners
-        setup_profile_v2_listeners(bot)
-
-        
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
         bot.loop.create_task(send_work_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_staff_panels())
-
-        
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         counts = {}
