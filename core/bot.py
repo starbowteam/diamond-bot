@@ -437,12 +437,19 @@ async def on_ready():
         bot.add_view(PromoView())
         bot.add_view(AdminView())
 
+
+        from modules.commands_profile import setup_profile_v2_listeners
+        setup_profile_v2_listeners(bot)
+
+        
         bot.loop.create_task(send_tarology_panel())
         bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
         bot.loop.create_task(send_work_panel())
         bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_staff_panels())
+
+        
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         counts = {}
