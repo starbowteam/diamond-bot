@@ -264,7 +264,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
         from PIL import Image, ImageDraw, ImageFont
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
-        font_path = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
+        font_path = os.path.join(ADD_DIR, "Fredoka_One.ttf")
         if not os.path.exists(base_path) or not os.path.exists(font_path):
             return
         img = Image.open(base_path).convert("RGBA")
