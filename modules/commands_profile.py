@@ -22,21 +22,10 @@ from modules.dc import (
 
 P = "\u3164"
 
-# ─── Цвет акцента V2-контейнера (0x676767 = RGB(103, 103, 103)) ───
-V2_ACCENT = disnake.Colour(0x676767)
-
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-_IMG_PANEL_BANNER = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735380877746368/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=2f257e6fbd905bcfc836b4cecef7048e3608a14cb0af356a7e8868ca1c6ed110&"
 
 IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
-
-# ─── Флаг поддержки Components V2 ───
-V2_AVAILABLE = (
-    hasattr(disnake.ui, "Container")
-    and hasattr(disnake.ui, "TextDisplay")
-    and hasattr(disnake.ui, "ActionRow")
-)
 
 
 def load_embed_from_file(filename: str):
@@ -52,6 +41,7 @@ def load_embed_from_file(filename: str):
         return [disnake.Embed(title="❌ Ошибка", description=str(e), color=0xff0000)]
 
 
+# ⬇️ 13-25 → crystalis, 26+ → pka
 def _role_info(count: int):
     thresholds = [
         (0,  "none",      "Клуб"),
@@ -111,156 +101,7 @@ async def _send_ephemeral_text(inter: disnake.MessageInteraction, content: str):
 
 
 # ============================================================
-# ОБРАБОТЧИКИ КНОПОК КАРТОЧКИ ПРОФИЛЯ (V1 + V2)
-# ============================================================
-async def _do_inv(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    purchases = await get_user_purchases(inter.author.id, only_unused=True)
-    filtered = [p for p in purchases if p.get("type") != "discounts"]
-
-    try:
-        from modules.dc import get_user_balance
-        balance = await get_user_balance(inter.author.id)
-    except Exception:
-        balance = get_dc_cache(inter.author.id).get("balance", 0)
-
-    total_spent = 0
-    try:
-        dc_data = get_dc_cache(inter.author.id)
-        for h in dc_data.get("history", []) or []:
-            amt = h.get("amount", 0) or 0
-            reason = h.get("reason", "") or ""
-            if amt < 0 and reason.startswith("Покупка"):
-                total_spent += abs(amt)
-    except Exception:
-        pass
-
-    try:
-        from modules.shop.render_profile import render_inventory
-        buf = await asyncio.to_thread(
-            render_inventory,
-            inter.author.id, balance, total_spent, filtered,
-        )
-        fname = f"inv_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-        await _send_ephemeral_file(inter, buf, fname)
-    except Exception as e:
-        logger.exception(f"_do_inv render: {e}")
-        await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
-
-
-async def _do_roles(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    guild = inter.guild
-    member = inter.author
-
-    excluded = set()
-    for rid in CONFIG.get("ROLE_IDS", {}).values():
-        excluded.add(rid)
-    excluded.update({
-        1127428607606796290, 1154757071330365490, 1471844291595731016,
-        1471190371181789234, 1457964854441672806, 1423360115335106570,
-        1539523399611580476,
-        1208442450373513277, 1208442449425334372,
-    })
-    limit_role = guild.get_role(1127428607606796290)
-    max_pos = limit_role.position if limit_role else 9999
-
-    custom = []
-    for r in sorted(member.roles, key=lambda x: -x.position):
-        if r.is_default() or r.managed:
-            continue
-        if r.id in excluded:
-            continue
-        if r.position >= max_pos:
-            continue
-        custom.append(r)
-
-    roles_list = []
-    for r in custom[:40]:
-        roles_list.append({
-            "id": r.id,
-            "name": r.name,
-            "color": r.color.value if r.color else 0,
-            "position": r.position,
-            "mention": r.mention,
-        })
-
-    try:
-        from modules.dc import get_user_balance
-        balance = await get_user_balance(inter.author.id)
-    except Exception:
-        balance = get_dc_cache(inter.author.id).get("balance", 0)
-
-    total_spent = 0
-    try:
-        dc_data = get_dc_cache(inter.author.id)
-        for h in dc_data.get("history", []) or []:
-            amt = h.get("amount", 0) or 0
-            reason = h.get("reason", "") or ""
-            if amt < 0 and reason.startswith("Покупка"):
-                total_spent += abs(amt)
-    except Exception:
-        pass
-
-    try:
-        from modules.shop.render_profile import render_custom_roles
-        buf = await asyncio.to_thread(
-            render_custom_roles,
-            inter.author.id, balance, total_spent, roles_list,
-        )
-        fname = f"roles_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-        await _send_ephemeral_file(inter, buf, fname)
-    except Exception as e:
-        logger.exception(f"_do_roles render: {e}")
-        await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
-
-
-async def _do_coin(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    try:
-        from modules.dc import get_user_balance
-        balance = await get_user_balance(inter.author.id)
-    except Exception:
-        balance = get_dc_cache(inter.author.id).get("balance", 0)
-
-    total_spent = 0
-    try:
-        dc_data = get_dc_cache(inter.author.id)
-        for h in dc_data.get("history", []) or []:
-            amt = h.get("amount", 0) or 0
-            reason = h.get("reason", "") or ""
-            if amt < 0 and reason.startswith("Покупка"):
-                total_spent += abs(amt)
-    except Exception:
-        pass
-
-    try:
-        from modules.shop.render_profile import render_about_coin
-        buf = await asyncio.to_thread(
-            render_about_coin,
-            inter.author.id, balance, total_spent,
-        )
-        fname = f"coin_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-        await _send_ephemeral_file(inter, buf, fname)
-    except Exception as e:
-        logger.exception(f"_do_coin render: {e}")
-        await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
-
-
-# ============================================================
-# VIEW КАРТОЧКИ ПРОФИЛЯ (V1 fallback)
+# VIEW КАРТОЧКИ ПРОФИЛЯ
 # ============================================================
 class ProfileCardView(View):
     def __init__(self):
@@ -273,7 +114,42 @@ class ProfileCardView(View):
         emoji=PartialEmoji(name="prize", id=1539657202170859561)
     )
     async def inv_btn(self, button, inter: disnake.MessageInteraction):
-        await _do_inv(inter)
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        purchases = await get_user_purchases(inter.author.id, only_unused=True)
+        filtered = [p for p in purchases if p.get("type") != "discounts"]
+
+        try:
+            from modules.dc import get_user_balance
+            balance = await get_user_balance(inter.author.id)
+        except Exception:
+            balance = get_dc_cache(inter.author.id).get("balance", 0)
+
+        total_spent = 0
+        try:
+            dc_data = get_dc_cache(inter.author.id)
+            for h in dc_data.get("history", []) or []:
+                amt = h.get("amount", 0) or 0
+                reason = h.get("reason", "") or ""
+                if amt < 0 and reason.startswith("Покупка"):
+                    total_spent += abs(amt)
+        except Exception:
+            pass
+
+        try:
+            from modules.shop.render_profile import render_inventory
+            buf = await asyncio.to_thread(
+                render_inventory,
+                inter.author.id, balance, total_spent, filtered,
+            )
+            fname = f"inv_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
+            await _send_ephemeral_file(inter, buf, fname)
+        except Exception as e:
+            logger.exception(f"inv_btn render: {e}")
+            await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
     @disnake.ui.button(
         label=f"{P}Кастомные роли",
@@ -282,7 +158,74 @@ class ProfileCardView(View):
         emoji=PartialEmoji(name="image", id=1550869363266027641)
     )
     async def roles_btn(self, button, inter: disnake.MessageInteraction):
-        await _do_roles(inter)
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        guild = inter.guild
+        member = inter.author
+
+        excluded = set()
+        for rid in CONFIG.get("ROLE_IDS", {}).values():
+            excluded.add(rid)
+        excluded.update({
+            1127428607606796290, 1154757071330365490, 1471844291595731016,
+            1471190371181789234, 1457964854441672806, 1423360115335106570,
+            1539523399611580476,
+            1208442450373513277, 1208442449425334372,
+        })
+        limit_role = guild.get_role(1127428607606796290)
+        max_pos = limit_role.position if limit_role else 9999
+
+        custom = []
+        for r in sorted(member.roles, key=lambda x: -x.position):
+            if r.is_default() or r.managed:
+                continue
+            if r.id in excluded:
+                continue
+            if r.position >= max_pos:
+                continue
+            custom.append(r)
+
+        roles_list = []
+        for r in custom[:40]:
+            roles_list.append({
+                "id": r.id,
+                "name": r.name,
+                "color": r.color.value if r.color else 0,
+                "position": r.position,
+                "mention": r.mention,
+            })
+
+        try:
+            from modules.dc import get_user_balance
+            balance = await get_user_balance(inter.author.id)
+        except Exception:
+            balance = get_dc_cache(inter.author.id).get("balance", 0)
+
+        total_spent = 0
+        try:
+            dc_data = get_dc_cache(inter.author.id)
+            for h in dc_data.get("history", []) or []:
+                amt = h.get("amount", 0) or 0
+                reason = h.get("reason", "") or ""
+                if amt < 0 and reason.startswith("Покупка"):
+                    total_spent += abs(amt)
+        except Exception:
+            pass
+
+        try:
+            from modules.shop.render_profile import render_custom_roles
+            buf = await asyncio.to_thread(
+                render_custom_roles,
+                inter.author.id, balance, total_spent, roles_list,
+            )
+            fname = f"roles_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
+            await _send_ephemeral_file(inter, buf, fname)
+        except Exception as e:
+            logger.exception(f"roles_btn render: {e}")
+            await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
     @disnake.ui.button(
         label=f"{P}О валюте",
@@ -291,7 +234,39 @@ class ProfileCardView(View):
         emoji=PartialEmoji(name="pravil", id=1544388874497687622)
     )
     async def coin_btn(self, button, inter: disnake.MessageInteraction):
-        await _do_coin(inter)
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        try:
+            from modules.dc import get_user_balance
+            balance = await get_user_balance(inter.author.id)
+        except Exception:
+            balance = get_dc_cache(inter.author.id).get("balance", 0)
+
+        total_spent = 0
+        try:
+            dc_data = get_dc_cache(inter.author.id)
+            for h in dc_data.get("history", []) or []:
+                amt = h.get("amount", 0) or 0
+                reason = h.get("reason", "") or ""
+                if amt < 0 and reason.startswith("Покупка"):
+                    total_spent += abs(amt)
+        except Exception:
+            pass
+
+        try:
+            from modules.shop.render_profile import render_about_coin
+            buf = await asyncio.to_thread(
+                render_about_coin,
+                inter.author.id, balance, total_spent,
+            )
+            fname = f"coin_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
+            await _send_ephemeral_file(inter, buf, fname)
+        except Exception as e:
+            logger.exception(f"coin_btn render: {e}")
+            await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
 
 # ============================================================
@@ -342,52 +317,16 @@ async def show_profile_card(
         filename = f"profile_{user.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
         file = disnake.File(buf, filename=filename)
 
-        # ─── V2: кнопки внутри контейнера, картинка — отдельным вложением ───
-        if V2_AVAILABLE and show_view:
-            try:
-                container = disnake.ui.Container(
-                    disnake.ui.ActionRow(
-                        disnake.ui.Button(
-                            label="Инвентарь DC",
-                            style=ButtonStyle.gray,
-                            custom_id="pcard_v2:inv",
-                            emoji=PartialEmoji(name="prize", id=1539657202170859561),
-                        ),
-                        disnake.ui.Button(
-                            label="Кастомные роли",
-                            style=ButtonStyle.gray,
-                            custom_id="pcard_v2:roles",
-                            emoji=PartialEmoji(name="image", id=1550869363266027641),
-                        ),
-                        disnake.ui.Button(
-                            label="О валюте",
-                            style=ButtonStyle.gray,
-                            custom_id="pcard_v2:coin",
-                            emoji=PartialEmoji(name="pravil", id=1544388874497687622),
-                        ),
-                    ),
-                    accent_colour=V2_ACCENT,
-                )
-                await inter.edit_original_response(
-                    components=[container],
-                    file=file,
-                    attachments=[],
-                )
-            except Exception as e:
-                logger.exception(f"V2 card render failed, fallback to V1: {e}")
-                embed = disnake.Embed(color=6776679)
-                embed.set_image(url=f"attachment://{filename}")
-                view = ProfileCardView() if show_view else None
-                await inter.edit_original_response(
-                    embed=embed, file=file, attachments=[], view=view,
-                )
-        else:
-            embed = disnake.Embed(color=6776679)
-            embed.set_image(url=f"attachment://{filename}")
-            view = ProfileCardView() if show_view else None
-            await inter.edit_original_response(
-                embed=embed, file=file, attachments=[], view=view,
-            )
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{filename}")
+
+        view = ProfileCardView() if show_view else None
+
+        await inter.edit_original_response(
+            content=None, embed=embed, file=file,
+            attachments=[],
+            view=view
+        )
 
         if viewer and viewer.id != user.id:
             asyncio.create_task(log_discord(
@@ -416,7 +355,7 @@ async def show_profile_card(
 
 
 # ============================================================
-# ЕЖЕДНЕВНЫЙ ПОДАРОК — PILLOW
+# ЕЖЕДНЕВНЫЙ ПОДАРОК — PILLOW (без embed 1)
 # ============================================================
 def _daily_gift_stats(user_id: int) -> dict:
     count = 0
@@ -456,6 +395,7 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
     except Exception:
         balance = get_dc_cache(user_id).get("balance", 0)
 
+    # 👇 ТОЛЬКО PILLOW — без embed 1
     try:
         from modules.shop.render_gift import render_daily_gift
         buf = await asyncio.to_thread(
@@ -470,7 +410,11 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
         embed.set_image(url=f"attachment://{fname}")
 
         try:
-            await inter.followup.send(embed=embed, file=file, ephemeral=True)
+            await inter.followup.send(
+                embed=embed,
+                file=file,
+                ephemeral=True,
+            )
         except Exception as e:
             logger.exception(f"show_daily_gift send: {e}")
             if result.get("ok"):
@@ -634,26 +578,6 @@ class ProfilePanelView(View):
 PROFILE_CHANNEL_ID = 1540018373503483934
 
 
-# ============================================================
-# ЛИСТЕНЕР ДЛЯ V2-КНОПОК КАРТОЧКИ ПРОФИЛЯ
-# ============================================================
-def setup_profile_v2_listeners(bot):
-    """Регистрирует обработчики кнопок V2. Вызвать из bot.on_ready()."""
-
-    @bot.listen("on_button_click")
-    async def _profile_v2_buttons(inter: disnake.MessageInteraction):
-        cid = getattr(inter.component, "custom_id", None)
-        if cid == "pcard_v2:inv":
-            await _do_inv(inter)
-        elif cid == "pcard_v2:roles":
-            await _do_roles(inter)
-        elif cid == "pcard_v2:coin":
-            await _do_coin(inter)
-
-
-# ============================================================
-# ОТПРАВКА ПАНЕЛИ
-# ============================================================
 async def send_profile_panel():
     from core.bot import bot
     await bot.wait_until_ready()
@@ -670,55 +594,18 @@ async def send_profile_panel():
                 pass
             break
 
-    # ─── V2: селект внутри контейнера, баннер и страйп — двумя эмбедами ───
-    if V2_AVAILABLE:
-        try:
-            container = disnake.ui.Container(
-                disnake.ui.TextDisplay(
-                    content=(
-                        "## Твой профиль на сервере Diamond Shop\n"
-                        "> Здесь можно увидеть свой профиль, чужой профиль, "
-                        "забрать ежедневный подарок, посмотреть инвентарь, "
-                        "кастомные роли и рассчитать скидку."
-                    )
-                ),
-                disnake.ui.ActionRow(ProfilePanelSelect()),
-                accent_colour=V2_ACCENT,
-            )
-
-            # Баннер и страйп — двумя отдельными embed-сообщениями ПЕРЕД контейнером
-            # (это тот же визуал, что у тебя был раньше, но селект теперь в V2-контейнере)
-            embed_banner = disnake.Embed(color=6776679)
-            embed_banner.set_image(url=_IMG_PANEL_BANNER)
-
-            embed_desc = disnake.Embed(color=6776679)
-            embed_desc.set_image(url=_IMG_STRIPE)
-
-            await channel.send(embeds=[embed_banner, embed_desc])
-            await channel.send(components=[container])
-            logger.info("Панель профиля (V2) отправлена — селект внутри контейнера")
-            await log_discord(
-                title="👤 Панель Профиль отправлена (V2)",
-                description=f"> Сообщение отправлено в {channel.mention}",
-                color=0x00ff00,
-            )
-            return
-        except Exception as e:
-            logger.exception(f"send_profile_panel V2 failed, fallback V1: {e}")
-
-    # ─── Fallback V1 ───
     embed1 = disnake.Embed(color=6776679)
-    embed1.set_image(url=_IMG_PANEL_BANNER)
+    embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735380877746368/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=2f257e6fbd905bcfc836b4cecef7048e3608a14cb0af356a7e8868ca1c6ed110&")
     embed2 = disnake.Embed(
         title="Твой профиль на сервере Diamond Shop",
         description="> Здесь можно увидеть свой профиль, чужой профиль, забрать ежедневный подарок, посмотреть инвентарь, кастомные роли и рассчитать скидку.",
-        color=6776679,
+        color=6776679
     )
     embed2.set_image(url=_IMG_STRIPE)
+
     await channel.send(embeds=[embed1, embed2], view=ProfilePanelView())
-    logger.info("Панель профиля (V1 fallback)")
     await log_discord(
         title="👤 Панель Профиль отправлена",
         description=f"> Сообщение отправлено в {channel.mention}",
-        color=0x00ff00,
+        color=0x00ff00
     )
