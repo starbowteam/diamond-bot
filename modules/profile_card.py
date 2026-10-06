@@ -29,7 +29,7 @@ except Exception:
             "unlocked_set": set(),
         }
 
-FONT_BOLD = os.path.join(ADD_DIR, "ProximaNova-ExtraBold.ttf")
+FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
 FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
 
 _FONT_CACHE = {}
