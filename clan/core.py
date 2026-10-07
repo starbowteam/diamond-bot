@@ -1094,7 +1094,7 @@ def close_cycle_and_pay(bot) -> bool:
                     bot.loop.create_task(unlock_achievement(uid, "clan_champion", bot=bot))
             if top_clan_data["top"]:
                 winner_id = top_clan_data["top"][0]["user_id"]
-                bot.loop.create_task(unlock_achievement(winner_id, "king", bot=bot))
+                bot.loop.create_task(unlock_achievement(winner_id, "clan_champion", bot=bot))
     except Exception as e:
         logger.warning(f"clan season achievements: {e}")
 
@@ -1175,8 +1175,9 @@ async def add_clan_contribution(user_id: int, amount: int, reason: str):
 
     _add_daily_contributed(user_id, actual_amount)
 
+    # 👇 ФИКС: get_user_contribution живёт здесь же, в clan.core
     try:
-        from clan.achievements import check_and_unlock, get_user_contribution
+        from clan.achievements import check_and_unlock
         from core.bot import bot
         total = get_user_contribution(user_id)
         asyncio.create_task(check_and_unlock(user_id, "clan_deposit", value=total, bot=bot))
