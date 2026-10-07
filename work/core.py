@@ -18,12 +18,11 @@ from core.utils import (
 # ============================================================
 # КОНСТАНТЫ
 # ============================================================
-# ⚠️ ЗАМЕНИ на ID канала, где бот будет создавать реферальные ссылки.
-# Обычно это скрытый канал или #welcome. Ссылка универсальная (unique, max_age=0).
+# ⚠️ Канал, где бот создаёт реферальные ссылки (нужно право create_instant_invite)
 REF_INVITE_CHANNEL_ID = 1552700701128400979   # ← ЗАМЕНИ
 
 ADVERTISER_ROLE_ID = 1457964854441672806      # роль адвайтера
-REWARD_AMOUNT = 80                            # награда за засчитанного
+REWARD_AMOUNT = 20                            # награда за засчитанного
 MIN_ALIVE_SECONDS = 12 * 3600                 # 12 часов — порог зачёта
 PANEL_CHANNEL_ID = 1557405478890373210        # канал панели
 
@@ -45,7 +44,6 @@ def init_advertiser_tables():
     """)
     db.commit()
 
-    # Миграции для invites (2 колонки)
     for col, ddl in [
         ("invite_code",   "invite_code TEXT DEFAULT NULL"),
         ("advertiser_id", "advertiser_id INTEGER DEFAULT NULL"),
@@ -142,36 +140,6 @@ def get_advertiser_by_code(invite_code: str) -> Optional[int]:
 # ============================================================
 # ЗАПИСЬ СОБЫТИЙ
 # ============================================================
-def register_invite_join(member_id: int, guild_id: int, invite_code: str):
-    """Пишет в invites факт входа по коду. Вызывается из on_member_join."""
-    if not invite_code:
-        return
-    advertiser_id = get_advertiser_by_code(invite_code)
-    try:
-        cur.execute(
-            "UPDATE invites SET invite_code=?, advertiser_id=? "
-            "WHERE guild_id=? AND member_id=? "
-            "ORDER BY joined_at DESC LIMIT 1",
-            (invite_code, advertiser_id, guild_id, member_id)
-        )
-        # SQLite не поддерживает ORDER BY LIMIT в UPDATE — делаем иначе
-        db.rollback()
-
-        row = cur.execute(
-            "SELECT id FROM invites WHERE guild_id=? AND member_id=? "
-            "ORDER BY joined_at DESC LIMIT 1",
-            (guild_id, member_id)
-        ).fetchone()
-        if row:
-            cur.execute(
-                "UPDATE invites SET invite_code=?, advertiser_id=? WHERE id=?",
-                (invite_code, advertiser_id, row["id"])
-            )
-            db.commit()
-    except Exception as e:
-        logger.warning(f"register_invite_join: {e}")
-
-
 def register_invite_leave(member_id: int, guild_id: int):
     """Пишет left_at. Вызывается из on_member_remove."""
     try:
@@ -189,19 +157,15 @@ def register_invite_leave(member_id: int, guild_id: int):
 # ПОДСЧЁТ СТАТИСТИКИ
 # ============================================================
 def is_valid(invite_row) -> bool:
-    """Засчитан: прожил >= 12ч (ушёл позже 12ч или ещё живёт)."""
     joined_at = invite_row["joined_at"] or 0
     left_at = invite_row["left_at"]
     now = int(time.time())
-
     if left_at:
         return (left_at - joined_at) >= MIN_ALIVE_SECONDS
-    # Ещё на сервере
     return (now - joined_at) >= MIN_ALIVE_SECONDS
 
 
 def is_on_review(invite_row) -> bool:
-    """На проверке: ушёл, но прожил < 12ч."""
     joined_at = invite_row["joined_at"] or 0
     left_at = invite_row["left_at"]
     if not left_at:
@@ -235,11 +199,7 @@ def get_advertiser_stats(advertiser_id: int) -> dict:
 
 
 def get_advertiser_top(limit: int = 20) -> List[dict]:
-    """Топ адвайтеров по засчитанным."""
-    rows = cur.execute(
-        "SELECT advertiser_id FROM advertiser_links"
-    ).fetchall()
-
+    rows = cur.execute("SELECT advertiser_id FROM advertiser_links").fetchall()
     result = []
     for r in rows:
         aid = r["advertiser_id"]
@@ -250,7 +210,6 @@ def get_advertiser_top(limit: int = 20) -> List[dict]:
             "on_review": stats["on_review"],
             "total": stats["total"],
         })
-
     result.sort(key=lambda x: (-x["rewarded"], -x["on_review"], -x["total"]))
     return result[:limit]
 
@@ -264,7 +223,6 @@ def get_my_place_in_top(advertiser_id: int) -> Optional[int]:
 
 
 def get_reward_history(advertiser_id: int, limit: int = 15) -> List[dict]:
-    """История начислений (только засчитанные)."""
     rows = cur.execute(
         "SELECT * FROM invites WHERE advertiser_id=? AND rewarded=1 "
         "ORDER BY joined_at DESC LIMIT ?",
@@ -275,8 +233,7 @@ def get_reward_history(advertiser_id: int, limit: int = 15) -> List[dict]:
 
 def get_total_rewarded_dc(advertiser_id: int) -> int:
     row = cur.execute(
-        "SELECT COUNT(*) AS c FROM invites "
-        "WHERE advertiser_id=? AND rewarded=1",
+        "SELECT COUNT(*) AS c FROM invites WHERE advertiser_id=? AND rewarded=1",
         (advertiser_id,)
     ).fetchone()
     return (row["c"] or 0) * REWARD_AMOUNT
@@ -291,13 +248,6 @@ def get_hold_dc(advertiser_id: int) -> int:
 # НАЧИСЛЕНИЕ НАГРАД (фоновый таск)
 # ============================================================
 async def _pay_rewards(bot):
-    """
-    Проходит по необработанным инвайтам, где:
-      · есть advertiser_id
-      · rewarded = 0
-      · прожил >= 12ч (ушёл позже или ещё живёт и уже прошло 12ч)
-    Начисляет адвайстеру 80 DC, ставит rewarded=1.
-    """
     now = int(time.time())
     threshold = now - MIN_ALIVE_SECONDS
 
