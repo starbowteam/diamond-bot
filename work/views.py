@@ -222,7 +222,7 @@ async def _open_ephemeral(inter, screen):
         pass
 
     # проверка роли
-    if not wcore.has_advertiser_role(inter.author):
+    if inter.author.id not in ADMIN_OVERRIDE_IDS and not wcore.has_advertiser_role(inter.author):
         try:
             await inter.followup.send(
                 "⛔ У тебя нет роли адвайтера.", ephemeral=True,
@@ -253,7 +253,7 @@ async def _switch(inter, screen):
     except Exception:
         pass
 
-    if not wcore.has_advertiser_role(inter.author):
+    if inter.author.id not in ADMIN_OVERRIDE_IDS and not wcore.has_advertiser_role(inter.author):
         try:
             await inter.followup.send(
                 "⛔ У тебя нет роли адвайтера.", ephemeral=True,
