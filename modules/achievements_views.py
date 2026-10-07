@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Discord-view панели достижений.
-2 кнопки: Назад / Вперёд. Суммарная длина подписей — 46 символов.
+2 кнопки: Назад / Вперёд. Суммарная длина подписей — 29 символов.
 Без селекта. Каждая категория — отдельная страница.
 На первой странице «Назад» возвращает профиль.
 """
@@ -22,10 +22,7 @@ BTN_LABEL_TOTAL = 29
 
 
 def _btn_labels_total(labels, total=BTN_LABEL_TOTAL):
-    """
-    Добивает подписи невидимыми пробелами так,
-    чтобы СУММА длин всех подписей == total.
-    """
+    """Добивает подписи невидимыми пробелами так, чтобы СУММА == total."""
     base = sum(len(s) for s in labels)
     extra = max(0, total - base)
     n = len(labels)
@@ -43,6 +40,13 @@ def _btn_labels_total(labels, total=BTN_LABEL_TOTAL):
 
 
 _L_BACK, _L_FWD = _btn_labels_total(["Назад", "Вперёд"])
+
+
+# ============================================================
+# ЭМОДЗИ
+# ============================================================
+EMOJI_BACK = PartialEmoji(name="baa1", id=1557224983539749004)
+EMOJI_FWD  = PartialEmoji(name="rid1", id=1557225020265332816)
 
 
 # ============================================================
@@ -114,7 +118,7 @@ class AchievementsPanelView(View):
             label=_L_BACK,
             style=ButtonStyle.gray,
             custom_id="ach_panel:back",
-            emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
+            emoji=EMOJI_BACK,
             row=0,
         )
         b_back.callback = self._on_back
@@ -122,33 +126,24 @@ class AchievementsPanelView(View):
 
         b_fwd = Button(
             label=_L_FWD,
-            style=ButtonStyle.primary,
+            style=ButtonStyle.gray,
             custom_id="ach_panel:fwd",
-            emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
+            emoji=EMOJI_FWD,
             row=0,
         )
         b_fwd.callback = self._on_fwd
         self.add_item(b_fwd)
 
     async def _on_back(self, inter: disnake.MessageInteraction):
-        if inter.author.id != inter.message.interaction_metadata.user.id \
-                if inter.message.interaction_metadata else False:
-            # Кнопки видны только автору — нет смысла проверять строго.
-            pass
-
-        # На первой странице — возвращаем профиль
-        if self._idx <= 0:
-            try:
-                await inter.response.defer(ephemeral=True)
-            except Exception:
-                pass
-            await _return_to_profile(inter)
-            return
-
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
             pass
+
+        # На первой странице — возвращаем профиль
+        if self._idx <= 0:
+            await _return_to_profile(inter)
+            return
 
         new_key = CATEGORY_ORDER[self._idx - 1]
         await render_category(inter, new_key)
