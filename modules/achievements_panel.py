@@ -483,3 +483,84 @@ def generate_achievements_panel(user_id: int, active_key: str = "base") -> io.By
     body_h = CANVAS_H - PAD_Y - body_y
 
     left_w = 448
+    gap = 30
+    lx1 = PAD_X
+    lx2 = lx1 + left_w
+    rx1 = lx2 + gap
+    rx2 = CANVAS_W - PAD_X
+
+    # Левая панель
+    _draw_left_panel(img, d, (lx1, body_y, lx2 - 12, body_y + body_h - 12),
+                     user_id, active_key)
+
+    # Правая панель
+    _stack_panel(img, d, (rx1, body_y, rx2 - 12, body_y + body_h - 12), radius=22)
+    rpx1 = rx1 + 28
+    rpx2 = rx2 - 12 - 28
+    rpy = body_y + 22
+
+    # Заголовок: иконка категории + название
+    fa_head = FA_MAP.get(cat.get("icon", "fa-star"), I_STAR)
+    head_icon_size = 42
+    d.rounded_rectangle((rpx1, rpy + 2, rpx1 + 6, rpy + 48), radius=3,
+                        fill=cat_color + (255,))
+    _alpha(img, (rpx1 + 20, rpy, rpx1 + 20 + head_icon_size, rpy + head_icon_size),
+           cat_color, alpha=65, radius=11)
+    _icon(d, rpx1 + 20 + head_icon_size // 2, rpy + head_icon_size // 2 + 1,
+          fa_head, 20, cat_color)
+
+    d.text((rpx1 + 20 + head_icon_size + 16, rpy + 6),
+           cat["label"].upper(), font=_font(24), fill=TEXT)
+
+    keys = CATEGORY_KEYS.get(active_key, [])
+    cnt = sum(1 for k in keys if k in unlocked)
+    total = len(keys)
+    page_idx = CATEGORY_ORDER.index(active_key)
+    sub = f"страница {page_idx + 1} / {len(CATEGORY_ORDER)} · {cnt} / {total} открыто"
+    sw = _tw(d, sub, _font(14))
+    d.text((rpx2 - sw, rpy + 12), sub, font=_font(14), fill=MUTED)
+
+    sep_y = rpy + 56
+    d.line((rpx1, sep_y, rpx2, sep_y), fill=STACK_HDR + (255,), width=2)
+
+    # Сетка 3×2 = 6 карточек
+    grid_y = sep_y + 16
+    grid_bottom = body_y + body_h - 12 - 26
+    grid_h = grid_bottom - grid_y
+
+    cell_gap = 14
+    cols, rows = 3, 2
+    cell_w = (rpx2 - rpx1 - cell_gap * (cols - 1)) // cols
+    cell_h = (grid_h - cell_gap * (rows - 1)) // rows
+
+    slots = cols * rows  # 6
+
+    for idx in range(slots):
+        r = idx // cols
+        c = idx % cols
+        cx = rpx1 + c * (cell_w + cell_gap)
+        cy = grid_y + r * (cell_h + cell_gap)
+
+        if idx < len(keys):
+            key = keys[idx]
+            ach = ACHIEVEMENTS.get(key)
+            _draw_ach_card(img, d, cx, cy, cell_w, cell_h, ach,
+                           key in unlocked, cat_color)
+        else:
+            _draw_ach_card(img, d, cx, cy, cell_w, cell_h, None, False, cat_color)
+
+    # Индикатор страницы снизу
+    page_text = f"стр. {page_idx + 1} / {len(CATEGORY_ORDER)}"
+    pw = _tw(d, page_text, _font(12))
+    d.text(((rpx1 + rpx2 - pw) // 2, grid_bottom + 6), page_text,
+           font=_font(12), fill=DIM)
+
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
+def _get_unlocked_set(user_id: int) -> set:
+    from clan.achievements import get_user_unlocked_set
+    return get_user_unlocked_set(user_id)
