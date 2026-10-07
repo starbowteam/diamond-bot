@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 
 import disnake
-from disnake import ButtonStyle
+from disnake import ButtonStyle, PartialEmoji
 from disnake.ui import View
 
 from core.utils import logger, load_json
@@ -18,8 +18,13 @@ P = "\u3164"
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
-# Суммарная длина 3 кнопок = 23 символа
-_BTN_TOTAL = 46
+# Суммарная длина 3 кнопок = 35 символов
+_BTN_TOTAL = 35
+
+# Эмодзи
+EMOJI_LINK    = PartialEmoji(name="reklama", id=1555654392202535073)
+EMOJI_TOP     = PartialEmoji(name="peope",   id=1555654375781834883)
+EMOJI_REWARDS = PartialEmoji(name="1d1ds",   id=1552730624572391584)
 
 
 def _btn_labels_total(labels, total=_BTN_TOTAL):
@@ -154,21 +159,21 @@ class AdvertiserPanelView(View):
 
     @disnake.ui.button(
         label=_L_LINK, style=ButtonStyle.gray,
-        custom_id="adv_panel:link", row=0,
+        custom_id="adv_panel:link", emoji=EMOJI_LINK, row=0,
     )
     async def _link(self, button, inter):
         await _open_ephemeral(inter, "link")
 
     @disnake.ui.button(
         label=_L_TOP, style=ButtonStyle.gray,
-        custom_id="adv_panel:top", row=0,
+        custom_id="adv_panel:top", emoji=EMOJI_TOP, row=0,
     )
     async def _top(self, button, inter):
         await _open_ephemeral(inter, "top")
 
     @disnake.ui.button(
         label=_L_REWARDS, style=ButtonStyle.gray,
-        custom_id="adv_panel:rewards", row=0,
+        custom_id="adv_panel:rewards", emoji=EMOJI_REWARDS, row=0,
     )
     async def _rewards(self, button, inter):
         await _open_ephemeral(inter, "rewards")
@@ -184,7 +189,7 @@ class AdvertiserActionsView(View):
 
     @disnake.ui.button(
         label=_L_LINK, style=ButtonStyle.gray,
-        custom_id="adv_act:link", row=0,
+        custom_id="adv_act:link", emoji=EMOJI_LINK, row=0,
     )
     async def _link(self, button, inter):
         if self.current == "link":
@@ -193,7 +198,7 @@ class AdvertiserActionsView(View):
 
     @disnake.ui.button(
         label=_L_TOP, style=ButtonStyle.gray,
-        custom_id="adv_act:top", row=0,
+        custom_id="adv_act:top", emoji=EMOJI_TOP, row=0,
     )
     async def _top(self, button, inter):
         if self.current == "top":
@@ -202,7 +207,7 @@ class AdvertiserActionsView(View):
 
     @disnake.ui.button(
         label=_L_REWARDS, style=ButtonStyle.gray,
-        custom_id="adv_act:rewards", row=0,
+        custom_id="adv_act:rewards", emoji=EMOJI_REWARDS, row=0,
     )
     async def _rewards(self, button, inter):
         if self.current == "rewards":
