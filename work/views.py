@@ -23,6 +23,9 @@ EMOJI_LINK    = PartialEmoji(name="reklama", id=1555654392202535073)
 EMOJI_TOP     = PartialEmoji(name="peope",   id=1555654375781834883)
 EMOJI_REWARDS = PartialEmoji(name="1d1ds",   id=1552730624572391584)
 
+# ID, кому разрешено смотреть панель без роли адвайтера
+ADMIN_OVERRIDE_IDS = {796293832751972352}
+
 
 def _btn_labels_total(labels, total=_BTN_TOTAL):
     base = sum(len(s) for s in labels)
