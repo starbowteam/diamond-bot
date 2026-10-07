@@ -83,10 +83,7 @@ I_GIFT    = 0xf06b
 I_DICE    = 0xf522
 I_COINS   = 0xf51e
 I_SACK    = 0xf81d
-I_LOCK    = 0xf023
 I_SHIELD  = 0xf3ed
-I_ELLIPSIS= 0xf141
-I_ARROW_L = 0xf060
 
 
 ROLE_INFO = {
@@ -435,7 +432,7 @@ def _draw_clan_badge(d, img, x, y, w, h, clan: Optional[dict]):
         if _clan_name == "Сияние":
             clan_icon = I_STAR
         elif _clan_name == "Мультяшности":
-            clan_icon = 0xf11b   # fa-gamepad
+            clan_icon = 0xf11b
         elif _clan_name == "Кристализация":
             clan_icon = I_GEM
         else:
@@ -551,39 +548,6 @@ def _draw_operation_row(d, x, y, w, h, op: Optional[dict]):
     d.text((x + w - 18 - tag_w, amt_y + 26), tag_str, font=tag_f, fill=tag_color_dim)
 
 
-def _draw_achievements_button(img, d, x, y, w, h, unlocked: int, total: int):
-    """Плашка-кнопка «Достижения N/M →» внизу левой панели."""
-    GOLD_ACH = (247, 201, 145)
-    border = _lerp_color(GOLD_ACH, (255, 255, 255), 0.15)
-
-    # Фон
-    _gradient_box(img, (x, y, x + w, y + h), GOLD_ACH, GOLD_ACH, alpha=22, radius=14)
-    d.rounded_rectangle((x, y, x + w, y + h),
-                        radius=14, outline=border + (220,), width=2)
-
-    # Иконка слева
-    icon_size = 48
-    ib_x = x + 14
-    ib_y = y + (h - icon_size) // 2
-
-    _alpha_fill(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                GOLD_ACH, alpha=70, radius=12)
-    d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-                        radius=12, outline=GOLD_ACH + (230,), width=2)
-    _draw_icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1,
-               I_TROPHY, 24, GOLD_ACH)
-
-    # Текст
-    tx = ib_x + icon_size + 16
-    d.text((tx, y + 14), "ДОСТИЖЕНИЯ",
-           font=_font(11), fill=_lerp_color(GOLD_ACH, (255, 255, 255), 0.35))
-    d.text((tx, y + 34), f"{unlocked} / {total}",
-           font=_font(24), fill=GOLD_ACH)
-
-    # Стрелка
-    _draw_icon(d, x + w - 26, y + h // 2, I_ARROW_L, 22, GOLD_ACH)
-
-
 # ============================================================
 # ГЛАВНАЯ ФУНКЦИЯ
 # ============================================================
@@ -596,12 +560,7 @@ def generate_profile_card(
     balance: int,
     joined_at: Optional[datetime],
     history: List[Dict],
-    ach_progress: Optional[Dict] = None,
 ) -> io.BytesIO:
-    """
-    ach_progress: {"unlocked": int, "total": int} — данные для плашки
-    достижений. Если не передан — считает нулями.
-    """
     if user_id in EXEMPT_USERS:
         role_key = "pka"
 
@@ -619,9 +578,7 @@ def generate_profile_card(
     d.rounded_rectangle((0, 0, W - 1, H - 1), radius=30, fill=CARD_TOP + (255,),
                         outline=CARD_BRD + (255,), width=3)
 
-    # ═══════════════════════════════════════════════════════
-    # HEADER
-    # ═══════════════════════════════════════════════════════
+    # ─── HEADER ───
     hx = PAD_X
     hy = PAD_Y
 
@@ -645,9 +602,7 @@ def generate_profile_card(
     sep_y = hy + logo_size + 16
     d.line((PAD_X, sep_y, W - PAD_X, sep_y), fill=STACK_HDR + (255,), width=2)
 
-    # ═══════════════════════════════════════════════════════
-    # BODY
-    # ═══════════════════════════════════════════════════════
+    # ─── BODY ───
     body_y = sep_y + 24
     body_h = H - PAD_Y - body_y
     left_w = 400
@@ -668,7 +623,7 @@ def generate_profile_card(
     lp_cx = (lp_x1 + lp_x2) // 2
 
     # Заголовок панели
-    d.text((lp_cx, lp_y1 + 22), "ПРОФИЛЬ",
+    d.text((lp_cx, lp_y1 + 24), "ПРОФИЛЬ",
            font=_font(11), fill=DIM, anchor="mm")
 
     # Размеры
@@ -678,20 +633,13 @@ def generate_profile_card(
     badge_h = 42
     badge_gap = 8
     uid_h = 16
-    ach_btn_h = 76
-    ach_gap = 22
 
     # Высота группы: ава + 2 бейджа + UID
     group_h = av_size + 14 + badge_h + badge_gap + badge_h + 12 + uid_h
 
-    # Позиционирование плашки достижений — от низа панели
-    ach_btn_y2 = lp_y2 - 22
-    ach_btn_y1 = ach_btn_y2 - ach_btn_h
-    uid_bottom = ach_btn_y1 - ach_gap
-
-    # Свободное пространство для группы
-    avail_top = lp_y1 + 54      # ниже заголовка «ПРОФИЛЬ»
-    avail_bottom = uid_bottom
+    # Группа центрируется в панели (с учётом заголовка сверху)
+    avail_top = lp_y1 + 54
+    avail_bottom = lp_y2 - 26
     avail_h = avail_bottom - avail_top
 
     group_start_y = avail_top + max((avail_h - group_h) // 2, 0)
@@ -733,18 +681,6 @@ def generate_profile_card(
     uid_w = _tw(d, uid_text, uid_f)
     uid_y = clan_y + badge_h + 12
     d.text((lp_cx - uid_w // 2, uid_y), uid_text, font=uid_f, fill=MUTED)
-
-    # --- Плашка-кнопка достижений ---
-    if ach_progress is None:
-        ach_progress = {"unlocked": 0, "total": 0}
-
-    _draw_achievements_button(
-        img, d,
-        lp_x1 + 22, ach_btn_y1,
-        (lp_x2 - 22) - (lp_x1 + 22), ach_btn_h,
-        ach_progress.get("unlocked", 0),
-        ach_progress.get("total", 0),
-    )
 
     # ═══════════════════════════════════════════════════════
     # ПРАВАЯ ПАНЕЛЬ
@@ -860,7 +796,6 @@ def generate_profile_card(
         oy = ops_y + i * (op_h + ops_gap)
         _draw_operation_row(d, rp_x1, oy, rp_x2 - rp_x1, op_h, op)
 
-    # ═══════════════════════════════════════════════════════
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
