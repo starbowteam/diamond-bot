@@ -19,7 +19,7 @@ P = "\u3164"
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
 # Суммарная длина 3 кнопок = 35 символов
-_BTN_TOTAL = 26
+_BTN_TOTAL = 30
 
 # Эмодзи
 EMOJI_LINK    = PartialEmoji(name="reklama", id=1555654392202535073)
