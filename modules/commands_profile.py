@@ -28,7 +28,7 @@ IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
 # Суммарная длина подписей 4 кнопок профиля = 46 символов
-PROFILE_BTN_TOTAL = 46
+PROFILE_BTN_TOTAL = 42
 
 
 # ============================================================
@@ -54,7 +54,7 @@ def _btn_labels_total(labels, total=PROFILE_BTN_TOTAL):
 
 _L_INV, _L_ROLES, _L_COIN, _L_ACH = _btn_labels_total([
     "Инвентарь DC",
-    "Кастомные роли",
+    "Кастомные",
     "О валюте",
     "Достижения",
 ])
