@@ -24,7 +24,6 @@ from core.utils import (
     add_closed_order
 )
 
-# 👇 Из actions берём только живое: товар дня (витрина)
 from modules.actions import refresh_daily_deal
 
 from modules.dc import (
@@ -91,11 +90,11 @@ def save_salary_state(state: dict):
 # ЗАРПЛАТЫ И АВАНСЫ
 # ============================================================
 SALARY_ROLES = {
-    1471844291595731016: {"advance": 750, "salary": 1750},   # Control Diamond
-    1513935883475226796: {"advance": 550, "salary": 1250},   # Assistant
-    1154757071330365490: {"advance": 550, "salary": 1250},   # Sales Manager
-    1471190371181789234: {"advance": 450, "salary": 1000},   # Employer
-    1457964854441672806: {"advance": 375, "salary": 875},    # Advertiser
+    1471844291595731016: {"advance": 750, "salary": 1750},
+    1513935883475226796: {"advance": 550, "salary": 1250},
+    1154757071330365490: {"advance": 550, "salary": 1250},
+    1471190371181789234: {"advance": 450, "salary": 1000},
+    1457964854441672806: {"advance": 375, "salary": 875},
 }
 
 SALARY_ROLE_ORDER = [
@@ -719,8 +718,12 @@ async def on_member_join(member: disnake.Member):
         logger.exception(f"welcome bonus err: {e}")
 
     guild = member.guild
-    snapshot_before = {row["invite_code"]: row for row in db.execute(
-        "SELECT * FROM invites_snapshot WHERE guild_id=?", (guild.id,)).fetchall()}
+    snapshot_before = {
+        row["invite_code"]: row
+        for row in db.execute(
+            "SELECT * FROM invites_snapshot WHERE guild_id=?", (guild.id,)
+        ).fetchall()
+    }
     try:
         invites_now = await guild.invites()
     except Exception:
@@ -732,8 +735,11 @@ async def on_member_join(member: disnake.Member):
             used_invite = inv
             break
     for inv in invites_now:
-        db.execute("REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)",
-                   (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
+        db.execute(
+            "REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) "
+            "VALUES (?, ?, ?, ?)",
+            (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None)
+        )
     if not used_invite or not used_invite.inviter:
         db.commit()
         return
@@ -741,7 +747,6 @@ async def on_member_join(member: disnake.Member):
     is_bot = 1 if member.bot else 0
     joined_at = now_ts()
 
-    # 👇 Привязываем к адвайтер-панели: получаем advertiser_id по коду
     advertiser_id = None
     try:
         from work.core import get_advertiser_by_code
@@ -777,13 +782,20 @@ async def on_member_remove(member: disnake.Member):
         description=f"> **{member.mention}** (`{member}`) покинул сервер.\n> ID: `{member.id}`",
         color=0xff0000
     )
-    db.execute("UPDATE invites SET left_at=? WHERE guild_id=? AND member_id=? AND left_at IS NULL",
-               (now_ts(), guild.id, member.id))
-    row = db.execute("SELECT joined_at FROM invites WHERE guild_id=? AND member_id=? ORDER BY joined_at DESC LIMIT 1",
-                     (guild.id, member.id)).fetchone()
+    db.execute(
+        "UPDATE invites SET left_at=? WHERE guild_id=? AND member_id=? AND left_at IS NULL",
+        (now_ts(), guild.id, member.id)
+    )
+    row = db.execute(
+        "SELECT joined_at FROM invites WHERE guild_id=? AND member_id=? "
+        "ORDER BY joined_at DESC LIMIT 1",
+        (guild.id, member.id)
+    ).fetchone()
     if row and (now_ts() - row["joined_at"]) < 600:
-        db.execute("UPDATE invites SET is_fake=1 WHERE guild_id=? AND member_id=? AND is_fake=0",
-                   (guild.id, member.id))
+        db.execute(
+            "UPDATE invites SET is_fake=1 WHERE guild_id=? AND member_id=? AND is_fake=0",
+            (guild.id, member.id)
+        )
         await log_discord(
             title="⚠️ Фейковый вход",
             description=f"> **Пользователь:** {member.mention}\n> Ушёл менее чем через **10 минут** после входа.",
@@ -958,7 +970,9 @@ async def on_invite_create(invite: disnake.Invite):
 async def on_invite_delete(invite: disnake.Invite):
     db.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
     db.commit()
-    await log_discord(title="🗑️ Удалён инвайт", description=f"> **Код:** `{invite.code}`", color=0xff6600)
+    await log_discord(title="🗑️ Удалён инвайт",
+                      description=f"> **Код:** `{invite.code}`",
+                      color=0xff6600)
 
 
 @bot.event
@@ -1185,7 +1199,7 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
             await unlock_achievement(user_id, "first_voice", bot=bot, notify=False)
         except Exception:
             pass
-    elif before.channel and (after.channel is None or after.channel != member.before if False else after.channel != before.channel):
+    elif before.channel and (after.channel is None or after.channel != before.channel):
         if user_id in voice_track:
             channel_id, join_time = voice_track.pop(user_id)
             duration = int(time.time()) - join_time
