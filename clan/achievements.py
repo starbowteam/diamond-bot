@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Система достижений клан-лиги."""
-import os
+"""
+Система достижений клан-лиги.
+
+48 достижений, 8 категорий по 6 штук.
+Категории = страницы в панели достижений (см. modules/achievements_panel.py).
+"""
 import time
 import asyncio
 from datetime import datetime, timezone
@@ -12,463 +16,407 @@ from core.utils import (
     CONFIG, logger, db, cur, load_json, save_json, log_discord,
 )
 
-from clan.core import (
-    get_user_clan, get_user_contribution, get_current_cycle,
-    get_clan_top, HARD_EXCLUDED_USERS,
-)
+from clan.core import get_current_cycle
+
 
 # ============================================================
 # КОНСТАНТЫ
 # ============================================================
-CREATOR_USER_ID = 796293832751972352  # 👑 только ты
+CREATOR_USER_ID = 796293832751972352  # 👑 основатель
+
 
 # ============================================================
-# ВСЕ ДОСТИЖЕНИЯ
-# Порядок ВАЖЕН — топ-3 всегда в квадратах
-# priority: чем меньше — тем выше в квадратах
+# КАТЕГОРИИ — порядок = порядок страниц в панели
+# ============================================================
+CATEGORIES: List[dict] = [
+    {
+        "key": "base",
+        "label": "Базовые",
+        "icon": "fa-star",
+        "color": "green",
+    },
+    {
+        "key": "buyers",
+        "label": "Покупатели",
+        "icon": "fa-bag-shopping",
+        "color": "silver",
+    },
+    {
+        "key": "economy",
+        "label": "Экономика",
+        "icon": "fa-coins",
+        "color": "gold",
+    },
+    {
+        "key": "activity",
+        "label": "Активность",
+        "icon": "fa-comments",
+        "color": "blue",
+    },
+    {
+        "key": "clan",
+        "label": "Кланы",
+        "icon": "fa-shield-halved",
+        "color": "purple",
+    },
+    {
+        "key": "casino",
+        "label": "Казино",
+        "icon": "fa-dice",
+        "color": "red",
+    },
+    {
+        "key": "quests",
+        "label": "Квесты",
+        "icon": "fa-list-check",
+        "color": "orange",
+    },
+    {
+        "key": "staff",
+        "label": "Персонал",
+        "icon": "fa-briefcase",
+        "color": "steel",
+    },
+]
+
+CATEGORY_ORDER: List[str] = [c["key"] for c in CATEGORIES]
+
+
+# ============================================================
+# ДОСТИЖЕНИЯ — 48 штук
+# Порядок в словаре = порядок в сетке внутри категории.
+# Иконки — fa-solid (900.ttf).
 # ============================================================
 ACHIEVEMENTS: Dict[str, dict] = {
-    # === 👑 СОЗДАТЕЛЬ ===
+
+    # ─────────── 🏁 БАЗОВЫЕ ───────────
+    "newbie": {
+        "name": "Новичок",
+        "desc": "Зайти на сервер впервые",
+        "icon": "fa-seedling",
+        "category": "base",
+        "rare": False,
+    },
+    "first_message": {
+        "name": "Первое слово",
+        "desc": "Написать первое сообщение в чате",
+        "icon": "fa-comment",
+        "category": "base",
+    },
+    "first_voice": {
+        "name": "Голос",
+        "desc": "Зайти в голосовой канал впервые",
+        "icon": "fa-microphone",
+        "category": "base",
+    },
+    "first_review": {
+        "name": "Первый отзыв",
+        "desc": "Оставить первый отзыв в канале",
+        "icon": "fa-pen-fancy",
+        "category": "base",
+    },
+    "first_purchase": {
+        "name": "Первая покупка",
+        "desc": "Купить товар в магазине за DC",
+        "icon": "fa-cart-shopping",
+        "category": "base",
+    },
     "creator": {
         "name": "Создатель Diamond",
         "desc": "Основать Diamond Shop",
         "icon": "fa-crown",
-        "color": "gold",
-        "priority": 1,
+        "category": "base",
         "rare": True,
     },
 
-    # === 🏛 КЛАН-ТОПЫ ===
-    "king": {
-        "name": "Король сезона",
-        "desc": "Топ-1 клана по итогам сезона",
-        "icon": "fa-medal",
-        "color": "gold",
-        "priority": 2,
-    },
-    "legend": {
-        "name": "Легенда",
-        "desc": "Топ-1 в трёх сезонах подряд",
-        "icon": "fa-star",
-        "color": "purple",
-        "priority": 3,
-    },
-
-    # === 🏁 БАЗОВЫЕ ===
-    "newbie": {
-        "name": "Новичок",
-        "desc": "Зайти на сервер",
-        "icon": "fa-seedling",
-        "color": "green",
-        "priority": 10,
-    },
-    "first_message": {
-        "name": "Первое слово",
-        "desc": "Первое сообщение в чате",
-        "icon": "fa-comment",
-        "color": "blue",
-        "priority": 11,
-    },
-    "first_voice": {
-        "name": "Голос",
-        "desc": "Первый заход в голосовой канал",
-        "icon": "fa-microphone",
-        "color": "green",
-        "priority": 12,
-    },
-    "first_review": {
-        "name": "Первый отзыв",
-        "desc": "Оставить первый отзыв",
-        "icon": "fa-pen",
-        "color": "gold",
-        "priority": 13,
-    },
-    "first_purchase": {
-        "name": "Первая покупка",
-        "desc": "Купить что-то в магазине",
-        "icon": "fa-cart-shopping",
-        "color": "green",
-        "priority": 14,
-    },
-
-    # === 🛍 ПОКУПАТЕЛИ ===
+    # ─────────── 🛍 ПОКУПАТЕЛИ ───────────
     "role_bronze": {
         "name": "Бронза",
-        "desc": "Получить роль Bronze Buyer",
+        "desc": "Получить роль Bronze Buyer (1-5 отзывов)",
         "icon": "fa-medal",
-        "color": "gold",
-        "priority": 20,
+        "category": "buyers",
     },
     "role_silver": {
         "name": "Серебро",
-        "desc": "Получить роль Silver Buyer",
-        "icon": "fa-medal",
-        "color": "blue",
-        "priority": 21,
+        "desc": "Получить роль Silver Buyer (6-10 отзывов)",
+        "icon": "fa-award",
+        "category": "buyers",
     },
     "role_gold": {
         "name": "Золото",
-        "desc": "Получить роль Gold Buyer",
-        "icon": "fa-medal",
-        "color": "gold",
-        "priority": 22,
+        "desc": "Получить роль Gold Buyer (11-15 отзывов)",
+        "icon": "fa-trophy",
+        "category": "buyers",
     },
     "role_diamond": {
         "name": "Алмаз",
-        "desc": "Получить роль Diamond Buyer",
+        "desc": "Получить роль Diamond Buyer (16-20 отзывов)",
         "icon": "fa-gem",
-        "color": "blue",
-        "priority": 23,
+        "category": "buyers",
     },
     "role_crystalis": {
         "name": "Кристалис",
-        "desc": "Получить роль Crystalis Buyer",
-        "icon": "fa-gem",
-        "color": "purple",
-        "priority": 24,
+        "desc": "Получить роль Crystalis Buyer (21-25 отзывов)",
+        "icon": "fa-diamond",
+        "category": "buyers",
     },
     "role_pka": {
         "name": "Покупатель Века",
-        "desc": "Получить роль PKA",
+        "desc": "Получить роль PKA (26+ отзывов)",
         "icon": "fa-crown",
-        "color": "gold",
-        "priority": 25,
-    },
-    "buyer_5": {
-        "name": "Постоянный клиент",
-        "desc": "5 покупок в магазине",
-        "icon": "fa-bag-shopping",
-        "color": "green",
-        "priority": 26,
-    },
-    "buyer_25": {
-        "name": "Опытный покупатель",
-        "desc": "25 покупок в магазине",
-        "icon": "fa-briefcase",
-        "color": "blue",
-        "priority": 27,
-    },
-    "buyer_100": {
-        "name": "Мастер покупок",
-        "desc": "100 покупок в магазине",
-        "icon": "fa-trophy",
-        "color": "gold",
-        "priority": 28,
-    },
-    "buyer_500": {
-        "name": "Легенда магазина",
-        "desc": "500 покупок в магазине",
-        "icon": "fa-diamond",
-        "color": "purple",
-        "priority": 29,
+        "category": "buyers",
     },
 
-    # === 💰 ЭКОНОМИКА ===
+    # ─────────── 💰 ЭКОНОМИКА ───────────
     "rich_10k": {
         "name": "Богач",
         "desc": "10 000 DC на балансе",
-        "icon": "fa-sack-dollar",
-        "color": "green",
-        "priority": 30,
-    },
-    "rich_500k": {
-        "name": "Полумиллионер",
-        "desc": "500 000 DC на балансе",
         "icon": "fa-coins",
-        "color": "gold",
-        "priority": 31,
+        "category": "economy",
+    },
+    "rich_100k": {
+        "name": "Сотня",
+        "desc": "100 000 DC на балансе",
+        "icon": "fa-sack-dollar",
+        "category": "economy",
     },
     "rich_1m": {
         "name": "Миллионер",
         "desc": "1 000 000 DC на балансе",
         "icon": "fa-money-bill-wave",
-        "color": "gold",
-        "priority": 32,
-    },
-    "generous_10k": {
-        "name": "Щедрый",
-        "desc": "Подарить 10 000 DC другим",
-        "icon": "fa-gift",
-        "color": "red",
-        "priority": 33,
+        "category": "economy",
     },
     "investor_5k": {
         "name": "Инвестор",
         "desc": "Потратить 5 000 DC в магазине",
         "icon": "fa-chart-line",
-        "color": "blue",
-        "priority": 34,
+        "category": "economy",
     },
-    "investor_500k": {
+    "investor_100k": {
         "name": "Банкир",
-        "desc": "Потратить 500 000 DC в магазине",
+        "desc": "Потратить 100 000 DC в магазине",
         "icon": "fa-building-columns",
-        "color": "gold",
-        "priority": 35,
+        "category": "economy",
+    },
+    "generous_10k": {
+        "name": "Щедрый",
+        "desc": "Подарить 10 000 DC другим",
+        "icon": "fa-gift",
+        "category": "economy",
     },
 
-    # === 💬 АКТИВНОСТЬ ===
+    # ─────────── 💬 АКТИВНОСТЬ ───────────
     "talker_1k": {
         "name": "Болтун",
         "desc": "1 000 сообщений в чате",
         "icon": "fa-comments",
-        "color": "blue",
-        "priority": 40,
+        "category": "activity",
     },
     "talker_10k": {
         "name": "Спамер",
         "desc": "10 000 сообщений в чате",
         "icon": "fa-bullhorn",
-        "color": "green",
-        "priority": 41,
+        "category": "activity",
     },
     "talker_100k": {
         "name": "Легенда чата",
         "desc": "100 000 сообщений в чате",
         "icon": "fa-fire",
-        "color": "red",
-        "priority": 42,
+        "category": "activity",
     },
     "voice_100h": {
         "name": "Голос комьюнити",
         "desc": "100 часов в голосовых каналах",
         "icon": "fa-microphone",
-        "color": "green",
-        "priority": 43,
+        "category": "activity",
     },
     "voice_500h": {
         "name": "Голосовой маньяк",
         "desc": "500 часов в голосовых каналах",
         "icon": "fa-headphones",
-        "color": "blue",
-        "priority": 44,
-    },
-    "reviewer_50": {
-        "name": "Рецензент",
-        "desc": "50 отзывов оставлено",
-        "icon": "fa-pen-fancy",
-        "color": "gold",
-        "priority": 45,
+        "category": "activity",
     },
     "reviewer_100": {
         "name": "Критик",
         "desc": "100 отзывов оставлено",
         "icon": "fa-scroll",
-        "color": "purple",
-        "priority": 46,
-    },
-    "reviewer_500": {
-        "name": "Энциклопедия",
-        "desc": "500 отзывов оставлено",
-        "icon": "fa-book",
-        "color": "gold",
-        "priority": 47,
+        "category": "activity",
     },
 
-    # === 🏛 КЛАНЫ ===
+    # ─────────── 🏛 КЛАНЫ ───────────
     "clan_first_deposit": {
         "name": "Первый вклад",
-        "desc": "Внести первый DC в копилку",
+        "desc": "Внести DC в копилку клана",
         "icon": "fa-hand-holding-dollar",
-        "color": "gold",
-        "priority": 50,
+        "category": "clan",
     },
     "clan_1k": {
         "name": "Тысячник",
         "desc": "1 000 DC вклада за сезон",
         "icon": "fa-coins",
-        "color": "green",
-        "priority": 51,
+        "category": "clan",
     },
-    "clan_5k": {
+    "clan_10k": {
         "name": "Мега-вклад",
-        "desc": "5 000 DC вклада за сезон",
+        "desc": "10 000 DC вклада за сезон",
         "icon": "fa-gem",
-        "color": "blue",
-        "priority": 52,
+        "category": "clan",
     },
     "clan_50k": {
         "name": "Клан-магнат",
         "desc": "50 000 DC вклада за сезон",
         "icon": "fa-crown",
-        "color": "gold",
-        "priority": 53,
-    },
-    "clan_loyal": {
-        "name": "Лояльный",
-        "desc": "7 дней подряд с вкладом",
-        "icon": "fa-fire",
-        "color": "red",
-        "priority": 54,
-    },
-    "clan_hunter": {
-        "name": "Охотник",
-        "desc": "Обогнать 5 участников клана",
-        "icon": "fa-crosshairs",
-        "color": "green",
-        "priority": 55,
-    },
-    "clan_sniper": {
-        "name": "Снайпер",
-        "desc": "Обогнать топ-1 в последние 24ч",
-        "icon": "fa-bullseye",
-        "color": "red",
-        "priority": 56,
+        "category": "clan",
     },
     "clan_champion": {
         "name": "Чемпион",
         "desc": "Выиграть сезон вместе с кланом",
         "icon": "fa-trophy",
-        "color": "gold",
-        "priority": 57,
+        "category": "clan",
     },
     "clan_faithful": {
         "name": "Верный",
         "desc": "3 сезона в одном клане",
         "icon": "fa-shield-halved",
-        "color": "blue",
-        "priority": 58,
+        "category": "clan",
     },
 
-    # === 🎰 КАЗИНО ===
+    # ─────────── 🎰 КАЗИНО ───────────
     "casino_coin": {
         "name": "Орёл или решка",
         "desc": "Сыграть в монетку",
         "icon": "fa-coins",
-        "color": "gold",
-        "priority": 60,
+        "category": "casino",
     },
     "casino_bj21": {
         "name": "Двадцать одно",
         "desc": "Блэкджек с двух карт",
         "icon": "fa-spade",
-        "color": "green",
-        "priority": 61,
+        "category": "casino",
     },
     "casino_jackpot": {
         "name": "Джекпот",
         "desc": "Мега-джекпот в рулетке",
         "icon": "fa-dice",
-        "color": "gold",
-        "priority": 62,
+        "category": "casino",
     },
     "casino_100": {
         "name": "Азартный",
         "desc": "100 партий в казино",
         "icon": "fa-dice-five",
-        "color": "red",
-        "priority": 63,
+        "category": "casino",
     },
     "casino_1000": {
         "name": "Казино-магнат",
         "desc": "1 000 партий в казино",
         "icon": "fa-dice-six",
-        "color": "purple",
-        "priority": 64,
+        "category": "casino",
     },
     "casino_highroller": {
         "name": "Хайроллер",
-        "desc": "Ставка 10 000 DC",
+        "desc": "Ставка 10 000 DC за раз",
         "icon": "fa-money-bill-1-wave",
-        "color": "gold",
-        "priority": 65,
-    },
-    "casino_lucky": {
-        "name": "Мистер Удача",
-        "desc": "Выиграть 100 000 DC в казино",
-        "icon": "fa-clover",
-        "color": "green",
-        "priority": 66,
+        "category": "casino",
     },
 
-    # === 🎯 КВЕСТЫ ===
+    # ─────────── 🎯 КВЕСТЫ ───────────
     "quest_first": {
         "name": "Первый квест",
         "desc": "Выполнить первый квест",
         "icon": "fa-check",
-        "color": "green",
-        "priority": 70,
+        "category": "quests",
+    },
+    "quest_10": {
+        "name": "Новичок-охотник",
+        "desc": "10 квестов выполнено",
+        "icon": "fa-list",
+        "category": "quests",
     },
     "quest_50": {
         "name": "Квест-охотник",
         "desc": "50 квестов выполнено",
         "icon": "fa-list-check",
-        "color": "blue",
-        "priority": 71,
+        "category": "quests",
+    },
+    "quest_100": {
+        "name": "Мастер квестов",
+        "desc": "100 квестов выполнено",
+        "icon": "fa-medal",
+        "category": "quests",
     },
     "quest_200": {
-        "name": "Мастер квестов",
+        "name": "Гуру квестов",
         "desc": "200 квестов выполнено",
-        "icon": "fa-medal",
-        "color": "gold",
-        "priority": 72,
+        "icon": "fa-star",
+        "category": "quests",
+    },
+    "quest_500": {
+        "name": "Легенда квестов",
+        "desc": "500 квестов выполнено",
+        "icon": "fa-trophy",
+        "category": "quests",
     },
 
-    # === 👔 ПЕРСОНАЛ ===
+    # ─────────── 👔 ПЕРСОНАЛ ───────────
     "staff_first_ticket": {
         "name": "Первый тикет",
         "desc": "Закрыть первый тикет",
         "icon": "fa-ticket",
-        "color": "green",
-        "priority": 80,
+        "category": "staff",
     },
     "staff_10_tickets": {
         "name": "Менеджер",
         "desc": "10 закрытых тикетов",
         "icon": "fa-briefcase",
-        "color": "blue",
-        "priority": 81,
+        "category": "staff",
     },
     "staff_100_tickets": {
         "name": "Топ-менеджер",
         "desc": "100 закрытых тикетов",
         "icon": "fa-trophy",
-        "color": "gold",
-        "priority": 82,
+        "category": "staff",
     },
     "staff_perfect": {
         "name": "Идеальный сервис",
-        "desc": "10 тикетов с оценкой 5",
+        "desc": "10 оценок 5/5 от покупателей",
         "icon": "fa-star",
-        "color": "gold",
-        "priority": 83,
-    },
-    "staff_hr_5": {
-        "name": "HR",
-        "desc": "Привлечь 5 человек на сервер",
-        "icon": "fa-user-plus",
-        "color": "green",
-        "priority": 84,
-    },
-    "staff_hr_50": {
-        "name": "HR-легенда",
-        "desc": "Привлечь 50 человек на сервер",
-        "icon": "fa-users",
-        "color": "purple",
-        "priority": 85,
+        "category": "staff",
     },
     "staff_first_salary": {
         "name": "Первая зарплата",
         "desc": "Получить первую зарплату",
         "icon": "fa-sack-dollar",
-        "color": "green",
-        "priority": 86,
+        "category": "staff",
     },
     "staff_year": {
-        "name": "Годовщина работы",
+        "name": "Годовщина",
         "desc": "12 зарплат подряд",
         "icon": "fa-calendar-check",
-        "color": "gold",
-        "priority": 87,
+        "category": "staff",
     },
 }
 
 
 # ============================================================
-# СОРТИРОВКА ПО ПРИОРИТЕТУ
+# СОРТИРОВКА И УТИЛИТЫ
 # ============================================================
-def _sorted_keys() -> List[str]:
-    return sorted(ACHIEVEMENTS.keys(), key=lambda k: ACHIEVEMENTS[k].get("priority", 999))
+CATEGORY_MAP = {c["key"]: c for c in CATEGORIES}
+
+# Порядок ключей в каждой категории — как в словаре ACHIEVEMENTS
+CATEGORY_KEYS: Dict[str, List[str]] = {c["key"]: [] for c in CATEGORIES}
+for _k, _v in ACHIEVEMENTS.items():
+    cat = _v.get("category")
+    if cat in CATEGORY_KEYS:
+        CATEGORY_KEYS[cat].append(_k)
+
+
+def get_category_of(ach_key: str) -> Optional[str]:
+    ach = ACHIEVEMENTS.get(ach_key)
+    return ach.get("category") if ach else None
+
+
+def get_achievements_in_category(cat_key: str) -> List[str]:
+    return CATEGORY_KEYS.get(cat_key, [])
 
 
 # ============================================================
@@ -490,14 +438,37 @@ def get_user_achievements(user_id: int) -> List[str]:
     return [r["ach_key"] for r in rows]
 
 
-def get_user_achievements_sorted(user_id: int) -> List[str]:
-    """Возвращает ключи достижений юзера, отсортированные по priority."""
-    unlocked = set(get_user_achievements(user_id))
-    return [k for k in _sorted_keys() if k in unlocked]
+def get_user_unlocked_set(user_id: int) -> set:
+    """Возвращает set() разблокированных ключей — быстрее чем list."""
+    return set(get_user_achievements(user_id))
 
 
-async def unlock_achievement(user_id: int, ach_key: str, bot=None, notify: bool = True) -> bool:
-    """Выдаёт достижение, шлёт ЛС, логирует. Возвращает True если выдал."""
+def get_category_progress(user_id: int) -> Dict[str, dict]:
+    """
+    Возвращает {cat_key: {"unlocked": int, "total": int}} для всех категорий.
+    """
+    unlocked = get_user_unlocked_set(user_id)
+    result = {}
+    for c in CATEGORIES:
+        keys = CATEGORY_KEYS[c["key"]]
+        done = sum(1 for k in keys if k in unlocked)
+        result[c["key"]] = {"unlocked": done, "total": len(keys)}
+    return result
+
+
+def get_overall_progress(user_id: int) -> Dict[str, int]:
+    unlocked = get_user_unlocked_set(user_id)
+    return {
+        "unlocked": sum(1 for k in ACHIEVEMENTS if k in unlocked),
+        "total": len(ACHIEVEMENTS),
+    }
+
+
+# ============================================================
+# ВЫДАЧА ДОСТИЖЕНИЙ
+# ============================================================
+async def unlock_achievement(user_id: int, ach_key: str,
+                             bot=None, notify: bool = True) -> bool:
     if ach_key not in ACHIEVEMENTS:
         return False
     if has_achievement(user_id, ach_key):
@@ -533,7 +504,6 @@ async def unlock_achievement(user_id: int, ach_key: str, bot=None, notify: bool 
 
 
 async def _send_achievement_dm(bot, user_id: int, ach_key: str):
-    """ЛС о разблокировке достижения."""
     try:
         ach = ACHIEVEMENTS.get(ach_key)
         if not ach:
@@ -548,27 +518,34 @@ async def _send_achievement_dm(bot, user_id: int, ach_key: str):
         if not user:
             return
 
-        # Цвет эмбеда в зависимости от color
         color_map = {
             "gold":   0xf7c991,
             "green":  0x2ecc71,
             "blue":   0x6a9bd1,
             "purple": 0xb39ddb,
             "red":    0xff6b6b,
+            "silver": 0xc6d0e0,
+            "orange": 0xe08c5a,
+            "steel":  0x96b4dc,
         }
-        color = color_map.get(ach.get("color", "gold"), 0xf7c991)
+        cat_key = ach.get("category")
+        cat_color = CATEGORY_MAP.get(cat_key, {}).get("color", "gold")
+        color = color_map.get(cat_color, 0xf7c991)
+
+        cat_label = CATEGORY_MAP.get(cat_key, {}).get("label", "")
 
         embed = disnake.Embed(
             title="🏆 Достижение разблокировано!",
             description=(
                 f"**{ach['name']}**\n"
                 f"> {ach['desc']}\n\n"
+                f"> Категория: **{cat_label}**\n"
                 f"Продолжай в том же духе! 💎"
             ),
             color=color,
             timestamp=datetime.now(timezone.utc)
         )
-        embed.set_footer(text="Посмотреть все достижения — в профиле")
+        embed.set_footer(text="Все достижения — в профиле")
 
         await user.send(embed=embed)
     except disnake.Forbidden:
@@ -578,13 +555,12 @@ async def _send_achievement_dm(bot, user_id: int, ach_key: str):
 
 
 # ============================================================
-# ВЫДАЧА ПО УСЛОВИЯМ
+# ТРИГГЕРЫ
 # ============================================================
-async def check_and_unlock(user_id: int, trigger: str, value: int = 0, bot=None, **kwargs) -> List[str]:
+async def check_and_unlock(user_id: int, trigger: str, value: int = 0,
+                           bot=None, **kwargs) -> List[str]:
     """
     Проверяет условия и выдаёт достижения.
-    trigger — тип события: message, voice, purchase, review, deposit, casino, quest, salary...
-    value — числовое значение (например, общее число сообщений)
     Возвращает список выданных ключей.
     """
     unlocked = []
@@ -606,48 +582,60 @@ async def check_and_unlock(user_id: int, trigger: str, value: int = 0, bot=None,
 
     # Числовые триггеры
     elif trigger == "buyer_count":
-        if value >= 5:   _try("buyer_5")
-        if value >= 25:  _try("buyer_25")
-        if value >= 100: _try("buyer_100")
-        if value >= 500: _try("buyer_500")
+        if value >= 1:  _try("role_bronze")
+        if value >= 6:  _try("role_silver")
+        if value >= 11: _try("role_gold")
+        if value >= 16: _try("role_diamond")
+        if value >= 21: _try("role_crystalis")
+        if value >= 26: _try("role_pka")
+
     elif trigger == "balance":
         if value >= 10_000:    _try("rich_10k")
-        if value >= 500_000:   _try("rich_500k")
+        if value >= 100_000:   _try("rich_100k")
         if value >= 1_000_000: _try("rich_1m")
+
     elif trigger == "messages":
         if value >= 1_000:   _try("talker_1k")
         if value >= 10_000:  _try("talker_10k")
         if value >= 100_000: _try("talker_100k")
+
     elif trigger == "voice_hours":
         if value >= 100: _try("voice_100h")
         if value >= 500: _try("voice_500h")
+
     elif trigger == "reviews":
         if value >= 1:   _try("first_review")
-        if value >= 50:  _try("reviewer_50")
         if value >= 100: _try("reviewer_100")
-        if value >= 500: _try("reviewer_500")
+
     elif trigger == "clan_deposit":
         if value >= 1:      _try("clan_first_deposit")
         if value >= 1_000:  _try("clan_1k")
-        if value >= 5_000:  _try("clan_5k")
+        if value >= 10_000: _try("clan_10k")
         if value >= 50_000: _try("clan_50k")
+
     elif trigger == "casino_games":
         if value >= 1:    _try("casino_coin")
         if value >= 100:  _try("casino_100")
         if value >= 1000: _try("casino_1000")
+
     elif trigger == "casino_bet":
         if value >= 10_000: _try("casino_highroller")
-    elif trigger == "casino_win_total":
-        if value >= 100_000: _try("casino_lucky")
+
     elif trigger == "gift_total":
         if value >= 10_000: _try("generous_10k")
+
     elif trigger == "shop_spent":
         if value >= 5_000:   _try("investor_5k")
-        if value >= 500_000: _try("investor_500k")
+        if value >= 100_000: _try("investor_100k")
+
     elif trigger == "quests":
         if value >= 1:   _try("quest_first")
+        if value >= 10:  _try("quest_10")
         if value >= 50:  _try("quest_50")
+        if value >= 100: _try("quest_100")
         if value >= 200: _try("quest_200")
+        if value >= 500: _try("quest_500")
+
     elif trigger == "role":
         role_key = kwargs.get("role_key")
         role_map = {
@@ -660,14 +648,15 @@ async def check_and_unlock(user_id: int, trigger: str, value: int = 0, bot=None,
         }
         if role_key in role_map:
             _try(role_map[role_key])
+
     elif trigger == "staff_tickets":
         if value >= 1:   _try("staff_first_ticket")
         if value >= 10:  _try("staff_10_tickets")
         if value >= 100: _try("staff_100_tickets")
+
     elif trigger == "staff_salary":
         _try("staff_first_salary")
 
-    # Выдаём всё что нашли
     for key in unlocked:
         await unlock_achievement(user_id, key, bot=bot)
 
@@ -675,118 +664,58 @@ async def check_and_unlock(user_id: int, trigger: str, value: int = 0, bot=None,
 
 
 # ============================================================
-# ФОРМАТИРОВАНИЕ ДЛЯ ПРОФИЛЯ
-# ============================================================
-def get_profile_slots(user_id: int, total_slots: int = 6) -> Dict:
-    """
-    Возвращает данные для профиля:
-      - squares: топ-3 ключа (разблокированные приоритетно, добор заблокированными)
-      - rows: 3 ключа для строк
-      - more_count: сколько ещё скрыто
-      - total_unlocked: всего разблокировано
-      - total_all: всего достижений
-    """
-    unlocked_set = set(get_user_achievements(user_id))
-    sorted_all = _sorted_keys()
-
-    unlocked_sorted = [k for k in sorted_all if k in unlocked_set]
-    locked_sorted = [k for k in sorted_all if k not in unlocked_set]
-
-    # Формируем 6 слотов: сначала все разблокированные, потом заблокированные
-    slots = unlocked_sorted[:total_slots]
-    if len(slots) < total_slots:
-        slots += locked_sorted[:total_slots - len(slots)]
-
-    squares = slots[:3]
-    rows = slots[3:6]
-
-    more_count = max(0, len(unlocked_sorted) - total_slots)
-
-    return {
-        "squares": squares,
-        "rows": rows,
-        "more_count": more_count,
-        "total_unlocked": len(unlocked_sorted),
-        "total_all": len(ACHIEVEMENTS),
-        "unlocked_set": unlocked_set,
-    }
-
-
-# ============================================================
 # ПЕРЕСЧЁТ ВСЕХ
 # ============================================================
 async def recalculate_all_achievements(bot) -> Dict[str, int]:
-    """
-    Прогоняет всех юзеров сервера, проверяет условия, выдаёт недостающие.
-    Возвращает статистику.
-    """
-    from clan.core import (
-        get_clan, get_all_clans, get_user_clan,
-    )
+    from clan.core import get_user_clan, get_user_contribution
     from modules.dc import get_dc_cache
 
-    stats = {
-        "checked": 0,
-        "new_unlocked": 0,
-        "errors": 0,
-    }
+    stats = {"checked": 0, "errors": 0}
 
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
         logger.warning("recalculate_all_achievements: guild not found")
         return stats
 
-    # Загружаем вспомогательные данные
     review_counts = load_json("data/review_counts.json", {})
-    catalog = load_json("data/shop_catalog.json", {})
 
-    # Собираем статистику по каждому юзеру
     for member in guild.members:
         if member.bot:
-            continue
-        if member.id in HARD_EXCLUDED_USERS and member.id != CREATOR_USER_ID:
             continue
 
         stats["checked"] += 1
         uid = member.id
 
         try:
-            # --- БАЗОВЫЕ ---
             if member.id == CREATOR_USER_ID:
                 await unlock_achievement(uid, "creator", bot=bot, notify=False)
 
-            # --- РОЛИ ПОКУПАТЕЛЯ ---
-            from core.utils import CONFIG as CFG
-            role_ids = CFG["ROLE_IDS"]
-            if member.get_role(role_ids["bronze"]):
-                await unlock_achievement(uid, "role_bronze", bot=bot, notify=False)
-            if member.get_role(role_ids["silver"]):
-                await unlock_achievement(uid, "role_silver", bot=bot, notify=False)
-            if member.get_role(role_ids["gold"]):
-                await unlock_achievement(uid, "role_gold", bot=bot, notify=False)
-            if member.get_role(role_ids["diamond"]):
-                await unlock_achievement(uid, "role_diamond", bot=bot, notify=False)
-            if member.get_role(role_ids["crystalis"]):
-                await unlock_achievement(uid, "role_crystalis", bot=bot, notify=False)
-            if member.get_role(role_ids["pka"]):
-                await unlock_achievement(uid, "role_pka", bot=bot, notify=False)
+            role_ids = CONFIG["ROLE_IDS"]
+            role_pairs = [
+                ("bronze", "role_bronze"),
+                ("silver", "role_silver"),
+                ("gold", "role_gold"),
+                ("diamond", "role_diamond"),
+                ("crystalis", "role_crystalis"),
+                ("pka", "role_pka"),
+            ]
+            for role_key, ach_key in role_pairs:
+                role_id = role_ids.get(role_key)
+                if role_id and member.get_role(role_id):
+                    await unlock_achievement(uid, ach_key, bot=bot, notify=False)
 
-            # --- БАЛАНС ---
             dc_data = get_dc_cache(uid)
             balance = dc_data.get("balance", 0)
             await check_and_unlock(uid, "balance", value=balance, bot=bot)
 
-            # --- ПОКУПКИ ---
             purchases = dc_data.get("purchases", [])
             if purchases:
                 await unlock_achievement(uid, "first_purchase", bot=bot, notify=False)
-            await check_and_unlock(uid, "buyer_count", value=len(purchases), bot=bot)
 
-            # --- ОТЗЫВЫ ---
-            review_count = review_counts.get(str(uid), 0)
+            review_count = int(review_counts.get(str(uid), 0) or 0)
             await check_and_unlock(uid, "reviews", value=review_count, bot=bot)
+            await check_and_unlock(uid, "buyer_count", value=review_count, bot=bot)
 
-            # --- КЛАН ---
             user_clan = get_user_clan(uid)
             if user_clan:
                 contrib = get_user_contribution(uid)
@@ -797,17 +726,7 @@ async def recalculate_all_achievements(bot) -> Dict[str, int]:
             stats["errors"] += 1
             continue
 
-    # Считаем сколько новых выдано
-    for member in guild.members:
-        if member.bot:
-            continue
-        cnt = len(get_user_achievements(member.id))
-        stats["new_unlocked"] += cnt
-
     logger.info(f"🏆 Пересчёт достижений: {stats}")
-
-    # Одна итоговая ЛС не нужна — каждое достижение само шлёт ЛС
-
     return stats
 
 
