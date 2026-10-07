@@ -63,11 +63,17 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
+# 👇 Приветствие новичку — картинка-шапка для ЛС
+IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1556733201970626732/image.png?backend=b2&ex=6ac5e506&is=6ac49386&hm=574cd55b0658621f44bee53d8ed386f3b7e7372997e73326c327efef482daca5&"
+
 SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
 
 _LAST_PAYOUT_DATE = None
 _LAST_REMINDER_DATE = None
 _LAST_BONUS_DATE = None
+
+# 👇 ID канала инвайт-панели адвайтеров
+ADVERTISER_PANEL_CHANNEL_ID = 1557405478890373210
 
 
 # ============================================================
@@ -515,6 +521,46 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"clan league init err: {e}")
 
+        # ─── Инвайт-панель адвайтеров ───
+        try:
+            from work import init_advertiser
+            from work.views import AdvertiserPanelView, build_panel_embeds
+            from work.core import start_advertiser_tasks
+
+            init_advertiser(bot)
+            start_advertiser_tasks(bot)
+
+            bot.add_view(AdvertiserPanelView())
+
+            async def _post_advertiser_panel():
+                await asyncio.sleep(8)
+                try:
+                    ch = bot.get_channel(ADVERTISER_PANEL_CHANNEL_ID)
+                    if not ch:
+                        try:
+                            ch = await bot.fetch_channel(ADVERTISER_PANEL_CHANNEL_ID)
+                        except Exception as e:
+                            logger.warning(f"advertiser panel fetch: {e}")
+                            return
+                    if not ch:
+                        return
+                    async for m in ch.history(limit=30):
+                        if m.author == bot.user and m.components:
+                            try:
+                                await m.delete()
+                            except Exception:
+                                pass
+                            break
+                    await ch.send(embeds=build_panel_embeds(), view=AdvertiserPanelView())
+                    logger.info(f"📨 Инвайт-панель отправлена в {ch.name}")
+                except Exception as e:
+                    logger.exception(f"_post_advertiser_panel: {e}")
+
+            bot.loop.create_task(_post_advertiser_panel())
+            logger.info("📨 Инвайт-панель адвайтеров инициализирована")
+        except Exception as e:
+            logger.exception(f"init advertiser: {e}")
+
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
@@ -694,12 +740,31 @@ async def on_member_join(member: disnake.Member):
     inviter_id = used_invite.inviter.id
     is_bot = 1 if member.bot else 0
     joined_at = now_ts()
-    db.execute("INSERT INTO invites (guild_id, inviter_id, member_id, joined_at, is_bot) VALUES (?, ?, ?, ?, ?)",
-               (guild.id, inviter_id, member.id, joined_at, is_bot))
+
+    # 👇 Привязываем к адвайтер-панели: получаем advertiser_id по коду
+    advertiser_id = None
+    try:
+        from work.core import get_advertiser_by_code
+        advertiser_id = get_advertiser_by_code(used_invite.code)
+    except Exception as e:
+        logger.warning(f"get_advertiser_by_code on join: {e}")
+
+    db.execute(
+        "INSERT INTO invites "
+        "(guild_id, inviter_id, member_id, joined_at, is_bot, invite_code, advertiser_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (guild.id, inviter_id, member.id, joined_at, is_bot, used_invite.code, advertiser_id)
+    )
     db.commit()
+
     await log_discord(
         title="📨 Использован инвайт",
-        description=f"> **Пользователь:** {member.mention}\n> **Пригласил:** <@{inviter_id}>\n> **Код:** `{used_invite.code}`",
+        description=(
+            f"> **Пользователь:** {member.mention}\n"
+            f"> **Пригласил:** <@{inviter_id}>\n"
+            f"> **Код:** `{used_invite.code}`"
+            + (f"\n> **Адвайтер:** <@{advertiser_id}>" if advertiser_id else "")
+        ),
         color=0x00aaff
     )
 
@@ -940,7 +1005,6 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
 
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
-    # Flash/actions больше нет — обработчик убран
     try:
         from clan.panels import handle_clan_interaction
         await handle_clan_interaction(inter)
@@ -1121,7 +1185,7 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
             await unlock_achievement(user_id, "first_voice", bot=bot, notify=False)
         except Exception:
             pass
-    elif before.channel and (after.channel is None or after.channel != before.channel):
+    elif before.channel and (after.channel is None or after.channel != member.before if False else after.channel != before.channel):
         if user_id in voice_track:
             channel_id, join_time = voice_track.pop(user_id)
             duration = int(time.time()) - join_time
