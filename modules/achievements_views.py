@@ -1,114 +1,168 @@
 # -*- coding: utf-8 -*-
-"""Discord-view панели достижений: селект категорий + Назад/Вперёд."""
+"""
+Discord-view панели достижений.
+2 кнопки: Назад / Вперёд. Суммарная длина подписей — 46 символов.
+Без селекта. Каждая категория — отдельная страница.
+На первой странице «Назад» возвращает профиль.
+"""
 import asyncio
 from datetime import datetime, timezone
 
 import disnake
-from disnake import SelectOption
-from disnake.ui import View, Select, Button
 from disnake import ButtonStyle, PartialEmoji
+from disnake.ui import View, Button
 
 from core.utils import logger
-from clan.achievements import get_user_achievements
-from modules.achievements_panel import CATEGORIES, generate_achievements_panel
+from clan.achievements import CATEGORY_ORDER
+from modules.achievements_panel import generate_achievements_panel
 
 
 P = "\u3164"
+BTN_LABEL_TOTAL = 46
 
 
-def _btn_label(text: str, total: int = 46) -> str:
-    text = text.strip()
-    if len(text) >= total:
-        return text[:total]
-    padding = total - len(text)
-    left = padding // 2
-    right = padding - left
-    return f"{P*left}{text}{P*right}"
+def _btn_labels_total(labels, total=BTN_LABEL_TOTAL):
+    """
+    Добивает подписи невидимыми пробелами так,
+    чтобы СУММА длин всех подписей == total.
+    """
+    base = sum(len(s) for s in labels)
+    extra = max(0, total - base)
+    n = len(labels)
+    if n == 0:
+        return labels
+    per = extra // n
+    rem = extra % n
+    result = []
+    for i, s in enumerate(labels):
+        pad = per + (1 if i < rem else 0)
+        left = pad // 2
+        right = pad - left
+        result.append(f"{P * left}{s}{P * right}")
+    return result
 
 
-class AchievementsCategorySelect(Select):
-    def __init__(self, active: str = "base"):
-        options = [
-            SelectOption(
-                label=c["label"],
-                value=c["key"],
-                default=(c["key"] == active),
-            ) for c in CATEGORIES
-        ]
-        super().__init__(
-            placeholder="Выбери категорию достижений...",
-            min_values=1, max_values=1,
-            options=options,
-            custom_id="ach_panel:select",
-            row=0,
-        )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        key = inter.data.values[0]
-        await _render(inter, key, 0)
+_L_BACK, _L_FWD = _btn_labels_total(["Назад", "Вперёд"])
 
 
-class AchievementsCategoryView(View):
-    def __init__(self, active: str = "base"):
-        super().__init__(timeout=300)
-        self.active = active
-        self.add_item(AchievementsCategorySelect(active))
-
-        idx = next((i for i, c in enumerate(CATEGORIES) if c["key"] == active), 0)
-        prev_key = CATEGORIES[(idx-1) % len(CATEGORIES)]["key"]
-        next_key = CATEGORIES[(idx+1) % len(CATEGORIES)]["key"]
-
-        b_back = Button(label=_btn_label("Назад"), style=ButtonStyle.gray,
-                        custom_id=f"ach_panel:back:{prev_key}",
-                        emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
-                        row=1)
-        b_back.callback = self._back
-        self.add_item(b_back)
-
-        b_fwd = Button(label=_btn_label("Вперёд"), style=ButtonStyle.gray,
-                       custom_id=f"ach_panel:fwd:{next_key}",
-                       emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
-                       row=1)
-        b_fwd.callback = self._fwd
-        self.add_item(b_fwd)
-
-    async def _back(self, inter):
-        key = self.custom_id.split(":")[-1]
-        await _render(inter, key, 0)
-
-    async def _fwd(self, inter):
-        key = self.custom_id.split(":")[-1]
-        await _render(inter, key, 0)
-
-
-async def _render(inter: disnake.MessageInteraction, key: str, page: int):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    unlocked = set(get_user_achievements(inter.author.id))
+# ============================================================
+# РЕНДЕР СТРАНИЦЫ
+# ============================================================
+async def render_category(inter: disnake.MessageInteraction,
+                          category_key: str):
+    """Обновляет сообщение: рендерит панель для указанной категории."""
+    if category_key not in CATEGORY_ORDER:
+        category_key = CATEGORY_ORDER[0]
 
     try:
         buf = await asyncio.to_thread(
-            generate_achievements_panel, inter.author.id, unlocked, key, page
+            generate_achievements_panel,
+            inter.author.id,
+            category_key,
         )
-        fname = f"ach_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
+        fname = (
+            f"ach_{inter.author.id}_"
+            f"{int(datetime.now(timezone.utc).timestamp())}.png"
+        )
         file = disnake.File(buf, filename=fname)
         embed = disnake.Embed(color=6776679)
         embed.set_image(url=f"attachment://{fname}")
 
-        kwargs = dict(
-            embed=embed, file=file, attachments=[],
-            view=AchievementsCategoryView(key),
-        )
-        try:
+        view = AchievementsPanelView(category_key)
+        kwargs = dict(embed=embed, file=file, attachments=[], view=view)
+
+        if inter.response.is_done():
             await inter.edit_original_response(**kwargs)
-        except Exception:
-            await inter.followup.send(ephemeral=True, **kwargs)
+        else:
+            await inter.response.edit_message(**kwargs)
     except Exception as e:
-        logger.exception(f"ach panel render: {e}")
+        logger.exception(f"render_category: {e}")
         try:
-            await inter.followup.send(f"❌ {str(e)[:200]}", ephemeral=True)
+            if inter.response.is_done():
+                await inter.followup.send(f"❌ {str(e)[:200]}", ephemeral=True)
+            else:
+                await inter.response.send_message(f"❌ {str(e)[:200]}", ephemeral=True)
         except Exception:
             pass
+
+
+async def _return_to_profile(inter: disnake.MessageInteraction):
+    """Возвращает карточку профиля с 4 кнопками — редактирует текущее сообщение."""
+    try:
+        from modules.commands_profile import (
+            render_profile_into_interaction, ProfileCardView,
+        )
+        await render_profile_into_interaction(
+            inter, inter.author, ProfileCardView(),
+        )
+    except Exception as e:
+        logger.exception(f"_return_to_profile: {e}")
+
+
+# ============================================================
+# VIEW
+# ============================================================
+class AchievementsPanelView(View):
+    def __init__(self, category_key: str = "base"):
+        super().__init__(timeout=300)
+        self.category_key = category_key
+
+        idx = CATEGORY_ORDER.index(category_key) if category_key in CATEGORY_ORDER else 0
+        self._idx = idx
+
+        b_back = Button(
+            label=_L_BACK,
+            style=ButtonStyle.gray,
+            custom_id="ach_panel:back",
+            emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
+            row=0,
+        )
+        b_back.callback = self._on_back
+        self.add_item(b_back)
+
+        b_fwd = Button(
+            label=_L_FWD,
+            style=ButtonStyle.primary,
+            custom_id="ach_panel:fwd",
+            emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496),
+            row=0,
+        )
+        b_fwd.callback = self._on_fwd
+        self.add_item(b_fwd)
+
+    async def _on_back(self, inter: disnake.MessageInteraction):
+        if inter.author.id != inter.message.interaction_metadata.user.id \
+                if inter.message.interaction_metadata else False:
+            # Кнопки видны только автору — нет смысла проверять строго.
+            pass
+
+        # На первой странице — возвращаем профиль
+        if self._idx <= 0:
+            try:
+                await inter.response.defer(ephemeral=True)
+            except Exception:
+                pass
+            await _return_to_profile(inter)
+            return
+
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        new_key = CATEGORY_ORDER[self._idx - 1]
+        await render_category(inter, new_key)
+
+    async def _on_fwd(self, inter: disnake.MessageInteraction):
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        # На последней странице — заворачиваем на первую
+        if self._idx >= len(CATEGORY_ORDER) - 1:
+            new_key = CATEGORY_ORDER[0]
+        else:
+            new_key = CATEGORY_ORDER[self._idx + 1]
+
+        await render_category(inter, new_key)
