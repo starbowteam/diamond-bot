@@ -812,9 +812,11 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
             description=f"> **Пользователь:** {before.mention}\n> **Было:** `{before.display_name}`\n> **Стало:** `{after.display_name}`",
             color=0xffff00
         )
+
     if before.roles != after.roles:
         added = [r for r in after.roles if r not in before.roles]
         removed = [r for r in before.roles if r not in after.roles]
+
         if added:
             await log_discord(
                 title="➕ Выдана роль",
@@ -851,6 +853,15 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in removed)}",
                 color=0xff0000
             )
+
+            # ─── Адвайтер-панель: снятие роли адвайтера ───
+            try:
+                from work.core import ADVERTISER_ROLE_ID, reset_advertiser
+                if any(r.id == ADVERTISER_ROLE_ID for r in removed):
+                    reset_advertiser(after.id)
+            except Exception as e:
+                logger.warning(f"advertiser role reset: {e}")
+
     if before.display_avatar.url != after.display_avatar.url:
         await log_discord(
             title="🖼️ Изменён аватар",
