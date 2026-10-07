@@ -18,13 +18,12 @@ from core.utils import (
 # ============================================================
 # КОНСТАНТЫ
 # ============================================================
-# ⚠️ Канал, где бот создаёт реферальные ссылки (нужно право create_instant_invite)
-REF_INVITE_CHANNEL_ID = 1552700701128400979   # ← ЗАМЕНИ
+REF_INVITE_CHANNEL_ID = 1552700701128400979   # ← ЗАМЕНИ при необходимости
 
-ADVERTISER_ROLE_ID = 1457964854441672806      # роль адвайтера
-REWARD_AMOUNT = 20                            # награда за засчитанного
-MIN_ALIVE_SECONDS = 12 * 3600                 # 12 часов — порог зачёта
-PANEL_CHANNEL_ID = 1557405478890373210        # канал панели
+ADVERTISER_ROLE_ID = 1457964854441672806
+REWARD_AMOUNT = 20
+MIN_ALIVE_SECONDS = 12 * 3600
+PANEL_CHANNEL_ID = 1557405478890373210
 
 MSK = timezone(timedelta(hours=3))
 
@@ -60,6 +59,38 @@ def init_advertiser_tables():
 
 
 # ============================================================
+# РОЛЬ
+# ============================================================
+def has_advertiser_role(member) -> bool:
+    if member is None:
+        return False
+    try:
+        return any(r.id == ADVERTISER_ROLE_ID for r in member.roles)
+    except Exception:
+        return False
+
+
+def reset_advertiser(advertiser_id: int):
+    """
+    Стирает всё у адвайтера: ссылку и привязки в invites.
+    Вызывается при снятии роли ADVERTISER_ROLE_ID.
+    """
+    try:
+        # Удаляем ссылку
+        cur.execute("DELETE FROM advertiser_links WHERE advertiser_id=?", (advertiser_id,))
+
+        # Отвязываем все инвайты — при возврате роли начнёт с нуля
+        cur.execute(
+            "UPDATE invites SET advertiser_id=NULL WHERE advertiser_id=?",
+            (advertiser_id,)
+        )
+        db.commit()
+        logger.info(f"🧹 Адвайтер {advertiser_id} сброшен (роль снята)")
+    except Exception as e:
+        logger.exception(f"reset_advertiser({advertiser_id}): {e}")
+
+
+# ============================================================
 # РЕФЕРАЛЬНЫЕ ССЫЛКИ
 # ============================================================
 def get_advertiser_link(advertiser_id: int) -> Optional[dict]:
@@ -71,10 +102,6 @@ def get_advertiser_link(advertiser_id: int) -> Optional[dict]:
 
 
 async def ensure_advertiser_link(bot, advertiser_id: int) -> Optional[dict]:
-    """
-    Возвращает существующую ссылку адвайтера или создаёт новую.
-    Создание — в канале REF_INVITE_CHANNEL_ID.
-    """
     existing = get_advertiser_link(advertiser_id)
     if existing:
         return existing
@@ -141,7 +168,6 @@ def get_advertiser_by_code(invite_code: str) -> Optional[int]:
 # ЗАПИСЬ СОБЫТИЙ
 # ============================================================
 def register_invite_leave(member_id: int, guild_id: int):
-    """Пишет left_at. Вызывается из on_member_remove."""
     try:
         cur.execute(
             "UPDATE invites SET left_at=? "
@@ -154,7 +180,7 @@ def register_invite_leave(member_id: int, guild_id: int):
 
 
 # ============================================================
-# ПОДСЧЁТ СТАТИСТИКИ
+# ПОДСЧЁТ
 # ============================================================
 def is_valid(invite_row) -> bool:
     joined_at = invite_row["joined_at"] or 0
@@ -198,24 +224,51 @@ def get_advertiser_stats(advertiser_id: int) -> dict:
     }
 
 
-def get_advertiser_top(limit: int = 20) -> List[dict]:
+def _resolve_username(guild, user_id: int) -> str:
+    """Тянет display_name из гильдии. Иначе @id."""
+    if guild is None:
+        return f"@{user_id}"
+    try:
+        m = guild.get_member(user_id)
+        if m is not None:
+            return m.display_name
+    except Exception:
+        pass
+    return f"@{user_id}"
+
+
+def get_advertiser_top(guild, limit: int = 20) -> List[dict]:
+    """
+    Возвращает топ только по тем, у кого есть роль ADVERTISER_ROLE_ID.
+    Пропускает тех, кто ушёл с сервера или потерял роль.
+    """
     rows = cur.execute("SELECT advertiser_id FROM advertiser_links").fetchall()
+
     result = []
     for r in rows:
         aid = r["advertiser_id"]
+
+        # Проверка роли
+        if guild is not None:
+            member = guild.get_member(aid)
+            if member is None or not has_advertiser_role(member):
+                continue
+
         stats = get_advertiser_stats(aid)
         result.append({
             "advertiser_id": aid,
+            "username": _resolve_username(guild, aid),
             "rewarded": stats["rewarded"],
             "on_review": stats["on_review"],
             "total": stats["total"],
         })
+
     result.sort(key=lambda x: (-x["rewarded"], -x["on_review"], -x["total"]))
     return result[:limit]
 
 
-def get_my_place_in_top(advertiser_id: int) -> Optional[int]:
-    top = get_advertiser_top(limit=1000)
+def get_my_place_in_top(guild, advertiser_id: int) -> Optional[int]:
+    top = get_advertiser_top(guild, limit=1000)
     for i, entry in enumerate(top, 1):
         if entry["advertiser_id"] == advertiser_id:
             return i
@@ -245,7 +298,7 @@ def get_hold_dc(advertiser_id: int) -> int:
 
 
 # ============================================================
-# НАЧИСЛЕНИЕ НАГРАД (фоновый таск)
+# НАЧИСЛЕНИЕ НАГРАД
 # ============================================================
 async def _pay_rewards(bot):
     now = int(time.time())
