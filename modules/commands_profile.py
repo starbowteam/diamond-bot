@@ -28,7 +28,7 @@ IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
 # Суммарная длина подписей 3 кнопок профиля = 19 символов
-PROFILE_BTN_TOTAL = 25
+PROFILE_BTN_TOTAL = 34
 
 
 # ============================================================
