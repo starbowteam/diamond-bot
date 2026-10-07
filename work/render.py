@@ -67,7 +67,6 @@ BRONZE    = (209, 146, 96)
 
 CARD_BRD  = (74, 74, 79)
 
-# FA-иконки
 I_USER     = 0xf007
 I_TROPHY   = 0xf091
 I_MEDAL    = 0xf5a2
@@ -156,13 +155,10 @@ def _lighten(c, a=0.4):
     )
 
 
-# ============================================================
-# КАРКАС
-# ============================================================
 W, H = 1800, 1000
 PAD_X, PAD_Y = 56, 44
 BODY_Y = 138
-BODY_H = H - PAD_Y - BODY_Y  # 818
+BODY_H = H - PAD_Y - BODY_Y
 
 
 def _canvas(user_id, subtitle):
@@ -190,16 +186,12 @@ def _canvas(user_id, subtitle):
     return img, d
 
 
-# ============================================================
-# ЛЕВАЯ ПАНЕЛЬ — универсальная
-# ============================================================
 def _draw_left_panel(img, d, box, user_id, username, stats: Dict[str, int]):
     _panel(img, d, box, radius=22)
     x1, y1, x2, y2 = box
     pad = 26
     cx = (x1 + x2) // 2
 
-    # Аватар
     av_size = 120
     av_cy = y1 + pad + av_size // 2
     r = av_size // 2
@@ -209,23 +201,19 @@ def _draw_left_panel(img, d, box, user_id, username, stats: Dict[str, int]):
               outline=BLUE + (255,), width=4)
     _icon(d, cx, av_cy + 1, I_USER, 52, TEXT)
 
-    # Ник
     nick_y = y1 + pad + av_size + 20
     nick = _el(d, username, _font(20), (x2 - x1) - 2 * pad)
     nw = _tw(d, nick, _font(20))
     d.text((cx - nw // 2, nick_y), nick, font=_font(20), fill=TEXT)
 
-    # UID
     uid_y = nick_y + 30
     uid_text = f"UID · {user_id}"
     uid_w = _tw(d, uid_text, _font(12))
     d.text((cx - uid_w // 2, uid_y), uid_text, font=_font(12), fill=MUTED)
 
-    # Разделитель
     sep_y = uid_y + 26
     d.line((x1 + pad, sep_y, x2 - pad, sep_y), fill=STACK_HDR + (255,), width=2)
 
-    # 2×2 сетка
     grid_y = sep_y + 20
     grid_w = (x2 - pad) - (x1 + pad)
     gap = 12
@@ -249,34 +237,27 @@ def _draw_left_panel(img, d, box, user_id, username, stats: Dict[str, int]):
         d.text((cx1 + 16, cy1 + 40), str(val), font=_font(32), fill=color)
 
 
-# ============================================================
-# СТРОКА ТАБЛИЦЫ — приглашённый
-# ============================================================
-def _draw_invite_row(img, d, x1, y, w, h, row, col_x, col_w):
+def _draw_invite_row(img, d, x1, y, w, h, row, col_x):
     rewarded = row.get("rewarded", 0)
     on_review = (
         not rewarded
         and row.get("left_at")
         and (row["left_at"] - row["joined_at"]) < 12 * 3600
     )
-    alive = row.get("left_at") is None
 
     d.rounded_rectangle((x1, y, x1 + w, y + h), radius=12,
                         fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
 
-    # Аватар-заглушка
     av_x = col_x[0] + 14
     d.ellipse((av_x, y + h // 2 - 24, av_x + 48, y + h // 2 + 24),
               fill=(58, 58, 64))
     _icon(d, av_x + 24, y + h // 2 + 1, I_USER, 20, SILVER_HI)
 
-    # Ник
     d.text((col_x[1], y + h // 2 - 22), f"ID {row['member_id']}",
            font=_font(15), fill=TEXT)
     d.text((col_x[1], y + h // 2 + 2), "участник",
            font=_font(11), fill=MUTED)
 
-    # Вход
     try:
         jdt = datetime.fromtimestamp(row["joined_at"], timezone.utc)
         jd = jdt.strftime("%d.%m.%Y")
@@ -286,7 +267,6 @@ def _draw_invite_row(img, d, x1, y, w, h, row, col_x, col_w):
     d.text((col_x[2], y + h // 2 - 18), jd, font=_font(14), fill=SILVER_HI)
     d.text((col_x[2], y + h // 2 + 2), jt, font=_font(11), fill=MUTED)
 
-    # Выход
     if row.get("left_at"):
         try:
             ldt = datetime.fromtimestamp(row["left_at"], timezone.utc)
@@ -299,7 +279,6 @@ def _draw_invite_row(img, d, x1, y, w, h, row, col_x, col_w):
     else:
         d.text((col_x[3], y + h // 2 - 8), "—", font=_font(14), fill=DIM)
 
-    # Статус
     if rewarded:
         txt, color = "✓ ЗАСЧИТАН", GREEN
     elif on_review:
@@ -330,7 +309,6 @@ def render_personal(user_id, username, stats, link_url, created_at):
     _draw_left_panel(img, d, (lx1, BODY_Y, lx2 - 12, BODY_Y + BODY_H - 12),
                      user_id, username, stats)
 
-    # Блок ссылки снизу слева
     lp_y2 = BODY_Y + BODY_H - 12
     link_h = 96
     link_y = lp_y2 - 22 - link_h
@@ -357,7 +335,6 @@ def render_personal(user_id, username, stats, link_url, created_at):
         except Exception:
             pass
 
-    # Правая панель
     _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=22)
     rpx1 = rx1 + 28
     rpx2 = rx2 - 12 - 28
@@ -371,7 +348,6 @@ def render_personal(user_id, username, stats, link_url, created_at):
     sep_y = rpy + 44
     d.line((rpx1, sep_y, rpx2, sep_y), fill=STACK_HDR + (255,), width=2)
 
-    # Колонки
     col_x = [rpx1, rpx1 + 80, rpx2 - 660, rpx2 - 440, rpx2 - 220]
     th_y = sep_y + 14
     for x, lbl in zip(col_x[1:], ["ПОЛЬЗОВАТЕЛЬ", "ВХОД", "ВЫХОД", "СТАТУС"]):
@@ -381,7 +357,6 @@ def render_personal(user_id, username, stats, link_url, created_at):
     list_bottom = BODY_Y + BODY_H - 12 - 22
     row_h = 84
     row_gap = 6
-    col_w = [col_x[1] - col_x[0], 0, 0, 0, 0]
 
     rows = stats.get("rows", [])[:6]
 
@@ -397,7 +372,7 @@ def render_personal(user_id, username, stats, link_url, created_at):
             ry = list_y + i * (row_h + row_gap)
             if ry + row_h > list_bottom:
                 break
-            _draw_invite_row(img, d, rpx1, ry, rpx2 - rpx1, row_h, row, col_x, col_w)
+            _draw_invite_row(img, d, rpx1, ry, rpx2 - rpx1, row_h, row, col_x)
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
@@ -419,7 +394,6 @@ def render_top(user_id, username, stats, my_place, my_diff_1, my_diff_3, top_lis
     _draw_left_panel(img, d, (lx1, BODY_Y, lx2 - 12, BODY_Y + BODY_H - 12),
                      user_id, username, stats)
 
-    # Блок места
     lp_y2 = BODY_Y + BODY_H - 12
     info_h = 96
     info_y = lp_y2 - 22 - info_h
@@ -438,7 +412,6 @@ def render_top(user_id, username, stats, my_place, my_diff_1, my_diff_3, top_lis
     diff_str = f"до #1: -{my_diff_1}" if my_diff_1 else "ты в топе!"
     d.text((ip_x1 + 16, info_y + 74), diff_str, font=_font(11), fill=MUTED)
 
-    # Правая панель
     _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=22)
     rpx1 = rx1 + 28
     rpx2 = rx2 - 12 - 28
@@ -471,6 +444,7 @@ def render_top(user_id, username, stats, my_place, my_diff_1, my_diff_3, top_lis
                 break
 
             aid = entry["advertiser_id"]
+            name = entry.get("username") or f"@{aid}"
             rewarded = entry["rewarded"]
             on_review = entry["on_review"]
             total = entry["total"]
@@ -492,7 +466,6 @@ def render_top(user_id, username, stats, my_place, my_diff_1, my_diff_3, top_lis
             d.rounded_rectangle((rpx1, ry, rpx2, ry + row_h), radius=14,
                                 outline=border + (220,), width=2)
 
-            # Место
             m_size = 54
             mx = rpx1 + 18
             my = ry + row_h // 2 - m_size // 2
@@ -508,23 +481,23 @@ def render_top(user_id, username, stats, my_place, my_diff_1, my_diff_3, top_lis
                 d.text((mx + m_size // 2 - nw // 2, my + m_size // 2 - 13),
                        num, font=_font(22), fill=icon_c)
 
-            # Аватар
             av_size = 54
             avx = mx + m_size + 16
             avy = ry + row_h // 2 - av_size // 2
             d.ellipse((avx, avy, avx + av_size, avy + av_size), fill=(58, 58, 64))
             _icon(d, avx + av_size // 2, avy + av_size // 2 + 1, I_USER, 22, TEXT)
 
-            # Имя
             name_x = avx + av_size + 18
-            name_text = f"@{aid}"
+            name_max = (rpx2 - 500) - name_x - 10
+            name_shown = _el(d, name, _font(17), max(name_max, 60))
+            d.text((name_x, ry + row_h // 2 - 22), name_shown, font=_font(17), fill=TEXT)
             if is_me:
-                name_text = f"@{aid} (ты)"
-            d.text((name_x, ry + row_h // 2 - 22), name_text, font=_font(17), fill=TEXT)
+                nw = _tw(d, name_shown, _font(17))
+                d.text((name_x + nw + 8, ry + row_h // 2 - 22), "(ты)",
+                       font=_font(13), fill=BLUE)
             d.text((name_x, ry + row_h // 2 + 4), f"ID: {aid}",
                    font=_font(11), fill=DIM)
 
-            # 3 колонки справа
             col_start = rpx2 - 500
             col_w = 165
             items = [
@@ -563,7 +536,6 @@ def render_rewards(user_id, username, stats, total_dc, hold_dc, history):
     _draw_left_panel(img, d, (lx1, BODY_Y, lx2 - 12, BODY_Y + BODY_H - 12),
                      user_id, username, stats)
 
-    # Hero «Заработано»
     lp_y2 = BODY_Y + BODY_H - 12
     hero_h = 130
     hero_y = lp_y2 - 22 - hero_h
@@ -594,7 +566,6 @@ def render_rewards(user_id, username, stats, total_dc, hold_dc, history):
     hw = _tw(d, hold, _font(12))
     d.text((cx_mid - hw // 2, hero_y + 102), hold, font=_font(12), fill=GOLD)
 
-    # Правая панель
     _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=22)
     rpx1 = rx1 + 28
     rpx2 = rx2 - 12 - 28
