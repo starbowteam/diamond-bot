@@ -18,7 +18,7 @@ from modules.achievements_panel import generate_achievements_panel
 
 
 P = "\u3164"
-BTN_LABEL_TOTAL = 28
+BTN_LABEL_TOTAL = 29
 
 
 def _btn_labels_total(labels, total=BTN_LABEL_TOTAL):
