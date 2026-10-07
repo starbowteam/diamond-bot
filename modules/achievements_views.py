@@ -4,6 +4,7 @@ Discord-view панели достижений.
 2 кнопки: Назад / Вперёд. Суммарная длина подписей — 29 символов.
 Без селекта. Каждая категория — отдельная страница.
 На первой странице «Назад» возвращает профиль.
+При открытии — тихий догон достижений для юзера.
 """
 import asyncio
 from datetime import datetime, timezone
@@ -12,8 +13,12 @@ import disnake
 from disnake import ButtonStyle, PartialEmoji
 from disnake.ui import View, Button
 
-from core.utils import logger
-from clan.achievements import CATEGORY_ORDER
+from core.utils import logger, load_json, FILES, get_dc_cache
+from clan.achievements import (
+    CATEGORY_ORDER,
+    check_and_unlock,
+    get_user_unlocked_set,
+)
 from modules.achievements_panel import generate_achievements_panel
 
 
@@ -21,6 +26,9 @@ P = "\u3164"
 BTN_LABEL_TOTAL = 29
 
 
+# ============================================================
+# ХЕЛПЕР ПОДПИСЕЙ
+# ============================================================
 def _btn_labels_total(labels, total=BTN_LABEL_TOTAL):
     """Добивает подписи невидимыми пробелами так, чтобы СУММА == total."""
     base = sum(len(s) for s in labels)
@@ -46,7 +54,72 @@ _L_BACK, _L_FWD = _btn_labels_total(["Назад", "Вперёд"])
 # ЭМОДЗИ
 # ============================================================
 EMOJI_BACK = PartialEmoji(name="baa1", id=1557224983539749004)
-EMOJI_FWD  = PartialEmoji(name="rid1", id=1557225020265332816)
+EMOJI_FWD  = PartialEmoji(name="rid1", id=1557225225265332816 if False else 1557225020265332816)
+
+
+# ============================================================
+# ТИХИЙ ДОГОН
+# ============================================================
+async def _catchup_for_user(user_id: int):
+    """
+    Тихий догон: проверяем простые триггеры и доедаем всё,
+    что юзер заслужил, но не получил (например, если зашёл
+    до фикса или пересчёт не прошёл). Без ЛС, без логов.
+    """
+    # ── Баланс + первая покупка ──
+    try:
+        dc = get_dc_cache(user_id)
+        bal = dc.get("balance", 0) or 0
+        if bal > 0:
+            await check_and_unlock(user_id, "balance", value=bal)
+        if dc.get("purchases"):
+            await check_and_unlock(user_id, "first_purchase", value=1)
+    except Exception as e:
+        logger.debug(f"catchup balance {user_id}: {e}")
+
+    # ── Отзывы + роль-тир ──
+    try:
+        counts = load_json(FILES["review_counts"], {})
+        rc = int(counts.get(str(user_id), 0) or 0)
+        if rc > 0:
+            await check_and_unlock(user_id, "reviews", value=rc)
+            await check_and_unlock(user_id, "buyer_count", value=rc)
+            await check_and_unlock(user_id, "first_review", value=1)
+    except Exception as e:
+        logger.debug(f"catchup reviews {user_id}: {e}")
+
+    # ── Клан: вклад ──
+    try:
+        from clan.core import get_user_clan, get_user_contribution
+        if get_user_clan(user_id):
+            contrib = get_user_contribution(user_id)
+            await check_and_unlock(user_id, "clan_deposit", value=contrib)
+    except Exception as e:
+        logger.debug(f"catchup clan {user_id}: {e}")
+
+    # ── Казино: партии ──
+    try:
+        from modules.actions import load_roulette_stats
+        st = load_roulette_stats()
+        rolls = int(st.get("rolls", 0) or 0)
+        if rolls > 0:
+            await check_and_unlock(user_id, "casino_games", value=rolls)
+    except Exception as e:
+        logger.debug(f"catchup casino {user_id}: {e}")
+
+    # ── Квесты ──
+    try:
+        from core.utils import cur
+        row = cur.execute(
+            "SELECT COUNT(*) AS c FROM quest_progress "
+            "WHERE user_id=? AND completed_at IS NOT NULL",
+            (user_id,)
+        ).fetchone()
+        qc = row["c"] if row else 0
+        if qc > 0:
+            await check_and_unlock(user_id, "quests", value=qc)
+    except Exception as e:
+        logger.debug(f"catchup quests {user_id}: {e}")
 
 
 # ============================================================
@@ -57,6 +130,12 @@ async def render_category(inter: disnake.MessageInteraction,
     """Обновляет сообщение: рендерит панель для указанной категории."""
     if category_key not in CATEGORY_ORDER:
         category_key = CATEGORY_ORDER[0]
+
+    # 👇 тихий догон перед рендером
+    try:
+        await _catchup_for_user(inter.author.id)
+    except Exception as e:
+        logger.warning(f"ach catchup: {e}")
 
     try:
         buf = await asyncio.to_thread(
@@ -91,7 +170,7 @@ async def render_category(inter: disnake.MessageInteraction,
 
 
 async def _return_to_profile(inter: disnake.MessageInteraction):
-    """Возвращает карточку профиля с 4 кнопками — редактирует текущее сообщение."""
+    """Возвращает карточку профиля с 3 кнопками — редактирует текущее сообщение."""
     try:
         from modules.commands_profile import (
             render_profile_into_interaction, ProfileCardView,
