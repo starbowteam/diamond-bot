@@ -27,6 +27,23 @@ _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/153785
 IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
+# Длина подписи для кнопок профиля — чтобы все были одинаковой ширины
+BTN_LABEL_LEN = 46
+
+
+# ============================================================
+# ХЕЛПЕР: подпись фиксированной длины
+# ============================================================
+def _btn_label(text: str, total: int = BTN_LABEL_LEN) -> str:
+    """Добивает текст невидимыми пробелами до ровно `total` символов."""
+    text = text.strip()
+    if len(text) >= total:
+        return text[:total]
+    padding = total - len(text)
+    left = padding // 2
+    right = padding - left
+    return f"{P * left}{text}{P * right}"
+
 
 def load_embed_from_file(filename: str):
     path = os.path.join(ADD_DIR, filename)
@@ -41,7 +58,7 @@ def load_embed_from_file(filename: str):
         return [disnake.Embed(title="❌ Ошибка", description=str(e), color=0xff0000)]
 
 
-# ⬇️ 13-25 → crystalis, 26+ → pka
+# ⬇️ 1-5 → bronze, 6-10 → silver, 11-15 → gold, 16-20 → diamond, 21-25 → crystalis, 26+ → pka
 def _role_info(count: int):
     thresholds = [
         (0,  "none",      "Клуб"),
@@ -62,7 +79,7 @@ def _role_info(count: int):
 
 
 # ============================================================
-# ХЕЛПЕРЫ
+# ХЕЛПЕРЫ ОТПРАВКИ
 # ============================================================
 async def _send_ephemeral_file(inter: disnake.MessageInteraction,
                                 buf, filename: str,
@@ -107,11 +124,13 @@ class ProfileCardView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
+    # ─── 1. Инвентарь DC ───
     @disnake.ui.button(
-        label="Инвентарь DC",
+        label=_btn_label("Инвентарь DC"),
         style=ButtonStyle.gray,
         custom_id="pcard:inv",
-        emoji=PartialEmoji(name="prize", id=1539657202170859561)
+        emoji=PartialEmoji(name="prize", id=1539657202170859561),
+        row=0,
     )
     async def inv_btn(self, button, inter: disnake.MessageInteraction):
         try:
@@ -151,11 +170,13 @@ class ProfileCardView(View):
             logger.exception(f"inv_btn render: {e}")
             await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
+    # ─── 2. Кастомные роли ───
     @disnake.ui.button(
-        label=f"{P}Кастомные роли",
+        label=_btn_label("Кастомные роли"),
         style=ButtonStyle.gray,
         custom_id="pcard:roles",
-        emoji=PartialEmoji(name="image", id=1550869363266027641)
+        emoji=PartialEmoji(name="image", id=1550869363266027641),
+        row=0,
     )
     async def roles_btn(self, button, inter: disnake.MessageInteraction):
         try:
@@ -227,11 +248,13 @@ class ProfileCardView(View):
             logger.exception(f"roles_btn render: {e}")
             await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
+    # ─── 3. О валюте ───
     @disnake.ui.button(
-        label=f"{P}О валюте",
+        label=_btn_label("О валюте"),
         style=ButtonStyle.gray,
         custom_id="pcard:coin",
-        emoji=PartialEmoji(name="pravil", id=1544388874497687622)
+        emoji=PartialEmoji(name="pravil", id=1544388874497687622),
+        row=0,
     )
     async def coin_btn(self, button, inter: disnake.MessageInteraction):
         try:
@@ -268,6 +291,24 @@ class ProfileCardView(View):
             logger.exception(f"coin_btn render: {e}")
             await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
+    # ─── 4. Достижения ───
+    @disnake.ui.button(
+        label=_btn_label("Достижения"),
+        style=ButtonStyle.gray,
+        custom_id="pcard:achievements",
+        emoji=PartialEmoji(name="prize", id=1539657202170859561),
+        row=0,
+    )
+    async def ach_btn(self, button, inter: disnake.MessageInteraction):
+        # _render сам делает defer + edit_original_response
+        try:
+            from modules.achievements_views import _render
+        except Exception as e:
+            logger.exception(f"ach_btn import: {e}")
+            return await _send_ephemeral_text(inter, f"❌ Модуль достижений недоступен")
+
+        await _render(inter, "base", 0)
+
 
 # ============================================================
 # КАРТОЧКА ПРОФИЛЯ
@@ -281,6 +322,7 @@ async def show_profile_card(
     await inter.response.defer(with_message=True, ephemeral=True)
 
     from modules.profile_card import generate_profile_card
+    from clan.achievements import ACHIEVEMENTS, get_user_achievements
 
     counts = load_json(FILES["review_counts"], {})
     review_count = counts.get(str(user.id), 0)
@@ -290,6 +332,17 @@ async def show_profile_card(
     balance = dc.get("balance", 0)
     history_raw = dc.get("history", []) or []
     history = list(reversed(history_raw[-5:]))
+
+    # 👇 данные для плашки достижений
+    try:
+        unlocked_count = len(get_user_achievements(user.id))
+        total_ach = len(ACHIEVEMENTS)
+    except Exception as e:
+        logger.warning(f"ach progress for {user.id}: {e}")
+        unlocked_count = 0
+        total_ach = 0
+
+    ach_progress = {"unlocked": unlocked_count, "total": total_ach}
 
     avatar_bytes = None
     try:
@@ -312,6 +365,7 @@ async def show_profile_card(
             balance,
             joined_at,
             history,
+            ach_progress,   # 👈 новый аргумент
         )
 
         filename = f"profile_{user.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
@@ -325,7 +379,7 @@ async def show_profile_card(
         await inter.edit_original_response(
             content=None, embed=embed, file=file,
             attachments=[],
-            view=view
+            view=view,
         )
 
         if viewer and viewer.id != user.id:
@@ -355,7 +409,7 @@ async def show_profile_card(
 
 
 # ============================================================
-# ЕЖЕДНЕВНЫЙ ПОДАРОК — PILLOW (без embed 1)
+# ЕЖЕДНЕВНЫЙ ПОДАРОК — PILLOW
 # ============================================================
 def _daily_gift_stats(user_id: int) -> dict:
     count = 0
@@ -395,7 +449,6 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
     except Exception:
         balance = get_dc_cache(user_id).get("balance", 0)
 
-    # 👇 ТОЛЬКО PILLOW — без embed 1
     try:
         from modules.shop.render_gift import render_daily_gift
         buf = await asyncio.to_thread(
@@ -443,6 +496,9 @@ async def show_daily_gift(inter: disnake.MessageInteraction):
         ))
 
 
+# ============================================================
+# МОДАЛКИ
+# ============================================================
 class DiscountModal(Modal):
     def __init__(self):
         components = [
@@ -521,6 +577,9 @@ class OtherProfileModal(Modal):
         )
 
 
+# ============================================================
+# СЕЛЕКТ ПАНЕЛИ ПРОФИЛЯ
+# ============================================================
 class ProfilePanelSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
