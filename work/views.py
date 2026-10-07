@@ -3,7 +3,6 @@
 
 import asyncio
 import os
-from datetime import datetime, timezone
 
 import disnake
 from disnake import ButtonStyle, PartialEmoji
@@ -18,10 +17,8 @@ P = "\u3164"
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
-# Суммарная длина 3 кнопок = 35 символов
 _BTN_TOTAL = 29
 
-# Эмодзи
 EMOJI_LINK    = PartialEmoji(name="reklama", id=1555654392202535073)
 EMOJI_TOP     = PartialEmoji(name="peope",   id=1555654375781834883)
 EMOJI_REWARDS = PartialEmoji(name="1d1ds",   id=1552730624572391584)
@@ -49,9 +46,6 @@ _L_LINK, _L_TOP, _L_REWARDS = _btn_labels_total([
 ])
 
 
-# ============================================================
-# ЭМБЕД ПАНЕЛИ (из invite.json)
-# ============================================================
 def build_panel_embeds():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "invite.json")
     data = load_json(path, {})
@@ -65,7 +59,7 @@ def build_panel_embeds():
 
 
 # ============================================================
-# СБОРКА PAYLOAD ДЛЯ ЭКРАНА
+# СБОРКА PAYLOAD
 # ============================================================
 async def _build_payload(inter, screen):
     link = None
@@ -90,7 +84,7 @@ async def _build_payload(inter, screen):
 
     elif screen == "top":
         stats = wcore.get_advertiser_stats(inter.author.id)
-        top_list = wcore.get_advertiser_top(limit=10)
+        top_list = wcore.get_advertiser_top(inter.guild, limit=10)
         my_place = None
         my_diff_1 = None
         my_diff_3 = None
@@ -151,7 +145,7 @@ async def _build_payload(inter, screen):
 
 
 # ============================================================
-# ПАНЕЛЬ В КАНАЛЕ (статичная, 3 кнопки gray)
+# ПАНЕЛЬ (в канале)
 # ============================================================
 class AdvertiserPanelView(View):
     def __init__(self):
@@ -180,7 +174,7 @@ class AdvertiserPanelView(View):
 
 
 # ============================================================
-# КНОПКИ ВНУТРИ EPHEMERAL (заменяют контент)
+# КНОПКИ ВНУТРИ EPHEMERAL
 # ============================================================
 class AdvertiserActionsView(View):
     def __init__(self, current="link"):
@@ -219,11 +213,20 @@ class AdvertiserActionsView(View):
 # ОБРАБОТЧИКИ
 # ============================================================
 async def _open_ephemeral(inter, screen):
-    """Первое нажатие из панели → ephemeral сообщение."""
     try:
         await inter.response.defer(ephemeral=True)
     except Exception:
         pass
+
+    # проверка роли
+    if not wcore.has_advertiser_role(inter.author):
+        try:
+            await inter.followup.send(
+                "⛔ У тебя нет роли адвайтера.", ephemeral=True,
+            )
+        except Exception:
+            pass
+        return
 
     embeds, file, view = await _build_payload(inter, screen)
     if not embeds:
@@ -242,11 +245,19 @@ async def _open_ephemeral(inter, screen):
 
 
 async def _switch(inter, screen):
-    """Переключение внутри ephemeral → заменяем сообщение."""
     try:
         await inter.response.defer(ephemeral=True)
     except Exception:
         pass
+
+    if not wcore.has_advertiser_role(inter.author):
+        try:
+            await inter.followup.send(
+                "⛔ У тебя нет роли адвайтера.", ephemeral=True,
+            )
+        except Exception:
+            pass
+        return
 
     embeds, file, view = await _build_payload(inter, screen)
     if not embeds:
