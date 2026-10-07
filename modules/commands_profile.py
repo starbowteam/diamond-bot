@@ -27,8 +27,8 @@ _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/153785
 IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
-# Суммарная длина подписей 4 кнопок профиля = 19 символов
-PROFILE_BTN_TOTAL = 19
+# Суммарная длина подписей 3 кнопок профиля = 19 символов
+PROFILE_BTN_TOTAL = 46
 
 
 # ============================================================
@@ -52,10 +52,9 @@ def _btn_labels_total(labels, total=PROFILE_BTN_TOTAL):
     return result
 
 
-_L_INV, _L_ROLES, _L_COIN, _L_ACH = _btn_labels_total([
+_L_INV, _L_ROLES, _L_ACH = _btn_labels_total([
     "Инвентарь",
-    "Кастом",
-    "Валюта",
+    "Кастомные роли",
     "Достижения",
 ])
 
@@ -65,7 +64,6 @@ _L_INV, _L_ROLES, _L_COIN, _L_ACH = _btn_labels_total([
 # ============================================================
 EMOJI_INV     = PartialEmoji(name="prize", id=1539657202170859561)
 EMOJI_ROLES   = PartialEmoji(name="image", id=1550869363266027641)
-EMOJI_COIN    = PartialEmoji(name="pravil", id=1544388874497687622)
 EMOJI_ACH     = PartialEmoji(name="shla",  id=1557087851949203600)
 
 
@@ -244,38 +242,6 @@ class ProfileCardView(View):
             await _send_ephemeral_file(inter, buf, fname)
         except Exception as e:
             logger.exception(f"roles_btn: {e}")
-            await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
-
-    @disnake.ui.button(
-        label=_L_COIN,
-        style=ButtonStyle.gray,
-        custom_id="pcard:coin",
-        emoji=EMOJI_COIN,
-        row=0,
-    )
-    async def coin_btn(self, button, inter):
-        try:
-            await inter.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
-        try:
-            from modules.dc import get_user_balance
-            balance = await get_user_balance(inter.author.id)
-        except Exception:
-            balance = get_dc_cache(inter.author.id).get("balance", 0)
-
-        total_spent = _total_spent(inter.author.id)
-
-        try:
-            from modules.shop.render_profile import render_about_coin
-            buf = await asyncio.to_thread(
-                render_about_coin, inter.author.id, balance, total_spent,
-            )
-            fname = f"coin_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            await _send_ephemeral_file(inter, buf, fname)
-        except Exception as e:
-            logger.exception(f"coin_btn: {e}")
             await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
     @disnake.ui.button(
@@ -619,7 +585,8 @@ class ProfilePanelSelect(disnake.ui.StringSelect):
         ]
         super().__init__(
             placeholder="Выберите действие...",
-            min_values=1, max_values=1,
+            min_values=1,
+            max_values=1,
             options=options,
             custom_id="profile_panel_select",
         )
