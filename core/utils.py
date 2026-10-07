@@ -344,6 +344,12 @@ def _ensure_column(table: str, column: str, ddl: str):
 # (АФК и те, кто не писал на сервере 3 недели)
 _ensure_column("dc_cache", "last_active_ts", "last_active_ts INTEGER DEFAULT 0")
 
+# Адвайтер-панель: привязка инвайтов к реферальным ссылкам и наградам
+_ensure_column("invites", "invite_code",   "invite_code TEXT DEFAULT NULL")
+_ensure_column("invites", "advertiser_id", "advertiser_id INTEGER DEFAULT NULL")
+_ensure_column("invites", "rewarded",      "rewarded INTEGER DEFAULT 0")
+
+
 # ============================================================
 # Загрузка JSON
 # ============================================================
