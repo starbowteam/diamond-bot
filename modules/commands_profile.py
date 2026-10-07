@@ -27,7 +27,7 @@ _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/153785
 IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 
-# Суммарная длина подписей 4 кнопок профиля = 46 символов
+# Суммарная длина подписей 4 кнопок профиля = 19 символов
 PROFILE_BTN_TOTAL = 19
 
 
@@ -58,6 +58,15 @@ _L_INV, _L_ROLES, _L_COIN, _L_ACH = _btn_labels_total([
     "Валюта",
     "Достижения",
 ])
+
+
+# ============================================================
+# ЭМОДЗИ
+# ============================================================
+EMOJI_INV     = PartialEmoji(name="prize", id=1539657202170859561)
+EMOJI_ROLES   = PartialEmoji(name="image", id=1550869363266027641)
+EMOJI_COIN    = PartialEmoji(name="pravil", id=1544388874497687622)
+EMOJI_ACH     = PartialEmoji(name="shla",  id=1557087851949203600)
 
 
 # ============================================================
@@ -142,7 +151,7 @@ class ProfileCardView(View):
         label=_L_INV,
         style=ButtonStyle.gray,
         custom_id="pcard:inv",
-        emoji=PartialEmoji(name="prize", id=1539657202170859561),
+        emoji=EMOJI_INV,
         row=0,
     )
     async def inv_btn(self, button, inter):
@@ -177,7 +186,7 @@ class ProfileCardView(View):
         label=_L_ROLES,
         style=ButtonStyle.gray,
         custom_id="pcard:roles",
-        emoji=PartialEmoji(name="image", id=1550869363266027641),
+        emoji=EMOJI_ROLES,
         row=0,
     )
     async def roles_btn(self, button, inter):
@@ -241,7 +250,7 @@ class ProfileCardView(View):
         label=_L_COIN,
         style=ButtonStyle.gray,
         custom_id="pcard:coin",
-        emoji=PartialEmoji(name="pravil", id=1544388874497687622),
+        emoji=EMOJI_COIN,
         row=0,
     )
     async def coin_btn(self, button, inter):
@@ -273,7 +282,7 @@ class ProfileCardView(View):
         label=_L_ACH,
         style=ButtonStyle.gray,
         custom_id="pcard:achievements",
-        emoji=PartialEmoji(name="prize", id=1539657202170859561),
+        emoji=EMOJI_ACH,
         row=0,
     )
     async def ach_btn(self, button, inter):
@@ -308,7 +317,7 @@ def _total_spent(user_id: int) -> int:
 
 
 # ============================================================
-# РЕНДЕР ПРОФИЛЯ В ИНТЕРАКЦИЮ (используется кнопкой «Назад» из достижений)
+# РЕНДЕР ПРОФИЛЯ В ИНТЕРАКЦИЮ
 # ============================================================
 async def render_profile_into_interaction(inter, user, view=None):
     """
