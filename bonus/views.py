@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Панель бонусов: селект + эфемерные экраны."""
+"""Панель бонусов: селекты + эфемерные экраны."""
 
 import asyncio
 import os
@@ -21,6 +21,9 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 SUPREME_USER_ID = 796293832751972352
 
 
+# ============================================================
+# ХЕЛПЕР: ПАДДИНГ ПОДПИСЕЙ ДО РОВНОЙ ДЛИНЫ
+# ============================================================
 def _btn_pad(text: str, total: int) -> str:
     """Добивает подпись невидимыми пробелами до ровно `total` символов."""
     base = len(text)
@@ -28,6 +31,28 @@ def _btn_pad(text: str, total: int) -> str:
     left = extra // 2
     right = extra - left
     return f"{P * left}{text}{P * right}"
+
+
+def _btn_labels_total(labels, total):
+    """Раскидывает невидимые пробелы так, чтобы СУММА длин == total."""
+    base = sum(len(s) for s in labels)
+    extra = max(0, total - base)
+    n = len(labels)
+    if n == 0:
+        return labels
+    per = extra // n
+    rem = extra % n
+    result = []
+    for i, s in enumerate(labels):
+        pad = per + (1 if i < rem else 0)
+        left = pad // 2
+        right = pad - left
+        result.append(f"{P * left}{s}{P * right}")
+    return result
+
+
+# Сумарно 78 символов на 2 кнопки — «вровень с эмбедом»
+_L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 78)
 
 
 def build_panel_embeds():
@@ -48,11 +73,11 @@ def build_panel_embeds():
 class BonusSelect(Select):
     def __init__(self):
         options = [
-            SelectOption(label="🔥 Акция дня", description="Скидка дня на товар — торопись",
+            SelectOption(label="Акция дня", description="Скидка дня на товар — торопись",
                          emoji="🔥", value="deal"),
-            SelectOption(label="👥 Реферальная система", description="Приглашай друзей — получай DC",
+            SelectOption(label="Реферальная система", description="Приглашай друзей — получай DC",
                          emoji="👥", value="ref"),
-            SelectOption(label="🎰 Кейсы", description="Испытай удачу — забери ценный приз",
+            SelectOption(label="Кейсы", description="Испытай удачу — забери ценный приз",
                          emoji="🎰", value="cases"),
         ]
         super().__init__(
@@ -192,7 +217,7 @@ async def _build_payload(inter, screen):
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
 
-        view = CasesButtonsView()
+        view = CasesSelectView()
         return [e], file, view
 
     # ─── МОИ КЕЙСЫ ───
@@ -233,7 +258,6 @@ class DealView(View):
         btn.callback = self._buy
         self.add_item(btn)
 
-    # ⚠️ ФИКС: убрал параметр `button` — disnake зовёт callback только с `inter`
     async def _buy(self, inter: disnake.MessageInteraction):
         try:
             await inter.response.defer(ephemeral=True)
@@ -350,50 +374,75 @@ class DealNoDealView(View):
 
 
 # ============================================================
-# VIEW: ВЫБОР КЕЙСА
+# VIEW: ВЫБОР КЕЙСА (СЕЛЕКТ)
 # ============================================================
-class CasesButtonsView(View):
+CASE_EMOJI = {
+    1: "🎁",
+    2: "💰",
+    3: "💎",
+    4: "👑",
+    5: "🏆",
+}
+
+
+class CaseSelect(Select):
+    def __init__(self):
+        from bonus.core import CASES
+        options = []
+        for case in CASES:
+            desc = (case.get("desc") or "").strip()
+            if len(desc) > 95:
+                desc = desc[:92] + "..."
+            options.append(SelectOption(
+                label=f"{case['name']} · {case['price']} DC",
+                description=desc or f"Кейс за {case['price']} DC",
+                emoji=CASE_EMOJI.get(case["num"], "🎁"),
+                value=str(case["num"]),
+            ))
+        super().__init__(
+            placeholder="🎰 Выбери кейс для открытия...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="bonus_case_select",
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        try:
+            case_num = int(inter.data.values[0])
+        except Exception:
+            return
+        await _open_case(inter, case_num)
+
+
+class CasesSelectView(View):
     def __init__(self):
         super().__init__(timeout=300)
-        from bonus.core import CASES
-        for case in CASES:
-            btn = Button(
-                label=f"Кейс {case['num']} · {case['price']}",
-                style=ButtonStyle.gray,
-                custom_id=f"bonus_case:{case['num']}",
-                row=0,
-            )
-            btn.callback = self._make_callback(case["num"])
-            self.add_item(btn)
-
-    def _make_callback(self, case_num: int):
-        async def cb(inter):
-            await _open_case(inter, case_num)
-        return cb
+        self.add_item(CaseSelect())
 
 
 # ============================================================
-# VIEW: ПОСЛЕ КЕЙСА (кнопки увеличены ×2)
+# VIEW: ПОСЛЕ КЕЙСА (кнопки вровень с эмбедом, не серые)
 # ============================================================
 class CaseAfterView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-        # 24 символа
         btn_again = Button(
-            label=_btn_pad("🔄 Купить ещё", 24),
+            label=_L_AGAIN,
             style=ButtonStyle.success,
             custom_id="bonus_after:again",
+            emoji=PartialEmoji(name="prize", id=1539657202170859561),
             row=0,
         )
         btn_again.callback = self._again
         self.add_item(btn_again)
 
-        # 22 символа
         btn_my = Button(
-            label=_btn_pad("🎒 Мои кейсы", 22),
-            style=ButtonStyle.gray,
+            label=_L_MYCASES,
+            style=ButtonStyle.primary,
             custom_id="bonus_after:mycases",
+            emoji=PartialEmoji(name="cakleb", id=1553236134316875846),
             row=0,
         )
         btn_my.callback = self._mycases
@@ -411,9 +460,10 @@ class MyCasesBackView(View):
         super().__init__(timeout=300)
 
         btn = Button(
-            label=_btn_pad("🔙 К кейсам", 24),
-            style=ButtonStyle.gray,
+            label=_btn_pad("К кейсам", 39),
+            style=ButtonStyle.primary,
             custom_id="bonus_mycases:back",
+            emoji="🔙",
             row=0,
         )
         btn.callback = self._back
