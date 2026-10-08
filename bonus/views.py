@@ -463,7 +463,6 @@ class MyCasesBackView(View):
             label=_btn_pad("К кейсам", 27),
             style=ButtonStyle.primary,
             custom_id="bonus_mycases:back",
-            emoji="🔙",
             row=0,
         )
         btn.callback = self._back
@@ -471,7 +470,6 @@ class MyCasesBackView(View):
 
     async def _back(self, inter):
         await _switch(inter, "cases")
-
 
 # ============================================================
 # ОТКРЫТИЕ КЕЙСА
