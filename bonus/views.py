@@ -52,7 +52,7 @@ def _btn_labels_total(labels, total):
 
 
 # Сумарно 78 символов на 2 кнопки — «вровень с эмбедом»
-_L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 51)
+_L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 20)
 
 
 def build_panel_embeds():
