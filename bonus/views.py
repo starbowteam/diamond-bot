@@ -103,7 +103,7 @@ class BonusSelect(Select):
                          emoji=E_CASES, value="cases"),
         ]
         super().__init__(
-            placeholder="🎁 Выбери раздел бонусов...",
+            placeholder="Выбери желаемый раздел бонусов...",
             min_values=1, max_values=1,
             options=options,
             custom_id="bonus:select",
