@@ -21,6 +21,15 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 SUPREME_USER_ID = 796293832751972352
 
 
+def _btn_pad(text: str, total: int) -> str:
+    """Добивает подпись невидимыми пробелами до ровно `total` символов."""
+    base = len(text)
+    extra = max(0, total - base)
+    left = extra // 2
+    right = extra - left
+    return f"{P * left}{text}{P * right}"
+
+
 def build_panel_embeds():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embed.json")
     data = load_json(path, {})
@@ -168,7 +177,8 @@ async def _build_payload(inter, screen):
         )
         e2.set_image(url=IMG_STRIPE)
 
-        view = BonusActionsView("ref")
+        # УБРАЛИ КНОПКИ — пустой View
+        view = View(timeout=300)
         return [e1, e2], file, view
 
     # ─── КЕЙСЫ ───
@@ -205,17 +215,27 @@ async def _build_payload(inter, screen):
 
 
 # ============================================================
-# VIEW: АКЦИЯ ДНЯ + КНОПКА КУПИТЬ
+# VIEW: АКЦИЯ ДНЯ — КНОПКА КУПИТЬ (длина 23)
 # ============================================================
 class DealView(View):
     def __init__(self, deal):
         super().__init__(timeout=300)
         self.deal = deal
+        price = deal.get("new_price", 0)
+        # Соберём лейбл и добьём до 23 символов
+        lbl = _btn_pad(f"Купить за {price} DC", 23)
 
-    @disnake.ui.button(label="🎁 Купить", style=ButtonStyle.success,
-                       custom_id="bonus_deal:buy", row=0)
+        btn = Button(
+            label=lbl,
+            style=ButtonStyle.success,
+            custom_id="bonus_deal:buy",
+            emoji=PartialEmoji(name="prize", id=1539657202170859561),
+            row=0,
+        )
+        btn.callback = self._buy
+        self.add_item(btn)
+
     async def _buy(self, button, inter):
-        """Покупка — заменяет это же ephemeral-сообщение экраном «Куплено»."""
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
@@ -231,7 +251,6 @@ class DealView(View):
         guild = inter.guild
         member = inter.author
 
-        # Проверка роли — уже на аккаунте
         if role_id and member is not None:
             try:
                 if member.get_role(int(role_id)):
@@ -253,7 +272,6 @@ class DealView(View):
         if not ok:
             return await inter.followup.send("❌ Ошибка списания", ephemeral=True)
 
-        # ─── ВЫДАЧА ───
         kind = "inventory"
         role_name = ""
 
@@ -285,7 +303,6 @@ class DealView(View):
         else:
             await add_purchase(inter.author.id, cat_key, name)
 
-        # Лог
         try:
             await bcore.log_discord(
                 title="🛒 Покупка по акции дня",
@@ -301,7 +318,6 @@ class DealView(View):
         except Exception:
             pass
 
-        # ─── Рендер экрана успеха и ЗАМЕНА сообщения ───
         outcome = {
             "kind": kind,
             "name": name,
@@ -335,31 +351,7 @@ class DealNoDealView(View):
 
 
 # ============================================================
-# VIEW: ОБЩИЕ ДЕЙСТВИЯ
-# ============================================================
-class BonusActionsView(View):
-    def __init__(self, current="ref"):
-        super().__init__(timeout=300)
-        self.current = current
-
-    @disnake.ui.button(label="🔥 Акция дня", style=ButtonStyle.gray,
-                       custom_id="bonus_act:deal", row=0)
-    async def _deal(self, button, inter):
-        await _switch(inter, "deal")
-
-    @disnake.ui.button(label="👥 Рефералы", style=ButtonStyle.gray,
-                       custom_id="bonus_act:ref", row=0)
-    async def _ref(self, button, inter):
-        await _switch(inter, "ref")
-
-    @disnake.ui.button(label="🎰 Кейсы", style=ButtonStyle.gray,
-                       custom_id="bonus_act:cases", row=0)
-    async def _cases(self, button, inter):
-        await _switch(inter, "cases")
-
-
-# ============================================================
-# VIEW: ВЫБОР КЕЙСА
+# VIEW: ВЫБОР КЕЙСА (короткие лейблы)
 # ============================================================
 class CasesButtonsView(View):
     def __init__(self):
@@ -429,7 +421,6 @@ async def _open_case(inter, case_num: int):
             ephemeral=True,
         )
 
-    # Показываем крутку
     try:
         buf = await asyncio.to_thread(brender.render_spin, case)
         fname = f"bonus_spin_{inter.author.id}.png"
