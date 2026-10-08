@@ -246,7 +246,7 @@ class DealView(View):
         super().__init__(timeout=300)
         self.deal = deal
         price = deal.get("new_price", 0)
-        lbl = _btn_pad(f"Купить за {price} DC", 35)
+        lbl = _btn_pad(f"Купить за {price} DC", 36)
 
         btn = Button(
             label=lbl,
