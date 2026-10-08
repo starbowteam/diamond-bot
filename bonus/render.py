@@ -2,7 +2,6 @@
 """Pillow-рендер бонус-панели. 1800×1000."""
 import io
 import os
-import random
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List
 
@@ -232,7 +231,6 @@ def render_daily_deal(user_id, balance, deal, hours_left):
     tvw = _tw(d, tv, _font(22))
     d.text((meta_r - tvw, PAD_Y + 26), tv, font=_font(22), fill=GOLD)
 
-    # Определяем данные
     if deal:
         cat = deal.get("category_label", "—")
         name = deal.get("item_data", {}).get("name", "—")
@@ -261,14 +259,12 @@ def render_daily_deal(user_id, balance, deal, hours_left):
     d.rounded_rectangle((banner_x1, banner_y1, banner_x2, banner_y2),
                         radius=24, outline=_lighten(color, 0.25) + (255,), width=3)
 
-    # Огромный −N%
     disc_str = f"−{disc}%"
     disc_font = _font(180)
     dw = _tw(d, disc_str, disc_font)
     d.text((banner_x1 + 60, banner_y1 + (banner_h - disc_font.size) // 2 - 22),
            disc_str, font=disc_font, fill=TEXT)
 
-    # Текст справа от цифры
     text_x = banner_x1 + 60 + dw + 70
     if text_x < banner_x2 - 200:
         cat_font = _font(18)
@@ -287,11 +283,10 @@ def render_daily_deal(user_id, balance, deal, hours_left):
     body_h = body_y2 - body_y1
 
     icon_card_x1 = 60
-    icon_card_x2 = 540   # 480 wide
+    icon_card_x2 = 540
     info_card_x1 = 580
     info_card_x2 = W - 60
 
-    # ICON CARD
     d.rounded_rectangle((icon_card_x1, body_y1, icon_card_x2, body_y2),
                         radius=24, fill=INNER_BG + (255,),
                         outline=STACK_BRD + (255,), width=3)
@@ -302,7 +297,6 @@ def render_daily_deal(user_id, balance, deal, hours_left):
     cx_icon = (icon_card_x1 + icon_card_x2) // 2
     cy_icon = (body_y1 + body_y2) // 2
 
-    # Свечение под иконкой
     for i, a in enumerate([45, 60, 75]):
         gs = 300 - i * 30
         _alpha(img, (cx_icon - gs // 2, cy_icon - gs // 2,
@@ -311,7 +305,6 @@ def render_daily_deal(user_id, balance, deal, hours_left):
 
     _icon(d, cx_icon, cy_icon, icon_code, 180, _lighten(color, 0.55))
 
-    # INFO CARD
     d.rounded_rectangle((info_card_x1, body_y1, info_card_x2, body_y2),
                         radius=24, fill=INNER_BG + (255,),
                         outline=STACK_BRD + (255,), width=3)
@@ -319,7 +312,6 @@ def render_daily_deal(user_id, balance, deal, hours_left):
     text_x = info_card_x1 + 60
     text_max = info_card_x2 - 60
 
-    # Описание
     if desc:
         desc_font = _font(22)
         lines = _wrap(d, desc, desc_font, text_max - text_x, max_lines=4)
@@ -331,7 +323,6 @@ def render_daily_deal(user_id, balance, deal, hours_left):
                "Акция обновляется каждые 5 часов — заходи позже.",
                font=_font(22), fill=MUTED)
 
-    # ЦЕНА
     price_y = body_y2 - 190
 
     if orig > 0:
@@ -358,7 +349,6 @@ def render_daily_deal(user_id, balance, deal, hours_left):
         d.text((next_x + nw + 14, price_y - 20 + new_font.size - 48),
                "DC", font=_font(38), fill=GREEN)
 
-    # ─── FOOTER ───
     foot_y = H - PAD_Y - 20
     d.line((PAD_X, foot_y - 12, W - PAD_X, foot_y - 12),
            fill=STACK_HDR + (255,), width=2)
@@ -377,6 +367,7 @@ def render_daily_deal(user_id, balance, deal, hours_left):
 
 # ═══════════════════════════════════════════════════
 # ЭКРАН 1B: УСПЕШНАЯ ПОКУПКА · V1 · CONFETTI HERO
+# (БЕЗ СВЕЧЕНИЙ)
 # ═══════════════════════════════════════════════════
 def render_deal_success(user_id, deal, outcome):
     img = Image.new("RGBA", (W, H), BG + (255,))
@@ -401,16 +392,9 @@ def render_deal_success(user_id, deal, outcome):
     sy = hy + 54 + 16
     d.line((PAD_X, sy, W - PAD_X, sy), fill=STACK_HDR + (255,), width=2)
 
-    # ─── ФОНОВОЕ СВЕЧЕНИЕ ───
     cx = W // 2
-    for i, a in enumerate([18, 22, 26]):
-        gs = 1400 - i * 200
-        _alpha(img, (cx - gs // 2, 150 - gs // 4,
-                     cx + gs // 2, 150 + gs * 3 // 4),
-               GREEN, alpha=a, radius=gs // 2)
 
     # ─── CONFETTI ───
-    random.seed(user_id)
     conf_positions = [
         (200, 220, I_STAR, 44, GOLD),
         (W - 220, 200, I_GEM, 48, GOLD),
@@ -424,20 +408,12 @@ def render_deal_success(user_id, deal, outcome):
     for px, py, code, sz, col in conf_positions:
         _icon(d, px, py, code, sz, _lighten(col, 0.1))
 
-    # ─── ГАЛОЧКА ───
+    # ─── ГАЛОЧКА (без свечения) ───
     check_size = 240
     check_x1 = cx - check_size // 2
     check_y1 = 200
     check_x2 = check_x1 + check_size
     check_y2 = check_y1 + check_size
-
-    # Свечение под галочкой
-    for i, a in enumerate([55, 75, 95]):
-        gs = check_size + 100 - i * 30
-        _alpha(img,
-               (cx - gs // 2, check_y1 + check_size // 2 - gs // 2,
-                cx + gs // 2, check_y1 + check_size // 2 + gs // 2),
-               GREEN, alpha=a, radius=gs // 2)
 
     _grad(img, (check_x1, check_y1, check_x2, check_y2),
           GREEN, (26, 138, 74), alpha=255, radius=60)
@@ -445,7 +421,7 @@ def render_deal_success(user_id, deal, outcome):
                         radius=60, outline=_lighten(GREEN, 0.3) + (255,), width=3)
     _icon(d, cx, check_y1 + check_size // 2, I_CHECK, 130, TEXT)
 
-    # ─── ТЕГ «ПОЛУЧЕНО» ───
+    # ─── ТЕГ ───
     orig = deal.get("original_price", 0)
     new = deal.get("new_price", 0)
     disc = deal.get("discount", 0)
@@ -536,7 +512,7 @@ def render_deal_success(user_id, deal, outcome):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 2: РЕФ-ПАНЕЛЬ (без изменений)
+# ЭКРАН 2: РЕФ-ПАНЕЛЬ
 # ═══════════════════════════════════════════════════
 def render_ref_panel(user_id, username, stats, link_url):
     img, d = _canvas("реферальная система")
@@ -711,7 +687,7 @@ def render_ref_panel(user_id, username, stats, link_url):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 3: КЕЙСЫ (без изменений)
+# ЭКРАН 3: КЕЙСЫ
 # ═══════════════════════════════════════════════════
 def render_cases(user_id, username, balance, stats):
     img, d = _canvas("кейсы")
@@ -817,7 +793,7 @@ def render_cases(user_id, username, balance, stats):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 4: КРУТКА (без изменений)
+# ЭКРАН 4: КРУТКА
 # ═══════════════════════════════════════════════════
 def render_spin(case):
     img, d = _canvas("крутка кейса")
@@ -865,7 +841,7 @@ def render_spin(case):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 5: РЕЗУЛЬТАТ КЕЙСА (без изменений)
+# ЭКРАН 5: РЕЗУЛЬТАТ КЕЙСА
 # ═══════════════════════════════════════════════════
 def render_result(case, prize, desc, user_balance):
     ptype = (prize or {}).get("type", "dc")
@@ -1031,7 +1007,7 @@ def render_result(case, prize, desc, user_balance):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 6: МОИ КЕЙСЫ (без изменений)
+# ЭКРАН 6: МОИ КЕЙСЫ
 # ═══════════════════════════════════════════════════
 def render_my_cases(user_id, username, stats, history):
     img, d = _canvas("мои кейсы")
