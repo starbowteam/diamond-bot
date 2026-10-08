@@ -25,7 +25,6 @@ SUPREME_USER_ID = 796293832751972352
 # ХЕЛПЕР: ПАДДИНГ ПОДПИСЕЙ ДО РОВНОЙ ДЛИНЫ
 # ============================================================
 def _btn_pad(text: str, total: int) -> str:
-    """Добивает подпись невидимыми пробелами до ровно `total` символов."""
     base = len(text)
     extra = max(0, total - base)
     left = extra // 2
@@ -34,7 +33,6 @@ def _btn_pad(text: str, total: int) -> str:
 
 
 def _btn_labels_total(labels, total):
-    """Раскидывает невидимые пробелы так, чтобы СУММА длин == total."""
     base = sum(len(s) for s in labels)
     extra = max(0, total - base)
     n = len(labels)
@@ -51,7 +49,7 @@ def _btn_labels_total(labels, total):
     return result
 
 
-# Сумарно 78 символов на 2 кнопки — «вровень с эмбедом»
+# Суммарно 32 символа на 2 кнопки — вровень
 _L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 32)
 
 
@@ -151,7 +149,6 @@ async def _switch(inter, screen):
 async def _build_payload(inter, screen):
     user_id = inter.author.id
 
-    # ─── АКЦИЯ ДНЯ ───
     if screen == "deal":
         balance = await get_user_balance(user_id)
         from modules.actions import refresh_daily_deal
@@ -172,7 +169,6 @@ async def _build_payload(inter, screen):
         view = DealView(deal) if deal else DealNoDealView()
         return [e], file, view
 
-    # ─── РЕФ ───
     if screen == "ref":
         link = await bcore.ensure_user_ref_link(inter.bot, user_id)
         if not link:
@@ -205,7 +201,6 @@ async def _build_payload(inter, screen):
         view = View(timeout=300)
         return [e1, e2], file, view
 
-    # ─── КЕЙСЫ ───
     if screen == "cases":
         balance = await get_user_balance(user_id)
         stats = bcore.get_case_stats(user_id)
@@ -220,7 +215,6 @@ async def _build_payload(inter, screen):
         view = CasesSelectView()
         return [e], file, view
 
-    # ─── МОИ КЕЙСЫ ───
     if screen == "mycases":
         stats = bcore.get_case_stats(user_id)
         history = bcore.get_case_history(user_id, limit=8)
@@ -252,7 +246,7 @@ class DealView(View):
             label=lbl,
             style=ButtonStyle.secondary,
             custom_id="bonus_deal:buy",
-            emoji=PartialEmoji(name="prize", id=1539657202170859561),
+            emoji=PartialEmoji(name="shop1", id=1555654407776112750),
             row=0,
         )
         btn.callback = self._buy
@@ -422,7 +416,7 @@ class CasesSelectView(View):
 
 
 # ============================================================
-# VIEW: ПОСЛЕ КЕЙСА (кнопки вровень с эмбедом, не серые)
+# VIEW: ПОСЛЕ КЕЙСА
 # ============================================================
 class CaseAfterView(View):
     def __init__(self):
@@ -432,7 +426,7 @@ class CaseAfterView(View):
             label=_L_AGAIN,
             style=ButtonStyle.secondary,
             custom_id="bonus_after:again",
-            emoji=PartialEmoji(name="prize", id=1539657202170859561),
+            emoji=PartialEmoji(name="shop1", id=1555654407776112750),
             row=0,
         )
         btn_again.callback = self._again
@@ -442,7 +436,7 @@ class CaseAfterView(View):
             label=_L_MYCASES,
             style=ButtonStyle.secondary,
             custom_id="bonus_after:mycases",
-            emoji=PartialEmoji(name="cakleb", id=1553236134316875846),
+            emoji=PartialEmoji(name="prize", id=1539657202170859561),
             row=0,
         )
         btn_my.callback = self._mycases
@@ -470,6 +464,7 @@ class MyCasesBackView(View):
 
     async def _back(self, inter):
         await _switch(inter, "cases")
+
 
 # ============================================================
 # ОТКРЫТИЕ КЕЙСА
