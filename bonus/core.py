@@ -33,14 +33,18 @@ REF_REWARD_BALANCE     = 100                   # DC юзеру за пригла
 REF_REWARD_CLAN        = 100                   # DC в копилку клана
 REF_COOLDOWN_MIN       = 15                    # таск каждые 15 мин
 
+# Пинг в анонсе акции — ID роли
+DEAL_PING_ROLE_ID      = 1127428607606796290
+
+# Slot акции — 5 часов
+DEAL_SLOT_SECONDS      = 5 * 3600
+
+
 # ============================================================
 # КЕЙСЫ · return ~60% · много призов
 # ============================================================
 CASES: List[dict] = [
-    # ─────────────────────────────────────────────────
-    # КЕЙС 1 · Попробуй удачу · 100 DC
-    # Return ~60.5% · 11 призов, лёгкий вход
-    # ─────────────────────────────────────────────────
+    # ─── КЕЙС 1 · Попробуй удачу · 100 DC · return ~60.5% ───
     {
         "num": 1, "key": "luck", "price": 100,
         "name": "Попробуй удачу",
@@ -62,10 +66,7 @@ CASES: List[dict] = [
         ],
     },
 
-    # ─────────────────────────────────────────────────
-    # КЕЙС 2 · Быстрый куш · 300 DC
-    # Return ~62.6% · 14 призов + буст + роль
-    # ─────────────────────────────────────────────────
+    # ─── КЕЙС 2 · Быстрый куш · 300 DC · return ~62.6% ───
     {
         "num": 2, "key": "fast", "price": 300,
         "name": "Быстрый куш",
@@ -90,10 +91,7 @@ CASES: List[dict] = [
         ],
     },
 
-    # ─────────────────────────────────────────────────
-    # КЕЙС 3 · Серьёзный куш · 500 DC
-    # Return ~59.8% · 14 призов + буст + скидка + роль
-    # ─────────────────────────────────────────────────
+    # ─── КЕЙС 3 · Серьёзный куш · 500 DC · return ~59.8% ───
     {
         "num": 3, "key": "serious", "price": 500,
         "name": "Серьёзный куш",
@@ -118,10 +116,7 @@ CASES: List[dict] = [
         ],
     },
 
-    # ─────────────────────────────────────────────────
-    # КЕЙС 4 · Королевский куш · 1000 DC
-    # Return ~59.9% · 15 призов + 2 буста + скидка + 2 роли
-    # ─────────────────────────────────────────────────
+    # ─── КЕЙС 4 · Королевский куш · 1000 DC · return ~59.9% ───
     {
         "num": 4, "key": "royal", "price": 1000,
         "name": "Королевский куш",
@@ -147,10 +142,7 @@ CASES: List[dict] = [
         ],
     },
 
-    # ─────────────────────────────────────────────────
-    # КЕЙС 5 · Мифический куш · 2000 DC
-    # Return ~59.4% · 16 призов + буст + скидка + 3 роли
-    # ─────────────────────────────────────────────────
+    # ─── КЕЙС 5 · Мифический куш · 2000 DC · return ~59.4% ───
     {
         "num": 5, "key": "mythic", "price": 2000,
         "name": "Мифический куш",
@@ -611,6 +603,18 @@ def get_case_stats(user_id: int) -> dict:
 # ============================================================
 DEAL_ANNOUNCE_STATE = os.path.join(DATA_DIR, "bonus_deal_announce.json")
 
+DEAL_ANNOUNCE_IMG = (
+    "https://cdn.discordapp.com/attachments/1527006158282555412/"
+    "1537851307757539390/image.png?ex=6ac864e3&is=6ac71363&"
+    "hm=8fc2a4970e9d4a67c7031812597700fbd32286d0919ee5aa1a460ec0a5316ad6&"
+    "https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F"
+    "1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
+    "https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F"
+    "1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
+    "https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F"
+    "1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
+)
+
 
 def _load_announce_state() -> dict:
     return load_json(DEAL_ANNOUNCE_STATE, {"slot": 0, "message_id": 0})
@@ -623,10 +627,11 @@ def _save_announce_state(state: dict):
 async def announce_deal_change(bot, deal: dict):
     """
     Постит анонс новой акции дня в канал Бонусы.
-    Удаляет старый анонс, если был.
+    Если slot не менялся — ничего не делает.
+    Если slot поменялся — удаляет старое сообщение и постит новое.
     """
     state = _load_announce_state()
-    slot = int(time.time() // (5 * 3600))
+    slot = int(time.time() // DEAL_SLOT_SECONDS)
 
     if state.get("slot") == slot:
         return
@@ -639,7 +644,7 @@ async def announce_deal_change(bot, deal: dict):
             logger.warning(f"announce_deal_change channel: {e}")
             return
 
-    # удаляем старое сообщение
+    # Удаляем старое сообщение
     old_id = state.get("message_id")
     if old_id:
         try:
@@ -648,25 +653,33 @@ async def announce_deal_change(bot, deal: dict):
         except Exception:
             pass
 
+    # Если акции нет — удаляем старую и выходим
+    if not deal:
+        state["slot"] = slot
+        state["message_id"] = 0
+        _save_announce_state(state)
+        logger.info(f"🔥 Анонс акции: слот {slot} — товара нет")
+        return
+
     item = deal.get("item_data", {})
     name = item.get("name", "—")
-    orig = deal.get("original_price", 0)
-    new = deal.get("new_price", 0)
-    discount = deal.get("discount", 0)
-    cat_label = deal.get("category_label", "—")
 
-    text = (
-        f"@everyone\n"
-        f"> **Новая акция дня!** 🔥\n\n"
-        f"> Скидка **{discount}%** на **«{name}»** — "
-        f"**{new} DC** вместо ~~{orig} DC~~.\n\n"
-        f"> Забрать: **панель Бонусы** → **Акция дня**."
+    embed = disnake.Embed(
+        title="Новая скидка на товар!",
+        description=(
+            f"> Сейчас проходит ссылка на товар - **{name}**.\n"
+            f"> Хочешь узнать о скидке больше? Выбери в панели - **Акция дня**.\n\n"
+            f"`Следующее обновление акции через 5ч`"
+        ),
+        color=6776679,
     )
+    embed.set_image(url=DEAL_ANNOUNCE_IMG)
 
     try:
         msg = await ch.send(
-            content=text,
-            allowed_mentions=disnake.AllowedMentions(everyone=True),
+            content=f"|| <@&{DEAL_PING_ROLE_ID}> ||",
+            embed=embed,
+            allowed_mentions=disnake.AllowedMentions(roles=True),
         )
     except Exception as e:
         logger.warning(f"announce_deal_change send: {e}")
@@ -676,7 +689,7 @@ async def announce_deal_change(bot, deal: dict):
     state["message_id"] = msg.id
     _save_announce_state(state)
 
-    logger.info(f"🔥 Анонс акции: {name} · {discount}% · {new} DC")
+    logger.info(f"🔥 Анонс акции: {name} · слот {slot}")
 
 
 # ============================================================
