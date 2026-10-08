@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Pillow-рендер бонус-панели: акция дня, реф-панель, кейсы, крутка, результат, покупка.
-1800×1000.
-"""
+"""Pillow-рендер бонус-панели. 1800×1000."""
 import io
 import os
 import random
@@ -48,6 +45,7 @@ TEXT      = (255, 255, 255)
 TEXT_SOFT = (232, 232, 236)
 MUTED     = (136, 136, 136)
 DIM       = (102, 102, 102)
+DARK      = (85, 85, 85)
 
 SILVER    = (198, 208, 224)
 SILVER_HI = (224, 232, 245)
@@ -61,6 +59,7 @@ BRONZE    = (209, 146, 96)
 
 CARD_BRD  = (74, 74, 79)
 
+# FA-иконки
 I_USER     = 0xf007
 I_TROPHY   = 0xf091
 I_MEDAL    = 0xf5a2
@@ -81,6 +80,10 @@ I_STAR     = 0xf005
 I_CART     = 0xf07a
 I_BOX      = 0xf466
 I_INFO     = 0xf05a
+I_BULLHORN = 0xf0a1
+I_MASKS    = 0xf630
+I_PALETTE  = 0xf53f
+I_SHOP     = 0xf54f
 
 
 FA_CASE_COLOR = {
@@ -204,166 +207,168 @@ def _wrap(d, text, font, max_w, max_lines=3):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 1: АКЦИЯ ДНЯ
+# ЭКРАН 1: АКЦИЯ ДНЯ (ВАРИАНТ C · ГОРИЗОНТ-ПОЛОСА)
 # ═══════════════════════════════════════════════════
 def render_daily_deal(user_id, balance, deal, hours_left):
     img, d = _canvas("акция дня")
 
-    left_w = 420; gap = 24
-    lx1, lx2 = PAD_X, PAD_X + left_w
-    rx1, rx2 = lx2 + gap, W - PAD_X
+    # Header — переделаем вручную, чтобы добавить баланс и время
+    # Перетираем канвас: рисуем заголовок слева (DIAMOND / BONUS · АКЦИЯ ДНЯ)
+    # и справа — время. Канвас уже нарисован, допишем поверх.
 
-    # ЛЕВАЯ
-    _panel(img, d, (lx1, BODY_Y, lx2 - 12, BODY_Y + BODY_H - 12), radius=20)
-    x1, y1 = lx1, BODY_Y
-    x2 = lx2 - 12
-    pad = 22
+    # Правый угол: время + баланс
+    meta_r = W - PAD_X
 
-    # Баланс
-    bal_y1 = y1 + pad
-    bal_y2 = bal_y1 + 132
-    _grad(img, (x1 + pad, bal_y1, x2 - pad, bal_y2), GREEN, GREEN, alpha=20, radius=16)
-    d.rounded_rectangle((x1 + pad, bal_y1, x2 - pad, bal_y2), radius=16,
-                        outline=GREEN + (200,), width=2)
-    cx = (x1 + x2) // 2
-    lbl = "ТВОЙ БАЛАНС"
-    lw = _tw(d, lbl, _font(12))
-    d.text((cx - lw // 2, bal_y1 + 22), lbl, font=_font(12), fill=GREEN)
+    # Время
+    tl = "СЛЕДУЮЩАЯ ЧЕРЕЗ"
+    tw_ = _tw(d, tl, _font(11))
+    d.text((meta_r - tw_, PAD_Y + 6), tl, font=_font(11), fill=MUTED)
+    tv = f"{hours_left} ч."
+    tvw = _tw(d, tv, _font(22))
+    d.text((meta_r - tvw, PAD_Y + 26), tv, font=_font(22), fill=GOLD)
 
+    # Баланс — слева, под лого
     bal_str = f"{balance:,}".replace(",", " ")
-    bf = _font(46)
-    while _tw(d, bal_str + " DC", bf) > (x2 - x1) - 2 * pad - 20 and bf.size > 22:
-        bf = _font(bf.size - 2)
-    bw = _tw(d, bal_str, bf)
-    uw = _tw(d, " DC", _font(20))
-    sx = cx - (bw + uw) // 2
-    d.text((sx, bal_y1 + 52), bal_str, font=bf, fill=GREEN)
-    d.text((sx + bw + 8, bal_y1 + 52 + bf.size - 22), " DC", font=_font(20), fill=MUTED)
+    bx = PAD_X + 54 + 18
+    # сдвинем DIAMOND вверх, добавим баланс ниже
+    # (уже нарисован DIAMOND/BONUS — допишем справа от subtitle)
 
-    # Мини-блоки
-    mini_y = bal_y2 + 14
-    mini_h = 120
-    cw = ((x2 - pad) - (x1 + pad) - 12) // 2
+    # Полоса
+    strip_x1 = 100
+    strip_x2 = W - 100
+    strip_y1 = 320
+    strip_y2 = 720
+    strip_h = strip_y2 - strip_y1
 
-    cat = deal.get("category_label", "—") if deal else "—"
-    disc = deal.get("discount", 0) if deal else 0
-
-    def _mini(bx, ic_code, ic_color, lbl, val, val_color):
-        d.rounded_rectangle((bx, mini_y, bx + cw, mini_y + mini_h), radius=16,
-                            fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
-        _alpha(img, (bx + 16, mini_y + 16, bx + 60, mini_y + 60),
-               ic_color, alpha=45, radius=12)
-        _icon(d, bx + 38, mini_y + 39, ic_code, 20, ic_color)
-        d.text((bx + 16, mini_y + 68), lbl, font=_font(11), fill=MUTED)
-        vf = _font(26)
-        v = _el(d, val, vf, cw - 32)
-        d.text((bx + 16, mini_y + 86), v, font=vf, fill=val_color)
-
-    _mini(x1 + pad, I_TAG, GOLD, "СКИДКА", f"{disc}%", GOLD)
-    _mini(x1 + pad + cw + 12, I_CUBE, BLUE, "КАТЕГОРИЯ", cat, BLUE)
-
-    # Таймер снизу
-    tm_y1 = y1 + (BODY_Y + BODY_H - 12) - pad - 130
-    tm_y2 = tm_y1 + 130
-    _grad(img, (x1 + pad, tm_y1, x2 - pad, tm_y2), GOLD, GOLD, alpha=18, radius=16)
-    d.rounded_rectangle((x1 + pad, tm_y1, x2 - pad, tm_y2), radius=16,
-                        outline=GOLD + (200,), width=2)
-    _icon(d, x1 + pad + 40, tm_y1 + 65, I_CLOCK, 42, GOLD)
-    d.text((x1 + pad + 78, tm_y1 + 30), "СЛЕДУЮЩАЯ ЧЕРЕЗ",
-           font=_font(11), fill=GOLD)
-    d.text((x1 + pad + 78, tm_y1 + 54), f"{hours_left} ч.",
-           font=_font(34), fill=GOLD)
-
-    # ПРАВАЯ
-    _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=20)
-    rpx1 = rx1 + 28; rpx2 = rx2 - 12 - 28; rpy = BODY_Y + 24
-
-    d.text((rpx1, rpy), "🔥 Акция дня", font=_font(32), fill=TEXT)
-    sw = _tw(d, "только сегодня · не упусти", _font(15))
-    d.text((rpx2 - sw, rpy + 14), "только сегодня · не упусти",
-           font=_font(15), fill=MUTED)
-
-    sep_y = rpy + 52
-    d.line((rpx1, sep_y, rpx2, sep_y), fill=STACK_HDR + (255,), width=2)
-
-    if not deal:
-        cx2 = (rpx1 + rpx2) // 2
-        cy2 = (sep_y + BODY_Y + BODY_H - 12 - 22) // 2
-        _icon(d, cx2, cy2 - 30, I_FIRE, 48, DIM)
-        msg = "Сегодня акции нет"
-        mw = _tw(d, msg, _font(22))
-        d.text((cx2 - mw // 2, cy2 + 30), msg, font=_font(22), fill=DIM)
-    else:
-        hero_y1 = sep_y + 20
-        hero_h = 550
-        hero_y2 = hero_y1 + hero_h
-
-        _grad(img, (rpx1, hero_y1, rpx2, hero_y2), RED, RED, alpha=15, radius=20)
-        d.rounded_rectangle((rpx1, hero_y1, rpx2, hero_y2), radius=20,
-                            outline=RED + (200,), width=3)
-
-        ic_size = 230
-        ic_x = rpx1 + 36
-        ic_y = hero_y1 + (hero_h - ic_size) // 2
-        _grad(img, (ic_x, ic_y, ic_x + ic_size, ic_y + ic_size),
-              BLUE, SILVER, alpha=45, radius=26)
-        d.rounded_rectangle((ic_x, ic_y, ic_x + ic_size, ic_y + ic_size),
-                            radius=26, outline=BLUE + (200,), width=3)
-        _icon(d, ic_x + ic_size // 2, ic_y + ic_size // 2 + 2, I_CUBE, 100, SILVER_HI)
-
-        tx = ic_x + ic_size + 34
-        tx_max = rpx2 - 36 - tx
-
-        d.text((tx, hero_y1 + 40),
-               f"🎯 {cat.upper()} · СКИДКА {disc}%",
-               font=_font(15), fill=RED)
-
+    if deal:
+        cat = deal.get("category_label", "—")
         name = deal.get("item_data", {}).get("name", "—")
-        nf = _font(52)
-        name_lines = _wrap(d, name, nf, tx_max, max_lines=2)
-        for i, ln in enumerate(name_lines):
-            d.text((tx, hero_y1 + 80 + i * 62), ln, font=nf, fill=TEXT)
-
-        desc = deal.get("item_data", {}).get("description", "") or "Товар дня со скидкой."
-        df = _font(17)
-        desc_lines = _wrap(d, desc, df, tx_max, max_lines=3)
-        desc_y = hero_y1 + 80 + len(name_lines) * 62 + 16
-        for i, ln in enumerate(desc_lines):
-            d.text((tx, desc_y + i * 24), ln, font=df, fill=MUTED)
-
-        prices_y = hero_y2 - 130
         orig = deal.get("original_price", 0)
         new = deal.get("new_price", 0)
+        disc = deal.get("discount", 0)
+        color = BLUE
+        icon_code = I_CUBE
 
+        # Определяем иконку по категории
+        cat_l = cat.lower()
+        if "рол" in cat_l:
+            icon_code = I_MASKS
+        elif "дизайн" in cat_l:
+            icon_code = I_PALETTE
+        elif "реклам" in cat_l:
+            icon_code = I_BULLHORN
+        elif "скидк" in cat_l:
+            icon_code = I_TAG
+        elif "буст" in cat_l:
+            icon_code = I_BOLT
+        elif "казино" in cat_l:
+            icon_code = I_COINS
+        elif "подар" in cat_l:
+            icon_code = I_GIFT
+    else:
+        cat = "—"; name = "Сегодня акции нет"
+        orig = new = disc = 0
+        color = DIM
+        icon_code = I_FIRE
+
+    # Свечение за полосой
+    for i, a in enumerate([8, 12, 16]):
+        gs = 2000 - i * 200
+        cx = W // 2
+        cy = (strip_y1 + strip_y2) // 2
+        _alpha(img, (cx - gs // 2, cy - gs // 2, cx + gs // 2, cy + gs // 2),
+               color, alpha=a, radius=gs // 2)
+
+    # Фон полосы
+    _grad(img, (strip_x1, strip_y1, strip_x2, strip_y2), color, color, alpha=18, radius=16)
+
+    # Жирные рамки сверху и снизу
+    d.rectangle((strip_x1, strip_y1, strip_x2, strip_y1 + 4), fill=color + (255,))
+    d.rectangle((strip_x1, strip_y2 - 4, strip_x2, strip_y2), fill=color + (255,))
+
+    # Тонкая линия сверху/снизу с отступом
+    d.line((strip_x1 + 100, strip_y1 - 12, strip_x2 - 100, strip_y1 - 12),
+           fill=color + (180,), width=2)
+    d.line((strip_x1 + 100, strip_y2 + 12, strip_x2 - 100, strip_y2 + 12),
+           fill=color + (180,), width=2)
+
+    # Круглая иконка
+    ic_size = 280
+    ic_x = strip_x1 + 70
+    ic_y = strip_y1 + (strip_h - ic_size) // 2
+
+    for i, a in enumerate([28, 42, 55]):
+        gs = ic_size + 60 - i * 20
+        _alpha(img, (ic_x + ic_size // 2 - gs // 2, ic_y + ic_size // 2 - gs // 2,
+                     ic_x + ic_size // 2 + gs // 2, ic_y + ic_size // 2 + gs // 2),
+               color, alpha=a, radius=gs // 2)
+
+    _grad(img, (ic_x, ic_y, ic_x + ic_size, ic_y + ic_size),
+          color, color, alpha=75, radius=ic_size // 2)
+    d.ellipse((ic_x - 3, ic_y - 3, ic_x + ic_size + 3, ic_y + ic_size + 3),
+              outline=color + (255,), width=6)
+    _icon(d, ic_x + ic_size // 2, ic_y + ic_size // 2 + 2, icon_code, 130, TEXT)
+
+    # Текст справа
+    col_x = ic_x + ic_size + 70
+    col_max = strip_x2 - 100
+
+    # Категория
+    d.text((col_x, strip_y1 + 56), f"🎯 {cat.upper()}",
+           font=_font(15), fill=color)
+
+    # Название
+    nf = _font(64)
+    name_lines = _wrap(d, name, nf, col_max - col_x, max_lines=2)
+    ny = strip_y1 + 96
+    for i, ln in enumerate(name_lines):
+        d.text((col_x, ny + i * 72), ln, font=nf, fill=TEXT)
+
+    # Цены
+    pr_y = strip_y2 - 140
+
+    if orig > 0:
         orig_str = f"{orig} DC"
-        of = _font(32)
+        of = _font(34)
         ow = _tw(d, orig_str, of)
-        d.text((tx, prices_y), orig_str, font=of, fill=DIM)
-        d.line((tx, prices_y + 20, tx + ow, prices_y + 20), fill=DIM, width=3)
+        d.text((col_x, pr_y), orig_str, font=of, fill=DIM)
+        d.line((col_x, pr_y + 22, col_x + ow, pr_y + 22), fill=DIM, width=3)
+        x_next = col_x + ow + 46
+    else:
+        x_next = col_x
 
+    if new > 0:
         new_str = str(new)
-        nf2 = _font(88)
-        d.text((tx, prices_y + 40), new_str, font=nf2, fill=GREEN)
+        nf2 = _font(100)
+        d.text((x_next, pr_y + 6), new_str, font=nf2, fill=GREEN)
         nw = _tw(d, new_str, nf2)
-        d.text((tx + nw + 16, prices_y + 40 + nf2.size - 34), "DC",
-               font=_font(34), fill=MUTED)
+        d.text((x_next + nw + 16, pr_y + 6 + nf2.size - 42), "DC",
+               font=_font(40), fill=MUTED)
 
-        # Хинт
-        hint_y = hero_y2 + 20
-        hint_h = BODY_Y + BODY_H - 12 - 24 - hint_y
-        if hint_h > 70:
-            d.rounded_rectangle((rpx1, hint_y, rpx2, hint_y + hint_h), radius=16,
-                                fill=(20, 30, 44) + (255,),
-                                outline=BLUE + (180,), width=2)
-            _icon(d, rpx1 + 36, hint_y + hint_h // 2, I_INFO, 34, BLUE)
-            hint_lines = _wrap(
-                d,
-                "Если товар — попадёт в инвентарь, оформишь через витрину DC. "
-                "Если роль — выдастся сразу.",
-                _font(16), rpx2 - rpx1 - 100, max_lines=2
-            )
-            for i, ln in enumerate(hint_lines):
-                d.text((rpx1 + 78, hint_y + 26 + i * 24), ln, font=_font(16), fill=BLUE)
+    # Бейдж скидки — выступает за пределы полосы справа сверху
+    if disc > 0:
+        disc_text = f"🔥 -{disc}%"
+        df = _font(24)
+        dw = _tw(d, disc_text, df)
+        badge_w = dw + 60
+        badge_h = 62
+        badge_x = strip_x2 - 80 - badge_w
+        badge_y = strip_y1 - 32
+
+        _alpha(img, (badge_x, badge_y, badge_x + badge_w, badge_y + badge_h),
+               RED, alpha=220, radius=15)
+        d.rounded_rectangle((badge_x, badge_y, badge_x + badge_w, badge_y + badge_h),
+                            radius=15, outline=RED + (255,), width=2)
+        d.text((badge_x + 30, badge_y + badge_h // 2), disc_text,
+               font=df, fill=TEXT, anchor="lm")
+
+    # Пустое состояние
+    if not deal:
+        cx = W // 2
+        cy = (strip_y1 + strip_y2) // 2
+        msg = "Сегодня акции нет — заходи позже"
+        mw = _tw(d, msg, _font(28))
+        d.text((cx - mw // 2, cy + 180), msg, font=_font(28), fill=DIM)
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
@@ -372,22 +377,14 @@ def render_daily_deal(user_id, balance, deal, hours_left):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 1B: УСПЕШНАЯ ПОКУПКА ПО АКЦИИ
+# ЭКРАН 1B: УСПЕШНАЯ ПОКУПКА
 # ═══════════════════════════════════════════════════
 def render_deal_success(user_id, deal, outcome):
-    """
-    outcome — dict с ключами:
-      kind: "role" | "inventory" | "boost"
-      name: str
-      price: int
-      role_name: str (опционально)
-    """
     img, d = _canvas("покупка · успех")
 
     body_y = BODY_Y
     body_h = BODY_H - 12
 
-    # HERO
     hero_h = 380
     hero_y1 = body_y + 30
     hero_y2 = hero_y1 + hero_h
@@ -422,7 +419,6 @@ def render_deal_success(user_id, deal, outcome):
     d.text((tx, hero_y1 + 100 + len(name_lines) * 60 + 20),
            price_str, font=_font(26), fill=GREEN)
 
-    # Инфо-блоки снизу
     info_y = hero_y2 + 30
     info_h = 140
     ix1 = PAD_X
@@ -431,17 +427,14 @@ def render_deal_success(user_id, deal, outcome):
     kind = outcome.get("kind", "inventory")
 
     if kind == "role":
-        # Роль — выдана
         d.rounded_rectangle((ix1, info_y, ix2, info_y + info_h), radius=18,
                             fill=(32, 24, 46) + (255,),
                             outline=PURPLE + (200,), width=2)
-        _alpha(img, (ix1 + 30, info_y + 30, ix1 + 90, info_y + 90),
-               PURPLE, alpha=55, radius=16)
+        _alpha(img, (ix1 + 30, info_y + 30, ix1 + 90, info_y + 90), PURPLE, alpha=55, radius=16)
         _icon(d, ix1 + 60, info_y + 61, I_CROWN, 30, PURPLE)
-        d.text((ix1 + 120, info_y + 28), "РОЛЬ УЖЕ У ТЕБЯ",
-               font=_font(14), fill=PURPLE)
+        d.text((ix1 + 120, info_y + 28), "РОЛЬ УЖЕ У ТЕБЯ", font=_font(14), fill=PURPLE)
         d.text((ix1 + 120, info_y + 58),
-               f"«{outcome.get('role_name', name)}» выдана автоматически на твой аккаунт.",
+               f"«{outcome.get('role_name', name)}» выдана автоматически.",
                font=_font(18), fill=TEXT)
         d.text((ix1 + 120, info_y + 92),
                "Проверь свой профиль Discord — роль уже там.",
@@ -451,33 +444,28 @@ def render_deal_success(user_id, deal, outcome):
         d.rounded_rectangle((ix1, info_y, ix2, info_y + info_h), radius=18,
                             fill=(20, 30, 44) + (255,),
                             outline=BLUE + (200,), width=2)
-        _alpha(img, (ix1 + 30, info_y + 30, ix1 + 90, info_y + 90),
-               BLUE, alpha=55, radius=16)
+        _alpha(img, (ix1 + 30, info_y + 30, ix1 + 90, info_y + 90), BLUE, alpha=55, radius=16)
         _icon(d, ix1 + 60, info_y + 61, I_BOLT, 30, BLUE)
-        d.text((ix1 + 120, info_y + 28), "БУСТ АКТИВИРОВАН",
-               font=_font(14), fill=BLUE)
+        d.text((ix1 + 120, info_y + 28), "БУСТ АКТИВИРОВАН", font=_font(14), fill=BLUE)
         d.text((ix1 + 120, info_y + 58),
-               "Буст уже работает — зайди в профиль и проверь.",
+               "Буст уже работает — проверь в профиле.",
                font=_font(18), fill=TEXT)
         d.text((ix1 + 120, info_y + 92),
-               "Панель профиля → «Инвентарь DC» — там список активных бустов.",
+               "Панель профиля → «Инвентарь DC».",
                font=_font(14), fill=MUTED)
 
     else:
-        # Товар в инвентаре
         d.rounded_rectangle((ix1, info_y, ix2, info_y + info_h), radius=18,
                             fill=(20, 30, 44) + (255,),
                             outline=BLUE + (200,), width=2)
-        _alpha(img, (ix1 + 30, info_y + 30, ix1 + 90, info_y + 90),
-               BLUE, alpha=55, radius=16)
+        _alpha(img, (ix1 + 30, info_y + 30, ix1 + 90, info_y + 90), BLUE, alpha=55, radius=16)
         _icon(d, ix1 + 60, info_y + 61, I_TICKET, 30, BLUE)
-        d.text((ix1 + 120, info_y + 28), "ТОВАР В ИНВЕНТАРЕ",
-               font=_font(14), fill=BLUE)
+        d.text((ix1 + 120, info_y + 28), "ТОВАР В ИНВЕНТАРЕ", font=_font(14), fill=BLUE)
         d.text((ix1 + 120, info_y + 58),
-               "Оформи тикет, чтобы менеджер выдал заказ вручную.",
+               "Оформи тикет, чтобы менеджер выдал заказ.",
                font=_font(18), fill=TEXT)
         d.text((ix1 + 120, info_y + 92),
-               "Витрина DC → «Купить» → Diamond Coins → выбери этот товар.",
+               "Витрина DC → «Купить» → Diamond Coins → выбери товар.",
                font=_font(14), fill=MUTED)
 
     buf = io.BytesIO()
@@ -552,7 +540,10 @@ def render_ref_panel(user_id, username, stats, link_url):
     _grad(img, (x1 + pad, hint_y, x2 - pad, hint_y + 150), GREEN, GREEN, alpha=15, radius=16)
     d.rounded_rectangle((x1 + pad, hint_y, x2 - pad, hint_y + 150), radius=16,
                         outline=GREEN + (200,), width=2)
-    d.text((x1 + pad + 20, hint_y + 20), "КАК ЗАРАБОТАТЬ",
+
+    # Иконка подарка — СЕРАЯ, как в профиле
+    _icon(d, x1 + pad + 32, hint_y + 30, I_GIFT, 20, DIM)
+    d.text((x1 + pad + 54, hint_y + 20), "КАК ЗАРАБОТАТЬ",
            font=_font(12), fill=GREEN)
 
     for i, ln in enumerate([
@@ -560,16 +551,17 @@ def render_ref_panel(user_id, username, stats, link_url):
         "100 DC в копилку клана",
         "Порог зачёта — 1 час",
     ]):
-        dy = hint_y + 56 + i * 28
-        d.ellipse((x1 + pad + 22, dy + 5, x1 + pad + 32, dy + 15), fill=GREEN + (255,))
+        dy = hint_y + 60 + i * 26
+        d.ellipse((x1 + pad + 24, dy + 6, x1 + pad + 32, dy + 14),
+                  fill=DIM + (255,))
         d.text((x1 + pad + 44, dy), ln, font=_font(15), fill=GREEN)
 
-    # ПРАВАЯ
+    # ПРАВАЯ — таблица
     _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=20)
     rpx1 = rx1 + 28; rpx2 = rx2 - 12 - 28; rpy = BODY_Y + 24
 
     d.text((rpx1, rpy), "👥 Мои приглашённые", font=_font(32), fill=TEXT)
-    sub = f"{stats['total']} чел. · {stats['rewarded']} засчитано · {stats['on_review']} на проверке"
+    sub = f"{stats['total']} чел. · {stats['rewarded']} засчитано · {stats['on_review']} в холде"
     sw = _tw(d, sub, _font(14))
     d.text((rpx2 - sw, rpy + 14), sub, font=_font(14), fill=MUTED)
 
@@ -668,7 +660,6 @@ def render_cases(user_id, username, balance, stats):
 
     from bonus.core import CASES
 
-    # Верхние 3 плашки
     top_y1 = BODY_Y
     top_h = 90
     gap_top = 14
@@ -690,8 +681,7 @@ def render_cases(user_id, username, balance, stats):
         d.rounded_rectangle((bx1, by1, bx2, by2), radius=16,
                             outline=color + (200,), width=2)
 
-        _alpha(img, (bx1 + 16, by1 + 22, bx1 + 62, by1 + 68),
-               color, alpha=45, radius=12)
+        _alpha(img, (bx1 + 16, by1 + 22, bx1 + 62, by1 + 68), color, alpha=45, radius=12)
         _icon(d, bx1 + 39, by1 + 45, ic_code, 22, color)
 
         d.text((bx1 + 78, by1 + 20), lbl, font=_font(11), fill=MUTED)
@@ -699,7 +689,6 @@ def render_cases(user_id, username, balance, stats):
         v = _el(d, val, vf, bx2 - 90)
         d.text((bx1 + 78, by1 + 42), v, font=vf, fill=color)
 
-    # Заголовок
     head_y = top_y1 + top_h + 22
     d.text((PAD_X, head_y), "🎰 Кейсы", font=_font(32), fill=TEXT)
     sw = _tw(d, "выбери свою удачу", _font(15))
@@ -708,7 +697,6 @@ def render_cases(user_id, username, balance, stats):
     d.line((PAD_X, head_y + 56, W - PAD_X, head_y + 56),
            fill=STACK_HDR + (255,), width=2)
 
-    # Кейсы — квадратные
     grid_y = head_y + 70
     grid_bottom = H - PAD_Y - 20
     grid_h = grid_bottom - grid_y
@@ -736,7 +724,6 @@ def render_cases(user_id, username, balance, stats):
             d.rounded_rectangle((bx1, by1, bx1 + bw_, by1 + 28), radius=8, fill=RED + (255,))
             d.text((bx1 + 10, by1 + 6), "TOP", font=_font(12), fill=TEXT)
 
-        # Иконка
         ic_size = 130
         ic_x = cx1 + (cell_w - ic_size) // 2
         ic_y = cy1 + 34
@@ -747,7 +734,6 @@ def render_cases(user_id, username, balance, stats):
         icon_code = {1: I_GIFT, 2: I_COINS, 3: I_GEM, 4: I_CROWN, 5: I_TROPHY}.get(case["num"], I_GIFT)
         _icon(d, ic_x + ic_size // 2, ic_y + ic_size // 2 + 1, icon_code, 58, color)
 
-        # Название
         nf = _font(20)
         name_lines = _wrap(d, case["name"], nf, cell_w - 30, max_lines=2)
         ny = ic_y + ic_size + 22
@@ -755,7 +741,6 @@ def render_cases(user_id, username, balance, stats):
             lw = _tw(d, ln, nf)
             d.text((cx1 + (cell_w - lw) // 2, ny + j * 26), ln, font=nf, fill=color)
 
-        # Цена
         price_str = str(case["price"])
         pf = _font(44)
         pw = _tw(d, price_str, pf)
@@ -774,7 +759,7 @@ def render_cases(user_id, username, balance, stats):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 4: КРУТКА
+# ЭКРАН 4: КРУТКА (поднято выше)
 # ═══════════════════════════════════════════════════
 def render_spin(case):
     img, d = _canvas("крутка кейса")
@@ -782,44 +767,42 @@ def render_spin(case):
     color = FA_CASE_COLOR.get(case["color"], GOLD)
 
     cx = W // 2
-    cy = H // 2 + 10
+    cy = 380            # было 510 → подняли выше
 
-    circle_size = 460
+    circle_size = 420   # чуть меньше, чтобы не уходило за края
+
     circle_x = cx - circle_size // 2
     circle_y = cy - circle_size // 2
 
-    # Внешнее свечение
     for i, a in enumerate([12, 18, 24]):
         gs = circle_size + 100 - i * 30
-        _alpha(img,
-               (cx - gs // 2, cy - gs // 2, cx + gs // 2, cy + gs // 2),
+        _alpha(img, (cx - gs // 2, cy - gs // 2, cx + gs // 2, cy + gs // 2),
                color, alpha=a, radius=gs // 2)
 
-    # Круг
     _grad(img, (circle_x, circle_y, circle_x + circle_size, circle_y + circle_size),
           color, color, alpha=30, radius=circle_size // 2)
     d.ellipse((circle_x - 5, circle_y - 5, circle_x + circle_size + 5, circle_y + circle_size + 5),
               outline=color + (255,), width=10)
-    d.ellipse((circle_x + 30, circle_y + 30, circle_x + circle_size - 30, circle_y + circle_size - 30),
+    d.ellipse((circle_x + 26, circle_y + 26,
+               circle_x + circle_size - 26, circle_y + circle_size - 26),
               outline=color + (140,), width=4)
 
-    _icon(d, cx, cy + 2, I_GIFT, 200, color)
+    _icon(d, cx, cy + 2, I_GIFT, 180, color)
 
-    # Текст
     title = "КРУТИМ БАРАБАН..."
-    tf = _font(60)
+    tf = _font(56)
     tw_ = _tw(d, title, tf)
-    d.text((cx - tw_ // 2, cy + circle_size // 2 + 60), title, font=tf, fill=color)
+    d.text((cx - tw_ // 2, circle_y + circle_size + 40), title, font=tf, fill=color)
 
     sub = f"{case['name']} · {case['price']} DC списано"
     sf = _font(22)
     sw = _tw(d, sub, sf)
-    d.text((cx - sw // 2, cy + circle_size // 2 + 150), sub, font=sf, fill=MUTED)
+    d.text((cx - sw // 2, circle_y + circle_size + 120), sub, font=sf, fill=MUTED)
 
     hint = "результат через пару секунд..."
     hf = _font(16)
     hw = _tw(d, hint, hf)
-    d.text((cx - hw // 2, cy + circle_size // 2 + 190), hint, font=hf, fill=DIM)
+    d.text((cx - hw // 2, circle_y + circle_size + 158), hint, font=hf, fill=DIM)
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
@@ -828,18 +811,27 @@ def render_spin(case):
 
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 5: РЕЗУЛЬТАТ
+# ЭКРАН 5: РЕЗУЛЬТАТ — переписан чисто, без падений
 # ═══════════════════════════════════════════════════
 def render_result(case, prize, desc, user_balance):
-    from bonus.core import REWARD_AMOUNT  # не используется, но на всякий
+    # Определяем цвет/тег
+    ptype = (prize or {}).get("type", "dc")
 
-    ptype = prize.get("type", "dc")
+    try:
+        case_price = int(case.get("price", 0) or 0)
+    except Exception:
+        case_price = 0
+
+    try:
+        prize_value = int((prize or {}).get("value", 0) or 0)
+    except Exception:
+        prize_value = 0
+
     if ptype == "dc":
-        amount = int(prize.get("value", 0))
-        if amount >= case["price"] * 3:
+        if case_price > 0 and prize_value >= case_price * 3:
             color = GOLD
             tag = "ПОЗДРАВЛЯЕМ, ДЖЕКПОТ"
-        elif amount >= case["price"]:
+        elif case_price > 0 and prize_value >= case_price:
             color = GREEN
             tag = "ПОЗДРАВЛЯЕМ, ВЫПАЛО"
         else:
@@ -858,29 +850,27 @@ def render_result(case, prize, desc, user_balance):
         color = SILVER
         tag = "ВЫПАЛО"
 
-    # Канвас со свечением
     img = Image.new("RGBA", (W, H), BG + (255,))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((0, 0, W - 1, H - 1), radius=30,
                         fill=CARD_TOP + (255,), outline=CARD_BRD + (255,), width=3)
 
-    # Свечение по центру
     cx = W // 2
-    cy = H // 2 - 20
+
+    # Свечение
     for i, a in enumerate([6, 10, 14, 18]):
         gs = 1600 - i * 200
-        _alpha(img, (cx - gs // 2, cy - gs // 2, cx + gs // 2, cy + gs // 2),
+        _alpha(img, (cx - gs // 2, H // 2 - gs // 2,
+                     cx + gs // 2, H // 2 + gs // 2),
                color, alpha=a, radius=gs // 2)
 
     # Звёзды
-    stars = [
-        (180, 150, 48), (W - 200, 180, 56), (200, H - 260, 40),
-        (W - 220, H - 240, 44), (120, 440, 34), (W - 140, 420, 38),
-    ]
-    for sx, sy, sz in stars:
+    for sx, sy, sz in [(180, 150, 44), (W - 200, 180, 52),
+                       (200, H - 260, 36), (W - 220, H - 240, 40),
+                       (120, 440, 32), (W - 140, 420, 36)]:
         _icon(d, sx, sy, I_STAR, sz, GOLD)
 
-    # HEADER
+    # Header
     hx, hy = PAD_X, PAD_Y
     d.rounded_rectangle((hx, hy, hx + 54, hy + 54), radius=14, fill=(58, 58, 64) + (255,))
     _icon(d, hx + 27, hy + 28, I_TROPHY, 26, GOLD)
@@ -889,14 +879,14 @@ def render_result(case, prize, desc, user_balance):
     d.text((bx + 2, hy + 38), "BONUS · ВЫИГРЫШ", font=_font(11), fill=MUTED)
 
     meta_r = W - PAD_X
-    w1 = _tw(d, f"КЕЙС {case['num']}", _font(11))
-    d.text((meta_r - w1, hy + 14), f"КЕЙС {case['num']}", font=_font(11), fill=MUTED)
+    mtext = f"КЕЙС {case.get('num', '?')}"
+    w1 = _tw(d, mtext, _font(11))
+    d.text((meta_r - w1, hy + 14), mtext, font=_font(11), fill=MUTED)
 
     d.line((PAD_X, hy + 54 + 16, W - PAD_X, hy + 54 + 16),
            fill=STACK_HDR + (255,), width=2)
 
-    # HERO
-    hero_cy = 420
+    # TAG
     tag_text = tag
     txf = _font(16)
     txw = _tw(d, tag_text, txf)
@@ -912,7 +902,7 @@ def render_result(case, prize, desc, user_balance):
                         radius=tag_h // 2, outline=color + (230,), width=3)
     d.text((cx - txw // 2, tag_y + 12), tag_text, font=txf, fill=color)
 
-    # Иконка
+    # ИКОНКА
     ic_size = 240
     ic_x = cx - ic_size // 2
     ic_y = tag_y + tag_h + 30
@@ -929,9 +919,9 @@ def render_result(case, prize, desc, user_balance):
               outline=color + (255,), width=6)
     _icon(d, cx, ic_y + ic_size // 2 + 2, I_TROPHY, 110, color)
 
-    # Цифра
+    # ЦИФРА
     num_y = ic_y + ic_size + 30
-    num_str = desc
+    num_str = str(desc or "—")
     nf = _font(140)
     while _tw(d, num_str, nf) > W - 200 and nf.size > 60:
         nf = _font(nf.size - 6)
@@ -940,36 +930,43 @@ def render_result(case, prize, desc, user_balance):
 
     # Подпись
     sub_y = num_y + nf.size + 16
-    sub = f"Кейс «{case['name']}» · {case['price']} DC"
+    sub = f"Кейс «{case.get('name', '—')}» · {case_price} DC"
     sf = _font(15)
     sw = _tw(d, sub, sf)
     d.text((cx - sw // 2, sub_y), sub, font=sf, fill=MUTED)
 
-    # INFO СНИЗУ
+    # INFO снизу
     info_y = H - PAD_Y - 130
     info_h = 130
     ix1 = PAD_X
     ix2 = W - PAD_X
 
-    _alpha(img, (ix1, info_y, ix2, info_y + info_h), (20, 20, 28), alpha=230, radius=20)
     d.rounded_rectangle((ix1, info_y, ix2, info_y + info_h), radius=20,
+                        fill=(20, 20, 28) + (255,),
                         outline=color + (200,), width=2)
 
     mid_x = (ix1 + ix2) // 2
 
-    # Левая половина — что получил
-    _icon(d, ix1 + 70, info_y + info_h // 2, I_COINS if ptype == "dc" else I_GIFT, 46, color)
+    # Левая половина
+    _icon(d, ix1 + 70, info_y + info_h // 2,
+          I_COINS if ptype == "dc" else I_GIFT, 46, color)
+
     if ptype == "dc":
-        d.text((ix1 + 116, info_y + 30), "ЗАЧИСЛЕНО НА БАЛАНС",
+        d.text((ix1 + 116, info_y + 26), "ЗАЧИСЛЕНО НА БАЛАНС",
                font=_font(12), fill=color)
-        d.text((ix1 + 116, info_y + 54), f"+{prize.get('value', 0)} DC",
+        d.text((ix1 + 116, info_y + 50), f"+{prize_value} DC",
                font=_font(38), fill=TEXT)
-        d.text((ix1 + 116, info_y + 98), f"×{prize.get('value', 0) / max(case['price'],1):.1f} от ставки",
+        if case_price > 0:
+            mult = prize_value / case_price
+            mult_str = f"×{mult:.1f} от ставки"
+        else:
+            mult_str = ""
+        d.text((ix1 + 116, info_y + 98), mult_str,
                font=_font(14), fill=MUTED)
     elif ptype == "role":
         d.text((ix1 + 116, info_y + 30), "РОЛЬ ВЫДАНА",
                font=_font(12), fill=color)
-        d.text((ix1 + 116, info_y + 54), desc,
+        d.text((ix1 + 116, info_y + 54), str(desc or "—"),
                font=_font(30), fill=TEXT)
         d.text((ix1 + 116, info_y + 98), "проверь профиль",
                font=_font(14), fill=MUTED)
@@ -983,7 +980,7 @@ def render_result(case, prize, desc, user_balance):
     elif ptype == "discount":
         d.text((ix1 + 116, info_y + 30), "СКИДКА В ИНВЕНТАРЕ",
                font=_font(12), fill=color)
-        d.text((ix1 + 116, info_y + 54), desc,
+        d.text((ix1 + 116, info_y + 54), str(desc or "—"),
                font=_font(30), fill=TEXT)
         d.text((ix1 + 116, info_y + 98), "примени в тикете",
                font=_font(14), fill=MUTED)
@@ -992,12 +989,12 @@ def render_result(case, prize, desc, user_balance):
     d.rectangle((mid_x - 1, info_y + 24, mid_x + 1, info_y + info_h - 24),
                 fill=(60, 60, 68) + (255,))
 
-    # Правая половина — баланс
+    # Правая половина
     _icon(d, mid_x + 60, info_y + info_h // 2, I_GEM, 46, GREEN)
-    d.text((mid_x + 106, info_y + 30), "ТЕКУЩИЙ БАЛАНС",
+    d.text((mid_x + 106, info_y + 26), "ТЕКУЩИЙ БАЛАНС",
            font=_font(12), fill=GREEN)
-    d.text((mid_x + 106, info_y + 54),
-           f"{user_balance:,}".replace(",", " ") + " DC",
+    bal_str = f"{int(user_balance):,}".replace(",", " ") + " DC"
+    d.text((mid_x + 106, info_y + 50), bal_str,
            font=_font(38), fill=TEXT)
     d.text((mid_x + 106, info_y + 98), "готов к новому кейсу",
            font=_font(14), fill=MUTED)
@@ -1070,7 +1067,6 @@ def render_my_cases(user_id, username, stats, history):
             vf = _font(vf.size - 2)
         d.text((cx1 + 18, cy1 + 44), v, font=vf, fill=color)
 
-    # ПРАВАЯ
     _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=20)
     rpx1 = rx1 + 28; rpx2 = rx2 - 12 - 28; rpy = BODY_Y + 24
 
