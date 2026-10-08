@@ -51,7 +51,7 @@ def _btn_labels_total(labels, total):
     return result
 
 
-# Сумарно 32 символа на 2 кнопки
+# Сумарно 78 символов на 2 кнопки — «вровень с эмбедом»
 _L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 32)
 
 
@@ -74,14 +74,14 @@ class BonusSelect(Select):
     def __init__(self):
         options = [
             SelectOption(label="Акция дня", description="Скидка дня на товар — торопись",
-                         value="deal"),
+                         emoji="🔥", value="deal"),
             SelectOption(label="Реферальная система", description="Приглашай друзей — получай DC",
-                         value="ref"),
+                         emoji="👥", value="ref"),
             SelectOption(label="Кейсы", description="Испытай удачу — забери ценный приз",
-                         value="cases"),
+                         emoji="🎰", value="cases"),
         ]
         super().__init__(
-            placeholder="Выбери раздел бонусов...",
+            placeholder="🎁 Выбери раздел бонусов...",
             min_values=1, max_values=1,
             options=options,
             custom_id="bonus:select",
@@ -252,6 +252,7 @@ class DealView(View):
             label=lbl,
             style=ButtonStyle.secondary,
             custom_id="bonus_deal:buy",
+            emoji=PartialEmoji(name="prize", id=1539657202170859561),
             row=0,
         )
         btn.callback = self._buy
@@ -375,6 +376,15 @@ class DealNoDealView(View):
 # ============================================================
 # VIEW: ВЫБОР КЕЙСА (СЕЛЕКТ)
 # ============================================================
+CASE_EMOJI = {
+    1: "🎁",
+    2: "💰",
+    3: "💎",
+    4: "👑",
+    5: "🏆",
+}
+
+
 class CaseSelect(Select):
     def __init__(self):
         from bonus.core import CASES
@@ -386,10 +396,11 @@ class CaseSelect(Select):
             options.append(SelectOption(
                 label=f"{case['name']} · {case['price']} DC",
                 description=desc or f"Кейс за {case['price']} DC",
+                emoji=CASE_EMOJI.get(case["num"], "🎁"),
                 value=str(case["num"]),
             ))
         super().__init__(
-            placeholder="Выбери кейс для открытия...",
+            placeholder="🎰 Выбери кейс для открытия...",
             min_values=1,
             max_values=1,
             options=options,
@@ -411,7 +422,7 @@ class CasesSelectView(View):
 
 
 # ============================================================
-# VIEW: ПОСЛЕ КЕЙСА
+# VIEW: ПОСЛЕ КЕЙСА (кнопки вровень с эмбедом, не серые)
 # ============================================================
 class CaseAfterView(View):
     def __init__(self):
@@ -421,6 +432,7 @@ class CaseAfterView(View):
             label=_L_AGAIN,
             style=ButtonStyle.secondary,
             custom_id="bonus_after:again",
+            emoji=PartialEmoji(name="prize", id=1539657202170859561),
             row=0,
         )
         btn_again.callback = self._again
@@ -430,6 +442,7 @@ class CaseAfterView(View):
             label=_L_MYCASES,
             style=ButtonStyle.secondary,
             custom_id="bonus_after:mycases",
+            emoji=PartialEmoji(name="cakleb", id=1553236134316875846),
             row=0,
         )
         btn_my.callback = self._mycases
@@ -457,7 +470,6 @@ class MyCasesBackView(View):
 
     async def _back(self, inter):
         await _switch(inter, "cases")
-
 
 # ============================================================
 # ОТКРЫТИЕ КЕЙСА
