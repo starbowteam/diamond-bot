@@ -22,7 +22,32 @@ SUPREME_USER_ID = 796293832751972352
 
 
 # ============================================================
-# ХЕЛПЕР: ПАДДИНГ ПОДПИСЕЙ ДО РОВНОЙ ДЛИНЫ
+# ЭМОДЗИ
+# ============================================================
+E_DEAL  = PartialEmoji(name="b1kns", id=1557755707854422088)
+E_REF   = PartialEmoji(name="wmore", id=1552330925684162580)
+E_CASES = PartialEmoji(name="S21",   id=1552381035092648026)
+
+E_CASE_1 = PartialEmoji(name="odin",    id=1557754584158441574)
+E_CASE_2 = PartialEmoji(name="dva",     id=1557754603389583370)
+E_CASE_3 = PartialEmoji(name="tri",     id=1557754619252179066)
+E_CASE_4 = PartialEmoji(name="chetiry", id=1557754636100833340)
+E_CASE_5 = PartialEmoji(name="puiat",   id=1557754652316139592)
+
+E_SHOP  = PartialEmoji(name="shop1", id=1555654407776112750)
+E_PRIZE = PartialEmoji(name="prize", id=1539657202170859561)
+
+CASE_EMOJI = {
+    1: E_CASE_1,
+    2: E_CASE_2,
+    3: E_CASE_3,
+    4: E_CASE_4,
+    5: E_CASE_5,
+}
+
+
+# ============================================================
+# ХЕЛПЕР: ПАДДИНГ ПОДПИСЕЙ
 # ============================================================
 def _btn_pad(text: str, total: int) -> str:
     base = len(text)
@@ -49,7 +74,6 @@ def _btn_labels_total(labels, total):
     return result
 
 
-# Суммарно 32 символа на 2 кнопки — вровень
 _L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 32)
 
 
@@ -72,11 +96,11 @@ class BonusSelect(Select):
     def __init__(self):
         options = [
             SelectOption(label="Акция дня", description="Скидка дня на товар — торопись",
-                         emoji="🔥", value="deal"),
+                         emoji=E_DEAL, value="deal"),
             SelectOption(label="Реферальная система", description="Приглашай друзей — получай DC",
-                         emoji="👥", value="ref"),
+                         emoji=E_REF, value="ref"),
             SelectOption(label="Кейсы", description="Испытай удачу — забери ценный приз",
-                         emoji="🎰", value="cases"),
+                         emoji=E_CASES, value="cases"),
         ]
         super().__init__(
             placeholder="🎁 Выбери раздел бонусов...",
@@ -246,7 +270,7 @@ class DealView(View):
             label=lbl,
             style=ButtonStyle.secondary,
             custom_id="bonus_deal:buy",
-            emoji=PartialEmoji(name="shop1", id=1555654407776112750),
+            emoji=E_SHOP,
             row=0,
         )
         btn.callback = self._buy
@@ -370,15 +394,6 @@ class DealNoDealView(View):
 # ============================================================
 # VIEW: ВЫБОР КЕЙСА (СЕЛЕКТ)
 # ============================================================
-CASE_EMOJI = {
-    1: "🎁",
-    2: "💰",
-    3: "💎",
-    4: "👑",
-    5: "🏆",
-}
-
-
 class CaseSelect(Select):
     def __init__(self):
         from bonus.core import CASES
@@ -390,7 +405,7 @@ class CaseSelect(Select):
             options.append(SelectOption(
                 label=f"{case['name']} · {case['price']} DC",
                 description=desc or f"Кейс за {case['price']} DC",
-                emoji=CASE_EMOJI.get(case["num"], "🎁"),
+                emoji=CASE_EMOJI.get(case["num"]),
                 value=str(case["num"]),
             ))
         super().__init__(
@@ -426,7 +441,7 @@ class CaseAfterView(View):
             label=_L_AGAIN,
             style=ButtonStyle.secondary,
             custom_id="bonus_after:again",
-            emoji=PartialEmoji(name="shop1", id=1555654407776112750),
+            emoji=E_SHOP,
             row=0,
         )
         btn_again.callback = self._again
@@ -436,7 +451,7 @@ class CaseAfterView(View):
             label=_L_MYCASES,
             style=ButtonStyle.secondary,
             custom_id="bonus_after:mycases",
-            emoji=PartialEmoji(name="prize", id=1539657202170859561),
+            emoji=E_PRIZE,
             row=0,
         )
         btn_my.callback = self._mycases
