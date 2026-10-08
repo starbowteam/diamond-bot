@@ -3,14 +3,13 @@
 
 import asyncio
 import os
-from datetime import datetime, timezone
 
 import disnake
 from disnake import ButtonStyle, PartialEmoji, SelectOption
 from disnake.ui import View, Button, Select
 
 from core.utils import logger, load_json
-from modules.dc import get_user_balance, get_user_purchases, remove_purchase
+from modules.dc import get_user_balance, add_purchase, remove_dc
 from bonus import core as bcore
 from bonus import render as brender
 
@@ -40,24 +39,12 @@ def build_panel_embeds():
 class BonusSelect(Select):
     def __init__(self):
         options = [
-            SelectOption(
-                label="🔥 Акция дня",
-                description="Скидка дня на товар — торопись",
-                emoji="🔥",
-                value="deal",
-            ),
-            SelectOption(
-                label="👥 Реферальная система",
-                description="Приглашай друзей — получай DC",
-                emoji="👥",
-                value="ref",
-            ),
-            SelectOption(
-                label="🎰 Кейсы",
-                description="Испытай удачу — забери ценный приз",
-                emoji="🎰",
-                value="cases",
-            ),
+            SelectOption(label="🔥 Акция дня", description="Скидка дня на товар — торопись",
+                         emoji="🔥", value="deal"),
+            SelectOption(label="👥 Реферальная система", description="Приглашай друзей — получай DC",
+                         emoji="👥", value="ref"),
+            SelectOption(label="🎰 Кейсы", description="Испытай удачу — забери ценный приз",
+                         emoji="🎰", value="cases"),
         ]
         super().__init__(
             placeholder="🎁 Выбери раздел бонусов...",
@@ -175,7 +162,7 @@ async def _build_payload(inter, screen):
                 f"> Скопируй и делись:\n"
                 f"```\n{url}\n```\n"
                 f"> За каждого друга, кто проживёт **1 час** и больше — "
-                f"получаешь **10 DC** + **10 DC** в копилку клана."
+                f"получаешь **100 DC** + **100 DC** в копилку клана."
             ),
             color=6776679,
         )
@@ -218,7 +205,7 @@ async def _build_payload(inter, screen):
 
 
 # ============================================================
-# VIEW: АКЦИЯ ДНЯ
+# VIEW: АКЦИЯ ДНЯ + КНОПКА КУПИТЬ
 # ============================================================
 class DealView(View):
     def __init__(self, deal):
@@ -226,8 +213,9 @@ class DealView(View):
         self.deal = deal
 
     @disnake.ui.button(label="🎁 Купить", style=ButtonStyle.success,
-                       custom_id="bonus_deal:buy")
+                       custom_id="bonus_deal:buy", row=0)
     async def _buy(self, button, inter):
+        """Покупка — заменяет это же ephemeral-сообщение экраном «Куплено»."""
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
@@ -243,7 +231,7 @@ class DealView(View):
         guild = inter.guild
         member = inter.author
 
-        # проверка owned role
+        # Проверка роли — уже на аккаунте
         if role_id and member is not None:
             try:
                 if member.get_role(int(role_id)):
@@ -261,24 +249,26 @@ class DealView(View):
                 ephemeral=True,
             )
 
-        from modules.dc import remove_dc, add_purchase
         ok = await remove_dc(inter.author.id, price, f"Акция дня: {name}")
         if not ok:
             return await inter.followup.send("❌ Ошибка списания", ephemeral=True)
 
-        # выдача
-        auto_role_given = False
+        # ─── ВЫДАЧА ───
+        kind = "inventory"
+        role_name = ""
+
         if cat_key == "roles" and role_id:
+            kind = "role"
             try:
                 role = guild.get_role(int(role_id))
                 if role and role not in member.roles:
                     await member.add_roles(role, reason=f"Акция дня: {name}")
-                    auto_role_given = True
+                role_name = role.name if role else name
             except Exception as e:
                 logger.warning(f"deal auto role: {e}")
 
-        # бусты
-        if item.get("boost_type"):
+        elif item.get("boost_type"):
+            kind = "boost"
             try:
                 from core.utils import activate_item
                 activate_item(
@@ -292,30 +282,51 @@ class DealView(View):
             except Exception as e:
                 logger.warning(f"deal boost: {e}")
 
-        # товар в инвентарь
-        if not (cat_key == "roles" and role_id) and not item.get("boost_type"):
+        else:
             await add_purchase(inter.author.id, cat_key, name)
 
-        await inter.followup.send(
-            content=(
-                f"✅ Куплено по акции!\n"
-                f"> **{name}** — `{price} DC`\n"
-                + (f"> 🎉 Роль уже выдана.\n" if auto_role_given
-                   else "> Товар в инвентаре — оформи в тикете через витрину DC.")
-            ),
-            ephemeral=True,
-        )
+        # Лог
+        try:
+            await bcore.log_discord(
+                title="🛒 Покупка по акции дня",
+                description=(
+                    f"> **Юзер:** {inter.author.mention}\n"
+                    f"> **Товар:** {name}\n"
+                    f"> **Цена:** {price} DC\n"
+                    f"> **Тип:** {kind}"
+                ),
+                color=0x00aaff,
+                channel_id=bcore.CONFIG["LOG_TICKET_CHANNEL_ID"],
+            )
+        except Exception:
+            pass
 
-        await bcore.log_discord(
-            title="🛒 Покупка по акции дня",
-            description=(
-                f"> **Юзер:** {inter.author.mention}\n"
-                f"> **Товар:** {name}\n"
-                f"> **Цена:** {price} DC"
-            ),
-            color=0x00aaff,
-            channel_id=bcore.CONFIG["LOG_TICKET_CHANNEL_ID"],
-        )
+        # ─── Рендер экрана успеха и ЗАМЕНА сообщения ───
+        outcome = {
+            "kind": kind,
+            "name": name,
+            "price": price,
+            "role_name": role_name,
+        }
+
+        try:
+            buf = await asyncio.to_thread(
+                brender.render_deal_success, inter.author.id, self.deal, outcome,
+            )
+            fname = f"bonus_deal_ok_{inter.author.id}.png"
+            file = disnake.File(buf, filename=fname)
+            e = disnake.Embed(color=6776679)
+            e.set_image(url=f"attachment://{fname}")
+
+            await inter.edit_original_response(
+                embeds=[e], file=file, attachments=[], view=None,
+            )
+        except Exception as e:
+            logger.exception(f"deal success render: {e}")
+            await inter.followup.send(
+                f"✅ Куплено! {name} · {price} DC",
+                ephemeral=True,
+            )
 
 
 class DealNoDealView(View):
@@ -324,7 +335,7 @@ class DealNoDealView(View):
 
 
 # ============================================================
-# VIEW: ОБЩИЕ ДЕЙСТВИЯ (на реф и тп)
+# VIEW: ОБЩИЕ ДЕЙСТВИЯ
 # ============================================================
 class BonusActionsView(View):
     def __init__(self, current="ref"):
@@ -348,7 +359,7 @@ class BonusActionsView(View):
 
 
 # ============================================================
-# VIEW: ВЫБОР КЕЙСА (5 кнопок)
+# VIEW: ВЫБОР КЕЙСА
 # ============================================================
 class CasesButtonsView(View):
     def __init__(self):
@@ -356,7 +367,7 @@ class CasesButtonsView(View):
         from bonus.core import CASES
         for case in CASES:
             btn = Button(
-                label=f"Кейс {case['num']} · {case['price']} DC",
+                label=f"Кейс {case['num']} · {case['price']}",
                 style=ButtonStyle.gray,
                 custom_id=f"bonus_case:{case['num']}",
                 row=0,
@@ -371,13 +382,13 @@ class CasesButtonsView(View):
 
 
 # ============================================================
-# VIEW: ПОСЛЕ КЕЙСА (2 кнопки)
+# VIEW: ПОСЛЕ КЕЙСА
 # ============================================================
 class CaseAfterView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label="🔄 Купить ещё кейс", style=ButtonStyle.success,
+    @disnake.ui.button(label="🔄 Купить ещё", style=ButtonStyle.success,
                        custom_id="bonus_after:again", row=0)
     async def _again(self, button, inter):
         await _switch(inter, "cases")
@@ -425,20 +436,18 @@ async def _open_case(inter, case_num: int):
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
-        await inter.edit_original_response(embed=e, file=file, attachments=[], view=None)
+        await inter.edit_original_response(embeds=[e], file=file, attachments=[], view=None)
     except Exception as e:
         logger.exception(f"spin render: {e}")
 
     await asyncio.sleep(2.0)
 
-    # Открываем кейс
     result = await bcore.open_case(inter.bot, inter.author.id, case_num)
     if not result["ok"]:
         return await inter.followup.send(
             f"❌ {result.get('error', 'Ошибка')}", ephemeral=True,
         )
 
-    # Показываем результат
     new_balance = await get_user_balance(inter.author.id)
     try:
         buf = await asyncio.to_thread(
@@ -450,7 +459,7 @@ async def _open_case(inter, case_num: int):
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
         await inter.edit_original_response(
-            embed=e, file=file, attachments=[], view=CaseAfterView(),
+            embeds=[e], file=file, attachments=[], view=CaseAfterView(),
         )
     except Exception as e:
         logger.exception(f"result render: {e}")
