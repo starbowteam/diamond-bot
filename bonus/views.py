@@ -246,11 +246,11 @@ class DealView(View):
         super().__init__(timeout=300)
         self.deal = deal
         price = deal.get("new_price", 0)
-        lbl = _btn_pad(f"Купить за {price} DC", 23)
+        lbl = _btn_pad(f"Купить за {price} DC", 45)
 
         btn = Button(
             label=lbl,
-            style=ButtonStyle.success,
+            style=ButtonStyle.secondary,
             custom_id="bonus_deal:buy",
             emoji=PartialEmoji(name="prize", id=1539657202170859561),
             row=0,
@@ -460,8 +460,8 @@ class MyCasesBackView(View):
         super().__init__(timeout=300)
 
         btn = Button(
-            label=_btn_pad("К кейсам", 34),
-            style=ButtonStyle.primary,
+            label=_btn_pad("К кейсам", 33),
+            style=ButtonStyle.secondary,
             custom_id="bonus_mycases:back",
             row=0,
         )
