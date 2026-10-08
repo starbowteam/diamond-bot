@@ -17,7 +17,34 @@ REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
 
 def L(text: str) -> str:
+    """Одиночный паддинг 1+1."""
     return f"{P}{text}{P}"
+
+
+def _L_total(labels, total: int):
+    """
+    Раскидывает невидимые пробелы так, чтобы СУММА длин == total.
+    Используется, когда из вью убрали кнопку — компенсируем длины.
+    """
+    base = sum(len(s) for s in labels)
+    extra = max(0, total - base)
+    n = len(labels)
+    if n == 0:
+        return labels
+    per = extra // n
+    rem = extra % n
+    result = []
+    for i, s in enumerate(labels):
+        pad = per + (1 if i < rem else 0)
+        left = pad // 2
+        right = pad - left
+        result.append(f"{P * left}{s}{P * right}")
+    return result
+
+
+# Суммарная длина 2 кнопок ShopMainView = 27
+# (раньше было 3 кнопки: Мои покупки + Акция дня + История = 27)
+_L_PURCHASES, _L_HISTORY = _L_total(["Мои покупки", "История"], 27)
 
 
 E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
@@ -86,7 +113,6 @@ class ShopCategorySelect(Select):
 # ============================================================
 class ShopItemSelect(Select):
     def __init__(self, cat_key: str, items: List[Dict], balance: int):
-        # 👇 Фильтруем купленные роли
         available = [it for it in items if not it.get("owned")]
 
         options = []
@@ -123,9 +149,9 @@ class ShopItemSelect(Select):
 # КНОПКИ
 # ============================================================
 class BtnPurchases(Button):
-    def __init__(self, row: int = 1):
+    def __init__(self, row: int = 1, label: str = None):
         super().__init__(
-            label=L("Мои покупки"),
+            label=label if label else L("Мои покупки"),
             style=ButtonStyle.gray,
             custom_id="shop:btn_purchases",
             emoji=E_BAG,
@@ -137,25 +163,10 @@ class BtnPurchases(Button):
         await goto_purchases(inter)
 
 
-class BtnDailyDeal(Button):
-    def __init__(self, row: int = 1):
-        super().__init__(
-            label=L("Акция дня"),
-            style=ButtonStyle.gray,
-            custom_id="shop:btn_daily",
-            emoji=E_FIRE,
-            row=row,
-        )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        from modules.shop.handlers import goto_daily
-        await goto_daily(inter)
-
-
 class BtnHistory(Button):
-    def __init__(self, row: int = 1):
+    def __init__(self, row: int = 1, label: str = None):
         super().__init__(
-            label=L("История"),
+            label=label if label else L("История"),
             style=ButtonStyle.gray,
             custom_id="shop:btn_history",
             emoji=E_HISTORY,
@@ -347,12 +358,16 @@ class ShopGiftModal(Modal):
 # VIEWS
 # ============================================================
 class ShopMainView(View):
+    """
+    Главная витрины. Кнопка «Акция дня» убрана —
+    акции теперь в канале Бонусы. Длины двух кнопок компенсированы
+    до суммарных 27 символов (как было с 3 кнопками).
+    """
     def __init__(self, categories: List[Dict], active: str = ""):
         super().__init__(timeout=None)
         self.add_item(ShopCategorySelect(categories, active))
-        self.add_item(BtnPurchases(row=1))
-        self.add_item(BtnDailyDeal(row=1))
-        self.add_item(BtnHistory(row=1))
+        self.add_item(BtnPurchases(row=1, label=_L_PURCHASES))
+        self.add_item(BtnHistory(row=1, label=_L_HISTORY))
 
 
 class ShopProductsView(View):
@@ -360,7 +375,6 @@ class ShopProductsView(View):
                  page: int = 0, total_pages: int = 1):
         super().__init__(timeout=None)
 
-        # 👇 Селект показываем только если есть доступные товары
         available = [it for it in items if not it.get("owned")]
         if available:
             self.add_item(ShopItemSelect(cat_key, items, balance))
@@ -383,7 +397,6 @@ class ShopDetailView(View):
 
 
 class ShopDetailOwnedView(View):
-    """Для уже купленных ролей — только «Назад» и подсказка."""
     def __init__(self, cat_key: str):
         super().__init__(timeout=None)
         self.add_item(BtnBack(target="products", cat_key=cat_key, row=0))
@@ -397,6 +410,7 @@ class ShopPurchasesView(View):
 
 
 class ShopDealView(View):
+    """Оставлено на всякий — акция дня теперь в /bonus."""
     def __init__(self, cat_key: str = "", item_key: str = "", price: int = 0):
         super().__init__(timeout=None)
         if cat_key and item_key and price > 0:
