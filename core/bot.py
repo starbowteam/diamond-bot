@@ -62,7 +62,6 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 
-# 👇 Приветствие новичку — картинка-шапка для ЛС
 IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1556733201970626732/image.png?backend=b2&ex=6ac5e506&is=6ac49386&hm=574cd55b0658621f44bee53d8ed386f3b7e7372997e73326c327efef482daca5&"
 
 SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
@@ -328,6 +327,12 @@ async def daily_deal_task():
         if before.get("slot") != after.get("slot"):
             if deal:
                 logger.info(f"Товар дня: {deal['item_data']['name']}")
+                # 👇 анонс акции в канал Бонусы
+                try:
+                    from bonus.core import announce_deal_change
+                    await announce_deal_change(bot, deal)
+                except Exception as e:
+                    logger.warning(f"deal announce: {e}")
     except Exception as e:
         logger.exception(f"daily_deal_task error: {e}")
 
@@ -560,6 +565,44 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"init advertiser: {e}")
 
+        # ─── Бонус-панель ───
+        try:
+            from bonus import init_bonus
+            from bonus.views import BonusPanelView, build_panel_embeds as build_bonus_embeds
+            from bonus.core import BONUS_CHANNEL_ID
+
+            init_bonus(bot)
+            bot.add_view(BonusPanelView())
+
+            async def _post_bonus_panel():
+                await asyncio.sleep(10)
+                try:
+                    ch = bot.get_channel(BONUS_CHANNEL_ID)
+                    if not ch:
+                        try:
+                            ch = await bot.fetch_channel(BONUS_CHANNEL_ID)
+                        except Exception as e:
+                            logger.warning(f"bonus panel fetch: {e}")
+                            return
+                    if not ch:
+                        return
+                    async for m in ch.history(limit=30):
+                        if m.author == bot.user and m.components:
+                            try:
+                                await m.delete()
+                            except Exception:
+                                pass
+                            break
+                    await ch.send(embeds=build_bonus_embeds(), view=BonusPanelView())
+                    logger.info(f"🎁 Бонус-панель отправлена в {ch.name}")
+                except Exception as e:
+                    logger.exception(f"_post_bonus_panel: {e}")
+
+            bot.loop.create_task(_post_bonus_panel())
+            logger.info("🎁 Бонус-панель инициализирована")
+        except Exception as e:
+            logger.exception(f"init bonus: {e}")
+
         if not review_counter_task.is_running():
             review_counter_task.start()
         if not daily_bonus_task.is_running():
@@ -754,11 +797,19 @@ async def on_member_join(member: disnake.Member):
     except Exception as e:
         logger.warning(f"get_advertiser_by_code on join: {e}")
 
+    ref_user_id = None
+    try:
+        from bonus.core import get_user_by_ref_code
+        ref_user_id = get_user_by_ref_code(used_invite.code)
+    except Exception as e:
+        logger.warning(f"get_user_by_ref_code on join: {e}")
+
     db.execute(
         "INSERT INTO invites "
-        "(guild_id, inviter_id, member_id, joined_at, is_bot, invite_code, advertiser_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (guild.id, inviter_id, member.id, joined_at, is_bot, used_invite.code, advertiser_id)
+        "(guild_id, inviter_id, member_id, joined_at, is_bot, invite_code, advertiser_id, ref_user_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (guild.id, inviter_id, member.id, joined_at, is_bot,
+         used_invite.code, advertiser_id, ref_user_id)
     )
     db.commit()
 
@@ -769,6 +820,7 @@ async def on_member_join(member: disnake.Member):
             f"> **Пригласил:** <@{inviter_id}>\n"
             f"> **Код:** `{used_invite.code}`"
             + (f"\n> **Адвайтер:** <@{advertiser_id}>" if advertiser_id else "")
+            + (f"\n> **Реферал:** <@{ref_user_id}>" if ref_user_id else "")
         ),
         color=0x00aaff
     )
@@ -854,7 +906,6 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 color=0xff0000
             )
 
-            # ─── Адвайтер-панель: снятие роли адвайтера ───
             try:
                 from work.core import ADVERTISER_ROLE_ID, reset_advertiser
                 if any(r.id == ADVERTISER_ROLE_ID for r in removed):
