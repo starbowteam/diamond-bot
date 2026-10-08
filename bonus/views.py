@@ -246,7 +246,7 @@ class DealView(View):
         super().__init__(timeout=300)
         self.deal = deal
         price = deal.get("new_price", 0)
-        lbl = _btn_pad(f"Купить за {price} DC", 45)
+        lbl = _btn_pad(f"Купить за {price} DC", 35)
 
         btn = Button(
             label=lbl,
@@ -430,7 +430,7 @@ class CaseAfterView(View):
 
         btn_again = Button(
             label=_L_AGAIN,
-            style=ButtonStyle.success,
+            style=ButtonStyle.secondary,
             custom_id="bonus_after:again",
             emoji=PartialEmoji(name="prize", id=1539657202170859561),
             row=0,
@@ -440,7 +440,7 @@ class CaseAfterView(View):
 
         btn_my = Button(
             label=_L_MYCASES,
-            style=ButtonStyle.primary,
+            style=ButtonStyle.secondary,
             custom_id="bonus_after:mycases",
             emoji=PartialEmoji(name="cakleb", id=1553236134316875846),
             row=0,
