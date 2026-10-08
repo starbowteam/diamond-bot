@@ -409,7 +409,7 @@ class CaseSelect(Select):
                 value=str(case["num"]),
             ))
         super().__init__(
-            placeholder="🎰 Выбери кейс для открытия...",
+            placeholder="Выбери кейс для открытия...",
             min_values=1,
             max_values=1,
             options=options,
