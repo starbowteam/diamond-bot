@@ -177,7 +177,6 @@ async def _build_payload(inter, screen):
         )
         e2.set_image(url=IMG_STRIPE)
 
-        # УБРАЛИ КНОПКИ — пустой View
         view = View(timeout=300)
         return [e1, e2], file, view
 
@@ -215,14 +214,13 @@ async def _build_payload(inter, screen):
 
 
 # ============================================================
-# VIEW: АКЦИЯ ДНЯ — КНОПКА КУПИТЬ (длина 23)
+# VIEW: АКЦИЯ ДНЯ
 # ============================================================
 class DealView(View):
     def __init__(self, deal):
         super().__init__(timeout=300)
         self.deal = deal
         price = deal.get("new_price", 0)
-        # Соберём лейбл и добьём до 23 символов
         lbl = _btn_pad(f"Купить за {price} DC", 23)
 
         btn = Button(
@@ -235,7 +233,8 @@ class DealView(View):
         btn.callback = self._buy
         self.add_item(btn)
 
-    async def _buy(self, button, inter):
+    # ⚠️ ФИКС: убрал параметр `button` — disnake зовёт callback только с `inter`
+    async def _buy(self, inter: disnake.MessageInteraction):
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
@@ -351,7 +350,7 @@ class DealNoDealView(View):
 
 
 # ============================================================
-# VIEW: ВЫБОР КЕЙСА (короткие лейблы)
+# VIEW: ВЫБОР КЕЙСА
 # ============================================================
 class CasesButtonsView(View):
     def __init__(self):
@@ -374,20 +373,36 @@ class CasesButtonsView(View):
 
 
 # ============================================================
-# VIEW: ПОСЛЕ КЕЙСА
+# VIEW: ПОСЛЕ КЕЙСА (кнопки увеличены ×2)
 # ============================================================
 class CaseAfterView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label="🔄 Купить ещё", style=ButtonStyle.success,
-                       custom_id="bonus_after:again", row=0)
-    async def _again(self, button, inter):
+        # 24 символа
+        btn_again = Button(
+            label=_btn_pad("🔄 Купить ещё", 24),
+            style=ButtonStyle.success,
+            custom_id="bonus_after:again",
+            row=0,
+        )
+        btn_again.callback = self._again
+        self.add_item(btn_again)
+
+        # 22 символа
+        btn_my = Button(
+            label=_btn_pad("🎒 Мои кейсы", 22),
+            style=ButtonStyle.gray,
+            custom_id="bonus_after:mycases",
+            row=0,
+        )
+        btn_my.callback = self._mycases
+        self.add_item(btn_my)
+
+    async def _again(self, inter):
         await _switch(inter, "cases")
 
-    @disnake.ui.button(label="🎒 Мои кейсы", style=ButtonStyle.gray,
-                       custom_id="bonus_after:mycases", row=0)
-    async def _mycases(self, button, inter):
+    async def _mycases(self, inter):
         await _switch(inter, "mycases")
 
 
@@ -395,9 +410,16 @@ class MyCasesBackView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label="🔙 К кейсам", style=ButtonStyle.gray,
-                       custom_id="bonus_mycases:back", row=0)
-    async def _back(self, button, inter):
+        btn = Button(
+            label=_btn_pad("🔙 К кейсам", 24),
+            style=ButtonStyle.gray,
+            custom_id="bonus_mycases:back",
+            row=0,
+        )
+        btn.callback = self._back
+        self.add_item(btn)
+
+    async def _back(self, inter):
         await _switch(inter, "cases")
 
 
