@@ -52,7 +52,7 @@ def _btn_labels_total(labels, total):
 
 
 # Сумарно 78 символов на 2 кнопки — «вровень с эмбедом»
-_L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 24)
+_L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 32)
 
 
 def build_panel_embeds():
@@ -460,7 +460,7 @@ class MyCasesBackView(View):
         super().__init__(timeout=300)
 
         btn = Button(
-            label=_btn_pad("К кейсам", 32),
+            label=_btn_pad("К кейсам", 34),
             style=ButtonStyle.primary,
             custom_id="bonus_mycases:back",
             row=0,
