@@ -24,100 +24,156 @@ from modules.dc import add_dc, remove_dc, get_user_balance, add_purchase
 # КОНСТАНТЫ
 # ============================================================
 BONUS_CHANNEL_ID       = 1557590012667891774   # канал Бонусы
-REF_INVITE_CHANNEL_ID  = 1552700701128400979   # канал для реф-ссылок (тот же что у адвайтров)
-CLUB_ROLE_ID           = 1284697274655576186   # роль «Клуб» — доступ к рефам
-SUPREME_USER_ID        = 796293832751972352    # тебе — доступ без роли
+REF_INVITE_CHANNEL_ID  = 1552700701128400979   # канал для реф-ссылок
+CLUB_ROLE_ID           = 1284697274655576186   # роль «Клуб»
+SUPREME_USER_ID        = 796293832751972352    # доступ без роли
 
 REF_MIN_ALIVE_SECONDS  = 3600                  # 1 час — порог зачёта
 REF_REWARD_BALANCE     = 100                   # DC юзеру за приглашённого
 REF_REWARD_CLAN        = 100                   # DC в копилку клана
 REF_COOLDOWN_MIN       = 15                    # таск каждые 15 мин
 
+# ============================================================
+# КЕЙСЫ · return ~60% · много призов
+# ============================================================
 CASES: List[dict] = [
+    # ─────────────────────────────────────────────────
+    # КЕЙС 1 · Попробуй удачу · 100 DC
+    # Return ~60.5% · 11 призов, лёгкий вход
+    # ─────────────────────────────────────────────────
     {
-        "num": 1, "key": "luck",   "price": 100,
+        "num": 1, "key": "luck", "price": 100,
         "name": "Попробуй удачу",
         "icon": "fa-gift",
         "color": "blue",
-        "desc": "Лёгкий вход. Шанс на хороший приз без больших затрат.",
+        "desc": "Лёгкий вход. Много мелких призов и шанс на хороший куш.",
         "prizes": [
-            {"type": "dc",       "value": 30,   "chance": 30.0},
-            {"type": "dc",       "value": 60,   "chance": 25.0},
-            {"type": "dc",       "value": 100,  "chance": 20.0},
-            {"type": "dc",       "value": 150,  "chance": 15.0},
-            {"type": "dc",       "value": 250,  "chance": 8.0},
-            {"type": "role",     "key": "role_active", "days": 7, "chance": 1.5},
-            {"type": "role",     "key": "role_helper", "days": 3, "chance": 0.5},
+            {"type": "dc", "value": 8,    "chance": 12.0},
+            {"type": "dc", "value": 15,   "chance": 18.0},
+            {"type": "dc", "value": 25,   "chance": 18.0},
+            {"type": "dc", "value": 40,   "chance": 15.0},
+            {"type": "dc", "value": 60,   "chance": 12.0},
+            {"type": "dc", "value": 85,   "chance": 10.0},
+            {"type": "dc", "value": 120,  "chance": 8.0},
+            {"type": "dc", "value": 180,  "chance": 4.0},
+            {"type": "dc", "value": 300,  "chance": 2.0},
+            {"type": "dc", "value": 600,  "chance": 0.8},
+            {"type": "dc", "value": 1500, "chance": 0.2},
         ],
     },
+
+    # ─────────────────────────────────────────────────
+    # КЕЙС 2 · Быстрый куш · 300 DC
+    # Return ~62.6% · 14 призов + буст + роль
+    # ─────────────────────────────────────────────────
     {
-        "num": 2, "key": "fast",   "price": 300,
+        "num": 2, "key": "fast", "price": 300,
         "name": "Быстрый куш",
         "icon": "fa-coins",
         "color": "green",
-        "desc": "Для тех кто не любит ждать. Внутри бусты и роль Помощник.",
+        "desc": "Много мелких и средних DC, редкий шанс на буст и роль.",
         "prizes": [
-            {"type": "dc",       "value": 100,  "chance": 25.0},
-            {"type": "dc",       "value": 200,  "chance": 25.0},
-            {"type": "dc",       "value": 350,  "chance": 20.0},
-            {"type": "dc",       "value": 500,  "chance": 15.0},
-            {"type": "dc",       "value": 750,  "chance": 10.0},
-            {"type": "boost",    "key": "boost_messages_x2", "chance": 3.0},
-            {"type": "role",     "key": "role_helper", "days": 7, "chance": 1.5},
-            {"type": "discount", "key": "3",  "chance": 0.5},
+            {"type": "dc", "value": 15,   "chance": 12.0},
+            {"type": "dc", "value": 40,   "chance": 18.0},
+            {"type": "dc", "value": 70,   "chance": 20.0},
+            {"type": "dc", "value": 120,  "chance": 15.0},
+            {"type": "dc", "value": 180,  "chance": 12.0},
+            {"type": "dc", "value": 280,  "chance": 10.0},
+            {"type": "dc", "value": 420,  "chance": 7.0},
+            {"type": "dc", "value": 700,  "chance": 3.0},
+            {"type": "dc", "value": 1200, "chance": 1.5},
+            {"type": "dc", "value": 2200, "chance": 0.7},
+            {"type": "dc", "value": 4500, "chance": 0.3},
+            {"type": "boost", "key": "boost_messages_x2", "chance": 0.3},
+            {"type": "boost", "key": "boost_all_x2",      "chance": 0.1},
+            {"type": "role",  "key": "role_helper", "days": 7, "chance": 0.1},
         ],
     },
+
+    # ─────────────────────────────────────────────────
+    # КЕЙС 3 · Серьёзный куш · 500 DC
+    # Return ~59.8% · 14 призов + буст + скидка + роль
+    # ─────────────────────────────────────────────────
     {
         "num": 3, "key": "serious", "price": 500,
         "name": "Серьёзный куш",
         "icon": "fa-gem",
         "color": "gold",
-        "desc": "Средний уровень азарта. Ловит скидки и крупные суммы.",
+        "desc": "Средний уровень азарта. Ловит бусты, скидки и крупные суммы.",
         "prizes": [
-            {"type": "dc",       "value": 200,  "chance": 20.0},
-            {"type": "dc",       "value": 400,  "chance": 25.0},
-            {"type": "dc",       "value": 700,  "chance": 25.0},
-            {"type": "dc",       "value": 1000, "chance": 15.0},
-            {"type": "dc",       "value": 1500, "chance": 10.0},
-            {"type": "boost",    "key": "boost_all_x2", "chance": 3.0},
-            {"type": "discount", "key": "3",    "chance": 1.0},
-            {"type": "discount", "key": "5",    "chance": 0.8},
-            {"type": "role",     "key": "role_helper", "days": 0, "chance": 0.2},
+            {"type": "dc", "value": 30,    "chance": 12.0},
+            {"type": "dc", "value": 70,    "chance": 18.0},
+            {"type": "dc", "value": 120,   "chance": 20.0},
+            {"type": "dc", "value": 200,   "chance": 15.0},
+            {"type": "dc", "value": 300,   "chance": 12.0},
+            {"type": "dc", "value": 450,   "chance": 10.0},
+            {"type": "dc", "value": 700,   "chance": 7.0},
+            {"type": "dc", "value": 1100,  "chance": 3.0},
+            {"type": "dc", "value": 1800,  "chance": 1.5},
+            {"type": "dc", "value": 3000,  "chance": 0.7},
+            {"type": "dc", "value": 6000,  "chance": 0.3},
+            {"type": "boost",    "key": "boost_all_x2", "chance": 0.3},
+            {"type": "discount", "key": "5", "chance": 0.1},
+            {"type": "role",     "key": "role_helper", "days": 7, "chance": 0.1},
         ],
     },
+
+    # ─────────────────────────────────────────────────
+    # КЕЙС 4 · Королевский куш · 1000 DC
+    # Return ~59.9% · 15 призов + 2 буста + скидка + 2 роли
+    # ─────────────────────────────────────────────────
     {
-        "num": 4, "key": "royal",  "price": 1000,
+        "num": 4, "key": "royal", "price": 1000,
         "name": "Королевский куш",
         "icon": "fa-crown",
         "color": "purple",
-        "desc": "Для тех кто готов на серьёзный шаг. Шанс вытащить 3000 DC.",
+        "desc": "Для серьёзного шага. Роли, бусты и шанс вытащить 12 000 DC.",
         "prizes": [
-            {"type": "dc",       "value": 500,  "chance": 20.0},
-            {"type": "dc",       "value": 900,  "chance": 25.0},
-            {"type": "dc",       "value": 1400, "chance": 25.0},
-            {"type": "dc",       "value": 2000, "chance": 15.0},
-            {"type": "dc",       "value": 3000, "chance": 10.0},
-            {"type": "boost",    "key": "boost_review_x2", "chance": 3.0},
-            {"type": "discount", "key": "5",    "chance": 1.5},
-            {"type": "role",     "key": "role_legend", "days": 0, "chance": 0.5},
+            {"type": "dc", "value": 60,    "chance": 12.0},
+            {"type": "dc", "value": 140,   "chance": 18.0},
+            {"type": "dc", "value": 250,   "chance": 20.0},
+            {"type": "dc", "value": 400,   "chance": 15.0},
+            {"type": "dc", "value": 600,   "chance": 12.0},
+            {"type": "dc", "value": 900,   "chance": 10.0},
+            {"type": "dc", "value": 1400,  "chance": 7.0},
+            {"type": "dc", "value": 2200,  "chance": 3.0},
+            {"type": "dc", "value": 3500,  "chance": 1.5},
+            {"type": "dc", "value": 6000,  "chance": 0.7},
+            {"type": "dc", "value": 12000, "chance": 0.3},
+            {"type": "boost",    "key": "boost_review_x2", "chance": 0.3},
+            {"type": "discount", "key": "5", "chance": 0.1},
+            {"type": "role",     "key": "role_legend",     "days": 0, "chance": 0.05},
+            {"type": "role",     "key": "role_dc_magnate", "days": 0, "chance": 0.05},
         ],
     },
+
+    # ─────────────────────────────────────────────────
+    # КЕЙС 5 · Мифический куш · 2000 DC
+    # Return ~59.4% · 16 призов + буст + скидка + 3 роли
+    # ─────────────────────────────────────────────────
     {
         "num": 5, "key": "mythic", "price": 2000,
         "name": "Мифический куш",
         "icon": "fa-trophy",
         "color": "red",
-        "desc": "Максимум азарта. Джекпот — 8000 DC.",
+        "desc": "Максимум азарта. Мелкие DC, дорогие роли и джекпот — 20 000 DC.",
         "prizes": [
-            {"type": "dc",       "value": 1000, "chance": 15.0},
-            {"type": "dc",       "value": 1800, "chance": 20.0},
-            {"type": "dc",       "value": 2800, "chance": 25.0},
-            {"type": "dc",       "value": 4000, "chance": 20.0},
-            {"type": "dc",       "value": 6000, "chance": 12.0},
-            {"type": "discount", "key": "7",    "chance": 4.0},
-            {"type": "discount", "key": "10",   "chance": 2.0},
-            {"type": "role",     "key": "role_dc_magnate", "days": 0, "chance": 1.5},
-            {"type": "dc",       "value": 8000, "chance": 0.5},
+            {"type": "dc", "value": 120,   "chance": 12.0},
+            {"type": "dc", "value": 280,   "chance": 18.0},
+            {"type": "dc", "value": 500,   "chance": 20.0},
+            {"type": "dc", "value": 800,   "chance": 15.0},
+            {"type": "dc", "value": 1200,  "chance": 12.0},
+            {"type": "dc", "value": 1800,  "chance": 10.0},
+            {"type": "dc", "value": 2800,  "chance": 7.0},
+            {"type": "dc", "value": 4500,  "chance": 3.0},
+            {"type": "dc", "value": 7000,  "chance": 1.5},
+            {"type": "dc", "value": 12000, "chance": 0.7},
+            {"type": "dc", "value": 20000, "chance": 0.3},
+            {"type": "boost",    "key": "boost_review_x2", "chance": 0.2},
+            {"type": "discount", "key": "7", "chance": 0.1},
+            {"type": "role",     "key": "role_dc_magnate", "days": 0, "chance": 0.1},
+            {"type": "role",     "key": "role_legend",     "days": 0, "chance": 0.05},
+            {"type": "role",     "key": "role_helper",     "days": 0, "chance": 0.05},
         ],
     },
 ]
@@ -362,7 +418,7 @@ async def ref_reward_task(bot):
 
 
 # ============================================================
-# КЕЙСЫ
+# КЕЙСЫ · ВНУТРЕННЯЯ ЛОГИКА
 # ============================================================
 def _roll_case(case_num: int) -> Optional[dict]:
     case = CASES_BY_NUM.get(case_num)
