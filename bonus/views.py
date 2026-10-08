@@ -460,7 +460,7 @@ class MyCasesBackView(View):
         super().__init__(timeout=300)
 
         btn = Button(
-            label=_btn_pad("К кейсам", 27),
+            label=_btn_pad("К кейсам", 35),
             style=ButtonStyle.primary,
             custom_id="bonus_mycases:back",
             row=0,
