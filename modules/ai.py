@@ -1,33 +1,35 @@
 # -*- coding: utf-8 -*-
 """
-Diamond AI v3 — умный консультант магазина.
+Diamond AI v3.1 — умный консультант магазина.
 
-Что нового против v2:
-  · A1: триггеры действий текстом («покажи профиль», «забери подарок», «открой кейс N»)
-  · A2: дайджест «что нового» одним запросом
-  · A3: понимает реплаи на чужие сообщения
-  · A4: поиск в каталоге («есть ли X?»)
-  · B1: weekly-дайджест «не знаю» владельцу
-  · B3: умный retry при «не знаю»
-  · B4: sentiment-aware тон (злой / радостный / нейтральный)
-  · C1: персонализация через facts_json (без ЛС-пинга!)
-  · C5: знает про себя
-  · D1: сравнение товаров
-  · D2: рекомендация «что взять за N DC»
-  · D3: «что подешевле»
-  · D4: мультиязычность
-  · D5: AI в тикетах при @упоминании
-  · E1: «прошлый раз ты спрашивал X»
-  · E3: разные профили каналов (только основной чат + тикеты)
-  · E4: self-aware при ошибках
-  · E5: не влезает не по теме
-  · E6: авто-предупреждение о повторах «не знаю»
-  · F1: кастомные эмодзи-реакции
-  · F2: тон по роли
-  · F3: умный статус бота
-  · F4: напоминание про отзыв через 3 дня
-  · F5: детект «сам себя переспросил»
-  · F6: тихое приветствие
+Что нового против v3:
+  · BUGFIX: quick_action возвращает "" вместо None (не было дубликата карточки)
+  · BUGFIX: show_profile убран из TOOLS — двойной вызов LLM не нужен
+  · BUGFIX: отличаем 429 rate_limit от 5xx и даём человеческую фразу
+
+Полный набор фич v3:
+  A1 — триггеры действий текстом («покажи профиль», «забери подарок», «открой кейс N»)
+  A2 — дайджест «что нового» одним запросом
+  A3 — понимает реплаи на чужие сообщения
+  A4 — поиск в каталоге («есть ли X?»)
+  B1 — weekly-дайджест «не знаю» владельцу
+  B3 — умный retry при «не знаю»
+  B4 — sentiment-aware тон
+  C1 — персонализация через facts_json (без ЛС-пинга!)
+  C5 — знает про себя
+  D1-D4 — сравнение, рекомендации, «подешевле», мультиязычность
+  D5 — AI в тикетах при @упоминании
+  E1 — «прошлый раз ты спрашивал X»
+  E3 — разные профили каналов (основной чат + тикеты)
+  E4 — self-aware при ошибках (умный retry + лог)
+  E5 — не влезает не по теме
+  E6 — авто-предупреждение о повторах «не знаю»
+  F1 — кастомные эмодзи-реакции
+  F2 — тон по роли
+  F3 — умный статус бота
+  F4 — напоминание про отзыв через 3 дня
+  F5 — детект «сам себя переспросил»
+  F6 — тихое приветствие
 """
 import os
 import re
@@ -303,11 +305,6 @@ SYSTEM_PROMPT = """
 
 🔴 ЗАПРЕЩЕНО отвечать про: код, скрипты, пароли, токены, ssh, api-ключи, админку сервера, программирование. откажись одной фразой.
 
-🔴 ЕСЛИ ЮЗЕР ПРОСИТ ДЕЙСТВИЕ — ИСПОЛЬЗУЙ ФУНКЦИИ:
-- «покажи профиль» / «мой профиль» / «баланс» / «карточка» → show_profile
-- «забери подарок» / «получить подарок» / «дай подарок» → claim_daily_gift
-- «открой кейс N» / «крутни кейс N» → buy_case
-
 🔴 ПАМЯТЬ:
 если в [данные] есть «в прошлый раз юзер интересовался X» — можешь коротко сослаться.
 не переспрашивай то, что уже знаешь.
@@ -381,11 +378,12 @@ def check_reaction_reply(text: str) -> Optional[str]:
 
 # Разные фразы ошибок
 ERROR_PHRASES = {
-    "no_api":   "связь с мозгом пропала, попробуй через минуту.",
-    "timeout":  "что-то долго думаю, давай ещё раз.",
-    "no_model": "сейчас все модели недоступны, попробуй через пару минут.",
-    "empty":    "что-то не могу сообразить, спроси по-другому.",
-    "parse":    "сбой в мыслях, попробуй ещё раз.",
+    "no_api":     "связь с мозгом пропала, попробуй через минуту.",
+    "timeout":    "что-то долго думаю, давай ещё раз.",
+    "no_model":   "сейчас все модели недоступны, попробуй через пару минут.",
+    "rate_limit": "слишком много вопросов за раз — дай мне минуту передохнуть.",
+    "empty":      "что-то не могу сообразить, спроси по-другому.",
+    "parse":      "сбой в мыслях, попробуй ещё раз.",
 }
 
 
@@ -780,12 +778,8 @@ def build_context_block(user_id: int, member: Optional[disnake.Member]) -> str:
 # ============================================================
 # FUNCTION CALLING
 # ============================================================
+# 👇 show_profile УБРАН — он ловится быстрым триггером без LLM.
 TOOLS_DECLARATIONS = [
-    {
-        "name": "show_profile",
-        "description": "Показать карточку профиля юзера (баланс, отзывы, роль, клан)",
-        "parameters": {"type": "OBJECT", "properties": {}},
-    },
     {
         "name": "claim_daily_gift",
         "description": "Забрать ежедневный подарок. Если кулдаун не прошёл — вернёт ошибку.",
@@ -896,6 +890,7 @@ async def execute_tool(message: disnake.Message, name: str, args: dict) -> str:
 PROFILE_TRIGGERS = [
     "покажи профиль", "мой профиль", "скинь профиль", "карточка профиля",
     "моя карточка", "покажи карточку", "мой баланс", "сколько у меня",
+    "скинь карточку", "покажи баланс",
 ]
 GIFT_TRIGGERS = [
     "забери подарок", "получить подарок", "дай подарок", "забрать подарок",
@@ -925,14 +920,20 @@ def _match_any(text: str, patterns: List[str]) -> bool:
 
 
 async def quick_action(message: disnake.Message, text: str) -> Optional[str]:
-    """Быстрые триггеры без LLM. Возвращает текст ответа или None."""
+    """
+    Быстрые триггеры без LLM.
+    Возвращает:
+      · строку-ответ (не пустую) — отправить в чат
+      · "" (пустая строка) — уже отправили сами (например, карточку), стоп
+      · None — не наш случай, идём дальше в LLM
+    """
     user_id = message.author.id
 
     # Профиль
     if _match_any(text, PROFILE_TRIGGERS):
         result = await tool_show_profile(message)
         if result.startswith("профиль"):
-            return None  # уже отправили
+            return ""   # 👈 уже отправили карточку — стоп
         return result
 
     # Подарок
@@ -1310,7 +1311,11 @@ async def _try_model(session: aiohttp.ClientSession, model: str, payload: dict) 
                         fc = p["functionCall"]
                         fcs.append({"name": fc.get("name", ""), "args": fc.get("args", {})})
                 return True, {"text": "".join(text_parts).strip(), "function_calls": fcs}, 200
+
             err = await resp.text()
+            if resp.status == 429:
+                logger.warning(f"[{model}] 429 RATE LIMIT — {err[:200]}")
+                return False, {"error": "rate_limit"}, 429
             logger.warning(f"[{model}] {resp.status}: {err[:200]}")
             return False, {"error": f"http {resp.status}"}, resp.status
     except asyncio.TimeoutError:
@@ -1354,11 +1359,13 @@ async def ask_llm(message: disnake.Message,
 
         for _ in range(3):
             response = None
+            last_status = -1
             for model in models_to_try:
                 ok, res, status = await _try_model(session, model, payload)
                 if ok:
                     response = res
                     break
+                last_status = status
                 if status == 503:
                     await asyncio.sleep(2)
                     ok2, res2, _ = await _try_model(session, model, payload)
@@ -1368,6 +1375,9 @@ async def ask_llm(message: disnake.Message,
                 await asyncio.sleep(0.3)
 
             if response is None:
+                # 👇 различаем rate limit от прочих ошибок
+                if last_status == 429:
+                    return ERROR_PHRASES["rate_limit"], "rate_limit"
                 return ERROR_PHRASES["no_model"], "no_model"
 
             fcs = response.get("function_calls", [])
@@ -1418,8 +1428,12 @@ async def ask_llm_smart(message: disnake.Message,
                         user_id: int) -> Tuple[str, str]:
     """Обычный запрос + при «не знаю» — второй проход с усиленным промптом."""
     reply, status = await ask_llm(message, user_message, system_content, user_id)
+
+    # не гоняем retry, если это rate limit / no model — там повтор бессмысленен
+    if status in ("rate_limit", "no_model", "no_api", "timeout"):
+        return reply, status
+
     if status == "ok" and is_unknown_reply(reply):
-        # Второй проход с усиленным промптом
         extra = (
             "\n\n🔴 ОТВЕЧАЙ ИСПОЛЬЗУЯ ТОЛЬКО ДАННЫЕ ИЗ [данные]. "
             "если в них есть ответ — дай его. НЕ отказывайся, не отвечай «не знаю», "
@@ -1471,7 +1485,6 @@ async def handle_ticket_mention(message: disnake.Message) -> bool:
         ).fetchone()
         manager_id = manager_row["manager_id"] if manager_row else None
 
-        # Возраст
         try:
             created_at = message.channel.created_at
             delta = datetime.now(timezone.utc) - created_at
@@ -1481,7 +1494,6 @@ async def handle_ticket_mention(message: disnake.Message) -> bool:
         except Exception:
             age = "—"
 
-        # Категория
         cat_id = row["category_id"]
         if cat_id == CONFIG.get("TICKET_CATEGORY_ID"):
             cat_name = "Реальные деньги"
@@ -1712,7 +1724,6 @@ async def weekly_unknown_digest():
         lines.append("")
         lines.append("стоит дополнить промпт / каталог по этим темам.")
 
-        # Владельцу в ЛС
         owner = bot.get_user(OWNER_ID)
         if not owner:
             owner = await bot.fetch_user(OWNER_ID)
@@ -1751,7 +1762,6 @@ async def auto_unknown_alert():
         for h, data in by_hash.items():
             if data["count"] < 3:
                 continue
-            # Проверяем — не отправляли ли уже
             sent = cur.execute(
                 "SELECT 1 FROM ai_suggested WHERE question_hash=?", (h,)
             ).fetchone()
@@ -1782,8 +1792,6 @@ async def review_reminder_task():
     await bot.wait_until_ready()
     try:
         now = int(time.time())
-        threshold_old = now - 3 * 86400      # покупка старше 3 дней
-        threshold_fresh = now - 30 * 86400   # отзыв за последние 30 дней
 
         rows = cur.execute("SELECT user_id, purchases FROM dc_cache").fetchall()
         for row in rows:
@@ -1805,12 +1813,9 @@ async def review_reminder_task():
                 if not pdate or now - pdate < 3 * 86400:
                     continue
 
-                # Отзыв за последние 30 дней?
                 counts = load_json(FILES["review_counts"], {})
                 rc = int(counts.get(str(uid), 0) or 0)
 
-                # Грубая проверка: если у юзера есть свежие отзывы — не напоминаем
-                # (нет точной даты отзывов, поэтому проверяем через память)
                 mem = memory_get(uid)
                 last_seen = mem.get("last_seen") or 0
                 if rc > 0 and now - last_seen < 7 * 86400:
@@ -1818,7 +1823,6 @@ async def review_reminder_task():
                     changed = True
                     continue
 
-                # Шлём ЛС
                 member = bot.get_user(uid)
                 if not member:
                     try:
@@ -1873,7 +1877,7 @@ async def _log_to_discord(title: str, description: str, color: int = 0x00ff00):
 # ============================================================
 @bot.event
 async def on_ready():
-    logger.info(f"diamond ai v3 запущен как {bot.user} (id={bot.user.id})")
+    logger.info(f"diamond ai v3.1 запущен как {bot.user} (id={bot.user.id})")
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -1894,7 +1898,7 @@ async def on_ready():
             task.start()
 
     await _log_to_discord(
-        "✅ Diamond AI v3 запущен",
+        "✅ Diamond AI v3.1 запущен",
         f"> **{bot.user}** онлайн.\n> Отвечаю в <#{ALLOWED_CHANNEL_ID}> и тикетах.",
         color=0x00ff00,
     )
@@ -1938,6 +1942,7 @@ async def on_message(message: disnake.Message):
     # === A1: быстрые триггеры без LLM ===
     quick = await quick_action(message, text)
     if quick is not None:
+        # quick == "" → уже отправили сами
         if quick:
             try:
                 await message.channel.send(quick)
@@ -1993,7 +1998,6 @@ async def on_message(message: disnake.Message):
     is_repeat = is_repeat_question(user_id, text)
     mark_question_asked(user_id, text)
 
-    # Запоминаем тему (первое слово вопроса как «topic»)
     first_word = norm.split()[0] if norm.split() else ""
     if first_word and len(first_word) > 3:
         memory_upsert(user_id, last_topic=first_word)
@@ -2009,7 +2013,6 @@ async def on_message(message: disnake.Message):
     style_suffix = MOOD_SUFFIX.get(style, "")
     role_suffix = build_role_suffix(member, is_first)
 
-    # Реплай на чужое сообщение
     reply_context = ""
     if _is_reply_to_user(message):
         replied = _get_replied_message(message)
