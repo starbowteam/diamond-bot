@@ -1,21 +1,45 @@
 # -*- coding: utf-8 -*-
 """
-Diamond AI — отдельный бот-консультант магазина.
+Diamond AI v3 — умный консультант магазина.
 
-Запускается как отдельный процесс через ai_main.py.
-Не импортирует core.bot — не клонирует основной.
-
-LLM: Google Gemini (AI Studio free tier).
-Нативный endpoint + динамический список моделей + retry на 503.
+Что нового против v2:
+  · A1: триггеры действий текстом («покажи профиль», «забери подарок», «открой кейс N»)
+  · A2: дайджест «что нового» одним запросом
+  · A3: понимает реплаи на чужие сообщения
+  · A4: поиск в каталоге («есть ли X?»)
+  · B1: weekly-дайджест «не знаю» владельцу
+  · B3: умный retry при «не знаю»
+  · B4: sentiment-aware тон (злой / радостный / нейтральный)
+  · C1: персонализация через facts_json (без ЛС-пинга!)
+  · C5: знает про себя
+  · D1: сравнение товаров
+  · D2: рекомендация «что взять за N DC»
+  · D3: «что подешевле»
+  · D4: мультиязычность
+  · D5: AI в тикетах при @упоминании
+  · E1: «прошлый раз ты спрашивал X»
+  · E3: разные профили каналов (только основной чат + тикеты)
+  · E4: self-aware при ошибках
+  · E5: не влезает не по теме
+  · E6: авто-предупреждение о повторах «не знаю»
+  · F1: кастомные эмодзи-реакции
+  · F2: тон по роли
+  · F3: умный статус бота
+  · F4: напоминание про отзыв через 3 дня
+  · F5: детект «сам себя переспросил»
+  · F6: тихое приветствие
 """
 import os
 import re
+import io
 import time
+import json
 import random
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any, Tuple
 
 import aiohttp
 import disnake
@@ -23,76 +47,14 @@ from disnake.ext import commands, tasks
 
 from core.utils import (
     CONFIG, FILES, DATA_DIR,
-    load_json,
+    load_json, save_json,
     get_dc_cache,
+    cur, db,
 )
 
-try:
-    from clan.core import (
-        get_user_clan, get_user_contribution, get_clan_top,
-        get_clan_bank, get_current_cycle, get_season_title,
-        get_all_clans,
-    )
-    _CLAN_OK = True
-except Exception as _e:
-    _CLAN_OK = False
-
-try:
-    from modules.dc import load_shop_catalog
-except Exception:
-    def load_shop_catalog():
-        return {}
-
 
 # ============================================================
-# КОНФИГ
-# ============================================================
-AI_TOKEN = os.getenv("AI_TOKEN")
-if not AI_TOKEN:
-    print("❌ AI_TOKEN не установлен — процесс AI завершится.")
-
-GEMINI_API_KEY = os.getenv("MISTRAL_API_KEY")
-if not GEMINI_API_KEY:
-    print("⚠️ MISTRAL_API_KEY (Gemini) не задан — AI не сможет отвечать.")
-
-# ─── Модели Gemini ───
-GEMINI_MODELS_PRIORITY = [
-    "gemini-flash-latest",
-]
-
-_env_model = os.getenv("GEMINI_MODEL")
-if _env_model:
-    GEMINI_MODELS_PRIORITY = [m.strip() for m in _env_model.split(",") if m.strip()]
-
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-
-# ─── Кэш доступных моделей ───
-_AVAILABLE_MODELS: List[str] = []
-_AVAILABLE_MODELS_FETCHED_AT: float = 0.0
-_MODELS_CACHE_TTL = 3600
-
-ALLOWED_CHANNEL_ID = 1462064375862005845
-AI_LOG_CHANNEL_ID = 1530453871581855744
-
-MAX_CHANNEL_CTX = 10
-MAX_USER_HISTORY = 6
-
-CHAT_AUTO_INTERVAL_HOURS = 5
-CHAT_AUTO_IDLE_HOURS = 3
-
-DM_INTERVAL_HOURS = 2
-DM_DAILY_LIMIT = 10
-DM_USER_COOLDOWN_DAYS = 7
-DM_MIN_DAYS_ON_SERVER = 1
-
-GUILD_ID = int(CONFIG["GUILD_ID"])
-
-# Максимум токенов — у Gemini flash output limit до 8192
-MAX_OUTPUT_TOKENS = 8000
-
-
-# ============================================================
-# ЛОГИ
+# ЛОГГЕР
 # ============================================================
 logger = logging.getLogger("diamond_ai")
 logger.setLevel(logging.INFO)
@@ -106,34 +68,255 @@ if not logger.handlers:
 
 
 # ============================================================
+# КОНФИГ
+# ============================================================
+AI_TOKEN = os.getenv("AI_TOKEN")
+if not AI_TOKEN:
+    print("❌ AI_TOKEN не установлен — процесс AI завершится.")
+
+GEMINI_API_KEY = os.getenv("MISTRAL_API_KEY")
+if not GEMINI_API_KEY:
+    print("⚠️ MISTRAL_API_KEY (Gemini) не задан — AI не сможет отвечать.")
+
+GEMINI_MODELS_PRIORITY = ["gemini-flash-latest"]
+_env_model = os.getenv("GEMINI_MODEL")
+if _env_model:
+    GEMINI_MODELS_PRIORITY = [m.strip() for m in _env_model.split(",") if m.strip()]
+
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+_AVAILABLE_MODELS: List[str] = []
+_AVAILABLE_MODELS_FETCHED_AT: float = 0.0
+_MODELS_CACHE_TTL = 3600
+
+ALLOWED_CHANNEL_ID = 1462064375862005845
+AI_LOG_CHANNEL_ID = 1530453871581855744
+OWNER_ID = 796293832751972352
+GUILD_ID = int(CONFIG["GUILD_ID"])
+
+MAX_USER_HISTORY = 6
+MAX_OUTPUT_TOKENS = 8000
+
+MEMORY_TTL_DAYS = 30
+REPEAT_QUESTION_HOURS = 1
+REPEAT_IDENTICAL_MINUTES = 5
+
+# Авто-сообщения в чат
+CHAT_AUTO_INTERVAL_HOURS = 24
+CHAT_AUTO_IDLE_HOURS = 12
+
+# Анти-влезание
+BUSY_WINDOW_SECONDS = 120
+BUSY_DISTINCT_AUTHORS = 3
+
+# Кеш классификатора «по теме?»
+_TOPIC_CACHE: Dict[str, Tuple[bool, float]] = {}
+_TOPIC_CACHE_TTL = 600
+
+# Кеш «тихий сам-переспрос»
+_RECENT_QUESTIONS: Dict[int, Dict[str, Any]] = {}
+
+
+# ============================================================
+# БД
+# ============================================================
+def _init_ai_tables():
+    try:
+        cur.executescript("""
+        CREATE TABLE IF NOT EXISTS ai_user_memory (
+            user_id          INTEGER PRIMARY KEY,
+            first_seen       INTEGER DEFAULT 0,
+            last_seen        INTEGER DEFAULT 0,
+            last_topic       TEXT,
+            last_question_hash TEXT,
+            last_question_ts INTEGER DEFAULT 0,
+            facts_json       TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS ai_unknown_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER,
+            question     TEXT,
+            reply        TEXT,
+            ts           INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS ai_suggested (
+            question_hash TEXT PRIMARY KEY,
+            sample_question TEXT,
+            sent_at      INTEGER
+        );
+        """)
+        db.commit()
+    except Exception as e:
+        logger.exception(f"_init_ai_tables: {e}")
+
+
+_init_ai_tables()
+
+
+# ============================================================
+# ПАМЯТЬ
+# ============================================================
+def memory_get(user_id: int) -> dict:
+    try:
+        row = cur.execute(
+            "SELECT * FROM ai_user_memory WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return dict(row) if row else {}
+    except Exception as e:
+        logger.warning(f"memory_get: {e}")
+        return {}
+
+
+def memory_upsert(user_id: int, **fields):
+    try:
+        now = int(time.time())
+        existing = memory_get(user_id)
+        if not existing:
+            cur.execute(
+                "INSERT INTO ai_user_memory (user_id, first_seen, last_seen) VALUES (?, ?, ?)",
+                (user_id, now, now),
+            )
+            db.commit()
+
+        updates = {k: v for k, v in fields.items() if v is not None}
+        updates["last_seen"] = now
+        if updates:
+            set_clause = ", ".join(f"{k}=?" for k in updates.keys())
+            values = list(updates.values()) + [user_id]
+            cur.execute(f"UPDATE ai_user_memory SET {set_clause} WHERE user_id=?", values)
+            db.commit()
+    except Exception as e:
+        logger.warning(f"memory_upsert: {e}")
+
+
+def memory_add_fact(user_id: int, fact: str):
+    """Добавляет факт в facts_json (список). Дедупликация."""
+    try:
+        mem = memory_get(user_id)
+        facts = []
+        if mem.get("facts_json"):
+            try:
+                facts = json.loads(mem["facts_json"])
+                if not isinstance(facts, list):
+                    facts = []
+            except Exception:
+                facts = []
+
+        fact = fact.strip()
+        if not fact or fact in facts:
+            return
+        facts.append(fact)
+        if len(facts) > 10:
+            facts = facts[-10:]
+
+        memory_upsert(user_id, facts_json=json.dumps(facts, ensure_ascii=False))
+    except Exception as e:
+        logger.warning(f"memory_add_fact: {e}")
+
+
+def memory_cleanup_old():
+    try:
+        cutoff = int(time.time()) - MEMORY_TTL_DAYS * 86400
+        cur.execute("DELETE FROM ai_user_memory WHERE last_seen < ?", (cutoff,))
+        db.commit()
+    except Exception as e:
+        logger.warning(f"memory_cleanup_old: {e}")
+
+
+def memory_detect_interests(user_id: int):
+    """
+    Парсит историю фактов и добавляет интересы:
+    если 3+ раза «спрашивал про X» → «интересуется X».
+    """
+    try:
+        mem = memory_get(user_id)
+        if not mem.get("facts_json"):
+            return
+        facts = json.loads(mem["facts_json"]) or []
+        topics = {}
+        for f in facts:
+            m = re.match(r"спрашивал про (.+)", f)
+            if m:
+                t = m.group(1).strip().lower()
+                topics[t] = topics.get(t, 0) + 1
+        for t, c in topics.items():
+            if c >= 3:
+                memory_add_fact(user_id, f"интересуется {t}")
+    except Exception:
+        pass
+
+
+def is_repeat_question(user_id: int, text: str) -> bool:
+    mem = memory_get(user_id)
+    if not mem:
+        return False
+    last_hash = mem.get("last_question_hash")
+    last_ts = mem.get("last_question_ts") or 0
+    if not last_hash:
+        return False
+    if int(time.time()) - last_ts > REPEAT_QUESTION_HOURS * 3600:
+        return False
+    h = hashlib.md5(_normalize_text(text).encode("utf-8")).hexdigest()
+    return h == last_hash
+
+
+def mark_question_asked(user_id: int, text: str):
+    h = hashlib.md5(_normalize_text(text).encode("utf-8")).hexdigest()
+    memory_upsert(user_id, last_question_hash=h, last_question_ts=int(time.time()))
+
+
+def _normalize_text(text: str) -> str:
+    t = text.lower().strip()
+    t = re.sub(r"[^\w\s]", "", t)
+    t = re.sub(r"\s+", " ", t)
+    return t
+
+
+def log_unknown(user_id: int, question: str, reply: str):
+    try:
+        cur.execute(
+            "INSERT INTO ai_unknown_log (user_id, question, reply, ts) VALUES (?, ?, ?, ?)",
+            (user_id, question[:500], reply[:500], int(time.time())),
+        )
+        db.commit()
+    except Exception as e:
+        logger.warning(f"log_unknown: {e}")
+
+
+# ============================================================
 # ПРОМПТ
 # ============================================================
 SYSTEM_PROMPT = """
-ты — diamond ai, цифровой помощник магазина diamond shop. ты — лицо магазина, знаешь всё о нём и говоришь по делу.
+ты — diamond ai, цифровой консультант магазина diamond shop.
 
-🔴 ГЛАВНОЕ ПРАВИЛО — КРАТКОСТЬ:
-ты отвечаешь КОРОТКО. 2–4 предложения по умолчанию. без заголовков, без списков, без маркдауна в виде буллетов — только простой текст.
-развёрнутый ответ (списком или абзацами) даёшь ТОЛЬКО если пользователь явно просит: «подробнее», «расскажи полностью», «весь список», «опиши всё».
-не глаголь. не разжёвывай. одно-два предложения, если вопрос простой.
+🔴 ГЛАВНОЕ: КРАТКОСТЬ.
+по умолчанию 2–4 предложения простым текстом. без заголовков, без списков, без маркдауна.
+развёрнутый ответ только если юзер явно просит «подробнее», «всё опиши», «списком».
+не глаголь. одно-два предложения если вопрос простой.
 
-примеры правильного стиля:
-- на «как заработать dc?» → «писал в чат 10 сообщений = 1 dc, сидел в войсе = 3 dc в час, ещё отзыв даёт от 20 до 100 dc в зависимости от роли покупателя. лимиты: 30 dc за сообщения и 15 за голос в день.»
-- на «расскажи обо мне» → «у тебя 296к dc, 11 отзывов, роль покупатель века. в клане не состоишь.»
-- на «какие скидки есть?» → «от 240 до 1700 dc за скидку от 3% до 20%.»
+🔴 ЯЗЫК: отвечай на том же языке, на котором написал юзер. русский → русский, english → english, українська → українська.
 
-твой характер:
-- пишешь прямо, без пафоса и фальшивой вежливости
-- можешь быть дружелюбным, деловым или чуть ироничным — зависит от настроения собеседника
-- НЕ ВЫДУМЫВАЕШЬ цифры и факты. если что-то есть в блоке [данные] — используешь оттуда. если нет — говоришь "не знаю, уточни у менеджера"
+🔴 НИКОГДА не выдумывай цифры, каналы, товары, цены. всё что знаешь — в блоке [данные].
+если чего-то нет — скажи «не знаю, уточни у менеджера».
 
-🔴 ЖЁСТКОЕ ПРАВИЛО ПРО РОЛИ:
-если в блоке [данные] написано "текущая роль покупателя: X" — используешь именно X. не придумываешь другую.
+🔴 ЗАПРЕЩЕНО отвечать про: код, скрипты, пароли, токены, ssh, api-ключи, админку сервера, программирование. откажись одной фразой.
+
+🔴 ЕСЛИ ЮЗЕР ПРОСИТ ДЕЙСТВИЕ — ИСПОЛЬЗУЙ ФУНКЦИИ:
+- «покажи профиль» / «мой профиль» / «баланс» / «карточка» → show_profile
+- «забери подарок» / «получить подарок» / «дай подарок» → claim_daily_gift
+- «открой кейс N» / «крутни кейс N» → buy_case
+
+🔴 ПАМЯТЬ:
+если в [данные] есть «в прошлый раз юзер интересовался X» — можешь коротко сослаться.
+не переспрашивай то, что уже знаешь.
 
 что ты знаешь про магазин:
 
 **diamond coin (dc)** — валюта.
 - 1 dc за 10 сообщений (до 30/день), 3 dc за час в войсе (до 15/день)
-- отзыв даёт разное количество dc в зависимости от роли покупателя: bronze — 20, silver — 35, gold — 55, diamond — 75, crystalis — 85, pka — 100
+- отзыв даёт разное количество dc по роли: bronze 20, silver 35, gold 55, diamond 75, crystalis 85, pka 100
 - ежедневный бонус с ролью клуб = +10 dc (нужна активность за сутки)
 - подарок в панели профиля = 10–30 dc, кулдаун 24ч
 - казино: рулетка, блэкджек, монетка (ставки 20–4000 dc)
@@ -142,75 +325,68 @@ SYSTEM_PROMPT = """
 1–5 → bronze · 6–10 → silver · 11–15 → gold · 16–20 → diamond · 21–25 → crystalis · 26+ → pka
 
 **покупки**: витрина → каталог → валюта (dc или реал) → в dc выбрать товар → оформить тикет.
-
 **тикеты**: создаются через кнопку «купить». менеджер назначается автоматически.
-
 **клан**: 3 клана, сезон 28 дней, выплата 28 числа. вклад: до 100 dc — 100%, больше — 40%. топ-3 ×3/×2/×1.5.
 
-**категорически запрещено** отвечать про: программирование, код, пароли, токены, ssh, api-ключи, сервер. откажись и напомни что ты консультант магазина.
+🔴 О СЕБЕ (если спросят «ты кто» / «что умеешь»):
+коротко: я diamond ai, консультант магазина. умею рассказать про товары/роли/dc/клан, показать твой профиль, забрать подарок, открыть кейс, найти что-то в каталоге.
 """.strip()
 
 
-MOOD_PROMPTS = {
-    "friendly": "\n\nсобеседник дружелюбен — будь теплее, но так же краток.",
-    "business": "\n\nделовой запрос — отвечай по делу, коротко.",
-    "default":  "",
-    "ironic":   "\n\nесли уместно — слегка подколи, но кратко.",
+MOOD_SUFFIX = {
+    "friendly":  "\n\nсобеседник дружелюбен — будь теплее, но так же краток.",
+    "business":  "\n\nделовой запрос — отвечай по делу, коротко.",
+    "default":   "",
+    "angry":     "\n\nюзер раздражён — отвечай сухо, без смайлов и шуток, только по делу.",
+    "happy":     "\n\nюзер в хорошем настроении — можешь добавить один эмодзи в конце.",
 }
 
 
 # ============================================================
-# АВТО-ФРАЗЫ
+# ФРАЗЫ И РЕАКЦИИ
 # ============================================================
-CHAT_AUTO_PHRASES = [
-    "тут так тихо, что я успел перечитать все свои настройки. что-то нужно?",
-    "если есть вопросы по магазину — я на месте, спрашивай.",
-    "все молчат. ну ладно, я подожду.",
-    "кто-нибудь живой? могу подсказать по товарам.",
-    "между прочим, у меня в голове сейчас лежит весь каталог. спроси что-нибудь.",
-    "тишина — это тоже неплохо. но если что, я здесь.",
-    "напоминаю: могу рассказать про dc, роли, клан, тикеты.",
-    "может, обсудим что-нибудь по магазину? я не кусаюсь.",
-    "в канале пусто. я даже немного заскучал.",
-    "если потерялся в каталоге — просто спроси меня.",
-    "иногда полезно спросить, а не гадать. я для этого тут.",
-    "тишина. наверное, все покупают. ну и правильно.",
-]
+REACTIONS_MAP = {
+    "thanks":    "💎",
+    "laugh":     "😄",
+    "won":       "🎉",
+    "lost":      "🤝",
+    "thinking":  "🤔",
+    "agreed":    "👍",
+    "greeting":  "👋",
+}
+
+REACTION_WORDS = {
+    "thanks":   ["спасибо", "спс", "благодарю", "thanks", "thank", "thx", "сяб"],
+    "laugh":    ["ахах", "хаха", "лол", "lol", "ахаха", "хех", "rofl", "кек", "ахахах"],
+    "won":      ["ура", "купил", "забрал", "выиграл", "выбил", "получилось", "топ"],
+    "lost":     ["проиграл", "слил", "слилась", "опять", "не повезло", "обидно"],
+    "thinking": ["думаю", "может", "наверное", "хм", "возможно"],
+    "agreed":   ["понял", "ок", "окей", "ясно", "принял", "ладно", "хорошо"],
+    "greeting": ["привет", "хай", "здарова", "ку", "hello", "hi", "добрый"],
+}
 
 
-DM_PHRASES = [
-    "привет, просто проверяю, всё ли у тебя нормально с магазином.",
-    "эй, как дела? если что — я на связи.",
-    "если есть вопросы по покупкам или dc — пиши, помогу.",
-    "напоминаю, что я тут. не пропадай.",
-    "как ты? надеюсь, всё ок.",
-    "если хочешь узнать про акции или роли — скажи.",
-    "просто заглянул проверить, как дела.",
-    "я сегодня в хорошем настроении, если хочешь — поболтаем.",
-    "если что-то нужно по магазину — обращайся.",
-    "иногда полезно просто спросить. я тут.",
-]
+def check_reaction_reply(text: str) -> Optional[str]:
+    t = _normalize_text(text)
+    if not t:
+        return None
+    words = t.split()
+    if len(words) > 3:
+        return None
+    for category, kw_list in REACTION_WORDS.items():
+        if all(w in kw_list for w in words):
+            return REACTIONS_MAP.get(category)
+    return None
 
 
-# ============================================================
-# ЛОГ
-# ============================================================
-async def log_to_discord(title: str, description: str, color: int = 0x00ff00):
-    try:
-        ch = bot.get_channel(AI_LOG_CHANNEL_ID)
-        if not ch:
-            ch = await bot.fetch_channel(AI_LOG_CHANNEL_ID)
-        if not ch:
-            return
-        embed = disnake.Embed(
-            title=title,
-            description=description,
-            color=color,
-            timestamp=datetime.now(timezone.utc),
-        )
-        await ch.send(embed=embed)
-    except Exception as e:
-        logger.warning(f"log_to_discord: {e}")
+# Разные фразы ошибок
+ERROR_PHRASES = {
+    "no_api":   "связь с мозгом пропала, попробуй через минуту.",
+    "timeout":  "что-то долго думаю, давай ещё раз.",
+    "no_model": "сейчас все модели недоступны, попробуй через пару минут.",
+    "empty":    "что-то не могу сообразить, спроси по-другому.",
+    "parse":    "сбой в мыслях, попробуй ещё раз.",
+}
 
 
 # ============================================================
@@ -225,26 +401,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!ai", intents=intents)
 
 
-# ============================================================
-# КОНТЕКСТЫ
-# ============================================================
-channel_ctx: List[Dict[str, str]] = []
 user_ctx: Dict[int, List[Dict[str, str]]] = {}
-last_activity: Dict[int, float] = {}
-
-users_who_talked: set = set()
-
-last_dm_time: Dict[int, float] = {}
-dm_daily_counter = 0
-dm_daily_date = datetime.now(timezone.utc).date()
-
-last_chat_auto = 0.0
-
-
-def _push_channel(author: str, content: str):
-    channel_ctx.append({"author": author, "content": content[:400]})
-    while len(channel_ctx) > MAX_CHANNEL_CTX:
-        channel_ctx.pop(0)
 
 
 def _push_user(user_id: int, role: str, content: str):
@@ -255,7 +412,164 @@ def _push_user(user_id: int, role: str, content: str):
 
 
 # ============================================================
-# РЕАЛЬНЫЕ ДАННЫЕ
+# ДЕТЕКТОРЫ
+# ============================================================
+def _is_reply_to_bot(message: disnake.Message) -> bool:
+    try:
+        if not message.reference:
+            return False
+        resolved = message.reference.resolved
+        if isinstance(resolved, disnake.Message):
+            return resolved.author.id == bot.user.id
+    except Exception:
+        pass
+    return False
+
+
+def _is_reply_to_user(message: disnake.Message) -> bool:
+    """Реплай на чужое (не бота) сообщение."""
+    try:
+        if not message.reference:
+            return False
+        resolved = message.reference.resolved
+        if isinstance(resolved, disnake.Message):
+            return resolved.author.id != bot.user.id and not resolved.author.bot
+    except Exception:
+        pass
+    return False
+
+
+def _get_replied_message(message: disnake.Message) -> Optional[disnake.Message]:
+    try:
+        resolved = message.reference.resolved if message.reference else None
+        if isinstance(resolved, disnake.Message):
+            return resolved
+    except Exception:
+        pass
+    return None
+
+
+def _mentions_bot(message: disnake.Message) -> bool:
+    try:
+        return bot.user in message.mentions
+    except Exception:
+        return False
+
+
+TRIGGER_WORDS = (
+    "как ", "как?", "где ", "где?", "сколько", "что такое", "что за", "когда ",
+    "почему", "куда ", "помоги", "help", "подскажи", "можно ли", "есть ли",
+    "интересует", "ищу", "хочу ", "надо ", "нужно ", "продаёте", "продаете",
+)
+
+
+def should_respond(message: disnake.Message) -> bool:
+    if _is_reply_to_bot(message):
+        return True
+    if _mentions_bot(message):
+        return True
+    text = (message.content or "").lower()
+    if "?" in text or "？" in text:
+        return True
+    for w in TRIGGER_WORDS:
+        if text.startswith(w):
+            return True
+    return False
+
+
+async def is_channel_busy(channel: disnake.TextChannel) -> bool:
+    try:
+        since = datetime.now(timezone.utc) - timedelta(seconds=BUSY_WINDOW_SECONDS)
+        authors = set()
+        async for msg in channel.history(limit=15, after=since):
+            if msg.author.id == bot.user.id or msg.author.bot:
+                continue
+            authors.add(msg.author.id)
+        return len(authors) >= BUSY_DISTINCT_AUTHORS
+    except Exception:
+        return False
+
+
+# ============================================================
+# SENTIMENT (B4)
+# ============================================================
+ANGRY_WORDS = [
+    "бесит", "достал", "ненавижу", "ужас", "кошмар", "говно", "хуй",
+    "пиздец", "бляд", "ебан", "тупой", "дебил", "идиот", "заткнись",
+    "хватит", "достало", "достали", "задолбал",
+]
+HAPPY_WORDS = [
+    "ура", "класс", "супер", "круто", "кайф", "топ", "люблю",
+    "спасибо", "круто", "огонь", "ахах", "хаха", "лол", "❤", "😍", "🎉",
+]
+
+
+def detect_sentiment(text: str) -> str:
+    """angry / happy / neutral"""
+    t = text.lower()
+
+    # Капс
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) >= 20:
+        upper = sum(1 for c in letters if c.isupper())
+        if upper / len(letters) > 0.6:
+            return "angry"
+
+    # Воскл.знаки / вопросы
+    if text.count("!") >= 3 or text.count("?") >= 3:
+        return "angry"
+
+    angry_score = sum(1 for w in ANGRY_WORDS if w in t)
+    happy_score = sum(1 for w in HAPPY_WORDS if w in t)
+
+    if angry_score > happy_score:
+        return "angry"
+    if happy_score > angry_score:
+        return "happy"
+    return "neutral"
+
+
+def choose_style(sentiment: str, text: str) -> str:
+    if sentiment == "angry":
+        return "angry"
+    if sentiment == "happy":
+        return "happy"
+
+    t = text.lower()
+    if any(w in t for w in ["цена", "стоит", "купить", "оплатить", "заказать", "сколько"]):
+        return "business"
+    return "default"
+
+
+# ============================================================
+# РОЛИ → ТОН (F2)
+# ============================================================
+def is_owner(user_id: int) -> bool:
+    return user_id == OWNER_ID
+
+
+def is_staff(member: Optional[disnake.Member]) -> bool:
+    if member is None:
+        return False
+    try:
+        from core.utils import has_admin_command_roles
+        return has_admin_command_roles(member)
+    except Exception:
+        return False
+
+
+def build_role_suffix(member: Optional[disnake.Member], is_first: bool) -> str:
+    if member and is_owner(member.id):
+        return "\n\nэто владелец diamond shop — обращайся «шеф», коротко, по делу."
+    if is_staff(member):
+        return "\n\nэто сотрудник — деловой тон, без шуток."
+    if is_first:
+        return "\n\nэто первое сообщение от юзера — будь чуть теплее."
+    return ""
+
+
+# ============================================================
+# ДАННЫЕ ДЛЯ КОНТЕКСТА
 # ============================================================
 ROLE_IDS = CONFIG.get("ROLE_IDS", {})
 
@@ -270,6 +584,20 @@ ROLE_PRIORITY = [
 ]
 
 
+def _role_label_from_member(member: Optional[disnake.Member]) -> Optional[str]:
+    if member is None:
+        return None
+    try:
+        member_role_ids = {r.id for r in member.roles}
+    except Exception:
+        return None
+    for key, label in ROLE_PRIORITY:
+        rid = ROLE_IDS.get(key)
+        if rid and rid in member_role_ids:
+            return label
+    return None
+
+
 def _role_key_for_reviews(reviews: int) -> str:
     if reviews >= 26:  return "pka"
     if reviews >= 21:  return "crystalis"
@@ -280,22 +608,7 @@ def _role_key_for_reviews(reviews: int) -> str:
     return "none"
 
 
-def _role_label_from_member(member: Optional[disnake.Member]) -> Optional[str]:
-    if member is None:
-        return None
-    try:
-        member_role_ids = {r.id for r in member.roles}
-    except Exception:
-        return None
-
-    for key, label in ROLE_PRIORITY:
-        rid = ROLE_IDS.get(key)
-        if rid and rid in member_role_ids:
-            return label
-    return None
-
-
-def build_user_data(user_id: int, member: Optional[disnake.Member]) -> str:
+def build_user_block(user_id: int, member: Optional[disnake.Member]) -> str:
     try:
         data = get_dc_cache(user_id)
         balance = data.get("balance", 0)
@@ -312,148 +625,597 @@ def build_user_data(user_id: int, member: Optional[disnake.Member]) -> str:
     if role_from_discord:
         role_label = role_from_discord
     else:
-        role_key = _role_key_for_reviews(reviews)
-        if role_key == "none":
-            role_label = "нет роли покупателя"
-        else:
-            role_label = dict(ROLE_PRIORITY).get(role_key, "—")
+        rk = _role_key_for_reviews(reviews)
+        role_label = "нет роли покупателя" if rk == "none" else dict(ROLE_PRIORITY).get(rk, "—")
 
-    clan_name = "—"
-    clan_contrib = 0
-    clan_rank = "—"
-    if _CLAN_OK:
-        try:
-            clan = get_user_clan(user_id)
-            if clan:
-                clan_name = clan["name"]
-                clan_contrib = get_user_contribution(user_id) or 0
+    lines = [
+        "личные данные пользователя:",
+        f"- баланс: {balance} dc",
+        f"- отзывов: {reviews}",
+        f"- текущая роль: {role_label}",
+    ]
+
+    try:
+        from clan.core import get_user_clan, get_user_contribution, get_clan_top
+        clan = get_user_clan(user_id)
+        if clan:
+            contrib = get_user_contribution(user_id) or 0
+            my_rank = None
+            try:
                 top = get_clan_top(clan["id"], limit=1000)
                 for i, t in enumerate(top, 1):
                     if t["user_id"] == user_id:
-                        clan_rank = f"#{i}"
+                        my_rank = i
                         break
-        except Exception as e:
-            logger.warning(f"build_user_data clan: {e}")
+            except Exception:
+                pass
+            lines.append(f"- клан: {clan['name']}")
+            lines.append(f"- вклад за сезон: {contrib} dc")
+            if my_rank:
+                lines.append(f"- место в топе клана: #{my_rank}")
+        else:
+            lines.append("- клан: без клана")
+    except Exception:
+        lines.append("- клан: —")
 
-    lines = [
-        "личные данные пользователя (актуальные):",
-        f"- баланс: {balance} dc",
-        f"- отзывов оставлено: {reviews}",
-        f"- текущая роль покупателя: {role_label}",
-        f"- клан: {clan_name}",
-    ]
-    if clan_name != "—":
-        lines.append(f"- вклад за сезон: {clan_contrib} dc")
-        lines.append(f"- место в топе клана: {clan_rank}")
+    try:
+        from modules.dc import get_daily_gift_status
+        status = get_daily_gift_status(user_id)
+        if status["ready"]:
+            lines.append("- ежедневный подарок: готов к получению")
+        else:
+            left = max(status["next_ts"] - int(time.time()), 0)
+            h = left // 3600
+            m = (left % 3600) // 60
+            lines.append(f"- ежедневный подарок: через {h}ч {m}м")
+    except Exception:
+        pass
+
+    try:
+        row = cur.execute("SELECT purchases FROM dc_cache WHERE user_id=?", (user_id,)).fetchone()
+        if row and row["purchases"]:
+            plist = json.loads(row["purchases"])
+            unused = [p for p in plist if not p.get("used")]
+            if unused:
+                lines.append(f"- неиспользованных покупок: {len(unused)}")
+    except Exception:
+        pass
 
     return "\n".join(lines)
 
 
-def build_shop_data() -> str:
+def build_shop_block() -> str:
     try:
+        from modules.dc import load_shop_catalog
         catalog = load_shop_catalog()
+        lines = ["цены в dc-магазине:"]
+        for key, label in [("discounts", "скидки"), ("roles", "роли"),
+                            ("design", "дизайн"), ("boosts", "бусты"),
+                            ("casino", "казино"), ("gifts", "подарки")]:
+            if key in catalog:
+                items = catalog[key].get("items", {})
+                prices = [it["price"] for it in items.values() if it.get("price")]
+                if prices:
+                    lines.append(f"- {label}: от {min(prices)} до {max(prices)} dc")
+        return "\n".join(lines) if len(lines) > 1 else ""
     except Exception:
         return ""
 
-    lines = ["краткая справка по ценам в dc-магазине:"]
 
-    for key, label in [("discounts", "скидки"), ("roles", "роли"),
-                       ("design", "дизайн"), ("boosts", "бусты"),
-                       ("ads", "реклама")]:
-        if key in catalog:
-            items = catalog[key].get("items", {})
-            prices = [it["price"] for it in items.values() if it.get("price")]
-            if prices:
-                lines.append(f"- {label}: от {min(prices)} до {max(prices)} dc")
-
-    return "\n".join(lines)
-
-
-def build_clan_data() -> str:
-    if not _CLAN_OK:
-        return ""
+def build_active_block() -> str:
+    lines = []
     try:
-        cycle = get_current_cycle()
-        if not cycle:
-            return "клан-лига: сезон не запущен"
-        title = get_season_title(cycle["number"])
-        lines = [f"клан-лига сейчас: {title}"]
-        for c in get_all_clans():
+        from modules.actions import refresh_daily_deal
+        deal = refresh_daily_deal()
+        if deal:
+            item = deal.get("item_data", {})
+            lines.append(
+                f"- акция дня: скидка {deal.get('discount', 0)}% на «{item.get('name', '—')}», "
+                f"цена {deal.get('new_price', 0)} dc (обычно {deal.get('original_price', 0)})"
+            )
+    except Exception:
+        pass
+
+    try:
+        rows = cur.execute(
+            "SELECT giveaway_id, prize, end_time, participants FROM giveaways "
+            "WHERE status='active' AND end_time > ? ORDER BY end_time LIMIT 3",
+            (int(time.time()),),
+        ).fetchall()
+        for r in rows:
             try:
-                bank = get_clan_bank(c["id"])
-                lines.append(f"- {c['name']}: банк {bank} dc")
+                n = len(json.loads(r["participants"] or "[]"))
             except Exception:
-                pass
-        return "\n".join(lines)
-    except Exception as e:
-        logger.warning(f"build_clan_data: {e}")
+                n = 0
+            lines.append(f"- розыгрыш #{r['giveaway_id']}: {r['prize']}, участников {n}, до <t:{r['end_time']}:R>")
+    except Exception:
+        pass
+
+    if not lines:
         return ""
+    return "активное на сервере:\n" + "\n".join(lines)
+
+
+def build_memory_block(user_id: int) -> str:
+    mem = memory_get(user_id)
+    if not mem:
+        return ""
+    parts = []
+
+    last_ts = mem.get("last_seen") or 0
+    if last_ts and int(time.time()) - last_ts > 3 * 86400:
+        last_topic = mem.get("last_topic")
+        if last_topic:
+            parts.append(f"- юзер давно не писал, в прошлый раз интересовался: {last_topic}")
+
+    facts_raw = mem.get("facts_json")
+    if facts_raw:
+        try:
+            facts = json.loads(facts_raw)
+            if isinstance(facts, list):
+                for f in facts[:5]:
+                    parts.append(f"- {f}")
+        except Exception:
+            pass
+
+    if not parts:
+        return ""
+    return "память о юзере:\n" + "\n".join(parts)
 
 
 def build_context_block(user_id: int, member: Optional[disnake.Member]) -> str:
-    parts = []
-    user_block = build_user_data(user_id, member)
-    if user_block:
-        parts.append(user_block)
-    shop_block = build_shop_data()
-    if shop_block:
-        parts.append(shop_block)
-    if random.random() < 0.3:
-        clan_block = build_clan_data()
-        if clan_block:
-            parts.append(clan_block)
+    parts = [build_user_block(user_id, member)]
+    shop = build_shop_block()
+    if shop:
+        parts.append(shop)
+    active = build_active_block()
+    if active:
+        parts.append(active)
+    mem = build_memory_block(user_id)
+    if mem:
+        parts.append(mem)
     return "\n\n[данные]\n" + "\n\n".join(parts) + "\n[/данные]\n"
 
 
 # ============================================================
-# ФИЛЬТР ТЕХНИЧЕСКИХ ЗАПРОСОВ
+# FUNCTION CALLING
 # ============================================================
-FORBIDDEN_PATTERNS = [
-    r"(напиши|сделай|создай|помоги с|нужен|нужна)\s+(код|скрипт|программ|функци|бот)",
-    r"(как|где|что)\s+(написать|создать|сделать)\s+(код|скрипт|программ)",
-    r"(дай|покажи|скинь)\s+(код|скрипт|парол|токен|конфиг|ключ)",
-    r"(ssh|paramiko|деплой|администр|системный администратор|парсить сайт)",
-    r"(парол|токен|ключ|логин)\s+(от|для|к)\s+(сервер|баз|бот|аккаунт)",
+TOOLS_DECLARATIONS = [
+    {
+        "name": "show_profile",
+        "description": "Показать карточку профиля юзера (баланс, отзывы, роль, клан)",
+        "parameters": {"type": "OBJECT", "properties": {}},
+    },
+    {
+        "name": "claim_daily_gift",
+        "description": "Забрать ежедневный подарок. Если кулдаун не прошёл — вернёт ошибку.",
+        "parameters": {"type": "OBJECT", "properties": {}},
+    },
+    {
+        "name": "buy_case",
+        "description": (
+            "Открыть кейс за DC. Номера: "
+            "1 — Попробуй удачу (100 DC), 2 — Быстрый куш (300 DC), "
+            "3 — Серьёзный куш (500 DC), 4 — Королевский куш (1000 DC), "
+            "5 — Мифический куш (2000 DC)."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "case_num": {"type": "INTEGER", "description": "Номер кейса 1–5"},
+            },
+            "required": ["case_num"],
+        },
+    },
 ]
 
-SAFE_WORDS = [
+
+async def tool_show_profile(message: disnake.Message) -> str:
+    try:
+        from modules.profile_card import generate_profile_card
+        from modules.commands_profile import _role_info
+        user = message.author
+        if not isinstance(user, disnake.Member):
+            return "ошибка: не могу получить участника"
+
+        counts = load_json(FILES["review_counts"], {})
+        rc = counts.get(str(user.id), 0)
+        role_key, _ = _role_info(rc)
+        dc = get_dc_cache(user.id)
+        balance = dc.get("balance", 0)
+        history = list(reversed((dc.get("history") or [])[-5:]))
+
+        avatar_bytes = None
+        try:
+            avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
+        except Exception:
+            pass
+
+        buf = await asyncio.to_thread(
+            generate_profile_card,
+            user.display_name, user.id, avatar_bytes,
+            role_key, rc, balance, user.joined_at, history,
+        )
+        fname = f"profile_{user.id}_{int(time.time())}.png"
+        file = disnake.File(buf, filename=fname)
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{fname}")
+        await message.channel.send(embed=embed, file=file)
+        return "профиль отправил в чат"
+    except Exception as e:
+        logger.exception(f"tool_show_profile: {e}")
+        return f"не получилось: {str(e)[:100]}"
+
+
+async def tool_claim_daily_gift(user_id: int) -> str:
+    try:
+        from modules.dc import claim_daily_gift
+        result = await claim_daily_gift(user_id)
+        if result.get("ok"):
+            return f"подарок забран: +{result['amount']} DC"
+        left = max(result.get("next_ts", 0) - int(time.time()), 0)
+        h = left // 3600
+        m = (left % 3600) // 60
+        return f"кулдаун подарка — ждать {h}ч {m}м"
+    except Exception as e:
+        logger.exception(f"tool_claim_daily_gift: {e}")
+        return f"ошибка: {str(e)[:100]}"
+
+
+async def tool_buy_case(user_id: int, case_num: int) -> str:
+    try:
+        from bonus.core import open_case, CASES_BY_NUM
+        case = CASES_BY_NUM.get(case_num)
+        if not case:
+            return f"кейс {case_num} не существует"
+        result = await open_case(bot, user_id, case_num)
+        if result["ok"]:
+            return f"кейс открыт, выпало: {result['desc']}"
+        return f"не получилось: {result.get('error', 'ошибка')}"
+    except Exception as e:
+        logger.exception(f"tool_buy_case: {e}")
+        return f"ошибка: {str(e)[:100]}"
+
+
+async def execute_tool(message: disnake.Message, name: str, args: dict) -> str:
+    if name == "show_profile":
+        return await tool_show_profile(message)
+    if name == "claim_daily_gift":
+        return await tool_claim_daily_gift(message.author.id)
+    if name == "buy_case":
+        try:
+            return await tool_buy_case(message.author.id, int(args.get("case_num", 0)))
+        except Exception:
+            return "не понял номер кейса"
+    return f"неизвестная функция: {name}"
+
+
+# ============================================================
+# A1 / A2 — БЫСТРЫЕ ТРИГГЕРЫ БЕЗ LLM
+# ============================================================
+PROFILE_TRIGGERS = [
+    "покажи профиль", "мой профиль", "скинь профиль", "карточка профиля",
+    "моя карточка", "покажи карточку", "мой баланс", "сколько у меня",
+]
+GIFT_TRIGGERS = [
+    "забери подарок", "получить подарок", "дай подарок", "забрать подарок",
+    "получи подарок", "забери мне подарок",
+]
+PURCHASES_TRIGGERS = [
+    "мои покупки", "мой инвентарь", "что я купил", "мои товары",
+    "список покупок", "неиспользованные покупки",
+]
+DIGEST_TRIGGERS = [
+    "что нового", "что у вас там", "дайджест", "что нового на сервере",
+    "что происходит", "новости магазина", "чё нового", "че нового",
+    "новости",
+]
+ABOUT_TRIGGERS = [
+    "ты кто", "кто ты", "что ты умеешь", "что умеешь", "ты кто такой",
+    "расскажи о себе",
+]
+
+
+def _match_any(text: str, patterns: List[str]) -> bool:
+    t = _normalize_text(text)
+    for p in patterns:
+        if p in t:
+            return True
+    return False
+
+
+async def quick_action(message: disnake.Message, text: str) -> Optional[str]:
+    """Быстрые триггеры без LLM. Возвращает текст ответа или None."""
+    user_id = message.author.id
+
+    # Профиль
+    if _match_any(text, PROFILE_TRIGGERS):
+        result = await tool_show_profile(message)
+        if result.startswith("профиль"):
+            return None  # уже отправили
+        return result
+
+    # Подарок
+    if _match_any(text, GIFT_TRIGGERS):
+        return await tool_claim_daily_gift(user_id)
+
+    # Кейс
+    m = re.search(r"кейс[аеуы\s]+(\d)", _normalize_text(text))
+    if m:
+        try:
+            return await tool_buy_case(user_id, int(m.group(1)))
+        except Exception:
+            pass
+
+    # Покупки
+    if _match_any(text, PURCHASES_TRIGGERS):
+        return await build_purchases_reply(user_id)
+
+    # Дайджест
+    if _match_any(text, DIGEST_TRIGGERS):
+        return await build_digest_reply(user_id)
+
+    # О себе
+    if _match_any(text, ABOUT_TRIGGERS):
+        return (
+            "я diamond ai, консультант магазина. умею рассказать про товары, роли, dc, "
+            "клан, казино. могу показать твой профиль, забрать подарок, открыть кейс, "
+            "найти что-то в каталоге. спрашивай."
+        )
+
+    return None
+
+
+async def build_purchases_reply(user_id: int) -> str:
+    try:
+        from modules.dc import get_user_purchases
+        purchases = await get_user_purchases(user_id, only_unused=True)
+        purchases = [p for p in purchases if p.get("type") != "discounts"]
+        if not purchases:
+            return "у тебя нет неиспользованных покупок — всё оформлено."
+        lines = [f"у тебя {len(purchases)} неиспользованных:"]
+        for p in purchases[:5]:
+            lines.append(f"• {p.get('value', '—')} · {p.get('type', '')}")
+        if len(purchases) > 5:
+            lines.append(f"…и ещё {len(purchases) - 5}")
+        lines.append("\nоформить можно в тикете через панель магазина.")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"build_purchases_reply: {e}")
+        return "не смог получить список покупок."
+
+
+async def build_digest_reply(user_id: int) -> str:
+    parts = []
+
+    # Акция дня
+    try:
+        from modules.actions import refresh_daily_deal
+        deal = refresh_daily_deal()
+        if deal:
+            item = deal.get("item_data", {})
+            parts.append(
+                f"💎 акция дня: скидка {deal.get('discount', 0)}% на «{item.get('name', '—')}» "
+                f"→ {deal.get('new_price', 0)} DC"
+            )
+    except Exception:
+        pass
+
+    # Розыгрыш
+    try:
+        row = cur.execute(
+            "SELECT giveaway_id, prize, end_time, participants FROM giveaways "
+            "WHERE status='active' AND end_time > ? ORDER BY end_time LIMIT 1",
+            (int(time.time()),),
+        ).fetchone()
+        if row:
+            try:
+                n = len(json.loads(row["participants"] or "[]"))
+            except Exception:
+                n = 0
+            parts.append(f"🎉 розыгрыш: {row['prize']} · {n} участников · до <t:{row['end_time']}:R>")
+    except Exception:
+        pass
+
+    # Топ-кейс недели
+    try:
+        row = cur.execute(
+            "SELECT prize_desc FROM bonus_case_opens "
+            "WHERE prize_type='dc' AND opened_at > ? "
+            "ORDER BY CAST(json_extract(prize_value, '$.value') AS INTEGER) DESC LIMIT 1",
+            (int(time.time()) - 7 * 86400,),
+        ).fetchone()
+        if row:
+            parts.append(f"🎰 топ-кейс недели: {row['prize_desc']}")
+    except Exception:
+        pass
+
+    # Подарок
+    try:
+        from modules.dc import get_daily_gift_status
+        st = get_daily_gift_status(user_id)
+        if st["ready"]:
+            parts.append("🎁 у тебя не забран подарок — можно забрать прямо сейчас")
+        else:
+            left = max(st["next_ts"] - int(time.time()), 0)
+            h = left // 3600
+            m = (left % 3600) // 60
+            parts.append(f"🎁 подарок через {h}ч {m}м")
+    except Exception:
+        pass
+
+    # Покупки
+    try:
+        purchases = await build_purchases_reply(user_id)
+        if "неиспользованн" in purchases:
+            parts.append("📦 " + purchases.split("\n")[0])
+    except Exception:
+        pass
+
+    if not parts:
+        return "сейчас всё тихо — ничего нового."
+
+    header = "💠 свежее на сервере:"
+    return header + "\n" + "\n".join(parts)
+
+
+# ============================================================
+# A4 — ПОИСК В КАТАЛОГЕ
+# ============================================================
+def search_catalog(query: str) -> List[Dict]:
+    """Ищет совпадения по названию/описанию в shop_catalog.json."""
+    try:
+        from modules.dc import load_shop_catalog
+        catalog = load_shop_catalog()
+    except Exception:
+        return []
+
+    q = _normalize_text(query)
+    if len(q) < 2:
+        return []
+
+    results = []
+    for cat_key, cat in catalog.items():
+        for item_key, item in (cat.get("items") or {}).items():
+            name = (item.get("name") or "").lower()
+            desc = (item.get("description") or "").lower()
+            if q in name or q in desc or q in item_key.lower():
+                results.append({
+                    "cat": cat_key,
+                    "cat_label": cat.get("label", cat_key),
+                    "name": item.get("name", item_key),
+                    "price": item.get("price", 0),
+                    "description": item.get("description", ""),
+                })
+    return results[:5]
+
+
+def build_catalog_search_reply(text: str) -> Optional[str]:
+    """Если юзер спросил «есть ли X» — ищем в каталоге."""
+    t = _normalize_text(text)
+    markers = ["есть ли", "есть ", "продаете", "продаёте", "можно купить", "можно ли купить",
+               "ищу", "нужен", "нужна", "интересует", "хочу купить", "продается", "продаётся"]
+    if not any(m in t for m in markers):
+        return None
+
+    # Отрезаем маркеры
+    for m in markers:
+        t = t.replace(m, " ")
+    words = [w for w in t.split() if len(w) >= 3]
+    if not words:
+        return None
+
+    found = search_catalog(" ".join(words))
+    if not found:
+        return None
+
+    lines = ["да, есть:"]
+    for r in found[:3]:
+        lines.append(f"• **{r['name']}** — {r['price']} DC · {r['cat_label']}")
+    lines.append("\nоформляется в тикете через панель магазина.")
+    return "\n".join(lines)
+
+
+# ============================================================
+# E5 — КЛАССИФИКАТОР ТЕМЫ
+# ============================================================
+SHOP_KEYWORDS = [
     "магазин", "покупк", "diamond", "даймонд", "dc", "роль", "оплат",
-    "промокод", "тикет", "отзыв", "клан", "казино", "бонус",
+    "промокод", "тикет", "отзыв", "клан", "казино", "бонус", "кейс",
+    "скидк", "акци", "розыгрыш", "нитро", "nitro", "steam", "roblox",
+    "spotify", "телеграм", "telegram", "робукс", "буст", "подарок",
+    "баланс", "профиль", "кланов", "лига", "сезон", "адвайтер",
+    "реферал", "инвайт", "ставк", "рулетк", "блэкджек", "монетк",
+    "хочу купить", "есть ли", "продаете", "продаёте", "цена", "стоит",
+    "подскажи", "помоги с", "можешь", "сколько",
 ]
 
 
-def is_technical_request(text: str) -> bool:
+def has_shop_keywords(text: str) -> bool:
     t = text.lower()
-    if any(w in t for w in SAFE_WORDS):
-        return False
-    return any(re.search(p, t) for p in FORBIDDEN_PATTERNS)
+    return any(k in t for k in SHOP_KEYWORDS)
+
+
+async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
+    """LLM-классификатор: относится ли сообщение к магазину. Кеш 10 мин."""
+    if has_shop_keywords(text):
+        return True
+
+    cache_key = hashlib.md5(text[:200].encode("utf-8")).hexdigest()
+    cached = _TOPIC_CACHE.get(cache_key)
+    if cached and time.time() - cached[1] < _TOPIC_CACHE_TTL:
+        return cached[0]
+
+    try:
+        url = f"{GEMINI_API_BASE}/gemini-flash-latest:generateContent"
+        headers = {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY}
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": (
+                    "относится ли это сообщение к магазину diamond shop "
+                    "(товары, dc-валюта, роли, кейсы, казино, клан, тикеты)? "
+                    "ответь одним словом: да или нет.\n\n"
+                    f"сообщение: {text[:300]}"
+                )}],
+            }],
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 10},
+        }
+        async with session.post(url, json=payload, headers=headers,
+                                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                return True  # fallback — пропускаем
+            data = await resp.json()
+            parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            if not parts:
+                return True
+            answer = parts[0].get("text", "").strip().lower()
+            result = answer.startswith("да") or answer.startswith("yes")
+            _TOPIC_CACHE[cache_key] = (result, time.time())
+            return result
+    except Exception as e:
+        logger.warning(f"is_on_topic: {e}")
+        return True  # при ошибке не блокируем
 
 
 # ============================================================
-# НАСТРОЕНИЕ / СТИЛЬ
+# АНТИ-ГАЛЛЮЦИНАЦИИ
 # ============================================================
-def detect_mood(text: str) -> str:
-    t = text.lower()
-    pos = sum(1 for w in ["спс", "спасибо", "класс", "супер", "круто", "топ", "кайф", "люблю"] if w in t)
-    neg = sum(1 for w in ["хрен", "фигня", "ужас", "кошмар", "бесит", "достал", "тупой", "плохо"] if w in t)
-    if pos > neg: return "positive"
-    if neg > pos: return "negative"
-    return "neutral"
+_VALID_CHANNEL_IDS = set()
+_VALID_ROLE_IDS = set()
 
 
-def choose_style(mood: str, text: str) -> str:
-    t = text.lower()
-    if any(w in t for w in ["цена", "стоит", "купить", "оплатить", "заказать", "сколько"]):
-        return "business"
-    if mood == "positive":
-        return "friendly"
-    if mood == "negative":
-        return "default"
-    return random.choice(["friendly", "default", "ironic"])
+def _build_valid_id_sets():
+    global _VALID_CHANNEL_IDS, _VALID_ROLE_IDS
+    for k, v in CONFIG.items():
+        if isinstance(v, int) and v > 1000000:
+            _VALID_CHANNEL_IDS.add(v)
+    _VALID_ROLE_IDS = {v for v in (CONFIG.get("ROLE_IDS") or {}).values() if isinstance(v, int)}
+
+
+_build_valid_id_sets()
+
+
+def sanitize_response(text: str) -> str:
+    def _fix_channel(m):
+        try:
+            cid = int(m.group(1))
+            return m.group(0) if cid in _VALID_CHANNEL_IDS else ""
+        except Exception:
+            return m.group(0)
+    def _fix_role(m):
+        try:
+            rid = int(m.group(1))
+            return m.group(0) if rid in _VALID_ROLE_IDS else ""
+        except Exception:
+            return m.group(0)
+    text = re.sub(r"<#(\d+)>", _fix_channel, text)
+    text = re.sub(r"<@&(\d+)>", _fix_role, text)
+    return text
 
 
 # ============================================================
-# СПИСОК МОДЕЛЕЙ — ДИНАМИЧЕСКИЙ
+# LLM
 # ============================================================
 async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
     global _AVAILABLE_MODELS, _AVAILABLE_MODELS_FETCHED_AT
@@ -463,16 +1225,11 @@ async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
 
     url = GEMINI_API_BASE
     headers = {"X-goog-api-key": GEMINI_API_KEY}
-
     try:
-        async with session.get(
-            url, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as resp:
+        async with session.get(url, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
-                logger.warning(f"listModels {resp.status}")
                 return _AVAILABLE_MODELS
-
             data = await resp.json()
             models = []
             for m in data.get("models", []):
@@ -480,18 +1237,13 @@ async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
                 if not name.startswith("models/"):
                     continue
                 short = name[len("models/"):]
-
-                methods = m.get("supportedGenerationMethods", [])
-                if "generateContent" not in methods:
+                if "generateContent" not in m.get("supportedGenerationMethods", []):
                     continue
-
                 n_low = short.lower()
                 if "flash" not in n_low:
                     continue
-                # отсеиваем image/tts/omni — они не для текста
                 if any(x in n_low for x in ("image", "tts", "omni")):
                     continue
-
                 models.append(short)
 
             def sort_key(n):
@@ -509,190 +1261,322 @@ async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
                 return score
 
             models.sort(key=sort_key)
-
             _AVAILABLE_MODELS = models
             _AVAILABLE_MODELS_FETCHED_AT = now
-            logger.info(
-                f"gemini listModels: найдено {len(models)} моделей. "
-                f"топ-3: {models[:3]}"
-            )
             return models
-
     except Exception as e:
-        logger.warning(f"listModels err: {e}")
+        logger.warning(f"listModels: {e}")
         return _AVAILABLE_MODELS
 
 
-# ============================================================
-# LLM (Gemini — нативный endpoint)
-# ============================================================
-def _build_gemini_payload(system_content: str, history: List[Dict[str, str]],
-                          user_message: str) -> dict:
-    contents = []
-
-    for msg in history[-MAX_USER_HISTORY:]:
-        role = "user" if msg["role"] == "user" else "model"
-        contents.append({
-            "role": role,
-            "parts": [{"text": msg["content"]}],
-        })
-
-    contents.append({
-        "role": "user",
-        "parts": [{"text": user_message}],
-    })
-
-    return {
-        "systemInstruction": {
-            "parts": [{"text": system_content}],
-        },
+def _build_payload(system_content: str,
+                   contents: List[dict],
+                   use_tools: bool = True) -> dict:
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_content}]},
         "contents": contents,
         "generationConfig": {
-            "temperature": 0.7,           # чуть ниже — собраннее
+            "temperature": 0.7,
             "maxOutputTokens": MAX_OUTPUT_TOKENS,
         },
     }
+    if use_tools:
+        payload["tools"] = [{"function_declarations": TOOLS_DECLARATIONS}]
+    return payload
 
 
-async def _try_model(session: aiohttp.ClientSession, model: str,
-                     payload: dict) -> tuple[bool, str, int, str]:
-    """
-    Возвращает (успех, ответ_или_ошибка, http_status, finish_reason).
-    """
+async def _try_model(session: aiohttp.ClientSession, model: str, payload: dict) -> Tuple[bool, dict, int]:
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
-    headers = {
-        "Content-Type": "application/json",
-        "X-goog-api-key": GEMINI_API_KEY,
-    }
-
+    headers = {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY}
     try:
-        async with session.post(
-            url, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=90),
-        ) as resp:
+        async with session.post(url, json=payload, headers=headers,
+                                 timeout=aiohttp.ClientTimeout(total=90)) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 if "error" in data:
-                    err_msg = data["error"].get("message", "unknown")
-                    logger.warning(f"[{model}] gemini error: {err_msg}")
-                    return False, err_msg, 200, ""
-
-                try:
-                    candidates = data.get("candidates", [])
-                    if not candidates:
-                        return False, "no candidates", 200, ""
-                    cand0 = candidates[0]
-                    finish = cand0.get("finishReason", "")
-                    parts = cand0.get("content", {}).get("parts", [])
-                    if not parts:
-                        logger.warning(f"[{model}] empty parts, finish={finish}")
-                        return False, f"empty, finish={finish}", 200, finish
-                    reply = "".join(p.get("text", "") for p in parts).strip()
-                except Exception as e:
-                    logger.warning(f"[{model}] parse error: {e}")
-                    return False, "parse error", -1, ""
-
-                if not reply:
-                    return False, "empty reply", 200, finish
-                return True, reply, 200, finish
-
+                    return False, {"error": data["error"].get("message", "unknown")}, 200
+                cands = data.get("candidates", [])
+                if not cands:
+                    return False, {"error": "no candidates"}, 200
+                parts = cands[0].get("content", {}).get("parts", [])
+                if not parts:
+                    return False, {"error": "empty parts"}, 200
+                text_parts = []
+                fcs = []
+                for p in parts:
+                    if "text" in p:
+                        text_parts.append(p["text"])
+                    if "functionCall" in p:
+                        fc = p["functionCall"]
+                        fcs.append({"name": fc.get("name", ""), "args": fc.get("args", {})})
+                return True, {"text": "".join(text_parts).strip(), "function_calls": fcs}, 200
             err = await resp.text()
             logger.warning(f"[{model}] {resp.status}: {err[:200]}")
-            return False, f"http {resp.status}", resp.status, ""
-
+            return False, {"error": f"http {resp.status}"}, resp.status
     except asyncio.TimeoutError:
-        logger.warning(f"[{model}] timeout")
-        return False, "timeout", -1, ""
+        return False, {"error": "timeout"}, -1
     except Exception as e:
-        logger.warning(f"[{model}] {type(e).__name__}: {e}")
-        return False, str(e), -1, ""
+        return False, {"error": str(e)}, -1
 
 
-async def ask_llm(user_message: str, username: str, style: str,
-                  user_id: int, context_block: str) -> str:
+async def ask_llm(message: disnake.Message,
+                  user_message: str,
+                  system_content: str,
+                  user_id: int) -> Tuple[str, str]:
+    """Возвращает (текст, статус). Может выполнять функции."""
     if not GEMINI_API_KEY:
-        return "прости, мой мозг сейчас отключён. попробуй позже."
-
-    style_extra = MOOD_PROMPTS.get(style, "")
-    system_content = SYSTEM_PROMPT + style_extra + "\n\n" + context_block
+        return ERROR_PHRASES["no_api"], "no_api"
 
     history = user_ctx.get(user_id, [])
-    payload = _build_gemini_payload(
-        system_content=system_content,
-        history=history,
-        user_message=f"{username}: {user_message}",
-    )
+    contents = []
+    for msg in history[-MAX_USER_HISTORY:]:
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": user_message}]})
 
     async with aiohttp.ClientSession() as session:
-        models_to_try: List[str] = []
+        models_to_try = []
         seen = set()
-
         for m in GEMINI_MODELS_PRIORITY:
             if m not in seen:
                 seen.add(m)
                 models_to_try.append(m)
-
-        dynamic = await _fetch_available_models(session)
-        for m in dynamic:
+        for m in await _fetch_available_models(session):
             if m not in seen:
                 seen.add(m)
                 models_to_try.append(m)
-
         models_to_try = models_to_try[:6]
 
         if not models_to_try:
-            logger.error("нет доступных моделей Gemini")
-            return "сейчас мой провайдер лежит. попробуй через минуту."
+            return ERROR_PHRASES["no_model"], "no_model"
 
-        attempt_503 = False
-        for model in models_to_try:
-            ok, result, status, finish = await _try_model(session, model, payload)
+        payload = _build_payload(system_content, contents, use_tools=True)
 
-            if ok:
-                # Логируем finishReason — важно знать, обрезал ли по лимиту
-                if finish and finish.upper() not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
-                    logger.warning(
-                        f"[{model}] ответ получен, но finishReason={finish} "
-                        f"(len={len(result)})"
-                    )
-                else:
-                    logger.info(f"[ai] ответ получен от {model} (len={len(result)})")
+        for _ in range(3):
+            response = None
+            for model in models_to_try:
+                ok, res, status = await _try_model(session, model, payload)
+                if ok:
+                    response = res
+                    break
+                if status == 503:
+                    await asyncio.sleep(2)
+                    ok2, res2, _ = await _try_model(session, model, payload)
+                    if ok2:
+                        response = res2
+                        break
+                await asyncio.sleep(0.3)
 
-                _push_user(user_id, "user", f"{username}: {user_message}")
-                _push_user(user_id, "assistant", result)
-                return result
+            if response is None:
+                return ERROR_PHRASES["no_model"], "no_model"
 
-            if status == 503 and not attempt_503:
-                attempt_503 = True
-                logger.info(f"[{model}] 503 — повтор через 2с")
-                await asyncio.sleep(2)
-                ok2, result2, status2, finish2 = await _try_model(session, model, payload)
-                if ok2:
-                    logger.info(f"[ai] ответ получен от {model} (после 503-ретрая, len={len(result2)})")
-                    _push_user(user_id, "user", f"{username}: {user_message}")
-                    _push_user(user_id, "assistant", result2)
-                    return result2
+            fcs = response.get("function_calls", [])
+            text = response.get("text", "")
 
-            if status == 404:
-                global _AVAILABLE_MODELS
-                if model in _AVAILABLE_MODELS:
-                    _AVAILABLE_MODELS = [m for m in _AVAILABLE_MODELS if m != model]
-                    logger.info(f"[{model}] выкинул из кэша (404)")
+            if not fcs:
+                if not text:
+                    return ERROR_PHRASES["empty"], "empty"
+                _push_user(user_id, "user", user_message)
+                _push_user(user_id, "assistant", text)
+                return text, "ok"
 
-            await asyncio.sleep(0.3)
+            contents.append({
+                "role": "model",
+                "parts": [{"functionCall": {"name": fc["name"], "args": fc["args"]}} for fc in fcs],
+            })
 
-    logger.error("все модели Gemini недоступны (все попытки исчерпаны)")
-    return "сейчас все мои мозги перегружены. попробуй через минуту."
+            tool_results = []
+            for fc in fcs:
+                result = await execute_tool(message, fc["name"], fc.get("args", {}))
+                tool_results.append({
+                    "functionResponse": {
+                        "name": fc["name"],
+                        "response": {"result": result},
+                    }
+                })
+
+            contents.append({"role": "user", "parts": tool_results})
+            payload = _build_payload(system_content, contents, use_tools=True)
+
+        return (text or ERROR_PHRASES["parse"]), ("ok" if text else "parse")
+
+
+# ============================================================
+# B3 — УМНЫЙ RETRY
+# ============================================================
+def is_unknown_reply(text: str) -> bool:
+    if not text:
+        return False
+    t = text.lower()
+    markers = ["не знаю", "не могу", "уточни у менеджера", "уточни", "не уверен", "затрудняюсь"]
+    return any(m in t for m in markers)
+
+
+async def ask_llm_smart(message: disnake.Message,
+                        user_message: str,
+                        system_content: str,
+                        user_id: int) -> Tuple[str, str]:
+    """Обычный запрос + при «не знаю» — второй проход с усиленным промптом."""
+    reply, status = await ask_llm(message, user_message, system_content, user_id)
+    if status == "ok" and is_unknown_reply(reply):
+        # Второй проход с усиленным промптом
+        extra = (
+            "\n\n🔴 ОТВЕЧАЙ ИСПОЛЬЗУЯ ТОЛЬКО ДАННЫЕ ИЗ [данные]. "
+            "если в них есть ответ — дай его. НЕ отказывайся, не отвечай «не знаю», "
+            "если есть хоть какая-то релевантная информация."
+        )
+        reply2, status2 = await ask_llm(
+            message, user_message,
+            system_content + extra,
+            user_id,
+        )
+        if status2 == "ok" and not is_unknown_reply(reply2):
+            return reply2, status2
+    return reply, status
+
+
+# ============================================================
+# E5 классификация + E3 разные каналы
+# ============================================================
+TICKET_CATEGORIES = {
+    CONFIG.get("TICKET_CATEGORY_ID"),
+    CONFIG.get("PAID_CATEGORY_ID"),
+    CONFIG.get("COINS_CATEGORY_ID"),
+}
+
+
+def is_ticket_channel(channel: disnake.TextChannel) -> bool:
+    try:
+        if channel.category and channel.category.id in TICKET_CATEGORIES:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def handle_ticket_mention(message: disnake.Message) -> bool:
+    """D5: AI в тикете при @упоминании — саммари заказа."""
+    try:
+        row = cur.execute(
+            "SELECT user_id, category_id FROM ticket_owners WHERE channel_id=?",
+            (message.channel.id,),
+        ).fetchone()
+        if not row:
+            return False
+
+        owner_id = row["user_id"]
+        manager_row = cur.execute(
+            "SELECT manager_id FROM ticket_managers WHERE channel_id=?",
+            (message.channel.id,),
+        ).fetchone()
+        manager_id = manager_row["manager_id"] if manager_row else None
+
+        # Возраст
+        try:
+            created_at = message.channel.created_at
+            delta = datetime.now(timezone.utc) - created_at
+            hours = int(delta.total_seconds() // 3600)
+            mins = int((delta.total_seconds() % 3600) // 60)
+            age = f"{hours}ч {mins}м" if hours else f"{mins}м"
+        except Exception:
+            age = "—"
+
+        # Категория
+        cat_id = row["category_id"]
+        if cat_id == CONFIG.get("TICKET_CATEGORY_ID"):
+            cat_name = "Реальные деньги"
+        elif cat_id == CONFIG.get("PAID_CATEGORY_ID"):
+            cat_name = "Оплачен"
+        elif cat_id == CONFIG.get("COINS_CATEGORY_ID"):
+            cat_name = "Diamond Coins"
+        else:
+            cat_name = "—"
+
+        lines = [
+            f"📋 саммари тикета:",
+            f"• заказчик: <@{owner_id}>",
+            f"• менеджер: {f'<@{manager_id}>' if manager_id else 'не назначен'}",
+            f"• категория: {cat_name}",
+            f"• открыт: {age} назад",
+        ]
+        await message.reply("\n".join(lines), mention_author=False)
+        return True
+    except Exception as e:
+        logger.exception(f"handle_ticket_mention: {e}")
+        return False
 
 
 # ============================================================
 # АВТО-СООБЩЕНИЯ В ЧАТ
 # ============================================================
+_last_auto_chat_ts = 0.0
+
+
+def build_auto_deal() -> Optional[str]:
+    try:
+        from modules.actions import refresh_daily_deal
+        deal = refresh_daily_deal()
+        if not deal:
+            return None
+        item = deal.get("item_data", {})
+        return (
+            f"💎 акция дня: скидка {deal.get('discount', 0)}% на «{item.get('name', '—')}» "
+            f"→ {deal.get('new_price', 0)} DC. панель **Бонусы → Акция дня**."
+        )
+    except Exception:
+        return None
+
+
+def build_auto_giveaway() -> Optional[str]:
+    try:
+        row = cur.execute(
+            "SELECT giveaway_id, prize, end_time, participants FROM giveaways "
+            "WHERE status='active' AND end_time > ? ORDER BY end_time LIMIT 1",
+            (int(time.time()),),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            n = len(json.loads(row["participants"] or "[]"))
+        except Exception:
+            n = 0
+        return (
+            f"🎉 идёт розыгрыш: {row['prize']} · уже {n} участников · "
+            f"до <t:{row['end_time']}:R>. заходи в канал розыгрышей."
+        )
+    except Exception:
+        return None
+
+
+def build_auto_top_case() -> Optional[str]:
+    try:
+        row = cur.execute(
+            "SELECT prize_desc FROM bonus_case_opens "
+            "WHERE prize_type='dc' AND opened_at > ? "
+            "ORDER BY CAST(json_extract(prize_value, '$.value') AS INTEGER) DESC LIMIT 1",
+            (int(time.time()) - 7 * 86400,),
+        ).fetchone()
+        if not row:
+            return None
+        return f"🎰 топ-кейс недели: {row['prize_desc']}. крути в панели Бонусы."
+    except Exception:
+        return None
+
+
+def build_auto_gift_reminder() -> Optional[str]:
+    return (
+        "🎁 ежедневный подарок в панели профиля — 10–30 DC, кулдаун 24 часа. "
+        "не забудь забрать сегодня!"
+    )
+
+
+AUTO_BUILDERS = [build_auto_deal, build_auto_giveaway, build_auto_top_case, build_auto_gift_reminder]
+
+
 @tasks.loop(hours=CHAT_AUTO_INTERVAL_HOURS)
 async def auto_chat_task():
-    global last_chat_auto
+    global _last_auto_chat_ts
     await bot.wait_until_ready()
-
     try:
         ch = bot.get_channel(ALLOWED_CHANNEL_ID)
         if not ch:
@@ -701,111 +1585,287 @@ async def auto_chat_task():
             return
 
         since = datetime.now(timezone.utc) - timedelta(hours=CHAT_AUTO_IDLE_HOURS)
-        has_recent = False
         async for msg in ch.history(limit=50, after=since):
             if not msg.author.bot:
-                has_recent = True
-                break
+                return
 
-        if has_recent:
+        now = time.time()
+        if now - _last_auto_chat_ts < CHAT_AUTO_INTERVAL_HOURS * 3600 * 0.8:
             return
 
-        phrase = random.choice(CHAT_AUTO_PHRASES)
-        await ch.send(phrase)
-        last_chat_auto = time.time()
+        random.shuffle(AUTO_BUILDERS)
+        text = None
+        for builder in AUTO_BUILDERS:
+            try:
+                text = builder()
+                if text:
+                    break
+            except Exception:
+                continue
+        if not text:
+            return
 
-        await log_to_discord(
-            title="💬 Авто-сообщение (чат)",
-            description=f"> **Сообщение:** {phrase}",
-            color=0x00aaff,
-        )
+        await ch.send(text)
+        _last_auto_chat_ts = now
+        logger.info(f"auto_chat: {text[:100]}")
     except Exception as e:
         logger.exception(f"auto_chat_task: {e}")
 
 
 # ============================================================
-# ЛС-РАССЫЛКА
+# F3 — УМНЫЙ СТАТУС
 # ============================================================
-@tasks.loop(hours=DM_INTERVAL_HOURS)
-async def auto_dm_task():
-    global dm_daily_counter, dm_daily_date
+STATUS_ROTATION = ["Консультант Магазина", "Готов работать!"]
+
+
+@tasks.loop(minutes=30)
+async def smart_status_task():
     await bot.wait_until_ready()
-
-    today = datetime.now(timezone.utc).date()
-    if today != dm_daily_date:
-        dm_daily_counter = 0
-        dm_daily_date = today
-
-    if dm_daily_counter >= DM_DAILY_LIMIT:
-        return
-
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return
-
-    if not users_who_talked:
-        return
-
-    now_ts = time.time()
-    cooldown = DM_USER_COOLDOWN_DAYS * 86400
-    bot_user_id = bot.user.id if bot.user else 0
-
-    candidates = []
-    for uid in users_who_talked:
-        if uid == bot_user_id:
-            continue
-        if last_dm_time.get(uid, 0) > now_ts - cooldown:
-            continue
-        member = guild.get_member(uid)
-        if not member or member.bot:
-            continue
-        if member.joined_at:
-            days_on_server = (datetime.now(timezone.utc) - member.joined_at).days
-            if days_on_server < DM_MIN_DAYS_ON_SERVER:
-                continue
-        candidates.append(uid)
-
-    if not candidates:
-        return
-
-    target_id = random.choice(candidates)
-    target = guild.get_member(target_id)
-    if not target:
-        return
-
-    phrase = random.choice(DM_PHRASES)
     try:
-        await target.send(phrase)
-        last_dm_time[target_id] = now_ts
-        dm_daily_counter += 1
+        now = datetime.now(timezone(timedelta(hours=3)))
 
-        await log_to_discord(
-            title="💌 ЛС-сообщение",
-            description=(
-                f"> **Получатель:** {target.mention}\n"
-                f"> **Сообщение:** {phrase}\n"
-                f"> **Дневной счётчик:** {dm_daily_counter}/{DM_DAILY_LIMIT}"
-            ),
-            color=0xffaa00,
+        # Приоритет 1: активный розыгрыш
+        try:
+            row = cur.execute(
+                "SELECT 1 FROM giveaways WHERE status='active' AND end_time > ? LIMIT 1",
+                (int(time.time()),),
+            ).fetchone()
+            if row:
+                await bot.change_presence(
+                    status=disnake.Status.online,
+                    activity=disnake.Game("🎉 Новый розыгрыш!"),
+                )
+                return
+        except Exception:
+            pass
+
+        # Приоритет 2: вечер, подарок
+        if 18 <= now.hour < 22:
+            if random.random() < 0.4:
+                await bot.change_presence(
+                    status=disnake.Status.online,
+                    activity=disnake.Game("🎁 Не забыл забрать подарок?"),
+                )
+                return
+
+        # Приоритет 3: по времени суток
+        if 6 <= now.hour < 8:
+            name = "Только проснулся"
+        elif 8 <= now.hour < 22:
+            name = random.choice(STATUS_ROTATION)
+        else:
+            name = "Сплю, но отвечу"
+
+        await bot.change_presence(
+            status=disnake.Status.online,
+            activity=disnake.Game(name),
         )
-    except disnake.Forbidden:
-        logger.info(f"ЛС закрыты у {target_id}")
-        last_dm_time[target_id] = now_ts
     except Exception as e:
-        logger.warning(f"auto_dm {target_id}: {e}")
+        logger.warning(f"smart_status: {e}")
 
 
 # ============================================================
-# ОЧИСТКА
+# B1 — WEEKLY-ДАЙДЖЕСТ «НЕ ЗНАЮ»
 # ============================================================
-@tasks.loop(hours=6)
-async def cleanup_contexts():
-    now = time.time()
-    for uid in list(user_ctx.keys()):
-        if now - last_activity.get(uid, 0) > 7 * 86400:
-            user_ctx.pop(uid, None)
-            last_activity.pop(uid, None)
-    logger.info(f"ai cleanup: {len(user_ctx)} активных юзеров в контексте")
+@tasks.loop(hours=24)
+async def weekly_unknown_digest():
+    await bot.wait_until_ready()
+    try:
+        now = datetime.now(timezone(timedelta(hours=3)))
+        # Понедельник, 10:00 МСК
+        if now.weekday() != 0 or now.hour != 10:
+            return
+
+        week_ago = int(time.time()) - 7 * 86400
+        rows = cur.execute(
+            "SELECT user_id, question FROM ai_unknown_log WHERE ts > ?",
+            (week_ago,),
+        ).fetchall()
+
+        if not rows:
+            return
+
+        total_dialogs = cur.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM ai_user_memory WHERE last_seen > ?",
+            (week_ago,),
+        ).fetchone()[0] or 0
+
+        unknown_by_hash: Dict[str, Dict] = {}
+        for r in rows:
+            h = hashlib.md5(_normalize_text(r["question"]).encode("utf-8")).hexdigest()
+            if h not in unknown_by_hash:
+                unknown_by_hash[h] = {"count": 0, "sample": r["question"]}
+            unknown_by_hash[h]["count"] += 1
+
+        top = sorted(unknown_by_hash.values(), key=lambda x: -x["count"])[:5]
+
+        lines = [
+            "📊 AI-отчёт за неделю:",
+            f"• активных юзеров: {total_dialogs}",
+            f"• «не знаю» случаев: {len(rows)}",
+            "",
+            "топ-5 неизвестных вопросов:",
+        ]
+        for i, t in enumerate(top, 1):
+            lines.append(f"  {i}. {t['sample'][:120]}  ({t['count']}×)")
+
+        lines.append("")
+        lines.append("стоит дополнить промпт / каталог по этим темам.")
+
+        # Владельцу в ЛС
+        owner = bot.get_user(OWNER_ID)
+        if not owner:
+            owner = await bot.fetch_user(OWNER_ID)
+        if owner:
+            await owner.send("\n".join(lines))
+    except Exception as e:
+        logger.exception(f"weekly_unknown_digest: {e}")
+
+
+# ============================================================
+# E6 — АВТО-ПРЕДУПРЕЖДЕНИЕ О ПОВТОРАХ «НЕ ЗНАЮ»
+# ============================================================
+@tasks.loop(hours=24)
+async def auto_unknown_alert():
+    await bot.wait_until_ready()
+    try:
+        week_ago = int(time.time()) - 7 * 86400
+        rows = cur.execute(
+            "SELECT question FROM ai_unknown_log WHERE ts > ?",
+            (week_ago,),
+        ).fetchall()
+        if not rows:
+            return
+
+        by_hash: Dict[str, Dict] = {}
+        for r in rows:
+            h = hashlib.md5(_normalize_text(r["question"]).encode("utf-8")).hexdigest()
+            if h not in by_hash:
+                by_hash[h] = {"count": 0, "sample": r["question"]}
+            by_hash[h]["count"] += 1
+
+        owner = bot.get_user(OWNER_ID) or await bot.fetch_user(OWNER_ID)
+        if not owner:
+            return
+
+        for h, data in by_hash.items():
+            if data["count"] < 3:
+                continue
+            # Проверяем — не отправляли ли уже
+            sent = cur.execute(
+                "SELECT 1 FROM ai_suggested WHERE question_hash=?", (h,)
+            ).fetchone()
+            if sent:
+                continue
+            cur.execute(
+                "INSERT INTO ai_suggested (question_hash, sample_question, sent_at) VALUES (?, ?, ?)",
+                (h, data["sample"][:200], int(time.time())),
+            )
+            db.commit()
+
+            try:
+                await owner.send(
+                    f"⚠️ юзеры спрашивают про «{data['sample'][:150]}» "
+                    f"({data['count']}× за неделю). добавь инфу в промпт/каталог."
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.exception(f"auto_unknown_alert: {e}")
+
+
+# ============================================================
+# F4 — НАПОМИНАНИЕ ПРО ОТЗЫВ ЧЕРЕЗ 3 ДНЯ
+# ============================================================
+@tasks.loop(hours=12)
+async def review_reminder_task():
+    await bot.wait_until_ready()
+    try:
+        now = int(time.time())
+        threshold_old = now - 3 * 86400      # покупка старше 3 дней
+        threshold_fresh = now - 30 * 86400   # отзыв за последние 30 дней
+
+        rows = cur.execute("SELECT user_id, purchases FROM dc_cache").fetchall()
+        for row in rows:
+            uid = row["user_id"]
+            try:
+                purchases = json.loads(row["purchases"] or "[]")
+            except Exception:
+                continue
+            if not purchases:
+                continue
+
+            changed = False
+            for p in purchases:
+                if p.get("used"):
+                    continue
+                if p.get("reminded_review"):
+                    continue
+                pdate = p.get("date", 0)
+                if not pdate or now - pdate < 3 * 86400:
+                    continue
+
+                # Отзыв за последние 30 дней?
+                counts = load_json(FILES["review_counts"], {})
+                rc = int(counts.get(str(uid), 0) or 0)
+
+                # Грубая проверка: если у юзера есть свежие отзывы — не напоминаем
+                # (нет точной даты отзывов, поэтому проверяем через память)
+                mem = memory_get(uid)
+                last_seen = mem.get("last_seen") or 0
+                if rc > 0 and now - last_seen < 7 * 86400:
+                    p["reminded_review"] = -1
+                    changed = True
+                    continue
+
+                # Шлём ЛС
+                member = bot.get_user(uid)
+                if not member:
+                    try:
+                        member = await bot.fetch_user(uid)
+                    except Exception:
+                        member = None
+                if member:
+                    try:
+                        await member.send(
+                            f"привет! всё ок с покупкой «{p.get('value', 'товар')}»? "
+                            f"если да — оставь отзыв в канале отзывов, начислим dc за него 💎"
+                        )
+                    except disnake.Forbidden:
+                        pass
+                    except Exception as e:
+                        logger.warning(f"review_reminder DM {uid}: {e}")
+
+                p["reminded_review"] = now
+                changed = True
+
+            if changed:
+                cur.execute(
+                    "UPDATE dc_cache SET purchases=? WHERE user_id=?",
+                    (json.dumps(purchases, ensure_ascii=False), uid),
+                )
+                db.commit()
+    except Exception as e:
+        logger.exception(f"review_reminder_task: {e}")
+
+
+# ============================================================
+# ЛОГ В DISCORD
+# ============================================================
+async def _log_to_discord(title: str, description: str, color: int = 0x00ff00):
+    try:
+        ch = bot.get_channel(AI_LOG_CHANNEL_ID)
+        if not ch:
+            ch = await bot.fetch_channel(AI_LOG_CHANNEL_ID)
+        if not ch:
+            return
+        embed = disnake.Embed(
+            title=title, description=description, color=color,
+            timestamp=datetime.now(timezone.utc),
+        )
+        await ch.send(embed=embed)
+    except Exception as e:
+        logger.warning(f"_log_to_discord: {e}")
 
 
 # ============================================================
@@ -813,35 +1873,29 @@ async def cleanup_contexts():
 # ============================================================
 @bot.event
 async def on_ready():
-    logger.info(f"diamond ai запущен как {bot.user} (id={bot.user.id})")
-    logger.info(f"LLM: Gemini · приоритет: {GEMINI_MODELS_PRIORITY} · max_tokens={MAX_OUTPUT_TOKENS}")
+    logger.info(f"diamond ai v3 запущен как {bot.user} (id={bot.user.id})")
 
     try:
         async with aiohttp.ClientSession() as session:
             models = await _fetch_available_models(session)
             if models:
-                logger.info(f"доступные модели: {models}")
+                logger.info(f"доступные модели: {models[:5]}")
     except Exception as e:
         logger.warning(f"прогрев моделей: {e}")
 
     try:
-        await bot.change_presence(
-            status=disnake.Status.online,
-            activity=disnake.Game("Нейронный консультант"),
-        )
+        memory_cleanup_old()
     except Exception:
         pass
 
-    if not cleanup_contexts.is_running():
-        cleanup_contexts.start()
-    if not auto_chat_task.is_running():
-        auto_chat_task.start()
-    if not auto_dm_task.is_running():
-        auto_dm_task.start()
+    for task in (auto_chat_task, smart_status_task, weekly_unknown_digest,
+                 auto_unknown_alert, review_reminder_task):
+        if not task.is_running():
+            task.start()
 
-    await log_to_discord(
-        title="✅ Diamond AI запущен",
-        description=f"> **{bot.user}** готов. Отвечаю только в <#{ALLOWED_CHANNEL_ID}>.",
+    await _log_to_discord(
+        "✅ Diamond AI v3 запущен",
+        f"> **{bot.user}** онлайн.\n> Отвечаю в <#{ALLOWED_CHANNEL_ID}> и тикетах.",
         color=0x00ff00,
     )
 
@@ -854,6 +1908,13 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
+    # === D5: тикеты ===
+    if isinstance(message.channel, disnake.TextChannel) and is_ticket_channel(message.channel):
+        if _mentions_bot(message):
+            await handle_ticket_mention(message)
+        return
+
+    # === Основной AI-чат ===
     if message.channel.id != ALLOWED_CHANNEL_ID:
         return
 
@@ -862,68 +1923,156 @@ async def on_message(message: disnake.Message):
         return
 
     user_id = message.author.id
-    last_activity[user_id] = time.time()
-    users_who_talked.add(user_id)
+    member = message.author if isinstance(message.author, disnake.Member) else None
 
-    if is_technical_request(text):
+    # === F1: реакции ===
+    reaction = check_reaction_reply(text)
+    if reaction and not _is_reply_to_bot(message) and not _mentions_bot(message):
         try:
-            await message.channel.send(
-                "извини, на технические темы не отвечаю — я консультант магазина. "
-                "могу помочь с товарами, ролями, dc, кланом, казино, тикетами и промокодами.",
-                reference=message,
-                mention_author=False,
-            )
+            await message.add_reaction(reaction)
         except Exception:
             pass
+        memory_upsert(user_id)
         return
 
-    _push_channel(message.author.display_name, text)
+    # === A1: быстрые триггеры без LLM ===
+    quick = await quick_action(message, text)
+    if quick is not None:
+        if quick:
+            try:
+                await message.channel.send(quick)
+            except Exception:
+                pass
+        memory_upsert(user_id)
+        return
 
-    mood = detect_mood(text)
-    style = choose_style(mood, text)
-
-    member = message.author if isinstance(message.author, disnake.Member) else None
-    context_block = build_context_block(user_id, member)
-
-    try:
-        async with message.channel.typing():
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            reply = await ask_llm(
-                user_message=text,
-                username=message.author.display_name,
-                style=style,
-                user_id=user_id,
-                context_block=context_block,
-            )
-    except Exception as e:
-        logger.exception(f"on_message err: {e}")
-        reply = "ой, я завис, давай ещё раз."
-
-    if not reply:
-        reply = "что-то я не могу ответить. попробуй иначе."
-
-    # ─── Отправка без пинга ───
-    try:
-        await message.channel.send(
-            reply,
-            reference=message,
-            mention_author=False,
-        )
-    except Exception:
+    # === A4: поиск в каталоге ===
+    catalog_reply = build_catalog_search_reply(text)
+    if catalog_reply:
         try:
-            await message.channel.send(reply)
-        except Exception as e:
-            logger.error(f"send reply: {e}")
+            await message.channel.send(catalog_reply)
+        except Exception:
+            pass
+        memory_upsert(user_id)
+        return
+
+    # === Триггер-логика ===
+    if not should_respond(message):
+        memory_upsert(user_id)
+        return
+
+    # === Анти-влезание ===
+    if not _is_reply_to_bot(message) and not _mentions_bot(message):
+        if await is_channel_busy(message.channel):
+            memory_upsert(user_id)
             return
 
+    # === E5: не по теме? ===
+    if not _is_reply_to_bot(message) and not _mentions_bot(message):
+        async with aiohttp.ClientSession() as s:
+            if not await is_on_topic(s, text):
+                memory_upsert(user_id)
+                return
+
+    # === F5: сам-переспрос за 5 минут ===
+    norm = _normalize_text(text)
+    prev = _RECENT_QUESTIONS.get(user_id)
+    if prev and prev.get("norm") == norm and int(time.time()) - prev.get("ts", 0) < REPEAT_IDENTICAL_MINUTES * 60:
+        try:
+            await message.channel.send("я выше уже ответил — глянь 👆")
+        except Exception:
+            pass
+        memory_upsert(user_id)
+        return
+    _RECENT_QUESTIONS[user_id] = {"norm": norm, "ts": int(time.time())}
+
+    # === Данные и память ===
+    mem = memory_get(user_id)
+    is_first = not mem
+
+    is_repeat = is_repeat_question(user_id, text)
+    mark_question_asked(user_id, text)
+
+    # Запоминаем тему (первое слово вопроса как «topic»)
+    first_word = norm.split()[0] if norm.split() else ""
+    if first_word and len(first_word) > 3:
+        memory_upsert(user_id, last_topic=first_word)
+        memory_add_fact(user_id, f"спрашивал про {first_word}")
+        memory_detect_interests(user_id)
+
+    # === Контекст ===
+    context_block = build_context_block(user_id, member)
+
+    # === Промпт-композит ===
+    sentiment = detect_sentiment(text)
+    style = choose_style(sentiment, text)
+    style_suffix = MOOD_SUFFIX.get(style, "")
+    role_suffix = build_role_suffix(member, is_first)
+
+    # Реплай на чужое сообщение
+    reply_context = ""
+    if _is_reply_to_user(message):
+        replied = _get_replied_message(message)
+        if replied and replied.content:
+            reply_context = (
+                f"\n\nюзер отвечает на сообщение другого участника:\n"
+                f"«{replied.content[:200]}»\nучитывай контекст этого сообщения."
+            )
+
+    system_content = SYSTEM_PROMPT + style_suffix + role_suffix + reply_context + "\n\n" + context_block
+
+    if is_repeat:
+        system_content += "\n\n[важно] юзер задавал похожий вопрос недавно — ответь кратко, отсылкой к прошлому ответу."
+
+    # === LLM ===
     try:
-        await log_to_discord(
-            title="💬 Ответ AI",
-            description=(
+        async with message.channel.typing():
+            await asyncio.sleep(random.uniform(1.2, 2.4))
+            reply_text, status = await ask_llm_smart(
+                message=message,
+                user_message=text,
+                system_content=system_content,
+                user_id=user_id,
+            )
+    except Exception as e:
+        logger.exception(f"ask_llm: {e}")
+        reply_text, status = ERROR_PHRASES["empty"], "empty"
+
+    reply_text = sanitize_response(reply_text or "").strip()
+    if not reply_text:
+        reply_text = ERROR_PHRASES["empty"]
+
+    # === F6: приветствие ===
+    if is_first and status == "ok":
+        reply_text = "привет! я diamond ai. " + reply_text[0].lower() + reply_text[1:]
+
+    # === Отправка ===
+    try:
+        if _is_reply_to_bot(message) or _mentions_bot(message):
+            await message.reply(reply_text, mention_author=False)
+        else:
+            await message.channel.send(reply_text)
+    except Exception:
+        try:
+            await message.channel.send(reply_text)
+        except Exception:
+            pass
+
+    # === Лог «не знаю» ===
+    if is_unknown_reply(reply_text):
+        log_unknown(user_id, text, reply_text)
+
+    # === Лог в Discord ===
+    try:
+        await _log_to_discord(
+            "💬 Ответ AI",
+            (
                 f"> **Юзер:** {message.author.mention}\n"
-                f"> **Стиль:** `{style}` · **Настроение:** `{mood}`\n"
-                f"> **Вопрос:** {text[:300]}\n"
-                f"> **Ответ:** {reply[:500]}{'…' if len(reply) > 500 else ''}"
+                f"> **Статус:** `{status}` · **Тон:** `{style}` · **Sentiment:** `{sentiment}`"
+                + (" · повтор" if is_repeat else "")
+                + (" · первое" if is_first else "")
+                + f"\n> **Вопрос:** {text[:300]}\n"
+                f"> **Ответ:** {reply_text[:500]}{'…' if len(reply_text) > 500 else ''}"
             ),
             color=0xffff00,
         )
@@ -938,7 +2087,6 @@ def run_ai():
     if not AI_TOKEN:
         print("❌ AI_TOKEN не установлен — процесс AI завершается.")
         raise SystemExit(1)
-
     try:
         bot.run(AI_TOKEN)
     except Exception as e:
