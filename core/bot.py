@@ -51,7 +51,40 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 _REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
-REVIEW_REWARD_DC = 15
+
+# 👇 Награды за отзыв по уровню покупателя.
+# Считаются по НОВОЙ роли (после пересчёта ролей на этом же отзыве).
+REVIEW_REWARDS = {
+    "bronze":    20,
+    "silver":    35,
+    "gold":      55,
+    "diamond":   75,
+    "crystalis": 85,
+    "pka":       100,
+}
+REVIEW_REWARD_DEFAULT = 15  # страховка для count == 0
+
+
+def get_review_reward(count: int) -> int:
+    """
+    Размер награды за отзыв по числу отзывов (= по роли покупателя).
+
+    Переход с роли на роль — даём по НОВОЙ роли:
+      1–5   → bronze    → 20 DC
+      6–10  → silver    → 35 DC
+      11–15 → gold      → 55 DC
+      16–20 → diamond   → 75 DC
+      21–25 → crystalis → 85 DC
+      26+   → pka       → 100 DC
+    """
+    if count >= 26: return REVIEW_REWARDS["pka"]
+    if count >= 21: return REVIEW_REWARDS["crystalis"]
+    if count >= 16: return REVIEW_REWARDS["diamond"]
+    if count >= 11: return REVIEW_REWARDS["gold"]
+    if count >= 6:  return REVIEW_REWARDS["silver"]
+    if count >= 1:  return REVIEW_REWARDS["bronze"]
+    return REVIEW_REWARD_DEFAULT
+
 
 WELCOME_BONUS_DC = 50
 
@@ -731,7 +764,7 @@ async def on_member_join(member: disnake.Member):
                         f"**Как заработать DC?**\n"
                         f"> • **Сообщения** — 1 DC за 10 сообщений\n"
                         f"> • **Голос** — 3 DC в час\n"
-                        f"> • **Отзывы** — 15 DC за одобренный отзыв\n"
+                        f"> • **Отзывы** — от 20 до 100 DC в зависимости от роли покупателя\n"
                         f"> • **Ежедневный бонус** — +10 DC с ролью «Клуб» (нужна активность за день)\n"
                         f"> • **Ежедневный подарок** — от 10 до 30 DC каждый день, забирай в панели профиля\n"
                         f"> • **Казино** — испытай удачу в рулетке, блэкджеке и монетке\n\n"
@@ -1175,16 +1208,28 @@ async def on_message(message: disnake.Message):
         counts[str(user_id)] = counts.get(str(user_id), 0) + 1
         save_json(FILES["review_counts"], counts)
 
+        new_count = counts[str(user_id)]
+
+        # 👇 1. Сначала обновляем роль покупателя по НОВОМУ счётчику.
+        #    Награда ниже будет считаться уже по новой роли.
+        if isinstance(message.author, disnake.Member):
+            try:
+                await update_user_roles(message.author, new_count, keep_pka=True)
+            except Exception as e:
+                logger.exception(f"update roles: {e}")
+
+        # 👇 2. Награда — по новой роли
+        reward = get_review_reward(new_count)
+
         try:
-            await add_dc(user_id, REVIEW_REWARD_DC, "Отзыв о покупке",
+            await add_dc(user_id, reward, "Отзыв о покупке",
                          notify=False, log=False, to_clan_pool=True)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
 
         try:
             from clan.achievements import check_and_unlock
-            total_reviews = counts[str(user_id)]
-            await check_and_unlock(user_id, "reviews", value=total_reviews, bot=bot)
+            await check_and_unlock(user_id, "reviews", value=new_count, bot=bot)
         except Exception as e:
             logger.warning(f"reviews ach: {e}")
 
@@ -1194,19 +1239,13 @@ async def on_message(message: disnake.Message):
         except Exception as e:
             logger.warning(f"clan review hook: {e}")
 
-        if isinstance(message.author, disnake.Member):
-            try:
-                await update_user_roles(message.author, counts[str(user_id)], keep_pka=True)
-            except Exception as e:
-                logger.exception(f"update roles: {e}")
-
         try:
             dm_embed = disnake.Embed(
                 title="✅ Отзыв принят!",
                 description=(
                     f"> Спасибо за отзыв!\n\n"
-                    f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
-                    f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
+                    f"> **Всего отзывов:** `{new_count}`\n"
+                    f"> **Начислено:** `+{reward} DC`\n"
                     f"> **Следующий отзыв:** можно оставить через 2 минуты"
                 ),
                 color=0x2ecc71,
@@ -1221,8 +1260,8 @@ async def on_message(message: disnake.Message):
             title="📝 Отзыв принят",
             description=(
                 f"> **Пользователь:** {message.author.mention}\n"
-                f"> **Всего отзывов:** `{counts[str(user_id)]}`\n"
-                f"> **Начислено:** `+{REVIEW_REWARD_DC} DC`\n"
+                f"> **Всего отзывов:** `{new_count}`\n"
+                f"> **Начислено:** `+{reward} DC`\n"
                 f"> **Текст:** {text[:200]}\n"
                 f"> **Ссылка:** [перейти]({message.jump_url})"
             ),
