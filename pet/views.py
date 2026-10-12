@@ -33,6 +33,23 @@ E_GIFT     = PartialEmoji(name="gid1",    id=1555654337953267794)
 
 
 # ============================================================
+# ХЕЛПЕР: имя юзера
+# ============================================================
+def _get_username(guild, user_id: int) -> str:
+    """
+    Возвращает display_name участника или '@ID' если не найден.
+    """
+    if guild is not None:
+        try:
+            m = guild.get_member(user_id)
+            if m is not None:
+                return m.display_name
+        except Exception:
+            pass
+    return f"@{user_id}"
+
+
+# ============================================================
 # ПАНЕЛЬ В КАНАЛЕ
 # ============================================================
 class PetPanelView(View):
@@ -76,7 +93,7 @@ class MyPetsView(View):
 
 
 # ============================================================
-# КАТАЛОГ — селект с доступными
+# КАТАЛОГ
 # ============================================================
 class CatalogSelect(Select):
     def __init__(self, available):
@@ -212,9 +229,12 @@ class GiftPetModal(Modal):
         user_id = inter.author.id
         balance = _get_balance(user_id)
 
+        # 👇 ник получателя
+        recipient_name = _get_username(inter.guild, recipient_id)
+
         buf = await asyncio.to_thread(
             prender.render_success_gift,
-            user_id, balance, self.pet_key, price, base_price, recipient_id,
+            user_id, balance, self.pet_key, price, base_price, recipient_name,
         )
         fname = f"pet_gift_ok_{user_id}.png"
         file = disnake.File(buf, filename=fname)
@@ -326,6 +346,12 @@ async def _open_top(inter: disnake.MessageInteraction):
     top = pcore.get_top_users(limit=10)
     place = pcore.get_user_place(user_id)
     best_pet = pcore.get_user_best_pet(user_id)
+
+    # 👇 Прокидываем ники в top
+    guild = inter.guild
+    for t in top:
+        t["username"] = _get_username(guild, t["user_id"])
+
     buf = await asyncio.to_thread(
         prender.render_top, user_id, balance, top, place, best_pet
     )
