@@ -128,6 +128,20 @@ def gift_price(pet_key: str) -> int:
     return int(cat["price_dc"] * (1 + GIFT_COMMISSION))
 
 
+# ============================================================
+# МИГРАЦИЯ — добавляем недостающие колонки в старые таблицы
+# ============================================================
+def _ensure_column(table: str, column: str, ddl: str):
+    try:
+        cols = [r[1] for r in cur.execute(f'PRAGMA table_info("{table}")').fetchall()]
+        if column not in cols:
+            cur.execute(f'ALTER TABLE "{table}" ADD COLUMN {ddl}')
+            db.commit()
+            logger.info(f"🐾 Миграция {table}.{column} добавлена")
+    except Exception as e:
+        logger.error(f"🐾 Миграция {table}.{column}: {e}")
+
+
 def init_pet_tables():
     cur.executescript("""
     CREATE TABLE IF NOT EXISTS user_pets (
@@ -171,6 +185,10 @@ def init_pet_tables():
     );
     """)
     db.commit()
+
+    # 👇 Миграции для старых баз
+    _ensure_column("pet_purchases", "is_gift", "is_gift INTEGER DEFAULT 0")
+    _ensure_column("pet_purchases", "from_user_id", "from_user_id INTEGER DEFAULT NULL")
 
 
 def get_user_pets(user_id: int) -> List[dict]:
