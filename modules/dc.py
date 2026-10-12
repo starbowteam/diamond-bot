@@ -68,7 +68,6 @@ def has_daily_activity(data: dict) -> bool:
     ts = int(data.get("last_active_ts", 0) or 0)
     if ts >= _msk_day_start_ts():
         return True
-    # Фолбэк для старых записей, где отметки активности ещё нет
     return bool(
         (data.get("messages_today", 0) or 0) > 0
         or (data.get("voice_time_today", 0) or 0) > 0
@@ -168,6 +167,16 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
         elif clan_share > 0:
             bank_amount = int(amount * clan_share)
 
+    # 👇 Бонус от активного питомца (mythic → +10% к копилке клана)
+    if bank_amount > 0:
+        try:
+            from pet.core import get_clan_bonus
+            pet_mult = get_clan_bonus(user_id)
+            if pet_mult > 1.0:
+                bank_amount = int(bank_amount * pet_mult)
+        except Exception as e:
+            logger.debug(f"pet clan bonus: {e}")
+
     if bank_amount > 0:
         try:
             from clan.core import add_clan_contribution
@@ -223,7 +232,6 @@ async def remove_dc(user_id: int, amount: int, reason: str, notify: bool = True,
     })
     if len(data["history"]) > 50:
         data["history"] = data["history"][-50:]
-    # 👇 Покупка/ставка — это действие, сбрасывает счётчик неактивности
     if mark_activity:
         data["last_active_ts"] = int(time.time())
     save_dc_cache(user_id, data)
@@ -322,7 +330,6 @@ async def daily_activity_payout():
                 parts.append(f"голос: {voice_dc} DC")
             reason = "Активность за день (" + ", ".join(parts) + ")"
 
-            # 👇 Копилка клана по правилу: до 100 DC — вся сумма, больше — 40%
             await add_dc(uid, total, reason, notify=True, log=False, to_clan_pool=True)
             paid_users += 1
             total_paid += total
@@ -374,7 +381,6 @@ async def claim_daily_gift(user_id: int) -> dict:
 
     amount = random.randint(DAILY_GIFT_MIN, DAILY_GIFT_MAX)
 
-    # 👇 Забрал подарок — значит зашёл и что-то сделал
     touch_activity(user_id)
 
     await add_dc(user_id, amount, "Ежедневный подарок", notify=False, log=False, to_clan_pool=True)
@@ -428,11 +434,7 @@ def create_default_catalog() -> dict:
 async def daily_bonus():
     """
     Ежедневный клубный бонус.
-
-    👇 Что изменилось:
-      · сумма 3 DC → 10 DC
-      · выдаётся ТОЛЬКО тем, кто за сутки хоть как-то активил
-        (писал в чат или был в войсе)
+    Выдаётся ТОЛЬКО тем, кто за сутки хоть как-то активил.
     """
     from core.bot import bot
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -455,11 +457,9 @@ async def daily_bonus():
             continue
 
         data = get_dc_cache(member.id)
-        # Уже получал за последние сутки
         if data["last_bonus"] >= now - DAILY_BONUS_COOLDOWN:
             continue
 
-        # 👇 Новое условие: без активности за день бонус не выдаём
         if not has_daily_activity(data):
             skipped_inactive += 1
             continue
