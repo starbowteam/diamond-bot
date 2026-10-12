@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Discord UI для панели питомцев."""
+"""Discord UI для панели питомцев. Все кнопки серые."""
 import asyncio
 
 import disnake
@@ -25,12 +25,12 @@ class PetPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label=_pad("Питомцы"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Питомцы", 2, 2), style=ButtonStyle.gray,
                        custom_id="pet_panel:my", emoji="🐾", row=0)
     async def my_pets(self, button, inter: disnake.MessageInteraction):
         await _open_my_pets(inter)
 
-    @disnake.ui.button(label=_pad("Каталог"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Каталог", 2, 2), style=ButtonStyle.gray,
                        custom_id="pet_panel:catalog", emoji="📖", row=0)
     async def catalog(self, button, inter: disnake.MessageInteraction):
         await _open_catalog(inter)
@@ -48,13 +48,13 @@ class MyPetsView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label=_pad("Забрать накопленное", 2, 2),
+    @disnake.ui.button(label=_pad("Забрать накопленное", 2, 1),
                        style=ButtonStyle.gray,
                        custom_id="pet_my:claim", emoji="💰", row=0)
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
 
-    @disnake.ui.button(label=_pad("Покормить питомца", 2, 2),
+    @disnake.ui.button(label=_pad("Покормить питомца", 2, 1),
                        style=ButtonStyle.gray,
                        custom_id="pet_my:feed", emoji="🍖", row=0)
     async def feed(self, button, inter: disnake.MessageInteraction):
