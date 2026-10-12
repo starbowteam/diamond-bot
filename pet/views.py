@@ -40,7 +40,7 @@ class PetPanelView(View):
     async def catalog(self, button, inter: disnake.MessageInteraction):
         await _open_catalog(inter)
 
-    @disnake.ui.button(label=_pad("Топ"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Топ", 2, 1), style=ButtonStyle.gray,
                        custom_id="pet_panel:top", emoji="🏆", row=0)
     async def top(self, button, inter: disnake.MessageInteraction):
         await _open_top(inter)
@@ -73,7 +73,6 @@ class MyPetsSelect(Select):
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
-        # disnake вызывает метод с self=select, inter=interaction
         await _on_select_my(inter)
 
 
@@ -85,7 +84,7 @@ class MyPetsView(View):
         if pets:
             self.add_item(MyPetsSelect(pets))
 
-    @disnake.ui.button(label=_pad("Забрать"), style=ButtonStyle.success,
+    @disnake.ui.button(label=_pad("Забрать", 1, 2), style=ButtonStyle.success,
                        custom_id="pet_my:claim", emoji="💰", row=1)
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
@@ -94,11 +93,6 @@ class MyPetsView(View):
                        custom_id="pet_my:feed", emoji="🍖", row=1)
     async def feed(self, button, inter: disnake.MessageInteraction):
         await _feed_active(inter)
-
-    @disnake.ui.button(label=_pad("Назад"), style=ButtonStyle.gray,
-                       custom_id="pet_my:back", emoji="⬅️", row=1)
-    async def back(self, button, inter: disnake.MessageInteraction):
-        await _close_ephemeral(inter)
 
 
 # ============================================================
@@ -137,11 +131,6 @@ class CatalogView(View):
         self.owned_keys = owned_keys
         self.add_item(CatalogSelect(owned_keys))
 
-    @disnake.ui.button(label=_pad("Назад", 4, 4), style=ButtonStyle.gray,
-                       custom_id="pet_cat:back", emoji="⬅️", row=1)
-    async def back(self, button, inter: disnake.MessageInteraction):
-        await _close_ephemeral(inter)
-
 
 # ============================================================
 # КАРТОЧКА (после выбора в каталоге)
@@ -151,26 +140,16 @@ class CatalogPetView(View):
         super().__init__(timeout=300)
         self.pet_key = pet_key
 
-        btn_buy = Button(
-            label=_pad("Купить"),
-            style=ButtonStyle.success,
-            custom_id=f"pet_buy:{pet_key}",
-            emoji="💎",
-            row=0,
-            disabled=not can_buy,
-        )
-        btn_buy.callback = self.buy
-        self.add_item(btn_buy)
-
-        btn_back = Button(
-            label=_pad("Назад"),
-            style=ButtonStyle.gray,
-            custom_id=f"pet_cat_back:{pet_key}",
-            emoji="⬅️",
-            row=0,
-        )
-        btn_back.callback = self.back
-        self.add_item(btn_back)
+        if can_buy:
+            btn_buy = Button(
+                label=_pad("Купить"),
+                style=ButtonStyle.success,
+                custom_id=f"pet_buy:{pet_key}",
+                emoji="💎",
+                row=0,
+            )
+            btn_buy.callback = self.buy
+            self.add_item(btn_buy)
 
     async def buy(self, inter: disnake.MessageInteraction):
         try:
@@ -186,15 +165,11 @@ class CatalogPetView(View):
             f"✅ Питомец **{pcore.CATALOG[self.pet_key]['name']}** куплен!",
             ephemeral=True
         )
-        # Обновляем каталог — редактируем текущее эфемерное
         balance = _get_balance(inter.author.id)
         owned = [p["pet_key"] for p in pcore.get_user_pets(inter.author.id)]
         buf = await asyncio.to_thread(prender.render_catalog, inter.author.id, balance, owned)
         fname = f"pet_cat_{inter.author.id}.png"
         await _display_screen(inter, buf, fname, CatalogView(owned))
-
-    async def back(self, inter: disnake.MessageInteraction):
-        await _open_catalog(inter)
 
 
 # ============================================================
@@ -216,16 +191,6 @@ class MyPetCardView(View):
             btn.callback = self.set_active
             self.add_item(btn)
 
-        btn_back = Button(
-            label=_pad("Назад"),
-            style=ButtonStyle.gray,
-            custom_id=f"pet_myback:{pet_key}",
-            emoji="⬅️",
-            row=0,
-        )
-        btn_back.callback = self.back
-        self.add_item(btn_back)
-
     async def set_active(self, inter: disnake.MessageInteraction):
         try:
             await inter.response.defer(ephemeral=True)
@@ -239,9 +204,6 @@ class MyPetCardView(View):
         await inter.followup.send("⭐ Питомец сделан активным!", ephemeral=True)
         await _open_my_pets(inter)
 
-    async def back(self, inter: disnake.MessageInteraction):
-        await _open_my_pets(inter)
-
 
 # ============================================================
 # ТОП
@@ -249,11 +211,6 @@ class MyPetCardView(View):
 class TopView(View):
     def __init__(self):
         super().__init__(timeout=300)
-
-    @disnake.ui.button(label=_pad("Назад", 4, 4), style=ButtonStyle.gray,
-                       custom_id="pet_top:back", emoji="⬅️", row=0)
-    async def back(self, button, inter: disnake.MessageInteraction):
-        await _close_ephemeral(inter)
 
 
 # ============================================================
@@ -377,20 +334,8 @@ async def _feed_active(inter: disnake.MessageInteraction):
     await _open_my_pets(inter)
 
 
-async def _close_ephemeral(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.edit_message(
-            content="Меню закрыто.", embed=None, attachments=[], view=None
-        )
-    except Exception:
-        try:
-            await inter.response.defer()
-        except Exception:
-            pass
-
-
 # ============================================================
-# СЕЛЕКТ-КАЛБЭКИ (вызываются из методов класса Select)
+# СЕЛЕКТ-КАЛБЭКИ
 # ============================================================
 async def _on_select_my(inter: disnake.MessageInteraction):
     try:
