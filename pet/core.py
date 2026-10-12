@@ -27,6 +27,11 @@ FEED_STREAK_BONUS = 500
 ACTIVE_SWAP_COOLDOWN = 6 * 3600
 GIFT_COMMISSION = 0.10
 
+# 👇 Юзеры, которых НЕ показываем в топе питомцеводов
+TOP_EXCLUDED_USERS = {
+    796293832751972352,
+}
+
 XP_THRESHOLDS = [
     0, 100, 350, 850, 1850, 3850, 7350, 12850, 20850, 32850,
 ]
@@ -128,9 +133,6 @@ def gift_price(pet_key: str) -> int:
     return int(cat["price_dc"] * (1 + GIFT_COMMISSION))
 
 
-# ============================================================
-# МИГРАЦИЯ — добавляем недостающие колонки в старые таблицы
-# ============================================================
 def _ensure_column(table: str, column: str, ddl: str):
     try:
         cols = [r[1] for r in cur.execute(f'PRAGMA table_info("{table}")').fetchall()]
@@ -186,7 +188,6 @@ def init_pet_tables():
     """)
     db.commit()
 
-    # 👇 Миграции для старых баз
     _ensure_column("pet_purchases", "is_gift", "is_gift INTEGER DEFAULT 0")
     _ensure_column("pet_purchases", "from_user_id", "from_user_id INTEGER DEFAULT NULL")
 
@@ -610,18 +611,30 @@ def get_clan_bonus(user_id: int) -> float:
     return _get_active_bonus(user_id, "clan_contrib")
 
 
+# ============================================================
+# ТОП — исключаем заданных юзеров
+# ============================================================
 def get_top_users(limit: int = 10) -> List[dict]:
+    """
+    Топ по максимальному уровню питомца.
+    Юзеры из TOP_EXCLUDED_USERS не показываются.
+    """
+    # Собираем всех с их лучшим уровнем
     rows = cur.execute("""
         SELECT user_id, MAX(level) AS best_level
         FROM user_pets
         GROUP BY user_id
         ORDER BY best_level DESC, user_id ASC
-        LIMIT ?
-    """, (limit,)).fetchall()
+    """).fetchall()
 
     result = []
     for r in rows:
         uid = r["user_id"]
+
+        # 👇 Пропускаем исключённых
+        if uid in TOP_EXCLUDED_USERS:
+            continue
+
         best = cur.execute("""
             SELECT pet_key, level FROM user_pets
             WHERE user_id=? ORDER BY level DESC LIMIT 1
@@ -630,16 +643,25 @@ def get_top_users(limit: int = 10) -> List[dict]:
             "SELECT COUNT(*) AS c FROM user_pets WHERE user_id=?",
             (uid,)
         ).fetchone()
+
         result.append({
             "user_id": uid,
             "best_level": r["best_level"],
             "pet_key": best["pet_key"] if best else None,
             "pets_count": int(cnt["c"]) if cnt else 0,
         })
+
+        if len(result) >= limit:
+            break
+
     return result
 
 
 def get_user_place(user_id: int) -> Optional[int]:
+    """Место юзера в топе. Если он в исключениях — None."""
+    if user_id in TOP_EXCLUDED_USERS:
+        return None
+
     top = get_top_users(limit=1000)
     for i, t in enumerate(top, 1):
         if t["user_id"] == user_id:
