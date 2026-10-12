@@ -12,73 +12,35 @@ from pet import core as pcore
 from pet import render as prender
 
 
-P = "\u3164"
-
-# Кнопки стали короче в 2 раза (было 28)
-BTN_LEN = 14
+P = "\u3164"  # невидимый пробел
 
 
-def _btn_pad(text, total=BTN_LEN):
+def _pad(text: str, left: int = 2, right: int = 2) -> str:
     """
-    Паддинг невидимыми пробелами до total символов.
-    Если текст уже длиннее — возвращаем как есть.
+    Невидимые пробелы слева и справа от текста.
+    По умолчанию — по 2 с каждой стороны.
     """
-    base = len(text)
-    if base >= total:
-        return text
-    extra = total - base
-    left = extra // 2
-    right = extra - left
     return f"{P * left}{text}{P * right}"
 
 
-def _btn_labels_total(labels, total):
-    """
-    Раскидывает невидимые пробелы так, чтобы СУММА длин всех кнопок == total.
-    Если сумма уже больше — возвращаем как есть.
-    """
-    base = sum(len(s) for s in labels)
-    if base >= total:
-        return labels
-    extra = total - base
-    n = len(labels)
-    if n == 0:
-        return labels
-    per = extra // n
-    rem = extra % n
-    result = []
-    for i, s in enumerate(labels):
-        pad = per + (1 if i < rem else 0)
-        left = pad // 2
-        right = pad - left
-        result.append(f"{P * left}{s}{P * right}")
-    return result
-
-
-# Панель: 3 кнопки, суммарно 14 символов (было 28)
-_L_PETS, _L_CATALOG, _L_TOP = _btn_labels_total(
-    ["Питомцы", "Каталог", "Топ"], BTN_LEN
-)
-
-
 # ============================================================
-# ПАНЕЛЬ В КАНАЛЕ
+# ПАНЕЛЬ В КАНАЛЕ (3 кнопки)
 # ============================================================
 class PetPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label=_L_PETS, style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Питомцы"), style=ButtonStyle.gray,
                        custom_id="pet_panel:my", emoji="🐾", row=0)
     async def my_pets(self, button, inter: disnake.MessageInteraction):
         await _open_my_pets(inter)
 
-    @disnake.ui.button(label=_L_CATALOG, style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Каталог"), style=ButtonStyle.gray,
                        custom_id="pet_panel:catalog", emoji="📖", row=0)
     async def catalog(self, button, inter: disnake.MessageInteraction):
         await _open_catalog(inter)
 
-    @disnake.ui.button(label=_L_TOP, style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Топ"), style=ButtonStyle.gray,
                        custom_id="pet_panel:top", emoji="🏆", row=0)
     async def top(self, button, inter: disnake.MessageInteraction):
         await _open_top(inter)
@@ -95,15 +57,24 @@ class MyPetsSelect(Select):
             label = f"{cat.get('name', '—')} · ур. {p['level']}"
             if len(label) > 90:
                 label = label[:87] + "..."
-            desc = f"{pcore.RARITY_LABEL.get(cat.get('rarity', 'common'), '')} · {pcore.hourly_rate(p['pet_key'], p['level']):.1f} DC/ч"
+            desc = (
+                f"{pcore.RARITY_LABEL.get(cat.get('rarity', 'common'), '')} · "
+                f"{pcore.hourly_rate(p['pet_key'], p['level']):.1f} DC/ч"
+            )
             options.append(SelectOption(
                 label=label,
                 description=desc[:100],
                 value=p["pet_key"],
             ))
-        super().__init__(placeholder="Выбери питомца → карточка",
-                         min_values=1, max_values=1,
-                         options=options, custom_id="pet_my:select")
+        super().__init__(
+            placeholder="Выбери питомца → карточка",
+            min_values=1, max_values=1,
+            options=options, custom_id="pet_my:select",
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        # disnake вызывает метод с self=select, inter=interaction
+        await _on_select_my(inter)
 
 
 class MyPetsView(View):
@@ -114,17 +85,17 @@ class MyPetsView(View):
         if pets:
             self.add_item(MyPetsSelect(pets))
 
-    @disnake.ui.button(label=_btn_pad("Забрать"), style=ButtonStyle.success,
+    @disnake.ui.button(label=_pad("Забрать"), style=ButtonStyle.success,
                        custom_id="pet_my:claim", emoji="💰", row=1)
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
 
-    @disnake.ui.button(label=_btn_pad("Покормить"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Покормить"), style=ButtonStyle.gray,
                        custom_id="pet_my:feed", emoji="🍖", row=1)
     async def feed(self, button, inter: disnake.MessageInteraction):
         await _feed_active(inter)
 
-    @disnake.ui.button(label=_btn_pad("Назад"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Назад"), style=ButtonStyle.gray,
                        custom_id="pet_my:back", emoji="⬅️", row=1)
     async def back(self, button, inter: disnake.MessageInteraction):
         await _close_ephemeral(inter)
@@ -150,9 +121,14 @@ class CatalogSelect(Select):
                 description=desc[:100],
                 value=key,
             ))
-        super().__init__(placeholder="Выбери питомца для покупки",
-                         min_values=1, max_values=1,
-                         options=options, custom_id="pet_cat:select")
+        super().__init__(
+            placeholder="Выбери питомца для покупки",
+            min_values=1, max_values=1,
+            options=options, custom_id="pet_cat:select",
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        await _on_select_catalog(inter)
 
 
 class CatalogView(View):
@@ -161,7 +137,7 @@ class CatalogView(View):
         self.owned_keys = owned_keys
         self.add_item(CatalogSelect(owned_keys))
 
-    @disnake.ui.button(label=_btn_pad("Назад"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Назад", 4, 4), style=ButtonStyle.gray,
                        custom_id="pet_cat:back", emoji="⬅️", row=1)
     async def back(self, button, inter: disnake.MessageInteraction):
         await _close_ephemeral(inter)
@@ -176,7 +152,7 @@ class CatalogPetView(View):
         self.pet_key = pet_key
 
         btn_buy = Button(
-            label=_btn_pad("Купить"),
+            label=_pad("Купить"),
             style=ButtonStyle.success,
             custom_id=f"pet_buy:{pet_key}",
             emoji="💎",
@@ -187,7 +163,7 @@ class CatalogPetView(View):
         self.add_item(btn_buy)
 
         btn_back = Button(
-            label=_btn_pad("Назад"),
+            label=_pad("Назад"),
             style=ButtonStyle.gray,
             custom_id=f"pet_cat_back:{pet_key}",
             emoji="⬅️",
@@ -210,7 +186,7 @@ class CatalogPetView(View):
             f"✅ Питомец **{pcore.CATALOG[self.pet_key]['name']}** куплен!",
             ephemeral=True
         )
-        # Обновляем панель каталога — редактируем текущее эфемерное
+        # Обновляем каталог — редактируем текущее эфемерное
         balance = _get_balance(inter.author.id)
         owned = [p["pet_key"] for p in pcore.get_user_pets(inter.author.id)]
         buf = await asyncio.to_thread(prender.render_catalog, inter.author.id, balance, owned)
@@ -231,7 +207,7 @@ class MyPetCardView(View):
 
         if not is_active:
             btn = Button(
-                label=_btn_pad("Активным"),
+                label=_pad("Активным"),
                 style=ButtonStyle.primary,
                 custom_id=f"pet_setactive:{pet_key}",
                 emoji="⭐",
@@ -241,7 +217,7 @@ class MyPetCardView(View):
             self.add_item(btn)
 
         btn_back = Button(
-            label=_btn_pad("Назад"),
+            label=_pad("Назад"),
             style=ButtonStyle.gray,
             custom_id=f"pet_myback:{pet_key}",
             emoji="⬅️",
@@ -274,14 +250,14 @@ class TopView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label=_btn_pad("Назад"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Назад", 4, 4), style=ButtonStyle.gray,
                        custom_id="pet_top:back", emoji="⬅️", row=0)
     async def back(self, button, inter: disnake.MessageInteraction):
         await _close_ephemeral(inter)
 
 
 # ============================================================
-# ГЛАВНЫЙ ХЕЛПЕР — правильно показать экран
+# ХЕЛПЕР — правильно показать экран
 # ============================================================
 def _is_ephemeral_message(inter: disnake.MessageInteraction) -> bool:
     """Определяет, было ли сообщение, на котором нажали, эфемерным."""
@@ -304,7 +280,6 @@ async def _display_screen(inter: disnake.MessageInteraction,
     · Если нажали на панель в канале (не эфемерно) → followup ephemeral
     · Если нажали внутри эфемерного → редактируем это же эфемерное
     """
-    # Уже сделали defer в вызывающем коде
     file = disnake.File(buf, filename=fname)
     e = disnake.Embed(color=6776679)
     e.set_image(url=f"attachment://{fname}")
@@ -404,7 +379,9 @@ async def _feed_active(inter: disnake.MessageInteraction):
 
 async def _close_ephemeral(inter: disnake.MessageInteraction):
     try:
-        await inter.response.edit_message(content="Меню закрыто.", embed=None, attachments=[], view=None)
+        await inter.response.edit_message(
+            content="Меню закрыто.", embed=None, attachments=[], view=None
+        )
     except Exception:
         try:
             await inter.response.defer()
@@ -413,7 +390,7 @@ async def _close_ephemeral(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# СЕЛЕКТ-КАЛБЭКИ
+# СЕЛЕКТ-КАЛБЭКИ (вызываются из методов класса Select)
 # ============================================================
 async def _on_select_my(inter: disnake.MessageInteraction):
     try:
@@ -459,12 +436,3 @@ async def _on_select_catalog(inter: disnake.MessageInteraction):
     buf = await asyncio.to_thread(prender.render_pet_card, user_id, balance, fake_pet, None)
     fname = f"pet_preview_{user_id}_{pet_key}.png"
     await _display_screen(inter, buf, fname, CatalogPetView(pet_key, can_buy))
-
-
-# Привязываем колбэки к селектам
-def _wire_selects():
-    MyPetsSelect.callback = _on_select_my
-    CatalogSelect.callback = _on_select_catalog
-
-
-_wire_selects()
