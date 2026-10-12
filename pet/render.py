@@ -2,6 +2,7 @@
 """Pillow-рендеры панели питомцев. 4 экрана, 1800×1000."""
 import io
 import os
+import time
 from typing import List, Dict, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
@@ -306,7 +307,6 @@ def _pet_card_catalog(d, img, x, y, w, h, key, cat, owned):
 
     pad = 20
 
-    # Иконка
     ic_s = 64
     ix = x + pad
     iy = y + pad
@@ -315,7 +315,6 @@ def _pet_card_catalog(d, img, x, y, w, h, key, cat, owned):
                         outline=border + (200,), width=2)
     _icon(d, ix + ic_s // 2, iy + ic_s // 2 + 1, cat["fa_code"], 30, color)
 
-    # Имя и редкость
     tx = ix + ic_s + 14
     d.text((tx, iy + 4), cat["name"], font=_font(20), fill=TEXT)
 
@@ -327,7 +326,6 @@ def _pet_card_catalog(d, img, x, y, w, h, key, cat, owned):
                         outline=border + (200,), width=1)
     d.text((tx + 8, ry + 3), rl, font=_font(11), fill=color)
 
-    # Описание
     desc_y = iy + ic_s + 14
     df = _font(13)
     desc = cat.get("description", "")
@@ -345,7 +343,6 @@ def _pet_card_catalog(d, img, x, y, w, h, key, cat, owned):
     for i, line in enumerate(lines):
         d.text((x + pad, desc_y + i * 18), line, font=df, fill=MUTED)
 
-    # Статы (цена / доход)
     sy = y + h - 80
     d.line((x + pad, sy - 8, x + w - pad, sy - 8), fill=INNER_BRD + (255,), width=1)
 
@@ -358,7 +355,6 @@ def _pet_card_catalog(d, img, x, y, w, h, key, cat, owned):
     iw = _tw(d, inc_str, _font(20))
     d.text((x + w - pad - iw, lbl_y + 18), inc_str, font=_font(20), fill=GREEN)
 
-    # Бонус
     if cat.get("bonus_type") and cat["bonus_type"] != "none":
         bt = cat["bonus_type"]
         bnames = {
@@ -444,10 +440,8 @@ def render_my_pets(user_id, balance, pets: List[dict], swap_cd_left: int = 0):
     rx1 = lx2 + gap
     rx2 = W - M - PX
 
-    # Считаем общий pending
     total_pending = sum((p.get("pending_dc") or 0) for p in pets)
 
-    # Активный питомец
     active = next((p for p in pets if p.get("is_active")), None)
     active_name = "—"
     if active:
@@ -495,7 +489,6 @@ def render_my_pets(user_id, balance, pets: List[dict], swap_cd_left: int = 0):
             cat = CATALOG.get(pet["pet_key"], {})
             color = RARITY_PALETTE.get(cat.get("rarity", "common"), SILVER)
 
-            # Фон
             if pet.get("is_active"):
                 _grad(img, (rpx1, cy, rpx2, cy + row_h), GOLD, GOLD, alpha=15, radius=14)
                 d.rounded_rectangle((rpx1, cy, rpx2, cy + row_h), radius=14,
@@ -504,7 +497,6 @@ def render_my_pets(user_id, balance, pets: List[dict], swap_cd_left: int = 0):
                 d.rounded_rectangle((rpx1, cy, rpx2, cy + row_h), radius=14,
                                     fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
 
-            # Иконка
             ic_s = 56
             ix = rpx1 + 18
             iy = cy + (row_h - ic_s) // 2
@@ -513,19 +505,16 @@ def render_my_pets(user_id, balance, pets: List[dict], swap_cd_left: int = 0):
                                 outline=color + (180,), width=2)
             _icon(d, ix + ic_s // 2, iy + ic_s // 2 + 1, cat.get("fa_code", I_PAW), 24, color)
 
-            # Имя + активный
             tx = ix + ic_s + 16
             name = cat.get("name", "—")
             if pet.get("is_active"):
                 name += " · АКТИВНЫЙ"
             d.text((tx, cy + 12), name, font=_font(18), fill=GOLD if pet.get("is_active") else TEXT)
 
-            # Стат: уровень, доход, кулдаун
             hourly = hourly_rate(pet["pet_key"], pet["level"])
             line2 = f"Ур. {pet['level']} · {hourly:.1f} DC/ч"
             d.text((tx, cy + 38), line2, font=_font(14), fill=MUTED)
 
-            # XP-бар
             cur_xp, need_xp, pct = get_xp_progress(pet)
             bar_y = cy + row_h - 20
             bar_w = 260
@@ -536,7 +525,6 @@ def render_my_pets(user_id, balance, pets: List[dict], swap_cd_left: int = 0):
             if fill_w > 0:
                 _grad(img, (bx1, bar_y, bx1 + fill_w, bar_y + 8), PURPLE, BLUE, alpha=255, radius=4)
 
-            # pending + last income
             pending = pet.get("pending_dc") or 0
             last = pet.get("last_income") or pet.get("purchased_at") or 0
             elapsed = max(int(time.time()) - last, 0) if last else 0
@@ -570,7 +558,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
     body_y = 140
     body_h = H - M - PY - body_y - 26
 
-    # Левая панель — большая карточка
     lw = 600
     gap = 30
     lx1 = PX
@@ -581,7 +568,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
     _panel(img, d, (lx1, body_y, lx2, body_y + body_h), radius=22)
     cx = (lx1 + lx2) // 2
 
-    # Большая иконка
     ic_s = 200
     ic_x = cx - ic_s // 2
     ic_y = body_y + 40
@@ -590,11 +576,9 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
                         outline=color + (200,), width=4)
     _icon(d, cx, ic_y + ic_s // 2 + 2, cat.get("fa_code", I_PAW), 90, color)
 
-    # Имя
     d.text((cx, ic_y + ic_s + 30), cat.get("name", "—"),
            font=_font(36), fill=TEXT, anchor="mm")
 
-    # Редкость
     rl = RARITY_LABEL.get(cat.get("rarity", "common"), "—").upper()
     rw = _tw(d, rl, _font(16)) + 30
     ry = ic_y + ic_s + 60
@@ -603,7 +587,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
                         outline=color + (200,), width=2)
     d.text((cx, ry + 16), rl, font=_font(16), fill=color, anchor="mm")
 
-    # Активный — бейдж
     if pet.get("is_active"):
         ay = ry + 50
         txt = "✦ АКТИВНЫЙ ПИТОМЕЦ"
@@ -613,7 +596,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
                             outline=GOLD + (220,), width=2)
         d.text((cx, ay + 18), txt, font=_font(15), fill=GOLD, anchor="mm")
 
-    # Бонус
     bt = cat.get("bonus_type", "none")
     if bt != "none":
         bnames = {
@@ -629,7 +611,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
                             outline=GOLD + (180,), width=2)
         d.text((cx, by + 20), btext, font=_font(16), fill=GOLD, anchor="mm")
 
-    # Правая панель
     _panel(img, d, (rx1, body_y, rx2, body_y + body_h), radius=22)
     rpx1 = rx1 + 30
     rpx2 = rx2 - 30
@@ -637,7 +618,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
     _right_head(d, rpx1, body_y + 22, rpx2, "Информация",
                 f"УР. {pet['level']} / {MAX_LEVEL}")
 
-    # Описание
     dy = body_y + 110
     d.rounded_rectangle((rpx1, dy, rpx2, dy + 130), radius=16,
                         fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
@@ -656,7 +636,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
     for i, line in enumerate(lines[:4]):
         d.text((rpx1 + 20, dy + 20 + i * 24), line, font=df, fill=TEXT_SOFT)
 
-    # Уровень + XP
     sy = dy + 150
     sh = 96
     d.rounded_rectangle((rpx1, sy, rpx2, sy + sh), radius=14,
@@ -667,7 +646,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
     d.text((rpx1 + 100, sy + 40), f"Ур. {pet['level']} · {_fmt(pet['xp'])} XP",
            font=_font(22), fill=TEXT)
 
-    # XP-бар
     cur_xp, need_xp, pct = get_xp_progress(pet)
     bx1 = rpx1 + 100
     bx2 = rpx2 - 24
@@ -680,7 +658,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
         d.text((bx2, by - 20), f"{cur_xp} / {need_xp} XP · {pct}%",
                font=_font(12), fill=MUTED, anchor="rs")
 
-    # Доход
     sy += sh + 12
     hourly = hourly_rate(pet["pet_key"], pet["level"])
     cap = max_pending(pet["pet_key"], pet["level"])
@@ -703,7 +680,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
     d.text((rpx2 - 24, sy + 54), f"копилось {h_el}ч {m_el}м",
            font=_font(12), fill=MUTED, anchor="rt")
 
-    # Место в топе + дата покупки
     sy += sh + 12
     d.rounded_rectangle((rpx1, sy, rpx2, sy + 60), radius=14,
                         fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
@@ -732,7 +708,8 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
 # ============================================================
 # ЭКРАН 4: ТОП
 # ============================================================
-def render_top(user_id, balance, top_list: List[dict], my_place: int = None):
+def render_top(user_id, balance, top_list: List[dict], my_place: int = None,
+               my_best_pet: Optional[dict] = None):
     img, d = _canvas(user_id, "питомцы · топ")
 
     body_y = 140
@@ -745,20 +722,18 @@ def render_top(user_id, balance, top_list: List[dict], my_place: int = None):
     rx1 = lx2 + gap
     rx2 = W - M - PX
 
+    # 👇 Берём лучшего питомца из параметра (без обращения к БД)
     my_best = "—"
-    if my_place:
-        my_pets = cur.execute(
-            "SELECT pet_key, level FROM user_pets WHERE user_id=? ORDER BY level DESC LIMIT 1",
-            (user_id,)
-        ).fetchone()
-        if my_pets:
-            cat = CATALOG.get(my_pets["pet_key"], {})
-            my_best = f"{cat.get('name', '—')} · ур. {my_pets['level']}"
+    if my_best_pet:
+        my_best = f"{my_best_pet['name']} · ур. {my_best_pet['level']}"
 
     _left_panel(img, d, (lx1, body_y, lx2, body_y + body_h), balance, [
-        {"label": "Твоё место", "value": f"#{my_place}" if my_place else "—", "icon": I_TROPHY, "color": GOLD},
-        {"label": "Лучший питомец", "value": my_best, "icon": I_STAR, "color": PURPLE},
-        {"label": "Всего участников", "value": f"{len(top_list)}", "icon": I_USER, "color": BLUE},
+        {"label": "Твоё место", "value": f"#{my_place}" if my_place else "—",
+         "icon": I_TROPHY, "color": GOLD},
+        {"label": "Лучший питомец", "value": my_best,
+         "icon": I_STAR, "color": PURPLE},
+        {"label": "Всего участников", "value": f"{len(top_list)}",
+         "icon": I_USER, "color": BLUE},
     ])
 
     _panel(img, d, (rx1, body_y, rx2, body_y + body_h), radius=22)
@@ -803,7 +778,6 @@ def render_top(user_id, balance, top_list: List[dict], my_place: int = None):
                 d.rounded_rectangle((rpx1, cy, rpx2, cy + row_h), radius=12,
                                     fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
 
-            # Медаль
             bd_s = 46
             bx = rpx1 + 16
             by = cy + (row_h - bd_s) // 2
@@ -819,19 +793,16 @@ def render_top(user_id, balance, top_list: List[dict], my_place: int = None):
                 d.text((bx + bd_s // 2 - nw // 2, by + bd_s // 2 - nf.size // 2 - 2),
                        nstr, font=nf, fill=medal)
 
-            # Имя
             tx = bx + bd_s + 16
             name = f"@{t['user_id']}"
             if is_me:
                 name += " (ты)"
             d.text((tx, cy + row_h // 2 - 16), name, font=_font(19), fill=TEXT)
 
-            # Питомец
-            cat = CATALOG.get(t["pet_key"] or "", {})
+            cat = CATALOG.get(t.get("pet_key") or "", {})
             sub = cat.get("name", "—")
             d.text((tx, cy + row_h // 2 + 6), sub, font=_font(13), fill=MUTED)
 
-            # Значение
             val = f"ур. {t['best_level']}"
             vw = _tw(d, val, _font(22))
             d.text((rpx2 - 24 - vw, cy + row_h // 2 - 14), val, font=_font(22),
@@ -843,6 +814,3 @@ def render_top(user_id, balance, top_list: List[dict], my_place: int = None):
     img.convert("RGB").save(buf, "PNG")
     buf.seek(0)
     return buf
-
-
-import time  # noqa: E402
