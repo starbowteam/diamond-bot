@@ -3,7 +3,7 @@
 import asyncio
 
 import disnake
-from disnake import ButtonStyle, SelectOption
+from disnake import ButtonStyle, SelectOption, PartialEmoji
 from disnake.ui import View, Button, Select, Modal, TextInput
 
 from core.utils import logger, CONFIG
@@ -19,6 +19,17 @@ def _pad(text: str, left: int = 2, right: int = 2) -> str:
 
 
 # ============================================================
+# ЭМОДЗИ
+# ============================================================
+E_PETS     = PartialEmoji(name="pe121t", id=1559221896774553670)
+E_CATALOG  = PartialEmoji(name="bo1s1",  id=1559221873999351869)
+E_TOP      = PartialEmoji(name="d1edf",  id=1552730601155596348)
+
+E_BUY      = PartialEmoji(name="shop1",  id=1555654407776112750)
+E_GIFT     = PartialEmoji(name="gid1",   id=1555654337953267794)
+
+
+# ============================================================
 # ПАНЕЛЬ В КАНАЛЕ
 # ============================================================
 class PetPanelView(View):
@@ -26,23 +37,23 @@ class PetPanelView(View):
         super().__init__(timeout=None)
 
     @disnake.ui.button(label=_pad("Питомцы", 2, 1), style=ButtonStyle.gray,
-                       custom_id="pet_panel:my", emoji="🐾", row=0)
+                       custom_id="pet_panel:my", emoji=E_PETS, row=0)
     async def my_pets(self, button, inter: disnake.MessageInteraction):
         await _open_my_pets(inter)
 
     @disnake.ui.button(label=_pad("Каталог", 2, 2), style=ButtonStyle.gray,
-                       custom_id="pet_panel:catalog", emoji="📖", row=0)
+                       custom_id="pet_panel:catalog", emoji=E_CATALOG, row=0)
     async def catalog(self, button, inter: disnake.MessageInteraction):
         await _open_catalog(inter)
 
     @disnake.ui.button(label=_pad("Топ", 2, 1), style=ButtonStyle.gray,
-                       custom_id="pet_panel:top", emoji="🏆", row=0)
+                       custom_id="pet_panel:top", emoji=E_TOP, row=0)
     async def top(self, button, inter: disnake.MessageInteraction):
         await _open_top(inter)
 
 
 # ============================================================
-# МОИ ПИТОМЦЫ — только Забрать накопленное / Покормить питомца
+# МОИ ПИТОМЦЫ
 # ============================================================
 class MyPetsView(View):
     def __init__(self):
@@ -100,7 +111,7 @@ class CatalogView(View):
 
 
 # ============================================================
-# КАРТОЧКА ТОВАРА
+# КАРТОЧКА ТОВАРА — селект с 2 действиями
 # ============================================================
 class CardActionSelect(Select):
     def __init__(self, pet_key: str):
@@ -115,13 +126,13 @@ class CardActionSelect(Select):
                 SelectOption(
                     label=f"Купить себе · {price} DC",
                     description="Питомец сразу появится в твоей коллекции",
-                    emoji="💎",
+                    emoji=E_BUY,
                     value="buy",
                 ),
                 SelectOption(
                     label=f"Подарить · {gp} DC",
                     description="Отправить питомца другому юзеру (комиссия +10%)",
-                    emoji="🎁",
+                    emoji=E_GIFT,
                     value="gift",
                 ),
             ],
