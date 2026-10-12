@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Discord UI для панели питомцев. Всё в селектах, эфемерно."""
+"""Discord UI для панели питомцев."""
 import asyncio
 
 import disnake
@@ -19,7 +19,7 @@ def _pad(text: str, left: int = 2, right: int = 2) -> str:
 
 
 # ============================================================
-# ПАНЕЛЬ В КАНАЛЕ (3 кнопки)
+# ПАНЕЛЬ В КАНАЛЕ
 # ============================================================
 class PetPanelView(View):
     def __init__(self):
@@ -42,18 +42,20 @@ class PetPanelView(View):
 
 
 # ============================================================
-# МОИ ПИТОМЦЫ — только Забрать / Покормить
+# МОИ ПИТОМЦЫ — только Забрать накопленное / Покормить питомца
 # ============================================================
 class MyPetsView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label=_pad("Забрать", 2, 2), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Забрать накопленное", 2, 2),
+                       style=ButtonStyle.gray,
                        custom_id="pet_my:claim", emoji="💰", row=0)
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
 
-    @disnake.ui.button(label=_pad("Покормить", 2, 2), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Покормить питомца", 2, 2),
+                       style=ButtonStyle.gray,
                        custom_id="pet_my:feed", emoji="🍖", row=0)
     async def feed(self, button, inter: disnake.MessageInteraction):
         await _feed_active(inter)
@@ -98,7 +100,7 @@ class CatalogView(View):
 
 
 # ============================================================
-# КАРТОЧКА ТОВАРА — селект с 2 опциями
+# КАРТОЧКА ТОВАРА
 # ============================================================
 class CardActionSelect(Select):
     def __init__(self, pet_key: str):
@@ -112,7 +114,7 @@ class CardActionSelect(Select):
             options=[
                 SelectOption(
                     label=f"Купить себе · {price} DC",
-                    description="Питомец сразу появится в твоём зоопарке",
+                    description="Питомец сразу появится в твоей коллекции",
                     emoji="💎",
                     value="buy",
                 ),
@@ -193,20 +195,9 @@ class GiftPetModal(Modal):
         price = result.get("price", 0)
         base_price = cat.get("price_dc", 0)
 
-        # Эфемерка успеха подарка
-        try:
-            await inter.edit_original_response(
-                content=f"🎁 Питомец **{cat.get('name', '—')}** подарен <@{recipient_id}>!",
-                embed=None,
-                attachments=[],
-                view=None,
-            )
-        except Exception:
-            pass
-
-        # Рендер Pillow
         user_id = inter.author.id
         balance = _get_balance(user_id)
+
         buf = await asyncio.to_thread(
             prender.render_success_gift,
             user_id, balance, self.pet_key, price, base_price, recipient_id,
@@ -217,9 +208,14 @@ class GiftPetModal(Modal):
         e.set_image(url=f"attachment://{fname}")
 
         try:
-            await inter.followup.send(embed=e, file=file, ephemeral=True)
-        except Exception as ex:
-            logger.warning(f"gift success render: {ex}")
+            await inter.edit_original_response(
+                content=None, embed=e, file=file, attachments=[], view=None,
+            )
+        except Exception:
+            try:
+                await inter.followup.send(embed=e, file=file, ephemeral=True)
+            except Exception as ex:
+                logger.warning(f"gift success render: {ex}")
 
 
 # ============================================================
@@ -278,7 +274,7 @@ def _get_available_pets(user_id: int):
 
 
 # ============================================================
-# ОТКРЫТИЕ ЭКРАНОВ
+# ОТКРЫТИЕ
 # ============================================================
 async def _open_my_pets(inter: disnake.MessageInteraction):
     try:
@@ -359,9 +355,6 @@ async def _feed_active(inter: disnake.MessageInteraction):
     await _open_my_pets(inter)
 
 
-# ============================================================
-# КОЛБЭК СЕЛЕКТА КАТАЛОГА
-# ============================================================
 async def _on_select_catalog(inter: disnake.MessageInteraction):
     try:
         await inter.response.defer(ephemeral=True)
@@ -382,7 +375,6 @@ async def _on_select_catalog(inter: disnake.MessageInteraction):
     balance = _get_balance(user_id)
     can_buy = balance >= cat.get("price_dc", 0)
 
-    # Карточка товара (v3)
     buf = await asyncio.to_thread(
         prender.render_item_card, user_id, balance, pet_key
     )
@@ -391,9 +383,6 @@ async def _on_select_catalog(inter: disnake.MessageInteraction):
     await _display_screen(inter, buf, fname, view)
 
 
-# ============================================================
-# ПОКУПКА ИЗ КАРТОЧКИ
-# ============================================================
 async def _card_buy(inter: disnake.MessageInteraction, pet_key: str):
     try:
         await inter.response.defer(ephemeral=True)
@@ -417,7 +406,6 @@ async def _card_buy(inter: disnake.MessageInteraction, pet_key: str):
         )
         return
 
-    # Эфемерка — редактируем на экран успеха
     balance = _get_balance(user_id)
     buf = await asyncio.to_thread(
         prender.render_success_buy, user_id, balance, pet_key, price
@@ -426,9 +414,6 @@ async def _card_buy(inter: disnake.MessageInteraction, pet_key: str):
     await _display_screen(inter, buf, fname, TopView())
 
 
-# ============================================================
-# ПОДАРОК ИЗ КАРТОЧКИ
-# ============================================================
 async def _card_gift(inter: disnake.MessageInteraction, pet_key: str):
     try:
         await inter.response.send_modal(GiftPetModal(pet_key))
