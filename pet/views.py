@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Discord UI для панели питомцев. Всё в селектах, эфемерно, взаимозаменяемо."""
+"""Discord UI для панели питомцев. Всё в селектах, эфемерно."""
 import asyncio
 
 import disnake
@@ -19,7 +19,7 @@ def _pad(text: str, left: int = 2, right: int = 2) -> str:
 
 
 # ============================================================
-# ГЛАВНАЯ ПАНЕЛЬ В КАНАЛЕ (3 кнопки)
+# ПАНЕЛЬ В КАНАЛЕ (3 кнопки)
 # ============================================================
 class PetPanelView(View):
     def __init__(self):
@@ -48,12 +48,12 @@ class MyPetsView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @disnake.ui.button(label=_pad("Забрать", 1, 2), style=ButtonStyle.success,
+    @disnake.ui.button(label=_pad("Забрать", 2, 2), style=ButtonStyle.gray,
                        custom_id="pet_my:claim", emoji="💰", row=0)
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
 
-    @disnake.ui.button(label=_pad("Покормить"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Покормить", 2, 2), style=ButtonStyle.gray,
                        custom_id="pet_my:feed", emoji="🍖", row=0)
     async def feed(self, button, inter: disnake.MessageInteraction):
         await _feed_active(inter)
@@ -140,23 +140,7 @@ class CatalogCardView(View):
     def __init__(self, pet_key: str, can_buy: bool):
         super().__init__(timeout=300)
         self.pet_key = pet_key
-
-        # Кнопка "Назад в каталог"
-        btn_back = Button(
-            label=_pad("К каталогу"),
-            style=ButtonStyle.gray,
-            custom_id="pet_card:back",
-            emoji="⬅️",
-            row=1,
-        )
-        btn_back.callback = self.back
-        self.add_item(btn_back)
-
-        # Селект действий
         self.add_item(CardActionSelect(pet_key))
-
-    async def back(self, inter: disnake.MessageInteraction):
-        await _open_catalog(inter)
 
 
 # ============================================================
@@ -207,14 +191,35 @@ class GiftPetModal(Modal):
 
         cat = pcore.CATALOG.get(self.pet_key, {})
         price = result.get("price", 0)
-        await inter.followup.send(
-            f"🎁 Питомец **{cat.get('name', '—')}** подарен "
-            f"<@{recipient_id}>!\n> **Списано:** `{price} DC` (с комиссией 10%)",
-            ephemeral=True,
-        )
+        base_price = cat.get("price_dc", 0)
 
-        # Возвращаемся в каталог
-        await _open_catalog(inter)
+        # Эфемерка успеха подарка
+        try:
+            await inter.edit_original_response(
+                content=f"🎁 Питомец **{cat.get('name', '—')}** подарен <@{recipient_id}>!",
+                embed=None,
+                attachments=[],
+                view=None,
+            )
+        except Exception:
+            pass
+
+        # Рендер Pillow
+        user_id = inter.author.id
+        balance = _get_balance(user_id)
+        buf = await asyncio.to_thread(
+            prender.render_success_gift,
+            user_id, balance, self.pet_key, price, base_price, recipient_id,
+        )
+        fname = f"pet_gift_ok_{user_id}.png"
+        file = disnake.File(buf, filename=fname)
+        e = disnake.Embed(color=6776679)
+        e.set_image(url=f"attachment://{fname}")
+
+        try:
+            await inter.followup.send(embed=e, file=file, ephemeral=True)
+        except Exception as ex:
+            logger.warning(f"gift success render: {ex}")
 
 
 # ============================================================
@@ -243,7 +248,6 @@ def _is_ephemeral_message(inter: disnake.MessageInteraction) -> bool:
 
 async def _display_screen(inter: disnake.MessageInteraction,
                           buf, fname: str, view: View):
-    """Эфемерка редактируется, не эфемерка — followup."""
     file = disnake.File(buf, filename=fname)
     e = disnake.Embed(color=6776679)
     e.set_image(url=f"attachment://{fname}")
@@ -269,7 +273,6 @@ def _get_balance(user_id: int) -> int:
 
 
 def _get_available_pets(user_id: int):
-    """Возвращает список (key, cat) только непокупленных питомцев."""
     owned = {p["pet_key"] for p in pcore.get_user_pets(user_id)}
     return [(k, c) for k, c in pcore.CATALOG.items() if k not in owned]
 
@@ -368,7 +371,6 @@ async def _on_select_catalog(inter: disnake.MessageInteraction):
     pet_key = inter.data.values[0]
     user_id = inter.author.id
 
-    # Проверяем — не купили ли уже
     if pcore.has_pet(user_id, pet_key):
         await inter.followup.send(
             "❌ У тебя уже есть этот питомец.", ephemeral=True
@@ -380,18 +382,9 @@ async def _on_select_catalog(inter: disnake.MessageInteraction):
     balance = _get_balance(user_id)
     can_buy = balance >= cat.get("price_dc", 0)
 
-    # Рендерим карточку товара
-    fake_pet = {
-        "pet_key": pet_key,
-        "level": 1,
-        "xp": 0,
-        "pending_dc": 0,
-        "last_income": 0,
-        "purchased_at": 0,
-        "is_active": False,
-    }
+    # Карточка товара (v3)
     buf = await asyncio.to_thread(
-        prender.render_pet_card, user_id, balance, fake_pet, None, True
+        prender.render_item_card, user_id, balance, pet_key
     )
     fname = f"pet_item_{user_id}_{pet_key}.png"
     view = CatalogCardView(pet_key, can_buy)
@@ -414,6 +407,9 @@ async def _card_buy(inter: disnake.MessageInteraction, pet_key: str):
         await _open_catalog(inter)
         return
 
+    cat = pcore.CATALOG.get(pet_key, {})
+    price = cat.get("price_dc", 0)
+
     result = await pcore.buy_pet(inter.bot, user_id, pet_key)
     if not result.get("ok"):
         await inter.followup.send(
@@ -421,11 +417,13 @@ async def _card_buy(inter: disnake.MessageInteraction, pet_key: str):
         )
         return
 
-    cat = pcore.CATALOG.get(pet_key, {})
-    await inter.followup.send(
-        f"✅ Питомец **{cat.get('name', '—')}** куплен!", ephemeral=True
+    # Эфемерка — редактируем на экран успеха
+    balance = _get_balance(user_id)
+    buf = await asyncio.to_thread(
+        prender.render_success_buy, user_id, balance, pet_key, price
     )
-    await _open_catalog(inter)
+    fname = f"pet_buy_ok_{user_id}.png"
+    await _display_screen(inter, buf, fname, TopView())
 
 
 # ============================================================
