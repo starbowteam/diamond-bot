@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Pillow-рендеры питомцев.
-  · Каталог       — список строк с непокупленными
-  · Мои питомцы   — hero активного + список остальных
-  · Карточка      — товар для покупки/подарка или свой питомец
-  · Топ           — общий список строчками
+  · Каталог         — список строк (только непокупленные)
+  · Карточка товара — вариант 3: горизонтальный заголовок + 4 плитки + 2 цены
+  · Мои питомцы     — hero активного + список остальных
+  · Карточка своего — большая слева, инфо справа
+  · Успех покупки   — закрашенный круг с галочкой
+  · Успех подарка   — закрашенный круг с подарком
+  · Топ             — общий список строчками
 """
 import io
 import os
@@ -64,10 +67,12 @@ DIM       = (102, 102, 102)
 SILVER    = (198, 208, 224)
 SILVER_HI = (224, 232, 245)
 GREEN     = (46, 204, 113)
+GREEN_DK  = (26, 138, 74)
 RED       = (255, 107, 107)
 BLUE      = (106, 155, 209)
 PURPLE    = (179, 157, 219)
 GOLD      = (247, 201, 145)
+GOLD_DK   = (174, 121, 17)
 BRONZE    = (209, 146, 96)
 PINK      = (255, 77, 148)
 
@@ -96,6 +101,7 @@ I_CHECK    = 0xf00c
 I_PLUS     = 0xf067
 I_GIFT     = 0xf06b
 I_FIRE     = 0xf06d
+I_TARGET   = 0xf140
 
 
 # ============================================================
@@ -150,6 +156,21 @@ def _grad(img, box, c1, c2, alpha=30, radius=0):
         a = Image.composite(a, Image.new("L", (w, h), 0), mask)
         layer.putalpha(a)
     img.paste(layer, (x1, y1), layer)
+
+
+def _grad_radial_circle(img, cx, cy, r, c1, c2, alpha=255):
+    """Плотная радиальная заливка круга градиентом."""
+    layer = Image.new("RGBA", (2 * r, 2 * r), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    steps = r
+    for i in range(steps, 0, -1):
+        t = i / steps
+        rr = int(c1[0] * (1 - t) + c2[0] * t)
+        gg = int(c1[1] * (1 - t) + c2[1] * t)
+        bb = int(c1[2] * (1 - t) + c2[2] * t)
+        ld.ellipse((r - i, r - i, r + i, r + i),
+                   fill=(rr, gg, bb, alpha))
+    img.paste(layer, (cx - r, cy - r), layer)
 
 
 def _panel(img, d, box, radius=22):
@@ -311,7 +332,7 @@ def _xp_bar(d, img, x, y, w, h, pct):
 
 
 # ============================================================
-# ЭКРАН 1: КАТАЛОГ
+# ЭКРАН 1: КАТАЛОГ (список строк)
 # ============================================================
 def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
     color = RARITY_PALETTE.get(cat["rarity"], SILVER)
@@ -327,8 +348,6 @@ def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
                             outline=INNER_BRD + (255,), width=2)
 
     pad = 16
-
-    # Emoji блок 72×72
     es = 72
     ex = x + pad
     ey = y + (h - es) // 2
@@ -337,16 +356,13 @@ def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
                         outline=color + (170,), width=2)
     _icon(d, ex + es // 2, ey + es // 2 + 2, cat["fa_code"], 32, color)
 
-    # Текстовый блок
     tx = ex + es + 18
     tx_max = x + w - pad - 260
 
-    # Имя
     name_f = _font(21)
     name_shown = _el(d, cat["name"], name_f, tx_max - tx)
     d.text((tx, y + 14), name_shown, font=name_f, fill=TEXT)
 
-    # Редкость + описание
     rl = _rarity_label_short(cat["rarity"])
     rlf = _font(10)
     rlw = _tw(d, rl, rlf) + 16
@@ -363,7 +379,6 @@ def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
         desc_shown = _el(d, cat.get("description", ""), desc_f, desc_max)
         d.text((desc_x, rl_y + 4), desc_shown, font=desc_f, fill=MUTED)
 
-    # Статы внизу
     stats_y = y + h - 34
     base = cat["passive_dc"]
     max_rate = base * (1 + (MAX_LEVEL - 1) * 0.15)
@@ -388,7 +403,6 @@ def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
                                 outline=GOLD + (150,), width=1)
             d.text((bx + 8, stats_y + 9), btext, font=bf, fill=GOLD)
 
-    # Правая часть — цена
     right_x = x + w - pad
     price_str = _fmt(cat["price_dc"])
     pf = _font(26)
@@ -406,9 +420,6 @@ def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
 
 
 def render_catalog(user_id, balance, available_pets, selected_key=None):
-    """
-    available_pets = [(key, cat), ...] — только те, которых ещё НЕТ у юзера.
-    """
     img, d = _canvas(user_id, "питомцы · каталог")
 
     body_y = 140
@@ -483,7 +494,240 @@ def render_catalog(user_id, balance, available_pets, selected_key=None):
 
 
 # ============================================================
-# ЭКРАН 2: МОИ ПИТОМЦЫ
+# ЭКРАН 2: КАРТОЧКА ТОВАРА (вариант 3) — из каталога
+# ============================================================
+def render_item_card(user_id, balance, pet_key: str):
+    """Карточка товара из каталога: горизонтальный заголовок + 4 плитки + бонус + 2 цены."""
+    img, d = _canvas(user_id, "питомцы · товар")
+
+    cat = CATALOG.get(pet_key, {})
+    color = RARITY_PALETTE.get(cat.get("rarity", "common"), SILVER)
+
+    body_y = 140
+    body_h = H - M - PY - body_y - 26
+
+    lw = 450
+    gap = 28
+    lx1 = PX
+    lx2 = lx1 + lw
+    rx1 = lx2 + gap
+    rx2 = W - M - PX
+
+    total = len(CATALOG)
+    price = cat.get("price_dc", 0)
+    gp = gift_price(pet_key)
+    base = cat.get("passive_dc", 0)
+    max_rate = base * (1 + (MAX_LEVEL - 1) * 0.15)
+    days = max(int(price / (base * 24)), 1) if base > 0 else 0
+
+    _left_panel(img, d, (lx1, body_y, lx2, body_y + body_h), balance, [
+        {"label": "Категория", "value": "Питомцы", "icon": I_PAW, "color": BLUE},
+        {"label": "Редкость", "value": RARITY_LABEL.get(cat.get("rarity", ""), "—"),
+         "icon": I_STAR, "color": color},
+        {"label": "Цена покупки", "value": f"{_fmt(price)} DC", "icon": I_COINS, "color": GREEN},
+        {"label": "Цена подарка", "value": f"{_fmt(gp)} DC (+10%)", "icon": I_GIFT, "color": PURPLE},
+    ])
+
+    _panel(img, d, (rx1, body_y, rx2, body_y + body_h), radius=22)
+    rpx1 = rx1 + 26
+    rpx2 = rx2 - 26
+
+    _right_head(d, rpx1, body_y + 22, rpx2, cat.get("name", "—").upper(), "товар · питомец")
+
+    content_y1 = body_y + 96
+
+    # ── HEADER: emoji + имя + описание + теги ──
+    header_h = 180
+    header_x1 = rpx1
+    header_x2 = rpx2
+    header_y1 = content_y1
+    header_y2 = header_y1 + header_h
+
+    _grad(img, (header_x1, header_y1, header_x2, header_y2), GOLD, GOLD, alpha=12, radius=18)
+    d.rounded_rectangle((header_x1, header_y1, header_x2, header_y2), radius=18,
+                        outline=GOLD + (140,), width=2)
+
+    es = 130
+    ex = header_x1 + 24
+    ey = header_y1 + (header_h - es) // 2
+    _alpha(img, (ex, ey, ex + es, ey + es), color, alpha=45, radius=28)
+    d.rounded_rectangle((ex, ey, ex + es, ey + es), radius=28,
+                        outline=color + (180,), width=3)
+    _icon(d, ex + es // 2, ey + es // 2 + 2, cat.get("fa_code", I_PAW), 60, color)
+
+    tx = ex + es + 24
+    tx_max = header_x2 - 24
+
+    name_f = _font(30)
+    d.text((tx, ey + 4), _el(d, cat.get("name", "—"), name_f, tx_max - tx),
+           font=name_f, fill=TEXT)
+
+    desc_f = _font(15)
+    desc_lines = []
+    cur = ""
+    for word in cat.get("description", "").split():
+        test = (cur + " " + word).strip()
+        if _tw(d, test, desc_f) <= tx_max - tx:
+            cur = test
+        else:
+            if cur: desc_lines.append(cur)
+            cur = word
+            if len(desc_lines) >= 2: break
+    if cur and len(desc_lines) < 2: desc_lines.append(cur)
+    for i, line in enumerate(desc_lines):
+        d.text((tx, ey + 46 + i * 20), line, font=desc_f, fill=MUTED)
+
+    # Теги
+    tag_y = ey + 96
+    cur_x = tx
+    rl = _rarity_label_short(cat.get("rarity", "common"))
+    rlf = _font(12)
+    rlw = _tw(d, rl, rlf) + 20
+    _alpha(img, (cur_x, tag_y, cur_x + rlw, tag_y + 26), color, alpha=55, radius=7)
+    d.rounded_rectangle((cur_x, tag_y, cur_x + rlw, tag_y + 26), radius=7,
+                        outline=color + (200,), width=1)
+    d.text((cur_x + 10, tag_y + 4), rl, font=rlf, fill=color)
+    cur_x += rlw + 8
+
+    if cat.get("bonus_type", "none") != "none":
+        bnames = {"review_bonus": "отзывы", "casino_luck": "казино", "clan_contrib": "клан"}
+        btext = f"+{int(cat.get('bonus_value', 0) * 100)}% · {bnames.get(cat['bonus_type'], '')}"
+        bw = _tw(d, btext, rlf) + 20
+        _alpha(img, (cur_x, tag_y, cur_x + bw, tag_y + 26), GOLD, alpha=25, radius=7)
+        d.rounded_rectangle((cur_x, tag_y, cur_x + bw, tag_y + 26), radius=7,
+                            outline=GOLD + (150,), width=1)
+        d.text((cur_x + 10, tag_y + 4), btext, font=rlf, fill=GOLD)
+
+    # ── 4 ПЛИТКИ ──
+    stats_h = 110
+    stats_y1 = header_y2 + 14
+    stats_y2 = stats_y1 + stats_h
+
+    stats_data = [
+        ("ДОХОД", f"{base} DC/ч", GREEN, I_BOLT),
+        ("НА МАКС. УР.", f"{max_rate:.0f} DC/ч", GREEN, I_TARGET),
+        ("КАП КОПИЛКИ", f"{int(base * 24)} DC", SILVER, I_COINS),
+        ("ОКУПАЕМОСТЬ", f"~{days} дн", GOLD, I_FIRE),
+    ]
+
+    gap_col = 12
+    col_w = (rpx2 - rpx1 - gap_col * 3) // 4
+
+    for i, (lbl, val, col, ic) in enumerate(stats_data):
+        cx1 = rpx1 + i * (col_w + gap_col)
+        cx2 = cx1 + col_w
+
+        d.rounded_rectangle((cx1, stats_y1, cx2, stats_y2), radius=14,
+                            fill=INNER_BG + (255,),
+                            outline=INNER_BRD + (255,), width=2)
+        _alpha(img, (cx1 + 18, stats_y1 + 18, cx1 + 18 + 44, stats_y1 + 18 + 44),
+               col, alpha=35, radius=11)
+        _icon(d, cx1 + 40, stats_y1 + 40, ic, 22, col)
+
+        d.text((cx1 + 74, stats_y1 + 22), lbl, font=_font(10), fill=MUTED)
+        vf = _font(20)
+        d.text((cx1 + 74, stats_y1 + 44), _el(d, val, vf, cx2 - cx1 - 88),
+               font=vf, fill=col)
+
+    # ── БОНУС ──
+    bonus_y1 = stats_y2 + 14
+    bonus_h = 68
+    bonus_y2 = bonus_y1 + bonus_h
+
+    bt = cat.get("bonus_type", "none")
+    if bt != "none":
+        bnames = {
+            "review_bonus": "к награде за отзывы",
+            "casino_luck": "к выигрышу в казино",
+            "clan_contrib": "к вкладу в копилку клана",
+        }
+        bonus_text = f"+{int(cat.get('bonus_value', 0) * 100)}% {bnames.get(bt, '')}"
+
+        _grad(img, (rpx1, bonus_y1, rpx2, bonus_y2), GOLD, GOLD, alpha=18, radius=14)
+        d.rounded_rectangle((rpx1, bonus_y1, rpx2, bonus_y2), radius=14,
+                            outline=GOLD + (170,), width=2)
+
+        _alpha(img, (rpx1 + 16, bonus_y1 + 12, rpx1 + 16 + 44, bonus_y1 + 12 + 44),
+               GOLD, alpha=45, radius=11)
+        _icon(d, rpx1 + 38, bonus_y1 + 34, I_STAR, 22, GOLD)
+
+        d.text((rpx1 + 76, bonus_y1 + 12), "БОНУС РЕДКОСТИ",
+               font=_font(10), fill=GOLD)
+        d.text((rpx1 + 76, bonus_y1 + 30), bonus_text,
+               font=_font(18), fill=GOLD)
+    else:
+        _grad(img, (rpx1, bonus_y1, rpx2, bonus_y2), SILVER, SILVER, alpha=10, radius=14)
+        d.rounded_rectangle((rpx1, bonus_y1, rpx2, bonus_y2), radius=14,
+                            outline=INNER_BRD + (255,), width=2)
+        _icon(d, rpx1 + 38, bonus_y1 + 34, I_INFO, 22, SILVER)
+        d.text((rpx1 + 76, bonus_y1 + 22), "БОНУСОВ НЕТ — обычный питомец",
+               font=_font(15), fill=SILVER)
+
+    # ── 2 ЦЕНЫ (снизу, приподнятые) ──
+    price_h = 130
+    price_y2 = body_y + body_h - 22
+    price_y1 = price_y2 - price_h
+
+    gap_price = 14
+    half_w = (rpx2 - rpx1 - gap_price) // 2
+
+    # Купить себе
+    buy_x1 = rpx1
+    buy_x2 = buy_x1 + half_w
+    _grad(img, (buy_x1, price_y1, buy_x2, price_y2), GREEN, GREEN, alpha=22, radius=18)
+    d.rounded_rectangle((buy_x1, price_y1, buy_x2, price_y2), radius=18,
+                        outline=GREEN + (190,), width=3)
+
+    _alpha(img, (buy_x1 + 20, price_y1 + 34, buy_x1 + 20 + 62, price_y1 + 34 + 62),
+           GREEN, alpha=45, radius=15)
+    _icon(d, buy_x1 + 51, price_y1 + 65, I_GEM, 28, GREEN)
+
+    d.text((buy_x1 + 98, price_y1 + 24), "КУПИТЬ СЕБЕ",
+           font=_font(12), fill=GREEN)
+
+    price_str = f"{_fmt(price)}"
+    pv_f = _font(38)
+    pv_w = _tw(d, price_str, pv_f)
+    d.text((buy_x1 + 98, price_y1 + 48), price_str, font=pv_f, fill=GREEN)
+    d.text((buy_x1 + 98 + pv_w + 8, price_y1 + 48 + pv_f.size - 22),
+           "DC", font=_font(18), fill=GREEN)
+
+    d.text((buy_x1 + 98, price_y1 + 96), "добавится в зоопарк",
+           font=_font(12), fill=MUTED)
+
+    # Подарить
+    gift_x1 = buy_x2 + gap_price
+    gift_x2 = gift_x1 + half_w
+    _grad(img, (gift_x1, price_y1, gift_x2, price_y2), PURPLE, PURPLE, alpha=22, radius=18)
+    d.rounded_rectangle((gift_x1, price_y1, gift_x2, price_y2), radius=18,
+                        outline=PURPLE + (190,), width=3)
+
+    _alpha(img, (gift_x1 + 20, price_y1 + 34, gift_x1 + 20 + 62, price_y1 + 34 + 62),
+           PURPLE, alpha=45, radius=15)
+    _icon(d, gift_x1 + 51, price_y1 + 65, I_GIFT, 28, PURPLE)
+
+    d.text((gift_x1 + 98, price_y1 + 24), "ПОДАРИТЬ · КОМИССИЯ +10%",
+           font=_font(12), fill=PURPLE)
+
+    gp_str = f"{_fmt(gp)}"
+    gp_w = _tw(d, gp_str, pv_f)
+    d.text((gift_x1 + 98, price_y1 + 48), gp_str, font=pv_f, fill=PURPLE)
+    d.text((gift_x1 + 98 + gp_w + 8, price_y1 + 48 + pv_f.size - 22),
+           "DC", font=_font(18), fill=PURPLE)
+
+    d.text((gift_x1 + 98, price_y1 + 96), "получателю придёт в ЛС",
+           font=_font(12), fill=MUTED)
+
+    _footer(d, "Выбери действие в селекте ниже", "стр. 3 / 4")
+
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+# ============================================================
+# ЭКРАН 3: МОИ ПИТОМЦЫ
 # ============================================================
 def _hero_active(img, d, x, y, w, h, pet):
     cat = CATALOG.get(pet["pet_key"], {})
@@ -493,7 +737,6 @@ def _hero_active(img, d, x, y, w, h, pet):
     d.rounded_rectangle((x, y, x + w, y + h), radius=20,
                         outline=GOLD + (170,), width=3)
 
-    # Emoji
     es = 110
     ex = x + 24
     ey = y + (h - es) // 2
@@ -502,7 +745,6 @@ def _hero_active(img, d, x, y, w, h, pet):
                         outline=color + (200,), width=3)
     _icon(d, ex + es // 2, ey + es // 2 + 2, cat.get("fa_code", I_PAW), 50, color)
 
-    # Левая часть инфо
     tx = ex + es + 22
     tx_max = x + w - 260
 
@@ -512,7 +754,6 @@ def _hero_active(img, d, x, y, w, h, pet):
     d.text((tx, y + 40), _el(d, cat.get("name", "—"), name_f, tx_max - tx),
            font=name_f, fill=TEXT)
 
-    # Теги
     tag_y = y + 82
     cur_x = tx
 
@@ -532,19 +773,7 @@ def _hero_active(img, d, x, y, w, h, pet):
     d.rounded_rectangle((cur_x, tag_y, cur_x + lw, tag_y + 22), radius=6,
                         outline=SILVER + (100,), width=1)
     d.text((cur_x + 9, tag_y + 3), lvl_text, font=lf, fill=SILVER_HI)
-    cur_x += lw + 8
 
-    bt = cat.get("bonus_type", "none")
-    if bt != "none":
-        bnames = {"review_bonus": "к отзывам", "casino_luck": "к казино", "clan_contrib": "к клану"}
-        btext = f"+{int(cat.get('bonus_value', 0) * 100)}% {bnames.get(bt, '')}"
-        bw = _tw(d, btext, lf) + 18
-        _alpha(img, (cur_x, tag_y, cur_x + bw, tag_y + 22), GOLD, alpha=25, radius=6)
-        d.rounded_rectangle((cur_x, tag_y, cur_x + bw, tag_y + 22), radius=6,
-                            outline=GOLD + (150,), width=1)
-        d.text((cur_x + 9, tag_y + 3), btext, font=lf, fill=GOLD)
-
-    # XP bar
     cur_xp, need_xp, pct = get_xp_progress(pet)
     xp_y = y + h - 32
     xp_w = tx_max - tx
@@ -554,7 +783,6 @@ def _hero_active(img, d, x, y, w, h, pet):
     d.text((tx + xp_w - ptw, xp_y - 20), pct_text, font=_font(10), fill=GOLD)
     _xp_bar(d, img, tx, xp_y, xp_w, 10, pct)
 
-    # Правая часть — накоплено (правильное центрирование)
     right_edge = x + w - 24
     d.text((right_edge, y + 24), "НАКОПЛЕНО", font=_font(10), fill=GOLD, anchor="rt")
 
@@ -598,7 +826,6 @@ def _my_pet_row(img, d, x, y, w, h, pet):
                         outline=INNER_BRD + (255,), width=2)
 
     pad = 14
-
     es = 60
     ex = x + pad
     ey = y + (h - es) // 2
@@ -753,15 +980,10 @@ def render_my_pets(user_id, balance, pets):
 
 
 # ============================================================
-# ЭКРАН 3: КАРТОЧКА ПИТОМЦА (товар или свой)
+# ЭКРАН 4: КАРТОЧКА СВОЕГО ПИТОМЦА
 # ============================================================
-def render_pet_card(user_id, balance, pet: dict, place: int = None,
-                    preview_mode: bool = False):
-    """
-    preview_mode=True — карточка товара из каталога (без уровня/накопленного,
-    вместо этого цена покупки и цена подарка).
-    """
-    img, d = _canvas(user_id, "питомцы · карточка" if not preview_mode else "питомцы · товар")
+def render_pet_card(user_id, balance, pet: dict, place: int = None):
+    img, d = _canvas(user_id, "питомцы · карточка")
 
     cat = CATALOG.get(pet["pet_key"], {})
     color = RARITY_PALETTE.get(cat.get("rarity", "common"), SILVER)
@@ -776,7 +998,6 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None,
     rx1 = lx2 + gap
     rx2 = W - M - PX
 
-    # ============ ЛЕВАЯ ============
     _panel(img, d, (lx1, body_y, lx2, body_y + body_h), radius=22)
     cx = (lx1 + lx2) // 2
 
@@ -803,7 +1024,7 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None,
                         outline=color + (200,), width=2)
     d.text((cx, ry + 15), rl, font=rlf, fill=color, anchor="mm")
 
-    if not preview_mode and pet.get("is_active"):
+    if pet.get("is_active"):
         ay = ry + 42
         txt = "✦ АКТИВНЫЙ"
         tf = _font(14)
@@ -825,15 +1046,13 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None,
                             outline=GOLD + (180,), width=2)
         d.text((cx, by + 19), btext, font=bf, fill=GOLD, anchor="mm")
 
-    # ============ ПРАВАЯ ============
     _panel(img, d, (rx1, body_y, rx2, body_y + body_h), radius=22)
     rpx1 = rx1 + 26
     rpx2 = rx2 - 26
 
-    head_sub = "товар" if preview_mode else f"УР. {pet['level']} / {MAX_LEVEL}"
-    _right_head(d, rpx1, body_y + 22, rpx2, "Информация", head_sub)
+    _right_head(d, rpx1, body_y + 22, rpx2, "Информация",
+                f"УР. {pet['level']} / {MAX_LEVEL}")
 
-    # Описание
     dy = body_y + 100
     desc_h = 110
     d.rounded_rectangle((rpx1, dy, rpx2, dy + desc_h), radius=14,
@@ -853,105 +1072,62 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None,
     for i, line in enumerate(lines[:3]):
         d.text((rpx1 + 18, dy + 18 + i * 22), line, font=df, fill=TEXT_SOFT)
 
-    if preview_mode:
-        # Для товара — цена покупки и цена подарка
-        sy = dy + desc_h + 14
-        sh = 100
+    sy = dy + desc_h + 14
+    sh = 100
 
-        # Купить себе
-        d.rounded_rectangle((rpx1, sy, rpx2, sy + sh), radius=14,
-                            fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
-        _alpha(img, (rpx1 + 18, sy + 24, rpx1 + 70, sy + 76), GREEN, alpha=45, radius=12)
-        _icon(d, rpx1 + 44, sy + 50, I_GEM, 24, GREEN)
-        d.text((rpx1 + 92, sy + 18), "КУПИТЬ СЕБЕ", font=_font(11), fill=MUTED)
+    d.rounded_rectangle((rpx1, sy, rpx2, sy + sh), radius=14,
+                        fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
+    _alpha(img, (rpx1 + 18, sy + 24, rpx1 + 70, sy + 76), PURPLE, alpha=45, radius=12)
+    _icon(d, rpx1 + 44, sy + 50, I_STAR, 24, PURPLE)
+    d.text((rpx1 + 92, sy + 18), "УРОВЕНЬ И ОПЫТ", font=_font(11), fill=MUTED)
+    d.text((rpx1 + 92, sy + 38), f"Ур. {pet['level']} · {_fmt(pet['xp'])} XP",
+           font=_font(20), fill=TEXT)
 
-        price_str = f"{_fmt(cat['price_dc'])} DC"
-        pf = _font(24)
-        pw = _tw(d, price_str, pf)
-        d.text((rpx2 - 24 - pw, sy + 36), price_str, font=pf, fill=GREEN)
+    cur_xp, need_xp, pct = get_xp_progress(pet)
+    bx1 = rpx1 + 92
+    bx2 = rpx2 - 24
+    by = sy + sh - 24
+    _xp_bar(d, img, bx1, by, bx2 - bx1, 10, pct)
+    if need_xp > 0:
+        d.text((bx2, by - 18), f"{cur_xp} / {need_xp} · {pct}%",
+               font=_font(11), fill=MUTED, anchor="rs")
 
-        # Подарить
-        sy += sh + 12
-        d.rounded_rectangle((rpx1, sy, rpx2, sy + sh), radius=14,
-                            fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
-        _alpha(img, (rpx1 + 18, sy + 24, rpx1 + 70, sy + 76), PURPLE, alpha=45, radius=12)
-        _icon(d, rpx1 + 44, sy + 50, I_GIFT, 24, PURPLE)
-        d.text((rpx1 + 92, sy + 18), "ПОДАРИТЬ ДРУГОМУ", font=_font(11), fill=MUTED)
-        d.text((rpx1 + 92, sy + 40), "комиссия +10%", font=_font(11), fill=DIM)
+    sy += sh + 12
+    hourly = hourly_rate(pet["pet_key"], pet["level"])
+    cap = max_pending(pet["pet_key"], pet["level"])
+    pending = pet.get("pending_dc") or 0
+    last = pet.get("last_income") or pet.get("purchased_at") or 0
+    elapsed = max(int(time.time()) - last, 0) if last else 0
+    h_el = elapsed // 3600
+    m_el = (elapsed % 3600) // 60
 
-        gp_str = f"{_fmt(gift_price(pet['pet_key']))} DC"
-        gf = _font(24)
-        gw = _tw(d, gp_str, gf)
-        d.text((rpx2 - 24 - gw, sy + 36), gp_str, font=gf, fill=PURPLE)
+    d.rounded_rectangle((rpx1, sy, rpx2, sy + sh), radius=14,
+                        fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
+    _alpha(img, (rpx1 + 18, sy + 24, rpx1 + 70, sy + 76), GREEN, alpha=45, radius=12)
+    _icon(d, rpx1 + 44, sy + 50, I_COINS, 24, GREEN)
+    d.text((rpx1 + 92, sy + 18), "ДОХОД И НАКОПЛЕНИЯ", font=_font(11), fill=MUTED)
+    d.text((rpx1 + 92, sy + 38), f"{hourly:.1f} DC/час · кап {_fmt(cap)} DC",
+           font=_font(18), fill=GREEN)
 
-        # Окупаемость + инфо
-        sy += sh + 12
-        d.rounded_rectangle((rpx1, sy, rpx2, sy + 58), radius=14,
-                            fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
-        _icon(d, rpx1 + 32, sy + 29, I_BOLT, 20, GOLD)
+    d.text((rpx2 - 24, sy + 18), f"+{_fmt(pending)} DC",
+           font=_font(22), fill=GREEN, anchor="rt")
+    d.text((rpx2 - 24, sy + 50), f"копилось {h_el}ч {m_el}м",
+           font=_font(11), fill=MUTED, anchor="rt")
 
-        base = cat["passive_dc"]
-        days = max(int(cat["price_dc"] / (base * 24)), 1) if base > 0 else 0
-        d.text((rpx1 + 58, sy + 18), f"ДОХОД {base} DC/ч · ОКУПАЕМОСТЬ ~{days} ДН",
-               font=_font(13), fill=GOLD)
-    else:
-        # Для своего питомца — уровень, доход, дата
-        sy = dy + desc_h + 14
-        sh = 100
+    sy += sh + 12
+    d.rounded_rectangle((rpx1, sy, rpx2, sy + 58), radius=14,
+                        fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
 
-        d.rounded_rectangle((rpx1, sy, rpx2, sy + sh), radius=14,
-                            fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
-        _alpha(img, (rpx1 + 18, sy + 24, rpx1 + 70, sy + 76), PURPLE, alpha=45, radius=12)
-        _icon(d, rpx1 + 44, sy + 50, I_STAR, 24, PURPLE)
-        d.text((rpx1 + 92, sy + 18), "УРОВЕНЬ И ОПЫТ", font=_font(11), fill=MUTED)
-        d.text((rpx1 + 92, sy + 38), f"Ур. {pet['level']} · {_fmt(pet['xp'])} XP",
-               font=_font(20), fill=TEXT)
+    _icon(d, rpx1 + 32, sy + 29, I_TROPHY, 20, GOLD)
+    place_str = f"#{place}" if place else "—"
+    d.text((rpx1 + 58, sy + 16), f"МЕСТО В ТОПЕ: {place_str}",
+           font=_font(13), fill=GOLD)
 
-        cur_xp, need_xp, pct = get_xp_progress(pet)
-        bx1 = rpx1 + 92
-        bx2 = rpx2 - 24
-        by = sy + sh - 24
-        _xp_bar(d, img, bx1, by, bx2 - bx1, 10, pct)
-        if need_xp > 0:
-            d.text((bx2, by - 18), f"{cur_xp} / {need_xp} · {pct}%",
-                   font=_font(11), fill=MUTED, anchor="rs")
+    _icon(d, rpx1 + 260, sy + 29, I_CLOCK, 16, MUTED)
+    d.text((rpx1 + 284, sy + 20), f"КУПЛЕН: {_fmt_date(pet.get('purchased_at'))}",
+           font=_font(13), fill=MUTED)
 
-        sy += sh + 12
-        hourly = hourly_rate(pet["pet_key"], pet["level"])
-        cap = max_pending(pet["pet_key"], pet["level"])
-        pending = pet.get("pending_dc") or 0
-        last = pet.get("last_income") or pet.get("purchased_at") or 0
-        elapsed = max(int(time.time()) - last, 0) if last else 0
-        h_el = elapsed // 3600
-        m_el = (elapsed % 3600) // 60
-
-        d.rounded_rectangle((rpx1, sy, rpx2, sy + sh), radius=14,
-                            fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
-        _alpha(img, (rpx1 + 18, sy + 24, rpx1 + 70, sy + 76), GREEN, alpha=45, radius=12)
-        _icon(d, rpx1 + 44, sy + 50, I_COINS, 24, GREEN)
-        d.text((rpx1 + 92, sy + 18), "ДОХОД И НАКОПЛЕНИЯ", font=_font(11), fill=MUTED)
-        d.text((rpx1 + 92, sy + 38), f"{hourly:.1f} DC/час · кап {_fmt(cap)} DC",
-               font=_font(18), fill=GREEN)
-
-        d.text((rpx2 - 24, sy + 18), f"+{_fmt(pending)} DC",
-               font=_font(22), fill=GREEN, anchor="rt")
-        d.text((rpx2 - 24, sy + 50), f"копилось {h_el}ч {m_el}м",
-               font=_font(11), fill=MUTED, anchor="rt")
-
-        sy += sh + 12
-        d.rounded_rectangle((rpx1, sy, rpx2, sy + 58), radius=14,
-                            fill=INNER_BG + (255,), outline=INNER_BRD + (255,), width=2)
-
-        _icon(d, rpx1 + 32, sy + 29, I_TROPHY, 20, GOLD)
-        place_str = f"#{place}" if place else "—"
-        d.text((rpx1 + 58, sy + 16), f"МЕСТО В ТОПЕ: {place_str}",
-               font=_font(13), fill=GOLD)
-
-        _icon(d, rpx1 + 260, sy + 29, I_CLOCK, 16, MUTED)
-        d.text((rpx1 + 284, sy + 20), f"КУПЛЕН: {_fmt_date(pet.get('purchased_at'))}",
-               font=_font(13), fill=MUTED)
-
-    _footer(d, "Выбери действие в меню ниже", "стр. 3 / 4")
+    _footer(d, "Покормить и сделать активным — в меню ниже", "стр. 3 / 4")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
@@ -960,7 +1136,227 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None,
 
 
 # ============================================================
-# ЭКРАН 4: ТОП
+# ЭКРАН 5: УСПЕХ ПОКУПКИ
+# ============================================================
+def render_success_buy(user_id, balance, pet_key: str, price: int):
+    """Закрашенный круг с галочкой + инфо."""
+    img, d = _canvas(user_id, "питомцы · покупка")
+
+    cat = CATALOG.get(pet_key, {})
+
+    body_y = 140
+    body_h = H - M - PY - body_y - 26
+
+    lw = 450
+    gap = 28
+    lx1 = PX
+    lx2 = lx1 + lw
+    rx1 = lx2 + gap
+    rx2 = W - M - PX
+
+    _left_panel(img, d, (lx1, body_y, lx2, body_y + body_h), balance, [
+        {"label": "Списано", "value": f"{_fmt(price)} DC", "icon": I_COINS, "color": GREEN},
+        {"label": "Питомец", "value": cat.get("name", "—"), "icon": I_PAW, "color": GOLD},
+    ])
+
+    _panel(img, d, (rx1, body_y, rx2, body_y + body_h), radius=22)
+    rpx1 = rx1 + 26
+    rpx2 = rx2 - 26
+
+    _right_head(d, rpx1, body_y + 22, rpx2, "Покупка", "успешно")
+
+    # Центрированный контент
+    cx = (rpx1 + rpx2) // 2
+    cy_start = body_y + 130
+
+    # Закрашенный круг с галочкой
+    circle_r = 110
+    circle_cy = cy_start + circle_r
+    _grad_radial_circle(img, cx, circle_cy, circle_r, GREEN, GREEN_DK, alpha=255)
+
+    # Тонкое внешнее кольцо (мягкая обводка)
+    d.ellipse((cx - circle_r - 6, circle_cy - circle_r - 6,
+               cx + circle_r + 6, circle_cy + circle_r + 6),
+              outline=GREEN + (30,), width=12)
+    d.ellipse((cx - circle_r, circle_cy - circle_r,
+               cx + circle_r, circle_cy + circle_r),
+              outline=GREEN + (180,), width=4)
+
+    # Галочка внутри круга
+    _icon(d, cx, circle_cy, I_CHECK, 110, (255, 255, 255))
+
+    # Заголовок
+    title_y = circle_cy + circle_r + 40
+    title = "Питомец куплен!"
+    tf = _font(48)
+    tw_ = _tw(d, title, tf)
+    d.text((cx - tw_ // 2, title_y), title, font=tf, fill=GREEN)
+
+    # Подзаголовок
+    sub_y = title_y + 70
+    sub = "Теперь он в твоём зоопарке и начнёт приносить DC уже сейчас"
+    sf = _font(17)
+    sw = _tw(d, sub, sf)
+    d.text((cx - sw // 2, sub_y), sub, font=sf, fill=MUTED)
+
+    # Плашка товара
+    item_y = sub_y + 50
+    item_h = 70
+    name = cat.get("name", "—")
+    nf = _font(30)
+    nw = _tw(d, name, nf)
+
+    icon_size = 52
+    gap_inner = 16
+    total_w = icon_size + gap_inner + nw
+    px_w = total_w + 60
+    px_x = cx - px_w // 2
+
+    d.rounded_rectangle((px_x, item_y, px_x + px_w, item_y + item_h),
+                        radius=16, fill=INNER_BG + (255,),
+                        outline=INNER_BRD + (255,), width=2)
+
+    _alpha(img, (px_x + 20, item_y + 9, px_x + 20 + icon_size, item_y + 9 + icon_size),
+           RARITY_PALETTE.get(cat.get("rarity", "common"), SILVER), alpha=40, radius=13)
+    _icon(d, px_x + 20 + icon_size // 2, item_y + 9 + icon_size // 2 + 1,
+          cat.get("fa_code", I_PAW), 26,
+          RARITY_PALETTE.get(cat.get("rarity", "common"), SILVER))
+
+    d.text((px_x + 20 + icon_size + gap_inner,
+            item_y + (item_h - nf.size) // 2 - 2),
+           name, font=nf, fill=TEXT)
+
+    # Цена
+    price_y = item_y + item_h + 24
+    price_text = f"−{_fmt(price)} DC"
+    pf = _font(28)
+    pw = _tw(d, price_text, pf)
+    d.text((cx - pw // 2, price_y), price_text, font=pf, fill=GREEN)
+
+    _footer(d, "Открой «Мои питомцы» чтобы забрать DC", "стр. 3 / 4")
+
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+# ============================================================
+# ЭКРАН 6: УСПЕХ ПОДАРКА
+# ============================================================
+def render_success_gift(user_id, balance, pet_key: str, price: int,
+                        base_price: int, recipient_id: int):
+    """Закрашенный золотой круг с подарком + инфо."""
+    img, d = _canvas(user_id, "питомцы · подарок")
+
+    cat = CATALOG.get(pet_key, {})
+
+    body_y = 140
+    body_h = H - M - PY - body_y - 26
+
+    lw = 450
+    gap = 28
+    lx1 = PX
+    lx2 = lx1 + lw
+    rx1 = lx2 + gap
+    rx2 = W - M - PX
+
+    commission = price - base_price
+
+    _left_panel(img, d, (lx1, body_y, lx2, body_y + body_h), balance, [
+        {"label": "Списано", "value": f"{_fmt(price)} DC", "icon": I_COINS, "color": GOLD},
+        {"label": "Комиссия", "value": f"{_fmt(commission)} DC (10%)", "icon": I_GIFT, "color": PURPLE},
+        {"label": "Питомец", "value": cat.get("name", "—"), "icon": I_PAW, "color": GOLD},
+    ])
+
+    _panel(img, d, (rx1, body_y, rx2, body_y + body_h), radius=22)
+    rpx1 = rx1 + 26
+    rpx2 = rx2 - 26
+
+    _right_head(d, rpx1, body_y + 22, rpx2, "Подарок", "доставлен")
+
+    cx = (rpx1 + rpx2) // 2
+    cy_start = body_y + 110
+
+    # Закрашенный золотой круг с подарком
+    circle_r = 110
+    circle_cy = cy_start + circle_r
+    _grad_radial_circle(img, cx, circle_cy, circle_r, GOLD, GOLD_DK, alpha=255)
+
+    d.ellipse((cx - circle_r - 6, circle_cy - circle_r - 6,
+               cx + circle_r + 6, circle_cy + circle_r + 6),
+              outline=GOLD + (30,), width=12)
+    d.ellipse((cx - circle_r, circle_cy - circle_r,
+               cx + circle_r, circle_cy + circle_r),
+              outline=GOLD + (180,), width=4)
+
+    # Иконка подарка внутри
+    _icon(d, cx, circle_cy, I_GIFT, 100, (26, 18, 6))
+
+    # Заголовок
+    title_y = circle_cy + circle_r + 32
+    title = "Подарок отправлен!"
+    tf = _font(46)
+    tw_ = _tw(d, title, tf)
+    d.text((cx - tw_ // 2, title_y), title, font=tf, fill=GOLD)
+
+    # Получатель
+    who_lbl_y = title_y + 64
+    who_lbl = "ПОЛУЧАТЕЛЬ"
+    wlf = _font(12)
+    wlw = _tw(d, who_lbl, wlf)
+    d.text((cx - wlw // 2, who_lbl_y), who_lbl, font=wlf, fill=MUTED)
+
+    who_y = who_lbl_y + 22
+    who = f"@{recipient_id}"
+    wf = _font(28)
+    ww = _tw(d, who, wf)
+    d.text((cx - ww // 2, who_y), who, font=wf, fill=TEXT)
+
+    # Плашка питомца
+    item_y = who_y + 56
+    item_h = 66
+    name = cat.get("name", "—")
+    nf = _font(26)
+    nw = _tw(d, name, nf)
+
+    icon_size = 46
+    gap_inner = 14
+    total_w = icon_size + gap_inner + nw
+    px_w = total_w + 56
+    px_x = cx - px_w // 2
+
+    _grad(img, (px_x, item_y, px_x + px_w, item_y + item_h),
+          GOLD, GOLD, alpha=18, radius=14)
+    d.rounded_rectangle((px_x, item_y, px_x + px_w, item_y + item_h),
+                        radius=14, outline=GOLD + (170,), width=2)
+
+    _alpha(img, (px_x + 18, item_y + 10, px_x + 18 + icon_size, item_y + 10 + icon_size),
+           GOLD, alpha=45, radius=11)
+    _icon(d, px_x + 18 + icon_size // 2, item_y + 10 + icon_size // 2 + 1,
+          cat.get("fa_code", I_PAW), 24, GOLD)
+
+    d.text((px_x + 18 + icon_size + gap_inner,
+            item_y + (item_h - nf.size) // 2 - 2),
+           name, font=nf, fill=GOLD)
+
+    # Цена
+    price_y = item_y + item_h + 20
+    price_text = f"Списано: −{_fmt(price)} DC (комиссия {_fmt(commission)})"
+    pf = _font(17)
+    pw = _tw(d, price_text, pf)
+    d.text((cx - pw // 2, price_y), price_text, font=pf, fill=MUTED)
+
+    _footer(d, "Получатель уже получил уведомление в ЛС", "стр. 3 / 4")
+
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+# ============================================================
+# ЭКРАН 7: ТОП
 # ============================================================
 def _top_row(img, d, x, y, w, h, rank, entry, is_me):
     if rank == 1:
@@ -986,7 +1382,6 @@ def _top_row(img, d, x, y, w, h, rank, entry, is_me):
                             outline=INNER_BRD + (255,), width=2)
 
     pad = 16
-
     bs = 44
     bx = x + pad
     by = y + (h - bs) // 2
