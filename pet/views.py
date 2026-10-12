@@ -25,7 +25,7 @@ class PetPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label=_pad("Питомцы", 2, 2), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_pad("Питомцы", 2, 1), style=ButtonStyle.gray,
                        custom_id="pet_panel:my", emoji="🐾", row=0)
     async def my_pets(self, button, inter: disnake.MessageInteraction):
         await _open_my_pets(inter)
