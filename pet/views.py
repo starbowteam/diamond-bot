@@ -298,7 +298,10 @@ async def _open_top(inter: disnake.MessageInteraction):
     balance = _get_balance(user_id)
     top = pcore.get_top_users(limit=10)
     place = pcore.get_user_place(user_id)
-    buf = await asyncio.to_thread(prender.render_top, user_id, balance, top, place)
+    best_pet = pcore.get_user_best_pet(user_id)
+    buf = await asyncio.to_thread(
+        prender.render_top, user_id, balance, top, place, best_pet
+    )
     await _display_screen(inter, buf, f"pet_top_{user_id}.png", TopView())
 
 
