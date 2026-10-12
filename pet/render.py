@@ -638,7 +638,6 @@ def render_item_card(user_id, balance, pet_key: str):
         d.text((rpx1 + 76, bonus_y1 + 22), "БОНУСОВ НЕТ — обычный питомец",
                font=_font(15), fill=SILVER)
 
-    # 2 ЦЕНЫ — приподняты, чтобы не налезали
     price_h = 130
     price_y2 = body_y + body_h - 22
     price_y1 = price_y2 - price_h
@@ -646,7 +645,6 @@ def render_item_card(user_id, balance, pet_key: str):
     gap_price = 14
     half_w = (rpx2 - rpx1 - gap_price) // 2
 
-    # Купить себе
     buy_x1 = rpx1
     buy_x2 = buy_x1 + half_w
     _grad(img, (buy_x1, price_y1, buy_x2, price_y2), GREEN, GREEN, alpha=22, radius=18)
@@ -670,7 +668,6 @@ def render_item_card(user_id, balance, pet_key: str):
     d.text((buy_x1 + 98, price_y1 + 96), "добавится в коллекцию",
            font=_font(12), fill=MUTED)
 
-    # Подарить
     gift_x1 = buy_x2 + gap_price
     gift_x2 = gift_x1 + half_w
     _grad(img, (gift_x1, price_y1, gift_x2, price_y2), PURPLE, PURPLE, alpha=22, radius=18)
@@ -837,18 +834,15 @@ def _my_pet_row(img, d, x, y, w, h, pet):
 
 
 def _placeholder_row(img, d, x, y, w, h):
-    """Пустой слот — плюс и текст центрированы вместе."""
     d.rounded_rectangle((x, y, x + w, y + h), radius=12,
                         fill=(20, 20, 26) + (255,),
                         outline=INNER_BRD + (255,), width=2)
 
-    # Пунктирная имитация по верхнему и нижнему краю
     for i in range(int(w) - 40):
         if i % 14 < 7:
             d.point((x + 20 + i, y + 5), fill=INNER_BRD)
             d.point((x + 20 + i, y + h - 6), fill=INNER_BRD)
 
-    # Композиция "плюс + текст" — центрируем целиком
     text = "Свободный слот — купи в каталоге"
     tf = _font(13)
     tw_ = _tw(d, text, tf)
@@ -860,13 +854,11 @@ def _placeholder_row(img, d, x, y, w, h):
     cx_start = x + (w - total_w) // 2
     cy = y + h // 2
 
-    # Плюс
     _alpha(img, (cx_start, cy - plus_size // 2,
                  cx_start + plus_size, cy + plus_size // 2),
            SILVER, alpha=30, radius=10)
     _icon(d, cx_start + plus_size // 2, cy, I_PLUS, 18, SILVER)
 
-    # Текст по центру справа от плюса
     d.text((cx_start + plus_size + gap, cy - tf.size // 2 - 3),
            text, font=tf, fill=MUTED)
 
@@ -1224,7 +1216,10 @@ def render_success_buy(user_id, balance, pet_key: str, price: int):
 # УСПЕХ ПОДАРКА
 # ============================================================
 def render_success_gift(user_id, balance, pet_key: str, price: int,
-                        base_price: int, recipient_id: int):
+                        base_price: int, recipient_name: str):
+    """
+    recipient_name — уже отформатированное имя получателя (ник или @id).
+    """
     img, d = _canvas(user_id, "питомцы · подарок")
 
     cat = CATALOG.get(pet_key, {})
@@ -1282,7 +1277,7 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
     d.text((cx - wlw // 2, who_lbl_y), who_lbl, font=wlf, fill=MUTED)
 
     who_y = who_lbl_y + 22
-    who = f"@{recipient_id}"
+    who = recipient_name
     wf = _font(28)
     ww = _tw(d, who, wf)
     d.text((cx - ww // 2, who_y), who, font=wf, fill=TEXT)
@@ -1328,7 +1323,7 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
 
 
 # ============================================================
-# ТОП
+# ТОП — с ником пользователя
 # ============================================================
 def _top_row(img, d, x, y, w, h, rank, entry, is_me):
     if rank == 1:
@@ -1384,7 +1379,8 @@ def _top_row(img, d, x, y, w, h, rank, entry, is_me):
     tx = ex + es + 16
     tx_max = x + w - 200
 
-    name = f"@{entry['user_id']}"
+    # 👇 НИК ВМЕСТО ID
+    name = entry.get("username") or f"@{entry['user_id']}"
     if is_me:
         name += " · это ты"
     name_f = _font(17)
