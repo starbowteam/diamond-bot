@@ -14,19 +14,51 @@ from pet import render as prender
 
 P = "\u3164"
 
-E_PAW    = PartialEmoji(name="paw",    id=1557126623653179463)
-E_CATALOG= PartialEmoji(name="shop1",  id=1555654407776112750)
-E_TROPHY = PartialEmoji(name="trophy", id=1557126670658494595)
-E_COINS  = PartialEmoji(name="coins",  id=1539649259245408340)
-E_FOOD   = PartialEmoji(name="food",   id=1557126643795751087)
+# Кнопки стали короче в 2 раза (было 28)
+BTN_LEN = 14
 
 
-def _btn_pad(text, total=28):
+def _btn_pad(text, total=BTN_LEN):
+    """
+    Паддинг невидимыми пробелами до total символов.
+    Если текст уже длиннее — возвращаем как есть.
+    """
     base = len(text)
-    extra = max(0, total - base)
+    if base >= total:
+        return text
+    extra = total - base
     left = extra // 2
     right = extra - left
     return f"{P * left}{text}{P * right}"
+
+
+def _btn_labels_total(labels, total):
+    """
+    Раскидывает невидимые пробелы так, чтобы СУММА длин всех кнопок == total.
+    Если сумма уже больше — возвращаем как есть.
+    """
+    base = sum(len(s) for s in labels)
+    if base >= total:
+        return labels
+    extra = total - base
+    n = len(labels)
+    if n == 0:
+        return labels
+    per = extra // n
+    rem = extra % n
+    result = []
+    for i, s in enumerate(labels):
+        pad = per + (1 if i < rem else 0)
+        left = pad // 2
+        right = pad - left
+        result.append(f"{P * left}{s}{P * right}")
+    return result
+
+
+# Панель: 3 кнопки, суммарно 14 символов (было 28)
+_L_PETS, _L_CATALOG, _L_TOP = _btn_labels_total(
+    ["Питомцы", "Каталог", "Топ"], BTN_LEN
+)
 
 
 # ============================================================
@@ -36,17 +68,17 @@ class PetPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label=_btn_pad("Питомцы"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_L_PETS, style=ButtonStyle.gray,
                        custom_id="pet_panel:my", emoji="🐾", row=0)
     async def my_pets(self, button, inter: disnake.MessageInteraction):
         await _open_my_pets(inter)
 
-    @disnake.ui.button(label=_btn_pad("Каталог"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_L_CATALOG, style=ButtonStyle.gray,
                        custom_id="pet_panel:catalog", emoji="📖", row=0)
     async def catalog(self, button, inter: disnake.MessageInteraction):
         await _open_catalog(inter)
 
-    @disnake.ui.button(label=_btn_pad("Топ"), style=ButtonStyle.gray,
+    @disnake.ui.button(label=_L_TOP, style=ButtonStyle.gray,
                        custom_id="pet_panel:top", emoji="🏆", row=0)
     async def top(self, button, inter: disnake.MessageInteraction):
         await _open_top(inter)
@@ -178,24 +210,14 @@ class CatalogPetView(View):
             f"✅ Питомец **{pcore.CATALOG[self.pet_key]['name']}** куплен!",
             ephemeral=True
         )
-        # Обновляем панель каталога
+        # Обновляем панель каталога — редактируем текущее эфемерное
         balance = _get_balance(inter.author.id)
         owned = [p["pet_key"] for p in pcore.get_user_pets(inter.author.id)]
-        buf = prender.render_catalog(inter.author.id, balance, owned)
+        buf = await asyncio.to_thread(prender.render_catalog, inter.author.id, balance, owned)
         fname = f"pet_cat_{inter.author.id}.png"
-        file = disnake.File(buf, filename=fname)
-        e = disnake.Embed(color=6776679)
-        e.set_image(url=f"attachment://{fname}")
-        try:
-            await inter.edit_original_response(embeds=[e], file=file, attachments=[], view=CatalogView(owned))
-        except Exception:
-            pass
+        await _display_screen(inter, buf, fname, CatalogView(owned))
 
     async def back(self, inter: disnake.MessageInteraction):
-        try:
-            await inter.response.defer(ephemeral=True)
-        except Exception:
-            pass
         await _open_catalog(inter)
 
 
@@ -209,7 +231,7 @@ class MyPetCardView(View):
 
         if not is_active:
             btn = Button(
-                label=_btn_pad("Сделать активным"),
+                label=_btn_pad("Активным"),
                 style=ButtonStyle.primary,
                 custom_id=f"pet_setactive:{pet_key}",
                 emoji="⭐",
@@ -242,10 +264,6 @@ class MyPetCardView(View):
         await _open_my_pets(inter)
 
     async def back(self, inter: disnake.MessageInteraction):
-        try:
-            await inter.response.defer(ephemeral=True)
-        except Exception:
-            pass
         await _open_my_pets(inter)
 
 
@@ -263,30 +281,55 @@ class TopView(View):
 
 
 # ============================================================
+# ГЛАВНЫЙ ХЕЛПЕР — правильно показать экран
+# ============================================================
+def _is_ephemeral_message(inter: disnake.MessageInteraction) -> bool:
+    """Определяет, было ли сообщение, на котором нажали, эфемерным."""
+    try:
+        msg = inter.message
+        if msg is None:
+            return False
+        flags = getattr(msg, "flags", None)
+        if flags is None:
+            return False
+        return bool(getattr(flags, "ephemeral", False))
+    except Exception:
+        return False
+
+
+async def _display_screen(inter: disnake.MessageInteraction,
+                          buf, fname: str, view: View):
+    """
+    Универсальная функция.
+    · Если нажали на панель в канале (не эфемерно) → followup ephemeral
+    · Если нажали внутри эфемерного → редактируем это же эфемерное
+    """
+    # Уже сделали defer в вызывающем коде
+    file = disnake.File(buf, filename=fname)
+    e = disnake.Embed(color=6776679)
+    e.set_image(url=f"attachment://{fname}")
+
+    if _is_ephemeral_message(inter):
+        try:
+            await inter.edit_original_response(
+                content=None, embed=e, file=file, attachments=[], view=view
+            )
+            return
+        except Exception as ex:
+            logger.warning(f"pet edit_original: {ex}")
+
+    try:
+        await inter.followup.send(embed=e, file=file, view=view, ephemeral=True)
+    except Exception as ex:
+        logger.warning(f"pet followup: {ex}")
+
+
+# ============================================================
 # ОБРАБОТЧИКИ
 # ============================================================
 def _get_balance(user_id):
     from core.utils import get_dc_cache
     return get_dc_cache(user_id).get("balance", 0)
-
-
-async def _send_screen(inter, buf, fname, view):
-    file = disnake.File(buf, filename=fname)
-    e = disnake.Embed(color=6776679)
-    e.set_image(url=f"attachment://{fname}")
-    await inter.followup.send(embed=e, file=file, view=view, ephemeral=True)
-
-
-async def _edit_screen(inter, buf, fname, view):
-    file = disnake.File(buf, filename=fname)
-    e = disnake.Embed(color=6776679)
-    e.set_image(url=f"attachment://{fname}")
-    try:
-        await inter.edit_original_response(
-            content=None, embed=e, file=file, attachments=[], view=view
-        )
-    except Exception as e:
-        logger.warning(f"pet _edit_screen: {e}")
 
 
 async def _open_my_pets(inter: disnake.MessageInteraction):
@@ -299,7 +342,7 @@ async def _open_my_pets(inter: disnake.MessageInteraction):
     pets = pcore.get_user_pets(user_id)
     swap_cd = pcore.get_swap_cooldown_left(user_id)
     buf = await asyncio.to_thread(prender.render_my_pets, user_id, balance, pets, swap_cd)
-    await _edit_screen(inter, buf, f"pet_my_{user_id}.png", MyPetsView(pets))
+    await _display_screen(inter, buf, f"pet_my_{user_id}.png", MyPetsView(pets))
 
 
 async def _open_catalog(inter: disnake.MessageInteraction):
@@ -311,7 +354,7 @@ async def _open_catalog(inter: disnake.MessageInteraction):
     balance = _get_balance(user_id)
     owned = [p["pet_key"] for p in pcore.get_user_pets(user_id)]
     buf = await asyncio.to_thread(prender.render_catalog, user_id, balance, owned)
-    await _edit_screen(inter, buf, f"pet_cat_{user_id}.png", CatalogView(owned))
+    await _display_screen(inter, buf, f"pet_cat_{user_id}.png", CatalogView(owned))
 
 
 async def _open_top(inter: disnake.MessageInteraction):
@@ -324,7 +367,7 @@ async def _open_top(inter: disnake.MessageInteraction):
     top = pcore.get_top_users(limit=10)
     place = pcore.get_user_place(user_id)
     buf = await asyncio.to_thread(prender.render_top, user_id, balance, top, place)
-    await _edit_screen(inter, buf, f"pet_top_{user_id}.png", TopView())
+    await _display_screen(inter, buf, f"pet_top_{user_id}.png", TopView())
 
 
 async def _claim_income(inter: disnake.MessageInteraction):
@@ -370,7 +413,7 @@ async def _close_ephemeral(inter: disnake.MessageInteraction):
 
 
 # ============================================================
-# СЕЛЕКТ-КАЛБЭКИ (для Select-компонентов)
+# СЕЛЕКТ-КАЛБЭКИ
 # ============================================================
 async def _on_select_my(inter: disnake.MessageInteraction):
     try:
@@ -386,7 +429,7 @@ async def _on_select_my(inter: disnake.MessageInteraction):
     place = pcore.get_user_place(user_id)
     buf = await asyncio.to_thread(prender.render_pet_card, user_id, balance, pet, place)
     fname = f"pet_card_{user_id}_{pet_key}.png"
-    await _edit_screen(
+    await _display_screen(
         inter, buf, fname,
         MyPetCardView(pet_key, bool(pet.get("is_active")))
     )
@@ -400,13 +443,10 @@ async def _on_select_catalog(inter: disnake.MessageInteraction):
     pet_key = inter.data.values[0]
     user_id = inter.author.id
     owned = pcore.has_pet(user_id, pet_key)
-    # Показываем карточку питомца с кнопкой купить
     cat = pcore.CATALOG.get(pet_key, {})
     balance = _get_balance(user_id)
     can_buy = (not owned) and balance >= cat.get("price_dc", 0)
 
-    # Рендерим карточку каталога (без данных юзера)
-    # Проще сделать фейковую карточку с level=1 и переиспользовать render_pet_card
     fake_pet = {
         "pet_key": pet_key,
         "level": 1,
@@ -418,7 +458,7 @@ async def _on_select_catalog(inter: disnake.MessageInteraction):
     }
     buf = await asyncio.to_thread(prender.render_pet_card, user_id, balance, fake_pet, None)
     fname = f"pet_preview_{user_id}_{pet_key}.png"
-    await _edit_screen(inter, buf, fname, CatalogPetView(pet_key, can_buy))
+    await _display_screen(inter, buf, fname, CatalogPetView(pet_key, can_buy))
 
 
 # Привязываем колбэки к селектам
