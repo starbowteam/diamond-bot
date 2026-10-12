@@ -21,12 +21,15 @@ def _pad(text: str, left: int = 2, right: int = 2) -> str:
 # ============================================================
 # ЭМОДЗИ
 # ============================================================
-E_PETS     = PartialEmoji(name="pe121t", id=1559221896774553670)
-E_CATALOG  = PartialEmoji(name="bo1s1",  id=1559221873999351869)
-E_TOP      = PartialEmoji(name="d1edf",  id=1552730601155596348)
+E_PETS     = PartialEmoji(name="pe121t",  id=1559221896774553670)
+E_CATALOG  = PartialEmoji(name="bo1s1",   id=1559221873999351869)
+E_TOP      = PartialEmoji(name="d1edf",   id=1552730601155596348)
 
-E_BUY      = PartialEmoji(name="shop1",  id=1555654407776112750)
-E_GIFT     = PartialEmoji(name="gid1",   id=1555654337953267794)
+E_CLAIM    = PartialEmoji(name="1d1ds",   id=1552730624572391584)
+E_FEED     = PartialEmoji(name="mea1w1",  id=1559221849177723041)
+
+E_BUY      = PartialEmoji(name="shop1",   id=1555654407776112750)
+E_GIFT     = PartialEmoji(name="gid1",    id=1555654337953267794)
 
 
 # ============================================================
@@ -61,13 +64,13 @@ class MyPetsView(View):
 
     @disnake.ui.button(label=_pad("Забрать накопленное", 2, 1),
                        style=ButtonStyle.gray,
-                       custom_id="pet_my:claim", emoji="💰", row=0)
+                       custom_id="pet_my:claim", emoji=E_CLAIM, row=0)
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
 
     @disnake.ui.button(label=_pad("Покормить питомца", 1, 1),
                        style=ButtonStyle.gray,
-                       custom_id="pet_my:feed", emoji="🍖", row=0)
+                       custom_id="pet_my:feed", emoji=E_FEED, row=0)
     async def feed(self, button, inter: disnake.MessageInteraction):
         await _feed_active(inter)
 
@@ -111,7 +114,7 @@ class CatalogView(View):
 
 
 # ============================================================
-# КАРТОЧКА ТОВАРА — селект с 2 действиями
+# КАРТОЧКА ТОВАРА
 # ============================================================
 class CardActionSelect(Select):
     def __init__(self, pet_key: str):
