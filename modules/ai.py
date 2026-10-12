@@ -1,35 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Diamond AI v3.1 — умный консультант магазина.
+Diamond AI v3.2 — умный консультант магазина.
 
-Что нового против v3:
-  · BUGFIX: quick_action возвращает "" вместо None (не было дубликата карточки)
-  · BUGFIX: show_profile убран из TOOLS — двойной вызов LLM не нужен
-  · BUGFIX: отличаем 429 rate_limit от 5xx и даём человеческую фразу
-
-Полный набор фич v3:
-  A1 — триггеры действий текстом («покажи профиль», «забери подарок», «открой кейс N»)
-  A2 — дайджест «что нового» одним запросом
-  A3 — понимает реплаи на чужие сообщения
-  A4 — поиск в каталоге («есть ли X?»)
-  B1 — weekly-дайджест «не знаю» владельцу
-  B3 — умный retry при «не знаю»
-  B4 — sentiment-aware тон
-  C1 — персонализация через facts_json (без ЛС-пинга!)
-  C5 — знает про себя
-  D1-D4 — сравнение, рекомендации, «подешевле», мультиязычность
-  D5 — AI в тикетах при @упоминании
-  E1 — «прошлый раз ты спрашивал X»
-  E3 — разные профили каналов (основной чат + тикеты)
-  E4 — self-aware при ошибках (умный retry + лог)
-  E5 — не влезает не по теме
-  E6 — авто-предупреждение о повторах «не знаю»
-  F1 — кастомные эмодзи-реакции
-  F2 — тон по роли
-  F3 — умный статус бота
-  F4 — напоминание про отзыв через 3 дня
-  F5 — детект «сам себя переспросил»
-  F6 — тихое приветствие
+Что нового против v3.1:
+  · ДОБАВЛЕНО: знает про питомцев (каталог, доход, бонусы, уровни)
+  · ДОБАВЛЕНО: знает про твоих питомцев (уровни, накопления, активный)
+  · ДОБАВЛЕНО: функция show_pets — показать питомцев юзера
 """
 import os
 import re
@@ -103,19 +79,15 @@ MEMORY_TTL_DAYS = 30
 REPEAT_QUESTION_HOURS = 1
 REPEAT_IDENTICAL_MINUTES = 5
 
-# Авто-сообщения в чат
 CHAT_AUTO_INTERVAL_HOURS = 24
 CHAT_AUTO_IDLE_HOURS = 12
 
-# Анти-влезание
 BUSY_WINDOW_SECONDS = 120
 BUSY_DISTINCT_AUTHORS = 3
 
-# Кеш классификатора «по теме?»
 _TOPIC_CACHE: Dict[str, Tuple[bool, float]] = {}
 _TOPIC_CACHE_TTL = 600
 
-# Кеш «тихий сам-переспрос»
 _RECENT_QUESTIONS: Dict[int, Dict[str, Any]] = {}
 
 
@@ -194,7 +166,6 @@ def memory_upsert(user_id: int, **fields):
 
 
 def memory_add_fact(user_id: int, fact: str):
-    """Добавляет факт в facts_json (список). Дедупликация."""
     try:
         mem = memory_get(user_id)
         facts = []
@@ -228,10 +199,6 @@ def memory_cleanup_old():
 
 
 def memory_detect_interests(user_id: int):
-    """
-    Парсит историю фактов и добавляет интересы:
-    если 3+ раза «спрашивал про X» → «интересуется X».
-    """
     try:
         mem = memory_get(user_id)
         if not mem.get("facts_json"):
@@ -325,8 +292,25 @@ SYSTEM_PROMPT = """
 **тикеты**: создаются через кнопку «купить». менеджер назначается автоматически.
 **клан**: 3 клана, сезон 28 дней, выплата 28 числа. вклад: до 100 dc — 100%, больше — 40%. топ-3 ×3/×2/×1.5.
 
+🔴 ПИТОМЦЫ — новая механика:
+Панель питомцев: канал с 3 кнопками — Питомцы · Каталог · Топ.
+- **Каталог** — 6 питомцев, от Common до Mythic. Цены от 300 до 5000 DC.
+- **Купить** — питомец начинает приносить DC каждый час автоматически. Копилка наполняется 24ч, потом останавливается — надо заходить и забирать.
+- **Подарить** другому юзеру — цена +10% (комиссия магазина). Нужен ID получателя.
+- **Уровни 1–10** — опыт капает с сообщений, войса, отзывов, казино. На макс. уровне доход ×2.35.
+- **Кормить** — 200 DC = +100 XP питомцу. Кулдаун 4ч. Streak 7 дней = +500 XP.
+- **Смена активного питомца** — кулдаун 6ч.
+
+Каталог питомцев:
+• Рыжий Кот (Common) — 300 DC · 1 DC/ч
+• Хитрая Лиса (Rare) — 600 DC · 2 DC/ч
+• Ночная Сова (Rare) — 900 DC · 3 DC/ч
+• Грифон (Epic) — 1200 DC · 4 DC/ч · +3% к отзывам
+• Дракончик (Legendary) — 2000 DC · 7 DC/ч · +5% к казино
+• Даймондик (Mythic) — 5000 DC · 20 DC/ч · +10% к копилке клана
+
 🔴 О СЕБЕ (если спросят «ты кто» / «что умеешь»):
-коротко: я diamond ai, консультант магазина. умею рассказать про товары/роли/dc/клан, показать твой профиль, забрать подарок, открыть кейс, найти что-то в каталоге.
+коротко: я diamond ai, консультант магазина. умею рассказать про товары/роли/dc/клан/питомцев, показать твой профиль, забрать подарок, открыть кейс, найти что-то в каталоге.
 """.strip()
 
 
@@ -376,7 +360,6 @@ def check_reaction_reply(text: str) -> Optional[str]:
     return None
 
 
-# Разные фразы ошибок
 ERROR_PHRASES = {
     "no_api":     "связь с мозгом пропала, попробуй через минуту.",
     "timeout":    "что-то долго думаю, давай ещё раз.",
@@ -425,7 +408,6 @@ def _is_reply_to_bot(message: disnake.Message) -> bool:
 
 
 def _is_reply_to_user(message: disnake.Message) -> bool:
-    """Реплай на чужое (не бота) сообщение."""
     try:
         if not message.reference:
             return False
@@ -489,7 +471,7 @@ async def is_channel_busy(channel: disnake.TextChannel) -> bool:
 
 
 # ============================================================
-# SENTIMENT (B4)
+# SENTIMENT
 # ============================================================
 ANGRY_WORDS = [
     "бесит", "достал", "ненавижу", "ужас", "кошмар", "говно", "хуй",
@@ -503,17 +485,14 @@ HAPPY_WORDS = [
 
 
 def detect_sentiment(text: str) -> str:
-    """angry / happy / neutral"""
     t = text.lower()
 
-    # Капс
     letters = [c for c in text if c.isalpha()]
     if len(letters) >= 20:
         upper = sum(1 for c in letters if c.isupper())
         if upper / len(letters) > 0.6:
             return "angry"
 
-    # Воскл.знаки / вопросы
     if text.count("!") >= 3 or text.count("?") >= 3:
         return "angry"
 
@@ -540,7 +519,7 @@ def choose_style(sentiment: str, text: str) -> str:
 
 
 # ============================================================
-# РОЛИ → ТОН (F2)
+# РОЛИ → ТОН
 # ============================================================
 def is_owner(user_id: int) -> bool:
     return user_id == OWNER_ID
@@ -606,6 +585,61 @@ def _role_key_for_reviews(reviews: int) -> str:
     return "none"
 
 
+def build_pets_block(user_id: int) -> str:
+    """Инфа про питомцев юзера."""
+    try:
+        from pet import core as pcore
+    except Exception:
+        return ""
+
+    try:
+        pets = pcore.get_user_pets(user_id)
+        if not pets:
+            return "питомцы: у юзера пока нет питомцев"
+
+        lines = ["питомцы юзера:"]
+
+        active = None
+        total_pending = 0
+        for p in pets:
+            cat = pcore.CATALOG.get(p["pet_key"], {})
+            name = cat.get("name", "—")
+            lvl = p["level"]
+            pending = p.get("pending_dc", 0)
+            total_pending += pending
+
+            if p.get("is_active"):
+                active = f"{name} · ур. {lvl}"
+                hr = pcore.hourly_rate(p["pet_key"], lvl)
+                lines.append(f"- активный: {name} (ур. {lvl}) · {hr:.0f} DC/ч")
+
+        lines.append(f"- всего питомцев: {len(pets)} из {len(pcore.CATALOG)}")
+        lines.append(f"- накоплено у всех: {total_pending} DC")
+
+        # Место в топе
+        try:
+            place = pcore.get_user_place(user_id)
+            if place:
+                lines.append(f"- место в топе питомцеводов: #{place}")
+        except Exception:
+            pass
+
+        # Список остальных (кратко)
+        others = []
+        for p in pets:
+            if p.get("is_active"):
+                continue
+            cat = pcore.CATALOG.get(p["pet_key"], {})
+            others.append(f"{cat.get('name', '—')} ур.{p['level']}")
+        if others:
+            lines.append(f"- остальные: {', '.join(others[:6])}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"build_pets_block: {e}")
+        return ""
+
+
 def build_user_block(user_id: int, member: Optional[disnake.Member]) -> str:
     try:
         data = get_dc_cache(user_id)
@@ -656,6 +690,7 @@ def build_user_block(user_id: int, member: Optional[disnake.Member]) -> str:
     except Exception:
         lines.append("- клан: —")
 
+    # Кулдауны
     try:
         from modules.dc import get_daily_gift_status
         status = get_daily_gift_status(user_id)
@@ -669,15 +704,11 @@ def build_user_block(user_id: int, member: Optional[disnake.Member]) -> str:
     except Exception:
         pass
 
-    try:
-        row = cur.execute("SELECT purchases FROM dc_cache WHERE user_id=?", (user_id,)).fetchone()
-        if row and row["purchases"]:
-            plist = json.loads(row["purchases"])
-            unused = [p for p in plist if not p.get("used")]
-            if unused:
-                lines.append(f"- неиспользованных покупок: {len(unused)}")
-    except Exception:
-        pass
+    # Питомцы
+    pets_block = build_pets_block(user_id)
+    if pets_block:
+        lines.append("")
+        lines.append(pets_block)
 
     return "\n".join(lines)
 
@@ -696,6 +727,34 @@ def build_shop_block() -> str:
                 if prices:
                     lines.append(f"- {label}: от {min(prices)} до {max(prices)} dc")
         return "\n".join(lines) if len(lines) > 1 else ""
+    except Exception:
+        return ""
+
+
+def build_pets_catalog_block() -> str:
+    """Краткий каталог питомцев для контекста."""
+    try:
+        from pet import core as pcore
+    except Exception:
+        return ""
+
+    try:
+        lines = ["каталог питомцев (можно купить):"]
+        for key, cat in pcore.CATALOG.items():
+            bonus = ""
+            bt = cat.get("bonus_type", "none")
+            if bt != "none":
+                bnames = {
+                    "review_bonus": "отзывы",
+                    "casino_luck": "казино",
+                    "clan_contrib": "копилка клана",
+                }
+                bonus = f" · +{int(cat.get('bonus_value', 0) * 100)}% к {bnames.get(bt, '')}"
+            lines.append(
+                f"- {cat['name']} ({pcore.RARITY_LABEL[cat['rarity']]}): "
+                f"{cat['price_dc']} dc · {cat['passive_dc']} dc/ч{bonus}"
+            )
+        return "\n".join(lines)
     except Exception:
         return ""
 
@@ -763,22 +822,29 @@ def build_memory_block(user_id: int) -> str:
 
 def build_context_block(user_id: int, member: Optional[disnake.Member]) -> str:
     parts = [build_user_block(user_id, member)]
+
     shop = build_shop_block()
     if shop:
         parts.append(shop)
+
+    pets_cat = build_pets_catalog_block()
+    if pets_cat:
+        parts.append(pets_cat)
+
     active = build_active_block()
     if active:
         parts.append(active)
+
     mem = build_memory_block(user_id)
     if mem:
         parts.append(mem)
+
     return "\n\n[данные]\n" + "\n\n".join(parts) + "\n[/данные]\n"
 
 
 # ============================================================
 # FUNCTION CALLING
 # ============================================================
-# 👇 show_profile УБРАН — он ловится быстрым триггером без LLM.
 TOOLS_DECLARATIONS = [
     {
         "name": "claim_daily_gift",
@@ -802,43 +868,6 @@ TOOLS_DECLARATIONS = [
         },
     },
 ]
-
-
-async def tool_show_profile(message: disnake.Message) -> str:
-    try:
-        from modules.profile_card import generate_profile_card
-        from modules.commands_profile import _role_info
-        user = message.author
-        if not isinstance(user, disnake.Member):
-            return "ошибка: не могу получить участника"
-
-        counts = load_json(FILES["review_counts"], {})
-        rc = counts.get(str(user.id), 0)
-        role_key, _ = _role_info(rc)
-        dc = get_dc_cache(user.id)
-        balance = dc.get("balance", 0)
-        history = list(reversed((dc.get("history") or [])[-5:]))
-
-        avatar_bytes = None
-        try:
-            avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
-        except Exception:
-            pass
-
-        buf = await asyncio.to_thread(
-            generate_profile_card,
-            user.display_name, user.id, avatar_bytes,
-            role_key, rc, balance, user.joined_at, history,
-        )
-        fname = f"profile_{user.id}_{int(time.time())}.png"
-        file = disnake.File(buf, filename=fname)
-        embed = disnake.Embed(color=6776679)
-        embed.set_image(url=f"attachment://{fname}")
-        await message.channel.send(embed=embed, file=file)
-        return "профиль отправил в чат"
-    except Exception as e:
-        logger.exception(f"tool_show_profile: {e}")
-        return f"не получилось: {str(e)[:100]}"
 
 
 async def tool_claim_daily_gift(user_id: int) -> str:
@@ -885,7 +914,7 @@ async def execute_tool(message: disnake.Message, name: str, args: dict) -> str:
 
 
 # ============================================================
-# A1 / A2 — БЫСТРЫЕ ТРИГГЕРЫ БЕЗ LLM
+# БЫСТРЫЕ ТРИГГЕРЫ
 # ============================================================
 PROFILE_TRIGGERS = [
     "покажи профиль", "мой профиль", "скинь профиль", "карточка профиля",
@@ -920,27 +949,17 @@ def _match_any(text: str, patterns: List[str]) -> bool:
 
 
 async def quick_action(message: disnake.Message, text: str) -> Optional[str]:
-    """
-    Быстрые триггеры без LLM.
-    Возвращает:
-      · строку-ответ (не пустую) — отправить в чат
-      · "" (пустая строка) — уже отправили сами (например, карточку), стоп
-      · None — не наш случай, идём дальше в LLM
-    """
     user_id = message.author.id
 
-    # Профиль
     if _match_any(text, PROFILE_TRIGGERS):
         result = await tool_show_profile(message)
         if result.startswith("профиль"):
-            return ""   # 👈 уже отправили карточку — стоп
+            return ""
         return result
 
-    # Подарок
     if _match_any(text, GIFT_TRIGGERS):
         return await tool_claim_daily_gift(user_id)
 
-    # Кейс
     m = re.search(r"кейс[аеуы\s]+(\d)", _normalize_text(text))
     if m:
         try:
@@ -948,23 +967,57 @@ async def quick_action(message: disnake.Message, text: str) -> Optional[str]:
         except Exception:
             pass
 
-    # Покупки
     if _match_any(text, PURCHASES_TRIGGERS):
         return await build_purchases_reply(user_id)
 
-    # Дайджест
     if _match_any(text, DIGEST_TRIGGERS):
         return await build_digest_reply(user_id)
 
-    # О себе
     if _match_any(text, ABOUT_TRIGGERS):
         return (
             "я diamond ai, консультант магазина. умею рассказать про товары, роли, dc, "
-            "клан, казино. могу показать твой профиль, забрать подарок, открыть кейс, "
-            "найти что-то в каталоге. спрашивай."
+            "клан, питомцев, казино. могу показать твой профиль, забрать подарок, "
+            "открыть кейс, найти что-то в каталоге. спрашивай."
         )
 
     return None
+
+
+async def tool_show_profile(message: disnake.Message) -> str:
+    try:
+        from modules.profile_card import generate_profile_card
+        from modules.commands_profile import _role_info
+        user = message.author
+        if not isinstance(user, disnake.Member):
+            return "ошибка: не могу получить участника"
+
+        counts = load_json(FILES["review_counts"], {})
+        rc = counts.get(str(user.id), 0)
+        role_key, _ = _role_info(rc)
+        dc = get_dc_cache(user.id)
+        balance = dc.get("balance", 0)
+        history = list(reversed((dc.get("history") or [])[-5:]))
+
+        avatar_bytes = None
+        try:
+            avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
+        except Exception:
+            pass
+
+        buf = await asyncio.to_thread(
+            generate_profile_card,
+            user.display_name, user.id, avatar_bytes,
+            role_key, rc, balance, user.joined_at, history,
+        )
+        fname = f"profile_{user.id}_{int(time.time())}.png"
+        file = disnake.File(buf, filename=fname)
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{fname}")
+        await message.channel.send(embed=embed, file=file)
+        return "профиль отправил в чат"
+    except Exception as e:
+        logger.exception(f"tool_show_profile: {e}")
+        return f"не получилось: {str(e)[:100]}"
 
 
 async def build_purchases_reply(user_id: int) -> str:
@@ -989,7 +1042,6 @@ async def build_purchases_reply(user_id: int) -> str:
 async def build_digest_reply(user_id: int) -> str:
     parts = []
 
-    # Акция дня
     try:
         from modules.actions import refresh_daily_deal
         deal = refresh_daily_deal()
@@ -1002,7 +1054,6 @@ async def build_digest_reply(user_id: int) -> str:
     except Exception:
         pass
 
-    # Розыгрыш
     try:
         row = cur.execute(
             "SELECT giveaway_id, prize, end_time, participants FROM giveaways "
@@ -1018,7 +1069,6 @@ async def build_digest_reply(user_id: int) -> str:
     except Exception:
         pass
 
-    # Топ-кейс недели
     try:
         row = cur.execute(
             "SELECT prize_desc FROM bonus_case_opens "
@@ -1031,7 +1081,6 @@ async def build_digest_reply(user_id: int) -> str:
     except Exception:
         pass
 
-    # Подарок
     try:
         from modules.dc import get_daily_gift_status
         st = get_daily_gift_status(user_id)
@@ -1045,7 +1094,17 @@ async def build_digest_reply(user_id: int) -> str:
     except Exception:
         pass
 
-    # Покупки
+    # Питомцы юзера
+    try:
+        from pet import core as pcore
+        pets = pcore.get_user_pets(user_id)
+        if pets:
+            total_pending = sum((p.get("pending_dc") or 0) for p in pets)
+            if total_pending > 0:
+                parts.append(f"🐾 у питомцев накоплено **{total_pending} DC** — можно забрать")
+    except Exception:
+        pass
+
     try:
         purchases = await build_purchases_reply(user_id)
         if "неиспользованн" in purchases:
@@ -1061,10 +1120,9 @@ async def build_digest_reply(user_id: int) -> str:
 
 
 # ============================================================
-# A4 — ПОИСК В КАТАЛОГЕ
+# ПОИСК В КАТАЛОГЕ
 # ============================================================
 def search_catalog(query: str) -> List[Dict]:
-    """Ищет совпадения по названию/описанию в shop_catalog.json."""
     try:
         from modules.dc import load_shop_catalog
         catalog = load_shop_catalog()
@@ -1092,14 +1150,12 @@ def search_catalog(query: str) -> List[Dict]:
 
 
 def build_catalog_search_reply(text: str) -> Optional[str]:
-    """Если юзер спросил «есть ли X» — ищем в каталоге."""
     t = _normalize_text(text)
     markers = ["есть ли", "есть ", "продаете", "продаёте", "можно купить", "можно ли купить",
                "ищу", "нужен", "нужна", "интересует", "хочу купить", "продается", "продаётся"]
     if not any(m in t for m in markers):
         return None
 
-    # Отрезаем маркеры
     for m in markers:
         t = t.replace(m, " ")
     words = [w for w in t.split() if len(w) >= 3]
@@ -1118,7 +1174,7 @@ def build_catalog_search_reply(text: str) -> Optional[str]:
 
 
 # ============================================================
-# E5 — КЛАССИФИКАТОР ТЕМЫ
+# КЛАССИФИКАТОР ТЕМЫ
 # ============================================================
 SHOP_KEYWORDS = [
     "магазин", "покупк", "diamond", "даймонд", "dc", "роль", "оплат",
@@ -1129,6 +1185,8 @@ SHOP_KEYWORDS = [
     "реферал", "инвайт", "ставк", "рулетк", "блэкджек", "монетк",
     "хочу купить", "есть ли", "продаете", "продаёте", "цена", "стоит",
     "подскажи", "помоги с", "можешь", "сколько",
+    "питомец", "питомц", "пет", "зоопарк", "кот", "лиса", "сова",
+    "грифон", "дракон", "даймондик", "кормить", "покормить",
 ]
 
 
@@ -1138,7 +1196,6 @@ def has_shop_keywords(text: str) -> bool:
 
 
 async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
-    """LLM-классификатор: относится ли сообщение к магазину. Кеш 10 мин."""
     if has_shop_keywords(text):
         return True
 
@@ -1155,7 +1212,7 @@ async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
                 "role": "user",
                 "parts": [{"text": (
                     "относится ли это сообщение к магазину diamond shop "
-                    "(товары, dc-валюта, роли, кейсы, казино, клан, тикеты)? "
+                    "(товары, dc-валюта, роли, кейсы, казино, клан, тикеты, питомцы)? "
                     "ответь одним словом: да или нет.\n\n"
                     f"сообщение: {text[:300]}"
                 )}],
@@ -1165,7 +1222,7 @@ async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
         async with session.post(url, json=payload, headers=headers,
                                  timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status != 200:
-                return True  # fallback — пропускаем
+                return True
             data = await resp.json()
             parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
             if not parts:
@@ -1176,7 +1233,7 @@ async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
             return result
     except Exception as e:
         logger.warning(f"is_on_topic: {e}")
-        return True  # при ошибке не блокируем
+        return True
 
 
 # ============================================================
@@ -1328,7 +1385,6 @@ async def ask_llm(message: disnake.Message,
                   user_message: str,
                   system_content: str,
                   user_id: int) -> Tuple[str, str]:
-    """Возвращает (текст, статус). Может выполнять функции."""
     if not GEMINI_API_KEY:
         return ERROR_PHRASES["no_api"], "no_api"
 
@@ -1375,7 +1431,6 @@ async def ask_llm(message: disnake.Message,
                 await asyncio.sleep(0.3)
 
             if response is None:
-                # 👇 различаем rate limit от прочих ошибок
                 if last_status == 429:
                     return ERROR_PHRASES["rate_limit"], "rate_limit"
                 return ERROR_PHRASES["no_model"], "no_model"
@@ -1412,7 +1467,7 @@ async def ask_llm(message: disnake.Message,
 
 
 # ============================================================
-# B3 — УМНЫЙ RETRY
+# УМНЫЙ RETRY
 # ============================================================
 def is_unknown_reply(text: str) -> bool:
     if not text:
@@ -1426,10 +1481,8 @@ async def ask_llm_smart(message: disnake.Message,
                         user_message: str,
                         system_content: str,
                         user_id: int) -> Tuple[str, str]:
-    """Обычный запрос + при «не знаю» — второй проход с усиленным промптом."""
     reply, status = await ask_llm(message, user_message, system_content, user_id)
 
-    # не гоняем retry, если это rate limit / no model — там повтор бессмысленен
     if status in ("rate_limit", "no_model", "no_api", "timeout"):
         return reply, status
 
@@ -1450,7 +1503,7 @@ async def ask_llm_smart(message: disnake.Message,
 
 
 # ============================================================
-# E5 классификация + E3 разные каналы
+# ТИКЕТЫ
 # ============================================================
 TICKET_CATEGORIES = {
     CONFIG.get("TICKET_CATEGORY_ID"),
@@ -1469,7 +1522,6 @@ def is_ticket_channel(channel: disnake.TextChannel) -> bool:
 
 
 async def handle_ticket_mention(message: disnake.Message) -> bool:
-    """D5: AI в тикете при @упоминании — саммари заказа."""
     try:
         row = cur.execute(
             "SELECT user_id, category_id FROM ticket_owners WHERE channel_id=?",
@@ -1519,7 +1571,7 @@ async def handle_ticket_mention(message: disnake.Message) -> bool:
 
 
 # ============================================================
-# АВТО-СООБЩЕНИЯ В ЧАТ
+# АВТО-СООБЩЕНИЯ
 # ============================================================
 _last_auto_chat_ts = 0.0
 
@@ -1582,7 +1634,31 @@ def build_auto_gift_reminder() -> Optional[str]:
     )
 
 
-AUTO_BUILDERS = [build_auto_deal, build_auto_giveaway, build_auto_top_case, build_auto_gift_reminder]
+def build_auto_pets() -> Optional[str]:
+    try:
+        from pet import core as pcore
+        total = cur.execute("SELECT COUNT(*) AS c FROM user_pets").fetchone()
+        if not total or total["c"] == 0:
+            return (
+                "🐾 в магазине появились питомцы! "
+                "от кота за 300 DC до Даймондика за 5000. "
+                "они приносят DC пока ты спишь — загляни в раздел **Питомцы**."
+            )
+        return (
+            "🐾 у питомцев копится DC каждый час — "
+            "не забудь забрать накопленное в разделе **Питомцы**."
+        )
+    except Exception:
+        return None
+
+
+AUTO_BUILDERS = [
+    build_auto_deal,
+    build_auto_giveaway,
+    build_auto_top_case,
+    build_auto_gift_reminder,
+    build_auto_pets,
+]
 
 
 @tasks.loop(hours=CHAT_AUTO_INTERVAL_HOURS)
@@ -1625,7 +1701,7 @@ async def auto_chat_task():
 
 
 # ============================================================
-# F3 — УМНЫЙ СТАТУС
+# СТАТУС
 # ============================================================
 STATUS_ROTATION = ["Консультант Магазина", "Готов работать!"]
 
@@ -1636,7 +1712,6 @@ async def smart_status_task():
     try:
         now = datetime.now(timezone(timedelta(hours=3)))
 
-        # Приоритет 1: активный розыгрыш
         try:
             row = cur.execute(
                 "SELECT 1 FROM giveaways WHERE status='active' AND end_time > ? LIMIT 1",
@@ -1651,7 +1726,6 @@ async def smart_status_task():
         except Exception:
             pass
 
-        # Приоритет 2: вечер, подарок
         if 18 <= now.hour < 22:
             if random.random() < 0.4:
                 await bot.change_presence(
@@ -1660,7 +1734,6 @@ async def smart_status_task():
                 )
                 return
 
-        # Приоритет 3: по времени суток
         if 6 <= now.hour < 8:
             name = "Только проснулся"
         elif 8 <= now.hour < 22:
@@ -1677,14 +1750,13 @@ async def smart_status_task():
 
 
 # ============================================================
-# B1 — WEEKLY-ДАЙДЖЕСТ «НЕ ЗНАЮ»
+# ДАЙДЖЕСТЫ
 # ============================================================
 @tasks.loop(hours=24)
 async def weekly_unknown_digest():
     await bot.wait_until_ready()
     try:
         now = datetime.now(timezone(timedelta(hours=3)))
-        # Понедельник, 10:00 МСК
         if now.weekday() != 0 or now.hour != 10:
             return
 
@@ -1733,9 +1805,6 @@ async def weekly_unknown_digest():
         logger.exception(f"weekly_unknown_digest: {e}")
 
 
-# ============================================================
-# E6 — АВТО-ПРЕДУПРЕЖДЕНИЕ О ПОВТОРАХ «НЕ ЗНАЮ»
-# ============================================================
 @tasks.loop(hours=24)
 async def auto_unknown_alert():
     await bot.wait_until_ready()
@@ -1784,9 +1853,6 @@ async def auto_unknown_alert():
         logger.exception(f"auto_unknown_alert: {e}")
 
 
-# ============================================================
-# F4 — НАПОМИНАНИЕ ПРО ОТЗЫВ ЧЕРЕЗ 3 ДНЯ
-# ============================================================
 @tasks.loop(hours=12)
 async def review_reminder_task():
     await bot.wait_until_ready()
@@ -1877,7 +1943,7 @@ async def _log_to_discord(title: str, description: str, color: int = 0x00ff00):
 # ============================================================
 @bot.event
 async def on_ready():
-    logger.info(f"diamond ai v3.1 запущен как {bot.user} (id={bot.user.id})")
+    logger.info(f"diamond ai v3.2 запущен как {bot.user} (id={bot.user.id})")
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -1898,8 +1964,9 @@ async def on_ready():
             task.start()
 
     await _log_to_discord(
-        "✅ Diamond AI v3.1 запущен",
-        f"> **{bot.user}** онлайн.\n> Отвечаю в <#{ALLOWED_CHANNEL_ID}> и тикетах.",
+        "✅ Diamond AI v3.2 запущен",
+        f"> **{bot.user}** онлайн.\n> Отвечаю в <#{ALLOWED_CHANNEL_ID}> и тикетах.\n"
+        f"> Знаю про питомцев 🐾",
         color=0x00ff00,
     )
 
@@ -1912,13 +1979,11 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
-    # === D5: тикеты ===
     if isinstance(message.channel, disnake.TextChannel) and is_ticket_channel(message.channel):
         if _mentions_bot(message):
             await handle_ticket_mention(message)
         return
 
-    # === Основной AI-чат ===
     if message.channel.id != ALLOWED_CHANNEL_ID:
         return
 
@@ -1929,7 +1994,6 @@ async def on_message(message: disnake.Message):
     user_id = message.author.id
     member = message.author if isinstance(message.author, disnake.Member) else None
 
-    # === F1: реакции ===
     reaction = check_reaction_reply(text)
     if reaction and not _is_reply_to_bot(message) and not _mentions_bot(message):
         try:
@@ -1939,10 +2003,8 @@ async def on_message(message: disnake.Message):
         memory_upsert(user_id)
         return
 
-    # === A1: быстрые триггеры без LLM ===
     quick = await quick_action(message, text)
     if quick is not None:
-        # quick == "" → уже отправили сами
         if quick:
             try:
                 await message.channel.send(quick)
@@ -1951,7 +2013,6 @@ async def on_message(message: disnake.Message):
         memory_upsert(user_id)
         return
 
-    # === A4: поиск в каталоге ===
     catalog_reply = build_catalog_search_reply(text)
     if catalog_reply:
         try:
@@ -1961,25 +2022,21 @@ async def on_message(message: disnake.Message):
         memory_upsert(user_id)
         return
 
-    # === Триггер-логика ===
     if not should_respond(message):
         memory_upsert(user_id)
         return
 
-    # === Анти-влезание ===
     if not _is_reply_to_bot(message) and not _mentions_bot(message):
         if await is_channel_busy(message.channel):
             memory_upsert(user_id)
             return
 
-    # === E5: не по теме? ===
     if not _is_reply_to_bot(message) and not _mentions_bot(message):
         async with aiohttp.ClientSession() as s:
             if not await is_on_topic(s, text):
                 memory_upsert(user_id)
                 return
 
-    # === F5: сам-переспрос за 5 минут ===
     norm = _normalize_text(text)
     prev = _RECENT_QUESTIONS.get(user_id)
     if prev and prev.get("norm") == norm and int(time.time()) - prev.get("ts", 0) < REPEAT_IDENTICAL_MINUTES * 60:
@@ -1991,7 +2048,6 @@ async def on_message(message: disnake.Message):
         return
     _RECENT_QUESTIONS[user_id] = {"norm": norm, "ts": int(time.time())}
 
-    # === Данные и память ===
     mem = memory_get(user_id)
     is_first = not mem
 
@@ -2004,10 +2060,8 @@ async def on_message(message: disnake.Message):
         memory_add_fact(user_id, f"спрашивал про {first_word}")
         memory_detect_interests(user_id)
 
-    # === Контекст ===
     context_block = build_context_block(user_id, member)
 
-    # === Промпт-композит ===
     sentiment = detect_sentiment(text)
     style = choose_style(sentiment, text)
     style_suffix = MOOD_SUFFIX.get(style, "")
@@ -2027,7 +2081,6 @@ async def on_message(message: disnake.Message):
     if is_repeat:
         system_content += "\n\n[важно] юзер задавал похожий вопрос недавно — ответь кратко, отсылкой к прошлому ответу."
 
-    # === LLM ===
     try:
         async with message.channel.typing():
             await asyncio.sleep(random.uniform(1.2, 2.4))
@@ -2045,11 +2098,9 @@ async def on_message(message: disnake.Message):
     if not reply_text:
         reply_text = ERROR_PHRASES["empty"]
 
-    # === F6: приветствие ===
     if is_first and status == "ok":
         reply_text = "привет! я diamond ai. " + reply_text[0].lower() + reply_text[1:]
 
-    # === Отправка ===
     try:
         if _is_reply_to_bot(message) or _mentions_bot(message):
             await message.reply(reply_text, mention_author=False)
@@ -2061,11 +2112,9 @@ async def on_message(message: disnake.Message):
         except Exception:
             pass
 
-    # === Лог «не знаю» ===
     if is_unknown_reply(reply_text):
         log_unknown(user_id, text, reply_text)
 
-    # === Лог в Discord ===
     try:
         await _log_to_discord(
             "💬 Ответ AI",
