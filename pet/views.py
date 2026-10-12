@@ -54,7 +54,7 @@ class MyPetsView(View):
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
 
-    @disnake.ui.button(label=_pad("Покормить питомца", 2, 1),
+    @disnake.ui.button(label=_pad("Покормить питомца", 1, 1),
                        style=ButtonStyle.gray,
                        custom_id="pet_my:feed", emoji="🍖", row=0)
     async def feed(self, button, inter: disnake.MessageInteraction):
