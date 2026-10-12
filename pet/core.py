@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Питомцы Diamond — ядро.
-
-Каталог, БД, покупка, подарок, XP, накопление, бонусы.
 """
 import os
 import time
@@ -18,9 +16,6 @@ from core.utils import (
 )
 
 
-# ============================================================
-# КОНСТАНТЫ
-# ============================================================
 MSK = timezone(timedelta(hours=3))
 
 MAX_LEVEL = 10
@@ -30,28 +25,13 @@ FEED_XP = 100
 FEED_COOLDOWN = 4 * 3600
 FEED_STREAK_BONUS = 500
 ACTIVE_SWAP_COOLDOWN = 6 * 3600
+GIFT_COMMISSION = 0.10
 
-# Комиссия за подарок питомца
-GIFT_COMMISSION = 0.10  # +10%
-
-# XP-пороги (суммарно чтобы достичь уровня N)
 XP_THRESHOLDS = [
-    0,      # L1
-    100,    # L2
-    350,    # L3
-    850,    # L4
-    1850,   # L5
-    3850,   # L6
-    7350,   # L7
-    12850,  # L8
-    20850,  # L9
-    32850,  # L10
+    0, 100, 350, 850, 1850, 3850, 7350, 12850, 20850, 32850,
 ]
 
 
-# ============================================================
-# КАТАЛОГ ПИТОМЦЕВ
-# ============================================================
 CATALOG: Dict[str, dict] = {
     "cat_ginger": {
         "name": "Рыжий Кот",
@@ -116,19 +96,12 @@ CATALOG: Dict[str, dict] = {
 }
 
 RARITY_LABEL = {
-    "common":    "Common",
-    "rare":      "Rare",
-    "epic":      "Epic",
-    "legendary": "Legendary",
-    "mythic":    "Mythic",
+    "common": "Common", "rare": "Rare", "epic": "Epic",
+    "legendary": "Legendary", "mythic": "Mythic",
 }
 
 RARITY_ORDER = {
-    "common":    1,
-    "rare":      2,
-    "epic":      3,
-    "legendary": 4,
-    "mythic":    5,
+    "common": 1, "rare": 2, "epic": 3, "legendary": 4, "mythic": 5,
 }
 
 RARITY_PALETTE = {
@@ -149,16 +122,12 @@ def get_all_pets() -> List[Tuple[str, dict]]:
 
 
 def gift_price(pet_key: str) -> int:
-    """Стоимость подарка: цена питомца +10%."""
     cat = CATALOG.get(pet_key)
     if not cat:
         return 0
     return int(cat["price_dc"] * (1 + GIFT_COMMISSION))
 
 
-# ============================================================
-# БД
-# ============================================================
 def init_pet_tables():
     cur.executescript("""
     CREATE TABLE IF NOT EXISTS user_pets (
@@ -176,17 +145,16 @@ def init_pet_tables():
         last_feed_day TEXT DEFAULT NULL,
         UNIQUE(user_id, pet_key)
     );
-    CREATE INDEX IF NOT EXISTS idx_user_pets_user
-        ON user_pets (user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_pets_user ON user_pets (user_id);
 
     CREATE TABLE IF NOT EXISTS pet_purchases (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id  INTEGER,
-        pet_key  TEXT,
-        price    INTEGER,
-        is_gift  INTEGER DEFAULT 0,
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER,
+        pet_key      TEXT,
+        price        INTEGER,
+        is_gift      INTEGER DEFAULT 0,
         from_user_id INTEGER DEFAULT NULL,
-        ts       INTEGER
+        ts           INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS pet_active_cooldown (
@@ -205,13 +173,9 @@ def init_pet_tables():
     db.commit()
 
 
-# ============================================================
-# ГЕТТЕРЫ
-# ============================================================
 def get_user_pets(user_id: int) -> List[dict]:
     rows = cur.execute(
-        "SELECT * FROM user_pets WHERE user_id=? "
-        "ORDER BY is_active DESC, id ASC",
+        "SELECT * FROM user_pets WHERE user_id=? ORDER BY is_active DESC, id ASC",
         (user_id,)
     ).fetchall()
     return [dict(r) for r in rows]
@@ -258,28 +222,14 @@ def get_user_best_pet(user_id: int) -> Optional[dict]:
     }
 
 
-def get_user_pets_count(user_id: int) -> int:
-    row = cur.execute(
-        "SELECT COUNT(*) AS c FROM user_pets WHERE user_id=?",
-        (user_id,)
-    ).fetchone()
-    return int(row["c"]) if row else 0
-
-
-# ============================================================
-# МАТЕМАТИКА
-# ============================================================
 def get_xp_threshold(level: int) -> int:
-    if level <= 1:
-        return 0
-    if level > MAX_LEVEL:
-        return XP_THRESHOLDS[-1]
+    if level <= 1: return 0
+    if level > MAX_LEVEL: return XP_THRESHOLDS[-1]
     return XP_THRESHOLDS[level - 1]
 
 
 def get_xp_for_next(level: int) -> int:
-    if level >= MAX_LEVEL:
-        return 0
+    if level >= MAX_LEVEL: return 0
     return get_xp_threshold(level + 1) - get_xp_threshold(level)
 
 
@@ -311,9 +261,6 @@ def max_pending(pet_key: str, level: int) -> int:
     return int(hourly_rate(pet_key, level) * CACHE_CAP_HOURS)
 
 
-# ============================================================
-# ПОКУПКА
-# ============================================================
 async def buy_pet(bot, user_id: int, pet_key: str) -> dict:
     cat = CATALOG.get(pet_key)
     if not cat:
@@ -367,19 +314,7 @@ async def buy_pet(bot, user_id: int, pet_key: str) -> dict:
     return {"ok": True, "pet_key": pet_key}
 
 
-# ============================================================
-# ПОДАРОК ПИТОМЦА
-# ============================================================
 async def gift_pet(bot, sender_id: int, recipient_id: int, pet_key: str) -> dict:
-    """
-    Дарит питомца от sender_id к recipient_id.
-    Стоимость: цена питомца + 10%.
-    Ограничения:
-      · получатель не бот
-      · получатель существует на сервере
-      · у получателя нет этого питомца
-      · у отправителя хватает DC с учётом комиссии
-    """
     cat = CATALOG.get(pet_key)
     if not cat:
         return {"ok": False, "error": "Питомец не найден"}
@@ -387,7 +322,6 @@ async def gift_pet(bot, sender_id: int, recipient_id: int, pet_key: str) -> dict
     if sender_id == recipient_id:
         return {"ok": False, "error": "Нельзя подарить самому себе"}
 
-    # Проверка получателя
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
         return {"ok": False, "error": "Сервер недоступен"}
@@ -401,7 +335,6 @@ async def gift_pet(bot, sender_id: int, recipient_id: int, pet_key: str) -> dict
     if has_pet(recipient_id, pet_key):
         return {"ok": False, "error": f"У получателя уже есть этот питомец"}
 
-    # Цена с комиссией
     price = gift_price(pet_key)
     balance = get_dc_cache(sender_id).get("balance", 0)
     if balance < price:
@@ -416,13 +349,11 @@ async def gift_pet(bot, sender_id: int, recipient_id: int, pet_key: str) -> dict
 
     now = int(time.time())
 
-    # Дарим получателю
     cur.execute("""
         INSERT INTO user_pets (user_id, pet_key, purchased_at, last_income)
         VALUES (?, ?, ?, ?)
     """, (recipient_id, pet_key, now, now))
 
-    # Делаем активным, если у получателя нет активного
     rec_active = get_active_pet(recipient_id)
     if not rec_active:
         cur.execute(
@@ -430,7 +361,6 @@ async def gift_pet(bot, sender_id: int, recipient_id: int, pet_key: str) -> dict
             (recipient_id, pet_key)
         )
 
-    # Лог покупки
     cur.execute(
         "INSERT INTO pet_purchases (user_id, pet_key, price, is_gift, from_user_id, ts) "
         "VALUES (?, ?, ?, 1, ?, ?)",
@@ -438,7 +368,6 @@ async def gift_pet(bot, sender_id: int, recipient_id: int, pet_key: str) -> dict
     )
     db.commit()
 
-    # ЛС получателю
     try:
         await member.send(
             f"🎁 **Тебе подарили питомца!**\n"
@@ -464,9 +393,6 @@ async def gift_pet(bot, sender_id: int, recipient_id: int, pet_key: str) -> dict
     return {"ok": True, "pet_key": pet_key, "price": price}
 
 
-# ============================================================
-# СМЕНА АКТИВНОГО
-# ============================================================
 def set_active_pet(user_id: int, pet_key: str) -> dict:
     pet = get_pet_by_key(user_id, pet_key)
     if not pet:
@@ -510,9 +436,6 @@ def get_swap_cooldown_left(user_id: int) -> int:
     return max(left, 0)
 
 
-# ============================================================
-# ЗАБРАТЬ ДОХОД
-# ============================================================
 async def claim_income(user_id: int) -> int:
     pets = get_user_pets(user_id)
     total = sum((p.get("pending_dc") or 0) for p in pets)
@@ -539,9 +462,6 @@ async def claim_income(user_id: int) -> int:
     return total
 
 
-# ============================================================
-# КОРМЛЕНИЕ
-# ============================================================
 async def feed_active_pet(user_id: int) -> dict:
     pet = get_active_pet(user_id)
     if not pet:
@@ -602,9 +522,6 @@ async def feed_active_pet(user_id: int) -> dict:
     return {"ok": True, "xp": xp_gain, "bonus_xp": bonus_xp, "streak": streak}
 
 
-# ============================================================
-# XP
-# ============================================================
 def add_pet_xp_sync(user_id: int, pet_key: str, amount: int) -> bool:
     pet = get_pet_by_key(user_id, pet_key)
     if not pet:
@@ -651,9 +568,6 @@ async def add_pet_xp(user_id: int, amount: int, source: str = "misc"):
             add_pet_xp_sync(user_id, p["pet_key"], rest)
 
 
-# ============================================================
-# БОНУСЫ
-# ============================================================
 def _get_active_bonus(user_id: int, bonus_type: str) -> float:
     active = get_active_pet(user_id)
     if not active:
@@ -678,9 +592,6 @@ def get_clan_bonus(user_id: int) -> float:
     return _get_active_bonus(user_id, "clan_contrib")
 
 
-# ============================================================
-# ТОП
-# ============================================================
 def get_top_users(limit: int = 10) -> List[dict]:
     rows = cur.execute("""
         SELECT user_id, MAX(level) AS best_level
@@ -718,9 +629,6 @@ def get_user_place(user_id: int) -> Optional[int]:
     return None
 
 
-# ============================================================
-# ТАСК НАКОПЛЕНИЯ
-# ============================================================
 @tasks.loop(minutes=15)
 async def pets_income_task(bot):
     await bot.wait_until_ready()
@@ -740,18 +648,12 @@ async def pets_income_task(bot):
             current = r["pending_dc"] or 0
 
             if current >= cap:
-                cur.execute(
-                    "UPDATE user_pets SET last_income=? WHERE id=?",
-                    (now, r["id"])
-                )
+                cur.execute("UPDATE user_pets SET last_income=? WHERE id=?", (now, r["id"]))
                 continue
 
             earned = int(hourly * elapsed / 3600)
             if earned <= 0:
-                cur.execute(
-                    "UPDATE user_pets SET last_income=? WHERE id=?",
-                    (now, r["id"])
-                )
+                cur.execute("UPDATE user_pets SET last_income=? WHERE id=?", (now, r["id"]))
                 continue
 
             new_pending = min(current + earned, cap)
@@ -768,9 +670,6 @@ async def pets_income_task(bot):
         logger.exception(f"pets_income_task: {e}")
 
 
-# ============================================================
-# ХУКИ
-# ============================================================
 def install_hooks(bot):
     @bot.listen("on_message")
     async def _pet_on_message(message):
