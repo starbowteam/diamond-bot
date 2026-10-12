@@ -1,13 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Pillow-рендеры питомцев.
-  · Каталог         — список строк (только непокупленные)
-  · Карточка товара — вариант 3: горизонтальный заголовок + 4 плитки + 2 цены
-  · Мои питомцы     — hero активного + список остальных
-  · Карточка своего — большая слева, инфо справа
-  · Успех покупки   — закрашенный круг с галочкой
-  · Успех подарка   — закрашенный круг с подарком
-  · Топ             — общий список строчками
 """
 import io
 import os
@@ -24,9 +17,6 @@ from pet.core import (
 )
 
 
-# ============================================================
-# ШРИФТЫ
-# ============================================================
 FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
 FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
 
@@ -49,9 +39,6 @@ def _fa(sz):
     _FA[sz] = f; return f
 
 
-# ============================================================
-# ПАЛИТРА
-# ============================================================
 BG        = (10, 10, 12)
 CARD_TOP  = (16, 16, 20)
 STACK_BG  = (21, 21, 26)
@@ -104,9 +91,6 @@ I_FIRE     = 0xf06d
 I_TARGET   = 0xf140
 
 
-# ============================================================
-# УТИЛИТЫ
-# ============================================================
 def _tw(d, t, f):
     b = d.textbbox((0, 0), t, font=f); return b[2] - b[0]
 
@@ -159,7 +143,6 @@ def _grad(img, box, c1, c2, alpha=30, radius=0):
 
 
 def _grad_radial_circle(img, cx, cy, r, c1, c2, alpha=255):
-    """Плотная радиальная заливка круга градиентом."""
     layer = Image.new("RGBA", (2 * r, 2 * r), (0, 0, 0, 0))
     ld = ImageDraw.Draw(layer)
     steps = r
@@ -202,9 +185,6 @@ def _fmt_date(ts: int) -> str:
         return "—"
 
 
-# ============================================================
-# КАРКАС
-# ============================================================
 W, H = 1800, 1000
 M = 14
 PX, PY = 40, 40
@@ -332,7 +312,7 @@ def _xp_bar(d, img, x, y, w, h, pct):
 
 
 # ============================================================
-# ЭКРАН 1: КАТАЛОГ (список строк)
+# КАТАЛОГ
 # ============================================================
 def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
     color = RARITY_PALETTE.get(cat["rarity"], SILVER)
@@ -494,10 +474,9 @@ def render_catalog(user_id, balance, available_pets, selected_key=None):
 
 
 # ============================================================
-# ЭКРАН 2: КАРТОЧКА ТОВАРА (вариант 3) — из каталога
+# КАРТОЧКА ТОВАРА
 # ============================================================
 def render_item_card(user_id, balance, pet_key: str):
-    """Карточка товара из каталога: горизонтальный заголовок + 4 плитки + бонус + 2 цены."""
     img, d = _canvas(user_id, "питомцы · товар")
 
     cat = CATALOG.get(pet_key, {})
@@ -536,7 +515,6 @@ def render_item_card(user_id, balance, pet_key: str):
 
     content_y1 = body_y + 96
 
-    # ── HEADER: emoji + имя + описание + теги ──
     header_h = 180
     header_x1 = rpx1
     header_x2 = rpx2
@@ -577,7 +555,6 @@ def render_item_card(user_id, balance, pet_key: str):
     for i, line in enumerate(desc_lines):
         d.text((tx, ey + 46 + i * 20), line, font=desc_f, fill=MUTED)
 
-    # Теги
     tag_y = ey + 96
     cur_x = tx
     rl = _rarity_label_short(cat.get("rarity", "common"))
@@ -598,7 +575,6 @@ def render_item_card(user_id, balance, pet_key: str):
                             outline=GOLD + (150,), width=1)
         d.text((cur_x + 10, tag_y + 4), btext, font=rlf, fill=GOLD)
 
-    # ── 4 ПЛИТКИ ──
     stats_h = 110
     stats_y1 = header_y2 + 14
     stats_y2 = stats_y1 + stats_h
@@ -629,7 +605,6 @@ def render_item_card(user_id, balance, pet_key: str):
         d.text((cx1 + 74, stats_y1 + 44), _el(d, val, vf, cx2 - cx1 - 88),
                font=vf, fill=col)
 
-    # ── БОНУС ──
     bonus_y1 = stats_y2 + 14
     bonus_h = 68
     bonus_y2 = bonus_y1 + bonus_h
@@ -663,7 +638,7 @@ def render_item_card(user_id, balance, pet_key: str):
         d.text((rpx1 + 76, bonus_y1 + 22), "БОНУСОВ НЕТ — обычный питомец",
                font=_font(15), fill=SILVER)
 
-    # ── 2 ЦЕНЫ (снизу, приподнятые) ──
+    # 2 ЦЕНЫ — приподняты, чтобы не налезали
     price_h = 130
     price_y2 = body_y + body_h - 22
     price_y1 = price_y2 - price_h
@@ -692,7 +667,7 @@ def render_item_card(user_id, balance, pet_key: str):
     d.text((buy_x1 + 98 + pv_w + 8, price_y1 + 48 + pv_f.size - 22),
            "DC", font=_font(18), fill=GREEN)
 
-    d.text((buy_x1 + 98, price_y1 + 96), "добавится в зоопарк",
+    d.text((buy_x1 + 98, price_y1 + 96), "добавится в коллекцию",
            font=_font(12), fill=MUTED)
 
     # Подарить
@@ -727,7 +702,7 @@ def render_item_card(user_id, balance, pet_key: str):
 
 
 # ============================================================
-# ЭКРАН 3: МОИ ПИТОМЦЫ
+# МОИ ПИТОМЦЫ
 # ============================================================
 def _hero_active(img, d, x, y, w, h, pet):
     cat = CATALOG.get(pet["pet_key"], {})
@@ -862,25 +837,38 @@ def _my_pet_row(img, d, x, y, w, h, pet):
 
 
 def _placeholder_row(img, d, x, y, w, h):
+    """Пустой слот — плюс и текст центрированы вместе."""
     d.rounded_rectangle((x, y, x + w, y + h), radius=12,
                         fill=(20, 20, 26) + (255,),
                         outline=INNER_BRD + (255,), width=2)
 
+    # Пунктирная имитация по верхнему и нижнему краю
     for i in range(int(w) - 40):
         if i % 14 < 7:
             d.point((x + 20 + i, y + 5), fill=INNER_BRD)
             d.point((x + 20 + i, y + h - 6), fill=INNER_BRD)
 
-    cx = x + w // 2
+    # Композиция "плюс + текст" — центрируем целиком
+    text = "Свободный слот — купи в каталоге"
+    tf = _font(13)
+    tw_ = _tw(d, text, tf)
+
+    plus_size = 36
+    gap = 14
+    total_w = plus_size + gap + tw_
+
+    cx_start = x + (w - total_w) // 2
     cy = y + h // 2
 
-    _alpha(img, (cx - 20, cy - 20, cx + 20, cy + 20), SILVER, alpha=30, radius=10)
-    _icon(d, cx, cy, I_PLUS, 20, SILVER)
+    # Плюс
+    _alpha(img, (cx_start, cy - plus_size // 2,
+                 cx_start + plus_size, cy + plus_size // 2),
+           SILVER, alpha=30, radius=10)
+    _icon(d, cx_start + plus_size // 2, cy, I_PLUS, 18, SILVER)
 
-    text = "Свободный слот — купи в каталоге"
-    tf = _font(12)
-    tw_ = _tw(d, text, tf)
-    d.text((cx + 34, cy - 9), text, font=tf, fill=MUTED)
+    # Текст по центру справа от плюса
+    d.text((cx_start + plus_size + gap, cy - tf.size // 2 - 3),
+           text, font=tf, fill=MUTED)
 
 
 def render_my_pets(user_id, balance, pets):
@@ -915,7 +903,7 @@ def render_my_pets(user_id, balance, pets):
     rpx2 = rx2 - 26
 
     if not pets:
-        sub_text = "зоопарк пуст"
+        sub_text = "питомцев пока нет"
     else:
         sub_text = f"{len(pets)} питомцев · {_fmt(total_pending)} DC копится"
 
@@ -971,7 +959,7 @@ def render_my_pets(user_id, balance, pets):
         else:
             _placeholder_row(img, d, rpx1, cy, rpx2 - rpx1, row_h)
 
-    _footer(d, "Забрать DC и покормить — в меню ниже", "стр. 2 / 4")
+    _footer(d, "Забрать накопленное и покормить питомца — в меню ниже", "стр. 2 / 4")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
@@ -980,7 +968,7 @@ def render_my_pets(user_id, balance, pets):
 
 
 # ============================================================
-# ЭКРАН 4: КАРТОЧКА СВОЕГО ПИТОМЦА
+# КАРТОЧКА СВОЕГО ПИТОМЦА
 # ============================================================
 def render_pet_card(user_id, balance, pet: dict, place: int = None):
     img, d = _canvas(user_id, "питомцы · карточка")
@@ -1136,10 +1124,9 @@ def render_pet_card(user_id, balance, pet: dict, place: int = None):
 
 
 # ============================================================
-# ЭКРАН 5: УСПЕХ ПОКУПКИ
+# УСПЕХ ПОКУПКИ
 # ============================================================
 def render_success_buy(user_id, balance, pet_key: str, price: int):
-    """Закрашенный круг с галочкой + инфо."""
     img, d = _canvas(user_id, "питомцы · покупка")
 
     cat = CATALOG.get(pet_key, {})
@@ -1165,16 +1152,13 @@ def render_success_buy(user_id, balance, pet_key: str, price: int):
 
     _right_head(d, rpx1, body_y + 22, rpx2, "Покупка", "успешно")
 
-    # Центрированный контент
     cx = (rpx1 + rpx2) // 2
     cy_start = body_y + 130
 
-    # Закрашенный круг с галочкой
     circle_r = 110
     circle_cy = cy_start + circle_r
     _grad_radial_circle(img, cx, circle_cy, circle_r, GREEN, GREEN_DK, alpha=255)
 
-    # Тонкое внешнее кольцо (мягкая обводка)
     d.ellipse((cx - circle_r - 6, circle_cy - circle_r - 6,
                cx + circle_r + 6, circle_cy + circle_r + 6),
               outline=GREEN + (30,), width=12)
@@ -1182,24 +1166,20 @@ def render_success_buy(user_id, balance, pet_key: str, price: int):
                cx + circle_r, circle_cy + circle_r),
               outline=GREEN + (180,), width=4)
 
-    # Галочка внутри круга
     _icon(d, cx, circle_cy, I_CHECK, 110, (255, 255, 255))
 
-    # Заголовок
     title_y = circle_cy + circle_r + 40
     title = "Питомец куплен!"
     tf = _font(48)
     tw_ = _tw(d, title, tf)
     d.text((cx - tw_ // 2, title_y), title, font=tf, fill=GREEN)
 
-    # Подзаголовок
     sub_y = title_y + 70
-    sub = "Теперь он в твоём зоопарке и начнёт приносить DC уже сейчас"
+    sub = "Теперь он у тебя в коллекции и начнёт приносить DC уже сейчас"
     sf = _font(17)
     sw = _tw(d, sub, sf)
     d.text((cx - sw // 2, sub_y), sub, font=sf, fill=MUTED)
 
-    # Плашка товара
     item_y = sub_y + 50
     item_h = 70
     name = cat.get("name", "—")
@@ -1226,7 +1206,6 @@ def render_success_buy(user_id, balance, pet_key: str, price: int):
             item_y + (item_h - nf.size) // 2 - 2),
            name, font=nf, fill=TEXT)
 
-    # Цена
     price_y = item_y + item_h + 24
     price_text = f"−{_fmt(price)} DC"
     pf = _font(28)
@@ -1242,11 +1221,10 @@ def render_success_buy(user_id, balance, pet_key: str, price: int):
 
 
 # ============================================================
-# ЭКРАН 6: УСПЕХ ПОДАРКА
+# УСПЕХ ПОДАРКА
 # ============================================================
 def render_success_gift(user_id, balance, pet_key: str, price: int,
                         base_price: int, recipient_id: int):
-    """Закрашенный золотой круг с подарком + инфо."""
     img, d = _canvas(user_id, "питомцы · подарок")
 
     cat = CATALOG.get(pet_key, {})
@@ -1278,7 +1256,6 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
     cx = (rpx1 + rpx2) // 2
     cy_start = body_y + 110
 
-    # Закрашенный золотой круг с подарком
     circle_r = 110
     circle_cy = cy_start + circle_r
     _grad_radial_circle(img, cx, circle_cy, circle_r, GOLD, GOLD_DK, alpha=255)
@@ -1290,17 +1267,14 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
                cx + circle_r, circle_cy + circle_r),
               outline=GOLD + (180,), width=4)
 
-    # Иконка подарка внутри
     _icon(d, cx, circle_cy, I_GIFT, 100, (26, 18, 6))
 
-    # Заголовок
     title_y = circle_cy + circle_r + 32
     title = "Подарок отправлен!"
     tf = _font(46)
     tw_ = _tw(d, title, tf)
     d.text((cx - tw_ // 2, title_y), title, font=tf, fill=GOLD)
 
-    # Получатель
     who_lbl_y = title_y + 64
     who_lbl = "ПОЛУЧАТЕЛЬ"
     wlf = _font(12)
@@ -1313,7 +1287,6 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
     ww = _tw(d, who, wf)
     d.text((cx - ww // 2, who_y), who, font=wf, fill=TEXT)
 
-    # Плашка питомца
     item_y = who_y + 56
     item_h = 66
     name = cat.get("name", "—")
@@ -1340,7 +1313,6 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
             item_y + (item_h - nf.size) // 2 - 2),
            name, font=nf, fill=GOLD)
 
-    # Цена
     price_y = item_y + item_h + 20
     price_text = f"Списано: −{_fmt(price)} DC (комиссия {_fmt(commission)})"
     pf = _font(17)
@@ -1356,7 +1328,7 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
 
 
 # ============================================================
-# ЭКРАН 7: ТОП
+# ТОП
 # ============================================================
 def _top_row(img, d, x, y, w, h, rank, entry, is_me):
     if rank == 1:
