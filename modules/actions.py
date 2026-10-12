@@ -48,6 +48,21 @@ P = "\u3164"
 
 
 # ============================================================
+# ХЕЛПЕРЫ ПИТОМЦЕВ
+# ============================================================
+def _apply_pet_casino_bonus(user_id: int, payout: int) -> tuple[int, float]:
+    """Применяет бонус активного питомца к выплате. Возвращает (payout, mult)."""
+    try:
+        from pet.core import get_casino_bonus
+        mult = get_casino_bonus(user_id)
+        if mult > 1.0:
+            return int(payout * mult), mult
+    except Exception as e:
+        logger.debug(f"pet casino bonus: {e}")
+    return payout, 1.0
+
+
+# ============================================================
 # УНИВЕРСАЛЬНЫЙ EDIT (чинит InteractionResponded)
 # ============================================================
 async def _edit_msg(inter, **kwargs):
@@ -99,6 +114,15 @@ async def _check_casino_achievements(user_id, bet=0, profit=0):
             await check_and_unlock(user_id, "casino_lucky", value=profit, bot=bot)
     except Exception as e:
         logger.warning(f"casino ach: {e}")
+
+
+async def _check_pet_xp(user_id: int, source: str = "casino"):
+    """Даёт XP питомцу за партию в казино."""
+    try:
+        from pet.core import add_pet_xp
+        await add_pet_xp(user_id, 3, source)
+    except Exception as e:
+        logger.debug(f"pet xp casino: {e}")
 
 
 # ============================================================
@@ -224,12 +248,19 @@ async def _roulette_play(inter, bet, reason="Ставка в рулетке мо
         except Exception: pass
 
     await _check_casino_achievements(user_id, bet=bet)
+    await _check_pet_xp(user_id, "roulette")
 
     if mult > 0:
         payout = bet + int(bet * mult)
+
+        # Бонус питомца (legendary → +5% к казино)
+        payout, pet_mult = _apply_pet_casino_bonus(user_id, payout)
+
         payout, used = apply_casino_win(user_id, payout)
         net = payout - bet
         r_reason = f"Выигрыш в рулетке: {result['name']}"
+        if pet_mult > 1.0:
+            r_reason += f" (питомец ×{pet_mult:.2f})"
         if used: r_reason += f" ({', '.join(used)})"
         await add_dc(user_id, payout, r_reason, to_clan_pool=True)
         if on_casino_win_hook:
@@ -261,7 +292,8 @@ async def _roulette_play(inter, bet, reason="Ставка в рулетке мо
             description=(f"> **Юзер:** {inter.author.mention}\n"
                          f"> **Ставка:** `{bet} DC`\n"
                          f"> **Множитель:** `x{1 + mult:.1f}`\n"
-                         f"> **Профит:** `+{net} DC`\n"
+                         + (f"> **Бонус питомца:** `×{pet_mult:.2f}`\n" if pet_mult > 1.0 else "")
+                         + f"> **Профит:** `+{net} DC`\n"
                          f"> **Баланс:** `{new_balance} DC`"),
             color=result["color"]))
     else:
@@ -387,8 +419,14 @@ async def _bj_finalize(inter, game, outcome):
     else:
         payout = 0; reason = "Проигрыш в блэкджеке"
 
+    pet_mult = 1.0
     if payout > 0:
+        # Бонус питомца
+        payout, pet_mult = _apply_pet_casino_bonus(user_id, payout)
+
         payout, used = apply_casino_win(user_id, payout)
+        if pet_mult > 1.0:
+            reason += f" (питомец ×{pet_mult:.2f})"
         if used: reason += f" ({', '.join(used)})"
         await add_dc(user_id, payout, reason, to_clan_pool=True)
         if on_casino_win_hook:
@@ -417,7 +455,8 @@ async def _bj_finalize(inter, game, outcome):
         title=f"🃏 Блэкджек: {outcome}",
         description=(f"> **Юзер:** <@{user_id}>\n"
                      f"> **Ставка:** `{total_bet} DC`\n"
-                     f"> **Выплата:** `{payout} DC`\n"
+                     + (f"> **Бонус питомца:** `×{pet_mult:.2f}`\n" if pet_mult > 1.0 else "")
+                     + f"> **Выплата:** `{payout} DC`\n"
                      f"> **Профит:** `{'+' if net >= 0 else ''}{net} DC`\n"
                      f"> **Баланс:** `{new_balance} DC`"),
         color=0x2ecc71 if payout > 0 else 0xed4245))
@@ -472,6 +511,7 @@ async def _blackjack_play(inter, bet, reason="Ставка в блэкджеке
         except Exception: pass
 
     await _check_casino_achievements(user_id, bet=bet)
+    await _check_pet_xp(user_id, "blackjack")
 
     dealer_first = game["dealer"][0]
     dealer_cards = [
@@ -655,6 +695,7 @@ async def _coinflip_play(inter, bet, reason="Ставка в монетке"):
         return await inter.edit_original_response(content="❌ Не удалось списать DC.")
 
     await _check_casino_achievements(user_id, bet=bet)
+    await _check_pet_xp(user_id, "coinflip")
 
     try:
         await _send_game_screen(inter, render_coinflip_choice(user_id, balance, bet),
@@ -700,6 +741,7 @@ class CoinflipChoiceView(View):
 
         payout = 0
         refund = 0
+        pet_mult = 1.0
 
         if on_casino_quest_hook:
             try: await on_casino_quest_hook(user_id)
@@ -707,8 +749,14 @@ class CoinflipChoiceView(View):
 
         if won:
             payout = int(bet * COINFLIP_WIN_MULT)
+
+            # Бонус питомца
+            payout, pet_mult = _apply_pet_casino_bonus(user_id, payout)
+
             payout, used = apply_casino_win(user_id, payout)
             reason = f"Монетка ({result_side})"
+            if pet_mult > 1.0:
+                reason += f" (питомец ×{pet_mult:.2f})"
             if used: reason += f" ({', '.join(used)})"
             await add_dc(user_id, payout, reason, to_clan_pool=True)
             if on_casino_win_hook:
@@ -747,7 +795,8 @@ class CoinflipChoiceView(View):
             description=(f"> **Юзер:** <@{user_id}>\n"
                          f"> **Ставка:** `{bet} DC`\n"
                          f"> **Выбор:** `{user_choice}` → `{result_side}`\n"
-                         f"> **Выплата:** `{payout} DC`\n"
+                         + (f"> **Бонус питомца:** `×{pet_mult:.2f}`\n" if pet_mult > 1.0 else "")
+                         + f"> **Выплата:** `{payout} DC`\n"
                          f"> **Страховка:** `{refund} DC`\n"
                          f"> **Баланс:** `{new_balance} DC`"),
             color=0x2ecc71 if won else 0xed4245))
