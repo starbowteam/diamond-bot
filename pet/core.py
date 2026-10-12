@@ -229,6 +229,27 @@ def has_pet(user_id: int, pet_key: str) -> bool:
     return bool(row)
 
 
+def get_user_best_pet(user_id: int) -> Optional[dict]:
+    """
+    Возвращает лучшего питомца юзера (по уровню, затем по xp)
+    с дополнительными cat-данными. Используется в render_top.
+    """
+    row = cur.execute(
+        "SELECT pet_key, level FROM user_pets WHERE user_id=? "
+        "ORDER BY level DESC, xp DESC LIMIT 1",
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return None
+    cat = CATALOG.get(row["pet_key"], {})
+    return {
+        "pet_key": row["pet_key"],
+        "level": row["level"],
+        "name": cat.get("name", "—"),
+        "rarity": cat.get("rarity", "common"),
+    }
+
+
 # ============================================================
 # МАТЕМАТИКА
 # ============================================================
@@ -571,7 +592,6 @@ def get_top_users(limit: int = 10) -> List[dict]:
     result = []
     for r in rows:
         uid = r["user_id"]
-        # Находим лучшего питомца
         best = cur.execute("""
             SELECT pet_key, level FROM user_pets
             WHERE user_id=? ORDER BY level DESC LIMIT 1
@@ -622,7 +642,6 @@ async def pets_income_task(bot):
 
             earned = int(hourly * elapsed / 3600)
             if earned <= 0:
-                # слишком мало времени прошло — обновим last_income
                 cur.execute(
                     "UPDATE user_pets SET last_income=? WHERE id=?",
                     (now, r["id"])
@@ -659,7 +678,6 @@ def install_hooks(bot):
                 return
             if len((message.content or "").strip()) < 3:
                 return
-            # Не считаем сообщения в канале отзывов как чат
             if message.channel.id == CONFIG.get("REVIEW_COUNT_CHANNEL"):
                 return
             await add_pet_xp(message.author.id, 1, "message")
