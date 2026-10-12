@@ -360,7 +360,6 @@ async def daily_deal_task():
         if before.get("slot") != after.get("slot"):
             if deal:
                 logger.info(f"Товар дня: {deal['item_data']['name']}")
-                # 👇 анонс акции в канал Бонусы
                 try:
                     from bonus.core import announce_deal_change
                     await announce_deal_change(bot, deal)
@@ -557,6 +556,14 @@ async def on_ready():
 
         except Exception as e:
             logger.exception(f"clan league init err: {e}")
+
+        # ─── Питомцы ───
+        try:
+            from pet import init_pet_league
+            init_pet_league(bot)
+            logger.info("🐾 Питомцы подключены")
+        except Exception as e:
+            logger.exception(f"init pets: {e}")
 
         # ─── Инвайт-панель адвайтеров ───
         try:
@@ -767,6 +774,7 @@ async def on_member_join(member: disnake.Member):
                         f"> • **Отзывы** — от 20 до 100 DC в зависимости от роли покупателя\n"
                         f"> • **Ежедневный бонус** — +10 DC с ролью «Клуб» (нужна активность за день)\n"
                         f"> • **Ежедневный подарок** — от 10 до 30 DC каждый день, забирай в панели профиля\n"
+                        f"> • **Питомцы** — заведи питомца, он приносит 1–20 DC в час\n"
                         f"> • **Казино** — испытай удачу в рулетке, блэкджеке и монетке\n\n"
                         f"**🛒 Где потратить?**\n"
                         f"> Загляни в <#1462136361711829053>, нажми кнопку **Каталог** "
@@ -1211,7 +1219,6 @@ async def on_message(message: disnake.Message):
         new_count = counts[str(user_id)]
 
         # 👇 1. Сначала обновляем роль покупателя по НОВОМУ счётчику.
-        #    Награда ниже будет считаться уже по новой роли.
         if isinstance(message.author, disnake.Member):
             try:
                 await update_user_roles(message.author, new_count, keep_pka=True)
@@ -1221,11 +1228,28 @@ async def on_message(message: disnake.Message):
         # 👇 2. Награда — по новой роли
         reward = get_review_reward(new_count)
 
+        # 👇 3. Бонус от активного питомца (epic → +3% к отзывам)
+        pet_mult = 1.0
+        try:
+            from pet.core import get_review_bonus
+            pet_mult = get_review_bonus(user_id)
+            if pet_mult > 1.0:
+                reward = int(reward * pet_mult)
+        except Exception as e:
+            logger.debug(f"pet review bonus: {e}")
+
         try:
             await add_dc(user_id, reward, "Отзыв о покупке",
                          notify=False, log=False, to_clan_pool=True)
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
+
+        # XP питомцам за отзыв
+        try:
+            from pet.core import add_pet_xp
+            await add_pet_xp(user_id, 25, "review")
+        except Exception as e:
+            logger.debug(f"pet xp review: {e}")
 
         try:
             from clan.achievements import check_and_unlock
@@ -1240,12 +1264,16 @@ async def on_message(message: disnake.Message):
             logger.warning(f"clan review hook: {e}")
 
         try:
+            reward_line = f"> **Начислено:** `+{reward} DC`"
+            if pet_mult > 1.0:
+                reward_line += f" (бонус питомца ×{pet_mult:.2f})"
+
             dm_embed = disnake.Embed(
                 title="✅ Отзыв принят!",
                 description=(
                     f"> Спасибо за отзыв!\n\n"
                     f"> **Всего отзывов:** `{new_count}`\n"
-                    f"> **Начислено:** `+{reward} DC`\n"
+                    f"{reward_line}\n"
                     f"> **Следующий отзыв:** можно оставить через 2 минуты"
                 ),
                 color=0x2ecc71,
@@ -1256,15 +1284,21 @@ async def on_message(message: disnake.Message):
         except Exception:
             pass
 
+        log_desc = (
+            f"> **Пользователь:** {message.author.mention}\n"
+            f"> **Всего отзывов:** `{new_count}`\n"
+            f"> **Начислено:** `+{reward} DC`\n"
+        )
+        if pet_mult > 1.0:
+            log_desc += f"> **Бонус питомца:** `×{pet_mult:.2f}`\n"
+        log_desc += (
+            f"> **Текст:** {text[:200]}\n"
+            f"> **Ссылка:** [перейти]({message.jump_url})"
+        )
+
         await log_discord(
             title="📝 Отзыв принят",
-            description=(
-                f"> **Пользователь:** {message.author.mention}\n"
-                f"> **Всего отзывов:** `{new_count}`\n"
-                f"> **Начислено:** `+{reward} DC`\n"
-                f"> **Текст:** {text[:200]}\n"
-                f"> **Ссылка:** [перейти]({message.jump_url})"
-            ),
+            description=log_desc,
             color=0x00ff00
         )
         await update_review_counter(silent=False)
@@ -1312,3 +1346,10 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                     await on_voice_quest_hook(user_id, duration)
                 except Exception as e:
                     logger.warning(f"clan voice hook: {e}")
+                # XP питомцам за час в войсе
+                try:
+                    from pet.core import add_pet_xp
+                    hours = max(duration // 3600, 1)
+                    await add_pet_xp(user_id, 5 * hours, "voice")
+                except Exception as e:
+                    logger.debug(f"pet xp voice: {e}")
