@@ -32,13 +32,7 @@ E_BUY      = PartialEmoji(name="shop1",   id=1555654407776112750)
 E_GIFT     = PartialEmoji(name="gid1",    id=1555654337953267794)
 
 
-# ============================================================
-# ХЕЛПЕР: имя юзера
-# ============================================================
 def _get_username(guild, user_id: int) -> str:
-    """
-    Возвращает display_name участника или '@ID' если не найден.
-    """
     if guild is not None:
         try:
             m = guild.get_member(user_id)
@@ -85,7 +79,7 @@ class MyPetsView(View):
     async def claim(self, button, inter: disnake.MessageInteraction):
         await _claim_income(inter)
 
-    @disnake.ui.button(label=_pad("Покормить питомца", 1, 1),
+    @disnake.ui.button(label=_pad("Покормить питомцев", 1, 1),
                        style=ButtonStyle.gray,
                        custom_id="pet_my:feed", emoji=E_FEED, row=0)
     async def feed(self, button, inter: disnake.MessageInteraction):
@@ -93,7 +87,7 @@ class MyPetsView(View):
 
 
 # ============================================================
-# КАТАЛОГ
+# КАТАЛОГ — короткие описания в селекте
 # ============================================================
 class CatalogSelect(Select):
     def __init__(self, available):
@@ -103,9 +97,14 @@ class CatalogSelect(Select):
             label = f"{cat['name']} · {price} DC"
             if len(label) > 90:
                 label = label[:87] + "..."
+            # 👇 КОРОТКОЕ описание
+            bt = cat.get("bonus_type", "none")
+            bonus_short = ""
+            if bt != "none":
+                bonus_short = f" · +{int(cat.get('bonus_value', 0) * 100)}%"
             desc = (
                 f"{pcore.RARITY_LABEL[cat['rarity']]} · "
-                f"+{cat['passive_dc']} DC/ч · {cat['description'][:50]}"
+                f"+{cat['passive_dc']} DC/ч{bonus_short}"
             )
             options.append(SelectOption(
                 label=label,
@@ -145,13 +144,13 @@ class CardActionSelect(Select):
             options=[
                 SelectOption(
                     label=f"Купить себе · {price} DC",
-                    description="Питомец сразу появится в твоей коллекции",
+                    description="Питомец появится в твоей коллекции",
                     emoji=E_BUY,
                     value="buy",
                 ),
                 SelectOption(
                     label=f"Подарить · {gp} DC",
-                    description="Отправить питомца другому юзеру (комиссия +10%)",
+                    description="Отправить другому юзеру (+10%)",
                     emoji=E_GIFT,
                     value="gift",
                 ),
@@ -229,7 +228,6 @@ class GiftPetModal(Modal):
         user_id = inter.author.id
         balance = _get_balance(user_id)
 
-        # 👇 ник получателя
         recipient_name = _get_username(inter.guild, recipient_id)
 
         buf = await asyncio.to_thread(
@@ -318,7 +316,10 @@ async def _open_my_pets(inter: disnake.MessageInteraction):
     user_id = inter.author.id
     balance = _get_balance(user_id)
     pets = pcore.get_user_pets(user_id)
-    buf = await asyncio.to_thread(prender.render_my_pets, user_id, balance, pets)
+    top_pet = pcore.get_top_earning_pet(user_id)
+    buf = await asyncio.to_thread(
+        prender.render_my_pets, user_id, balance, pets, top_pet
+    )
     await _display_screen(inter, buf, f"pet_my_{user_id}.png", MyPetsView())
 
 
@@ -347,7 +348,6 @@ async def _open_top(inter: disnake.MessageInteraction):
     place = pcore.get_user_place(user_id)
     best_pet = pcore.get_user_best_pet(user_id)
 
-    # 👇 Прокидываем ники в top
     guild = inter.guild
     for t in top:
         t["username"] = _get_username(guild, t["user_id"])
@@ -371,7 +371,7 @@ async def _claim_income(inter: disnake.MessageInteraction):
     if amount <= 0:
         await inter.followup.send("💰 Накоплений пока нет.", ephemeral=True)
         return
-    await inter.followup.send(f"💰 Получено **+{amount} DC**!", ephemeral=True)
+    await inter.followup.send(f"💰 Получено **+{amount} DC** со всех питомцев!", ephemeral=True)
     await _open_my_pets(inter)
 
 
@@ -387,10 +387,19 @@ async def _feed_active(inter: disnake.MessageInteraction):
             f"❌ {result.get('error', 'Ошибка')}", ephemeral=True
         )
         return
-    xp = result["xp"]
-    msg = f"🍖 Питомец покормлен! **+{xp} XP**"
-    if result.get("bonus_xp"):
-        msg += f" (бонус за streak +{result['bonus_xp']})"
+
+    n = result.get("pets_fed", 1)
+    xp_per = result.get("xp_per_pet", 0)
+    bonus = result.get("bonus_xp", 0)
+
+    if n == 1:
+        msg = f"🍖 Питомец покормлен! **+{xp_per} XP**"
+    else:
+        msg = f"🍖 Покормил **{n} питомцев**! Каждому **+{xp_per} XP**"
+
+    if bonus > 0:
+        msg += f"\n🔥 Бонус за streak: **+{bonus} XP** активному"
+
     await inter.followup.send(msg, ephemeral=True)
     await _open_my_pets(inter)
 
