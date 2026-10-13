@@ -557,7 +557,7 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"clan league init err: {e}")
 
-        # ─── Питомцы ───
+        # ─── 🐾 Питомцы ───
         try:
             from pet import init_pet_league
             init_pet_league(bot)
@@ -565,7 +565,16 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"init pets: {e}")
 
-        # ─── Инвайт-панель адвайтеров ───
+        # ─── 💠 DCC+ ───
+        try:
+            from dccplus import init_dccplus, send_dcc_panel
+            init_dccplus(bot)
+            bot.loop.create_task(send_dcc_panel(bot))
+            logger.info("💠 DCC+ подключён")
+        except Exception as e:
+            logger.exception(f"init DCC+: {e}")
+
+        # ─── 📨 Инвайт-панель адвайтеров ───
         try:
             from work import init_advertiser
             from work.views import AdvertiserPanelView, build_panel_embeds
@@ -605,7 +614,7 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"init advertiser: {e}")
 
-        # ─── Бонус-панель ───
+        # ─── 🎁 Бонус-панель ───
         try:
             from bonus import init_bonus
             from bonus.views import BonusPanelView, build_panel_embeds as build_bonus_embeds
