@@ -1,21 +1,23 @@
 # -*- coding: utf-8 -*-
 """Discord UI для DCC+.
 
-Всё управление — через селекты. Кнопок нет вообще.
+Всё управление — через селекты. Кнопок нет.
 
 Логика сообщений:
-  · 1 публичная панель в канале (DCCPanelView) — с селектом разделов.
-  · Любой клик по селекту раздела открывает ephemeral.
-  · В ephemeral есть ТОЛЬКО селект действия (для trade/stake),
-    в остальных разделах — вообще ничего.
-  · Любая операция ПЕРЕЗАПИСЫВАЕТ ту же эфемерку.
-  · Исключение — модалки: после них создаётся новое ephemeral
-    (Discord технически не даёт редактировать то, что из модалки).
+  · 1 публичная панель в канале (DCCPanelView).
+  · Любой клик по селекту открывает ephemeral.
+  · Операции ПЕРЕЗАПИСЫВАЮТ тот же ephemeral.
+  · Исключение — модалки: после них создаётся новое ephemeral.
+
+Защита от протухших интеракций:
+  · Все ответы на interaction идут через _safe_* обёртки.
+  · Ошибки типа «Unknown interaction / timeout / 404» тихо глотаются,
+    чтобы не засорять лог.
 """
 import asyncio
 
 import disnake
-from disnake import SelectOption, ButtonStyle
+from disnake import SelectOption
 from disnake.ui import View, Select, Modal, TextInput
 
 from core.utils import logger
@@ -37,8 +39,36 @@ SECTIONS = [
 
 
 # ═══════════════════════════════════════════
-# УТИЛИТЫ
+# ХЕЛПЕРЫ: мёртвая интеракция / ephemeral / view
 # ═══════════════════════════════════════════
+_DEAD_MARKERS = (
+    "unknown interaction",
+    "unknown message",
+    "interaction has already been acknowledged",
+    "interactiontimedout",
+    "interaction timed out",
+    "interaction took more than",
+    "10062",  # Discord code: Unknown Interaction
+    "10008",  # Discord code: Unknown Message
+    "404",
+)
+
+
+def _is_dead_interaction_error(ex: Exception) -> bool:
+    """True — если ошибка означает, что интеракция протухла / удалена."""
+    if isinstance(ex, disnake.NotFound):
+        return True
+    s = str(ex).lower()
+    return any(m in s for m in _DEAD_MARKERS)
+
+
+def _log_soft(label: str, ex: Exception):
+    """Мёртвые ошибки тихо проглатываем, остальные — в лог."""
+    if _is_dead_interaction_error(ex):
+        return
+    logger.warning(f"{label}: {ex}")
+
+
 def _is_ephemeral(inter: disnake.MessageInteraction) -> bool:
     try:
         msg = inter.message
@@ -61,12 +91,51 @@ def _has_components(view) -> bool:
         return False
 
 
+async def _safe_defer(inter, ephemeral: bool = True) -> bool:
+    """
+    Пытается отложить интеракцию. Возвращает False, если она уже мертва.
+    """
+    try:
+        if inter.response.is_done():
+            return True
+        await inter.response.defer(ephemeral=ephemeral)
+        return True
+    except disnake.InteractionResponded:
+        return True
+    except Exception as ex:
+        _log_soft("dcc defer", ex)
+        return False
+
+
+async def _safe_followup(inter, **kwargs):
+    """Безопасно шлёт followup. Молча скипает мёртвые интеракции."""
+    try:
+        fw = getattr(inter, "followup", None)
+        if fw is None:
+            return False
+        await fw.send(**kwargs)
+        return True
+    except Exception as ex:
+        _log_soft("dcc followup", ex)
+        return False
+
+
+async def _safe_edit_original(inter, **kwargs) -> bool:
+    """Безопасно редактирует исходное ephemeral. True — если удалось."""
+    try:
+        await inter.edit_original_response(**kwargs)
+        return True
+    except Exception as ex:
+        _log_soft("dcc edit_original", ex)
+        return False
+
+
 async def _render_into_ephemeral(inter, buf, fname: str, view, flash: str = ""):
     """
-    Показывает картинку.
+    Показывает картинку:
       · Если сообщение уже ephemeral → перезаписывает его.
       · Иначе → отправляет новое ephemeral.
-    flash — короткий текст-подпись под картинкой (успех/ошибка).
+      · Если интеракция мертва — тихо выходим (ничего не делаем).
     """
     file = disnake.File(buf, filename=fname)
     e = disnake.Embed(color=0x4dd0e1)
@@ -76,26 +145,26 @@ async def _render_into_ephemeral(inter, buf, fname: str, view, flash: str = ""):
 
     use_view = view if _has_components(view) else None
 
+    # 1) Пробуем перезаписать текущее ephemeral
     if _is_ephemeral(inter):
-        try:
-            await inter.edit_original_response(
-                content=None, embed=e, file=file,
-                attachments=[], view=use_view
-            )
-            return
-        except Exception as ex:
-            logger.warning(f"dcc edit_original: {ex}")
-
-    try:
-        await inter.followup.send(
-            embed=e, file=file, view=use_view, ephemeral=True
+        ok = await _safe_edit_original(
+            inter,
+            content=None, embed=e, file=file,
+            attachments=[], view=use_view,
         )
-    except Exception as ex:
-        logger.warning(f"dcc followup: {ex}")
+        if ok:
+            return
+        # если не получилось — не сдаёмся, пробуем followup ниже
+
+    # 2) Fallback — отправляем followup
+    await _safe_followup(
+        inter,
+        embed=e, file=file, view=use_view, ephemeral=True,
+    )
 
 
 # ═══════════════════════════════════════════
-# СЕЛЕКТ РАЗДЕЛОВ — ТОЛЬКО НА ПУБЛИЧНОЙ ПАНЕЛИ
+# СЕЛЕКТ РАЗДЕЛОВ — только на публичной панели
 # ═══════════════════════════════════════════
 class SectionSelect(Select):
     def __init__(self):
@@ -125,10 +194,9 @@ class DCCPanelView(View):
 
 
 # ═══════════════════════════════════════════
-# VIEW ДЛЯ MAIN / ASSETS / TOP / HISTORY — БЕЗ КОМПОНЕНТОВ
+# VIEW ДЛЯ MAIN / ASSETS / TOP / HISTORY — без компонентов
 # ═══════════════════════════════════════════
 class EmptyView(View):
-    """Пустая вью — нужна, чтобы явно передать view=None."""
     def __init__(self):
         super().__init__(timeout=300)
 
@@ -161,9 +229,18 @@ class TradeActionSelect(Select):
         v = inter.data.values[0]
 
         if v == "buy_custom":
-            return await inter.response.send_modal(BuyModal())
+            try:
+                await inter.response.send_modal(BuyModal())
+            except Exception as ex:
+                _log_soft("dcc buy modal", ex)
+            return
+
         if v == "sell_custom":
-            return await inter.response.send_modal(SellModal())
+            try:
+                await inter.response.send_modal(SellModal())
+            except Exception as ex:
+                _log_soft("dcc sell modal", ex)
+            return
 
         action, _, raw = v.partition("_")
         if action == "buy":
@@ -203,7 +280,10 @@ class StakePlanSelect(Select):
 
     async def callback(self, inter: disnake.MessageInteraction):
         days = int(inter.data.values[0])
-        await inter.response.send_modal(StakeModal(days))
+        try:
+            await inter.response.send_modal(StakeModal(days))
+        except Exception as ex:
+            _log_soft("dcc stake modal", ex)
 
 
 class StakeView(View):
@@ -213,7 +293,7 @@ class StakeView(View):
 
 
 # ═══════════════════════════════════════════
-# МОДАЛКИ (правильное обращение — inter.text_values)
+# МОДАЛКИ
 # ═══════════════════════════════════════════
 class BuyModal(Modal):
     def __init__(self):
@@ -292,9 +372,11 @@ class StakeModal(Modal):
 
         r = await dcc.create_stake(inter.author.id, amount, self.days)
         if not r.get("ok"):
-            return await inter.followup.send(f"❌ {r.get('error')}", ephemeral=True)
+            await _safe_followup(
+                inter, content=f"❌ {r.get('error')}", ephemeral=True
+            )
+            return
 
-        # После модалки создаём новое ephemeral — редактировать её сообщение нельзя
         user_id = inter.author.id
         try:
             buf = await asyncio.to_thread(dr.render_stake, user_id)
@@ -308,13 +390,15 @@ class StakeModal(Modal):
                 f"> Профит: `+{int(r['profit_pct']*100)}%`\n"
                 f"> Разлок: <t:{r['unlock_at']}:F>"
             )
-            await inter.followup.send(
-                embed=e, file=file, view=StakeView(), ephemeral=True
+            await _safe_followup(
+                inter,
+                embed=e, file=file, view=StakeView(), ephemeral=True,
             )
         except Exception as ex:
             logger.warning(f"stake success render: {ex}")
-            await inter.followup.send(
-                f"🔒 Стейк создан на {self.days} дней, `{amount:.4f} DCC+`",
+            await _safe_followup(
+                inter,
+                content=f"🔒 Стейк создан на {self.days} дней, `{amount:.4f} DCC+`",
                 ephemeral=True,
             )
 
@@ -323,14 +407,13 @@ class StakeModal(Modal):
 # ДЕЙСТВИЯ
 # ═══════════════════════════════════════════
 async def _do_buy(inter, dc_amount: int):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
+    if not await _safe_defer(inter):
+        return
 
     r = await dcc.buy_dccplus(inter.author.id, dc_amount)
     if not r.get("ok"):
-        return await inter.followup.send(f"❌ {r.get('error')}", ephemeral=True)
+        await _safe_followup(inter, content=f"❌ {r.get('error')}", ephemeral=True)
+        return
 
     user_id = inter.author.id
     try:
@@ -346,14 +429,13 @@ async def _do_buy(inter, dc_amount: int):
 
 
 async def _do_sell(inter, dcc_amount: float):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
+    if not await _safe_defer(inter):
+        return
 
     r = await dcc.sell_dccplus(inter.author.id, dcc_amount)
     if not r.get("ok"):
-        return await inter.followup.send(f"❌ {r.get('error')}", ephemeral=True)
+        await _safe_followup(inter, content=f"❌ {r.get('error')}", ephemeral=True)
+        return
 
     user_id = inter.author.id
     try:
@@ -372,10 +454,8 @@ async def _do_sell(inter, dcc_amount: float):
 # ОТКРЫТИЕ РАЗДЕЛОВ
 # ═══════════════════════════════════════════
 async def _open_section(inter, section: str):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
+    if not await _safe_defer(inter):
+        return
 
     user_id = inter.author.id
 
@@ -418,7 +498,4 @@ async def _open_section(inter, section: str):
 
     except Exception as e:
         logger.exception(f"dcc _open_section({section}): {e}")
-        try:
-            await inter.followup.send(f"❌ Ошибка: {e}", ephemeral=True)
-        except Exception:
-            pass
+        await _safe_followup(inter, content=f"❌ Ошибка: {e}", ephemeral=True)  
