@@ -4,19 +4,21 @@
 Всё управление — через селекты. Кнопок нет вообще.
 
 Логика сообщений:
-  · 1 публичная панель в канале (DCCPanelView).
-  · Любой клик по селекту открывает ephemeral сообщение.
-  · Все дальнейшие действия ПЕРЕЗАПИСЫВАЮТ это же ephemeral.
-  · Исключение — модалки (ввод своей суммы): после модалки
-    создаётся новое ephemeral, иначе Discord не даёт редактировать.
+  · 1 публичная панель в канале (DCCPanelView) — с селектом разделов.
+  · Любой клик по селекту раздела открывает ephemeral.
+  · В ephemeral есть ТОЛЬКО селект действия (для trade/stake),
+    в остальных разделах — вообще ничего.
+  · Любая операция ПЕРЕЗАПИСЫВАЕТ ту же эфемерку.
+  · Исключение — модалки: после них создаётся новое ephemeral
+    (Discord технически не даёт редактировать то, что из модалки).
 """
 import asyncio
 
 import disnake
-from disnake import SelectOption
+from disnake import SelectOption, ButtonStyle
 from disnake.ui import View, Select, Modal, TextInput
 
-from core.utils import logger, CONFIG
+from core.utils import logger
 from dccplus import core as dcc
 from dccplus import render as dr
 
@@ -50,32 +52,50 @@ def _is_ephemeral(inter: disnake.MessageInteraction) -> bool:
         return False
 
 
-async def _display(inter, buf, fname: str, view: View):
-    """Показывает картинку. Если уже ephemeral — перезаписывает его."""
+def _has_components(view) -> bool:
+    if view is None:
+        return False
     try:
-        file = disnake.File(buf, filename=fname)
-        e = disnake.Embed(color=0x4dd0e1)
-        e.set_image(url=f"attachment://{fname}")
+        return len(view.children) > 0
+    except Exception:
+        return False
 
-        if _is_ephemeral(inter):
-            try:
-                await inter.edit_original_response(
-                    content=None, embed=e, file=file, attachments=[], view=view
-                )
-                return
-            except Exception as ex:
-                logger.warning(f"dcc edit_original: {ex}")
 
+async def _render_into_ephemeral(inter, buf, fname: str, view, flash: str = ""):
+    """
+    Показывает картинку.
+      · Если сообщение уже ephemeral → перезаписывает его.
+      · Иначе → отправляет новое ephemeral.
+    flash — короткий текст-подпись под картинкой (успех/ошибка).
+    """
+    file = disnake.File(buf, filename=fname)
+    e = disnake.Embed(color=0x4dd0e1)
+    e.set_image(url=f"attachment://{fname}")
+    if flash:
+        e.description = flash
+
+    use_view = view if _has_components(view) else None
+
+    if _is_ephemeral(inter):
         try:
-            await inter.followup.send(embed=e, file=file, view=view, ephemeral=True)
+            await inter.edit_original_response(
+                content=None, embed=e, file=file,
+                attachments=[], view=use_view
+            )
+            return
         except Exception as ex:
-            logger.warning(f"dcc followup: {ex}")
-    except Exception as e:
-        logger.exception(f"dcc _display: {e}")
+            logger.warning(f"dcc edit_original: {ex}")
+
+    try:
+        await inter.followup.send(
+            embed=e, file=file, view=use_view, ephemeral=True
+        )
+    except Exception as ex:
+        logger.warning(f"dcc followup: {ex}")
 
 
 # ═══════════════════════════════════════════
-# СЕЛЕКТ РАЗДЕЛОВ — ОБЩИЙ ДЛЯ ВСЕХ ЭКРАНОВ
+# СЕЛЕКТ РАЗДЕЛОВ — ТОЛЬКО НА ПУБЛИЧНОЙ ПАНЕЛИ
 # ═══════════════════════════════════════════
 class SectionSelect(Select):
     def __init__(self):
@@ -105,16 +125,16 @@ class DCCPanelView(View):
 
 
 # ═══════════════════════════════════════════
-# VIEW ДЛЯ ГЛАВНОЙ / АКТИВОВ / ТОПА / ИСТОРИИ
+# VIEW ДЛЯ MAIN / ASSETS / TOP / HISTORY — БЕЗ КОМПОНЕНТОВ
 # ═══════════════════════════════════════════
-class MainView(View):
+class EmptyView(View):
+    """Пустая вью — нужна, чтобы явно передать view=None."""
     def __init__(self):
         super().__init__(timeout=300)
-        self.add_item(SectionSelect())
 
 
 # ═══════════════════════════════════════════
-# VIEW ДЛЯ ОБМЕНА
+# VIEW ДЛЯ ОБМЕНА — только селект действий
 # ═══════════════════════════════════════════
 class TradeActionSelect(Select):
     def __init__(self):
@@ -155,19 +175,24 @@ class TradeActionSelect(Select):
 class TradeView(View):
     def __init__(self):
         super().__init__(timeout=300)
-        self.add_item(SectionSelect())
         self.add_item(TradeActionSelect())
 
 
 # ═══════════════════════════════════════════
-# VIEW ДЛЯ СТЕЙКА
+# VIEW ДЛЯ СТЕЙКА — только селект срока
 # ═══════════════════════════════════════════
 class StakePlanSelect(Select):
     def __init__(self):
         options = [
-            SelectOption(label="7 дней · +5%",  description="Быстрый стейк, минимальный процент", value="7"),
-            SelectOption(label="14 дней · +14%", description="Оптимальный баланс срока и профита", value="14"),
-            SelectOption(label="30 дней · +35%", description="Максимум профита, держим долго",     value="30"),
+            SelectOption(label="7 дней · +5%",
+                         description="Быстрый стейк, минимальный процент",
+                         value="7"),
+            SelectOption(label="14 дней · +14%",
+                         description="Оптимальный баланс срока и профита",
+                         value="14"),
+            SelectOption(label="30 дней · +35%",
+                         description="Максимум профита, держим долго",
+                         value="30"),
         ]
         super().__init__(
             placeholder="Выбери срок стейка...",
@@ -184,7 +209,6 @@ class StakePlanSelect(Select):
 class StakeView(View):
     def __init__(self):
         super().__init__(timeout=300)
-        self.add_item(SectionSelect())
         self.add_item(StakePlanSelect())
 
 
@@ -270,7 +294,7 @@ class StakeModal(Modal):
         if not r.get("ok"):
             return await inter.followup.send(f"❌ {r.get('error')}", ephemeral=True)
 
-        # После модалки создаём новый экран (редактировать её сообщение нельзя)
+        # После модалки создаём новое ephemeral — редактировать её сообщение нельзя
         user_id = inter.author.id
         try:
             buf = await asyncio.to_thread(dr.render_stake, user_id)
@@ -296,37 +320,8 @@ class StakeModal(Modal):
 
 
 # ═══════════════════════════════════════════
-# ДЕЙСТВИЯ (общий рендер для селекта и модалки)
+# ДЕЙСТВИЯ
 # ═══════════════════════════════════════════
-async def _render_main_with_flash(inter, flash_text: str):
-    """Рисует главный экран с подсветкой действия (успех/ошибка)."""
-    user_id = inter.author.id
-    buf = await asyncio.to_thread(dr.render_main, user_id)
-    fname = f"dcc_main_{user_id}.png"
-
-    file = disnake.File(buf, filename=fname)
-    e = disnake.Embed(color=0x4dd0e1)
-    e.set_image(url=f"attachment://{fname}")
-    if flash_text:
-        e.description = flash_text
-
-    view = MainView()
-
-    if _is_ephemeral(inter):
-        try:
-            await inter.edit_original_response(
-                content=None, embed=e, file=file, attachments=[], view=view
-            )
-            return
-        except Exception as ex:
-            logger.warning(f"dcc main edit_original: {ex}")
-
-    try:
-        await inter.followup.send(embed=e, file=file, view=view, ephemeral=True)
-    except Exception as ex:
-        logger.warning(f"dcc main followup: {ex}")
-
-
 async def _do_buy(inter, dc_amount: int):
     try:
         await inter.response.defer(ephemeral=True)
@@ -337,11 +332,17 @@ async def _do_buy(inter, dc_amount: int):
     if not r.get("ok"):
         return await inter.followup.send(f"❌ {r.get('error')}", ephemeral=True)
 
-    flash = (
-        f"✅ **Куплено {r['dcc_amount']:.4f} DCC+** "
-        f"за `{dc_amount} DC` по курсу `{r['price']:.2f}`"
-    )
-    await _render_main_with_flash(inter, flash)
+    user_id = inter.author.id
+    try:
+        buf = await asyncio.to_thread(dr.render_trade, user_id, "buy", 0, 0.0)
+        fname = f"dcc_trade_{user_id}.png"
+        flash = (
+            f"✅ **Куплено {r['dcc_amount']:.4f} DCC+** "
+            f"за `{dc_amount} DC` по курсу `{r['price']:.2f}`"
+        )
+        await _render_into_ephemeral(inter, buf, fname, TradeView(), flash)
+    except Exception as ex:
+        logger.warning(f"buy success render: {ex}")
 
 
 async def _do_sell(inter, dcc_amount: float):
@@ -354,15 +355,21 @@ async def _do_sell(inter, dcc_amount: float):
     if not r.get("ok"):
         return await inter.followup.send(f"❌ {r.get('error')}", ephemeral=True)
 
-    flash = (
-        f"✅ **Продано {r['dcc_amount']:.4f} DCC+** — "
-        f"получено `{r['net_dc']} DC` (комиссия `{r['fee']:.0f}`)"
-    )
-    await _render_main_with_flash(inter, flash)
+    user_id = inter.author.id
+    try:
+        buf = await asyncio.to_thread(dr.render_trade, user_id, "sell", 0, 0.0)
+        fname = f"dcc_trade_{user_id}.png"
+        flash = (
+            f"✅ **Продано {r['dcc_amount']:.4f} DCC+** — "
+            f"получено `{r['net_dc']} DC` (комиссия `{r['fee']:.0f}`)"
+        )
+        await _render_into_ephemeral(inter, buf, fname, TradeView(), flash)
+    except Exception as ex:
+        logger.warning(f"sell success render: {ex}")
 
 
 # ═══════════════════════════════════════════
-# ОТКРЫТИЕ РАЗДЕЛОВ (единая точка)
+# ОТКРЫТИЕ РАЗДЕЛОВ
 # ═══════════════════════════════════════════
 async def _open_section(inter, section: str):
     try:
@@ -375,27 +382,39 @@ async def _open_section(inter, section: str):
     try:
         if section == "main":
             buf = await asyncio.to_thread(dr.render_main, user_id)
-            await _display(inter, buf, f"dcc_main_{user_id}.png", MainView())
+            await _render_into_ephemeral(
+                inter, buf, f"dcc_main_{user_id}.png", EmptyView()
+            )
 
         elif section == "assets":
             buf = await asyncio.to_thread(dr.render_my_assets, user_id)
-            await _display(inter, buf, f"dcc_assets_{user_id}.png", MainView())
+            await _render_into_ephemeral(
+                inter, buf, f"dcc_assets_{user_id}.png", EmptyView()
+            )
 
         elif section == "trade":
             buf = await asyncio.to_thread(dr.render_trade, user_id, "buy", 0, 0.0)
-            await _display(inter, buf, f"dcc_trade_{user_id}.png", TradeView())
+            await _render_into_ephemeral(
+                inter, buf, f"dcc_trade_{user_id}.png", TradeView()
+            )
 
         elif section == "stake":
             buf = await asyncio.to_thread(dr.render_stake, user_id)
-            await _display(inter, buf, f"dcc_stake_{user_id}.png", StakeView())
+            await _render_into_ephemeral(
+                inter, buf, f"dcc_stake_{user_id}.png", StakeView()
+            )
 
         elif section == "top":
             buf = await asyncio.to_thread(dr.render_top, user_id)
-            await _display(inter, buf, f"dcc_top_{user_id}.png", MainView())
+            await _render_into_ephemeral(
+                inter, buf, f"dcc_top_{user_id}.png", EmptyView()
+            )
 
         elif section == "history":
             buf = await asyncio.to_thread(dr.render_history, user_id)
-            await _display(inter, buf, f"dcc_hist_{user_id}.png", MainView())
+            await _render_into_ephemeral(
+                inter, buf, f"dcc_hist_{user_id}.png", EmptyView()
+            )
 
     except Exception as e:
         logger.exception(f"dcc _open_section({section}): {e}")
