@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
 """Discord UI для DCC+.
 
-Всё управление — через селекты. Кнопок нет.
+Всё управление — через селекты. Без эмодзи в UI (только текст).
 
-Логика ответов (важно!):
-  · Клик по компоненту ПУБЛИЧНОЙ панели → создаём новое ephemeral
-      (defer(ephemeral=True, with_message=True)).
-  · Клик по компоненту ЭФЕМЕРКИ      → обновляем ту же эфемерку
-      (defer() без флагов = UPDATE_MESSAGE).
-  · Ответ рисуем через edit_original_response.
-  · followup — только fallback для модалок.
+Логика ответов:
+  · Клик по публичной панели → создаётся новое ephemeral.
+  · Клик по эфемерке         → обновляется та же эфемерка.
+  · Модалки — отдельные эфемерки (ограничение Discord).
 """
 import asyncio
 
@@ -22,16 +19,43 @@ from dccplus import core as dcc
 from dccplus import render as dr
 
 
+EMBED_COLOR = 0x676767   # серый — единый цвет эмбедов DCC+
+
+
 # ═══════════════════════════════════════════
-# РАЗДЕЛЫ DCC+
+# РАЗДЕЛЫ DCC+ — без эмодзи, с подробными описаниями
 # ═══════════════════════════════════════════
 SECTIONS = [
-    ("main",    "📈 Курс",         "График, эмиссия, холдеры"),
-    ("assets",  "💼 Мои активы",   "Портфель, PnL, стейки"),
-    ("trade",   "💎 Обмен",        "Купить или продать DCC+"),
-    ("stake",   "🔒 Стейк",        "Заблокировать DCC+ под %"),
-    ("top",     "🏆 Топ",          "Топ-холдеры по DCC+"),
-    ("history", "📜 История",      "Курс за 7 дней, сделки"),
+    (
+        "main",
+        "Курс DCC+",
+        "Текущий курс, график за 24 часа, эмиссия, число холдеров",
+    ),
+    (
+        "assets",
+        "Мои активы",
+        "Баланс DCC+, средняя цена входа, PnL, активные стейки",
+    ),
+    (
+        "trade",
+        "Купить или продать",
+        "Обмен DC и DCC+ по текущему курсу, комиссия 3% на продажу",
+    ),
+    (
+        "stake",
+        "Открыть стейк",
+        "Заблокировать DCC+ на 7, 14 или 30 дней под процент",
+    ),
+    (
+        "top",
+        "Топ холдеров",
+        "Рейтинг участников по количеству DCC+ на кошельке",
+    ),
+    (
+        "history",
+        "История и статистика",
+        "График курса за 7 дней, последние сделки, оборот за сутки",
+    ),
 ]
 
 
@@ -80,11 +104,6 @@ def _has_components(view) -> bool:
 
 
 def _is_click_on_ephemeral(inter: disnake.MessageInteraction) -> bool:
-    """
-    True — если юзер кликнул на компонент ЭФЕМЕРНОГО сообщения.
-    Тогда нужно обновлять эту же эфемерку (type 6).
-    False — публичная панель → создать новое ephemeral (type 5).
-    """
     try:
         msg = inter.message
         if msg is None:
@@ -101,23 +120,13 @@ def _is_click_on_ephemeral(inter: disnake.MessageInteraction) -> bool:
 # БЕЗОПАСНЫЕ ОБЁРТКИ
 # ═══════════════════════════════════════════
 async def _safe_defer(inter, ephemeral: bool = True) -> bool:
-    """
-    Ключевая функция.
-
-    · Клик на публичную панель → defer(ephemeral=True, with_message=True)
-      = type 5, создаётся НОВОЕ ephemeral.
-    · Клик на эфемерку         → defer() без флагов
-      = type 6, ОБНОВЛЯЕТ ту же эфемерку.
-    """
     try:
         if inter.response.is_done():
             return True
 
         if _is_click_on_ephemeral(inter):
-            # обновляем существующую эфемерку
             await inter.response.defer()
         else:
-            # создаём новую эфемерку из публичной панели
             await inter.response.defer(ephemeral=ephemeral, with_message=True)
         return True
 
@@ -153,19 +162,13 @@ async def _safe_followup(inter, **kwargs) -> bool:
 # ОТРИСОВКА
 # ═══════════════════════════════════════════
 async def _render_into_ephemeral(inter, buf, fname: str, view, flash: str = ""):
-    """
-    1) Пробуем edit_original_response — после defer он всегда валиден:
-       · если был type 5 — редактирует новую эфемерку,
-       · если был type 6 — редактирует ту же эфемерку.
-    2) Fallback — followup (для модалок).
-    """
     try:
         file = disnake.File(buf, filename=fname)
     except Exception as ex:
         logger.warning(f"dcc render file: {ex}")
         return
 
-    e = disnake.Embed(color=0x4dd0e1)
+    e = disnake.Embed(color=EMBED_COLOR)
     e.set_image(url=f"attachment://{fname}")
     if flash:
         e.description = flash
@@ -202,7 +205,7 @@ class SectionSelect(Select):
             for key, label, desc in SECTIONS
         ]
         super().__init__(
-            placeholder="Выбери раздел DCC+...",
+            placeholder="Выберите раздел DCC+",
             min_values=1, max_values=1,
             options=options,
             custom_id="dcc_section_select",
@@ -225,24 +228,64 @@ class EmptyView(View):
 
 
 # ═══════════════════════════════════════════
-# ОБМЕН
+# ОБМЕН — без эмодзи, с подробными описаниями
 # ═══════════════════════════════════════════
 class TradeActionSelect(Select):
     def __init__(self):
         options = [
-            SelectOption(label="Купить на 1 000 DC",  value="buy_1000"),
-            SelectOption(label="Купить на 5 000 DC",  value="buy_5000"),
-            SelectOption(label="Купить на 10 000 DC", value="buy_10000"),
-            SelectOption(label="Купить на 50 000 DC", value="buy_50000"),
-            SelectOption(label="✏️ Своя сумма покупки", value="buy_custom"),
-            SelectOption(label="Продать 1 DCC+",   value="sell_1"),
-            SelectOption(label="Продать 5 DCC+",   value="sell_5"),
-            SelectOption(label="Продать 10 DCC+",  value="sell_10"),
-            SelectOption(label="Продать 50 DCC+",  value="sell_50"),
-            SelectOption(label="✏️ Своя сумма продажи", value="sell_custom"),
+            SelectOption(
+                label="Купить на 1 000 DC",
+                description="Обменять 1 000 DC на DCC+ по текущему курсу",
+                value="buy_1000",
+            ),
+            SelectOption(
+                label="Купить на 5 000 DC",
+                description="Обменять 5 000 DC на DCC+ по текущему курсу",
+                value="buy_5000",
+            ),
+            SelectOption(
+                label="Купить на 10 000 DC",
+                description="Обменять 10 000 DC на DCC+ по текущему курсу",
+                value="buy_10000",
+            ),
+            SelectOption(
+                label="Купить на 50 000 DC",
+                description="Обменять 50 000 DC на DCC+ по текущему курсу",
+                value="buy_50000",
+            ),
+            SelectOption(
+                label="Своя сумма покупки",
+                description="Ввести количество DC вручную, откроется форма",
+                value="buy_custom",
+            ),
+            SelectOption(
+                label="Продать 1 DCC+",
+                description="Обменять 1 DCC+ на DC, комиссия магазина 3%",
+                value="sell_1",
+            ),
+            SelectOption(
+                label="Продать 5 DCC+",
+                description="Обменять 5 DCC+ на DC, комиссия магазина 3%",
+                value="sell_5",
+            ),
+            SelectOption(
+                label="Продать 10 DCC+",
+                description="Обменять 10 DCC+ на DC, комиссия магазина 3%",
+                value="sell_10",
+            ),
+            SelectOption(
+                label="Продать 50 DCC+",
+                description="Обменять 50 DCC+ на DC, комиссия магазина 3%",
+                value="sell_50",
+            ),
+            SelectOption(
+                label="Своя сумма продажи",
+                description="Ввести количество DCC+ вручную, откроется форма",
+                value="sell_custom",
+            ),
         ]
         super().__init__(
-            placeholder="Что сделать с DCC+?",
+            placeholder="Выберите операцию обмена",
             min_values=1, max_values=1,
             options=options,
             custom_id="dcc_trade_action",
@@ -279,23 +322,29 @@ class TradeView(View):
 
 
 # ═══════════════════════════════════════════
-# СТЕЙК
+# СТЕЙК — без эмодзи, с подробными описаниями
 # ═══════════════════════════════════════════
 class StakePlanSelect(Select):
     def __init__(self):
         options = [
-            SelectOption(label="7 дней · +5%",
-                         description="Быстрый стейк, минимальный процент",
-                         value="7"),
-            SelectOption(label="14 дней · +14%",
-                         description="Оптимальный баланс срока и профита",
-                         value="14"),
-            SelectOption(label="30 дней · +35%",
-                         description="Максимум профита, держим долго",
-                         value="30"),
+            SelectOption(
+                label="7 дней  ·  +5%",
+                description="Быстрый стейк, минимальный процент, возврат через неделю",
+                value="7",
+            ),
+            SelectOption(
+                label="14 дней  ·  +14%",
+                description="Оптимальный баланс срока и профита, две недели",
+                value="14",
+            ),
+            SelectOption(
+                label="30 дней  ·  +35%",
+                description="Максимум профита, блокировка на месяц",
+                value="30",
+            ),
         ]
         super().__init__(
-            placeholder="Выбери срок стейка...",
+            placeholder="Выберите срок стейка",
             min_values=1, max_values=1,
             options=options,
             custom_id="dcc_stake_plan",
@@ -324,7 +373,7 @@ class BuyModal(Modal):
             title="Купить DCC+",
             components=[
                 TextInput(
-                    label=f"Сколько DC потратить (от {dcc.MIN_BUY_DC})",
+                    label=f"Сколько DC потратить (минимум {dcc.MIN_BUY_DC})",
                     placeholder="Например: 5000",
                     custom_id="dc_amount",
                     min_length=1, max_length=10,
@@ -336,7 +385,9 @@ class BuyModal(Modal):
     async def callback(self, inter: disnake.ModalInteraction):
         raw = (inter.text_values.get("dc_amount") or "").strip()
         if not raw.isdigit():
-            return await inter.response.send_message("❌ Введи число.", ephemeral=True)
+            return await inter.response.send_message(
+                "Введите целое число.", ephemeral=True
+            )
         await _do_buy(inter, int(raw))
 
 
@@ -360,7 +411,9 @@ class SellModal(Modal):
         try:
             dcc_amount = float(raw)
         except Exception:
-            return await inter.response.send_message("❌ Введи число.", ephemeral=True)
+            return await inter.response.send_message(
+                "Введите число.", ephemeral=True
+            )
         await _do_sell(inter, dcc_amount)
 
 
@@ -372,7 +425,7 @@ class StakeModal(Modal):
             title=f"Стейк на {days} дней (+{pct}%)",
             components=[
                 TextInput(
-                    label=f"Сколько DCC+ застейкать (от {int(dcc.STAKE_MIN)})",
+                    label=f"Сколько DCC+ застейкать (минимум {int(dcc.STAKE_MIN)})",
                     placeholder="Например: 100",
                     custom_id="amount",
                     min_length=1, max_length=16,
@@ -386,9 +439,10 @@ class StakeModal(Modal):
         try:
             amount = float(raw)
         except Exception:
-            return await inter.response.send_message("❌ Введи число.", ephemeral=True)
+            return await inter.response.send_message(
+                "Введите число.", ephemeral=True
+            )
 
-        # Для модалок defer всегда без сюрпризов — отдельная эфемерка.
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
@@ -397,7 +451,9 @@ class StakeModal(Modal):
         r = await dcc.create_stake(inter.author.id, amount, self.days)
         if not r.get("ok"):
             await _safe_followup(
-                inter, content=f"❌ {r.get('error')}", ephemeral=True
+                inter,
+                content=f"Ошибка: {r.get('error')}",
+                ephemeral=True,
             )
             return
 
@@ -406,10 +462,10 @@ class StakeModal(Modal):
             buf = await asyncio.to_thread(dr.render_stake, user_id)
             fname = f"dcc_stake_{user_id}.png"
             flash = (
-                f"🔒 **Стейк на {self.days} дней создан!**\n"
-                f"> Застейкано: `{amount:.4f} DCC+`\n"
-                f"> Профит: `+{int(r['profit_pct']*100)}%`\n"
-                f"> Разлок: <t:{r['unlock_at']}:F>"
+                f"Стейк на {self.days} дней создан. "
+                f"Застейкано: {amount:.4f} DCC+. "
+                f"Профит: +{int(r['profit_pct']*100)}%. "
+                f"Разлок: <t:{r['unlock_at']}:F>"
             )
             await _render_into_ephemeral(inter, buf, fname, StakeView(), flash)
         except Exception as ex:
@@ -425,7 +481,7 @@ async def _do_buy(inter, dc_amount: int):
 
     r = await dcc.buy_dccplus(inter.author.id, dc_amount)
     if not r.get("ok"):
-        await _safe_edit_original(inter, content=f"❌ {r.get('error')}")
+        await _safe_edit_original(inter, content=f"Ошибка: {r.get('error')}")
         return
 
     user_id = inter.author.id
@@ -433,8 +489,8 @@ async def _do_buy(inter, dc_amount: int):
         buf = await asyncio.to_thread(dr.render_trade, user_id, "buy", 0, 0.0)
         fname = f"dcc_trade_{user_id}.png"
         flash = (
-            f"✅ **Куплено {r['dcc_amount']:.4f} DCC+** "
-            f"за `{dc_amount} DC` по курсу `{r['price']:.2f}`"
+            f"Куплено {r['dcc_amount']:.4f} DCC+ "
+            f"за {dc_amount} DC по курсу {r['price']:.2f}"
         )
         await _render_into_ephemeral(inter, buf, fname, TradeView(), flash)
     except Exception as ex:
@@ -447,7 +503,7 @@ async def _do_sell(inter, dcc_amount: float):
 
     r = await dcc.sell_dccplus(inter.author.id, dcc_amount)
     if not r.get("ok"):
-        await _safe_edit_original(inter, content=f"❌ {r.get('error')}")
+        await _safe_edit_original(inter, content=f"Ошибка: {r.get('error')}")
         return
 
     user_id = inter.author.id
@@ -455,8 +511,8 @@ async def _do_sell(inter, dcc_amount: float):
         buf = await asyncio.to_thread(dr.render_trade, user_id, "sell", 0, 0.0)
         fname = f"dcc_trade_{user_id}.png"
         flash = (
-            f"✅ **Продано {r['dcc_amount']:.4f} DCC+** — "
-            f"получено `{r['net_dc']} DC` (комиссия `{r['fee']:.0f}`)"
+            f"Продано {r['dcc_amount']:.4f} DCC+. "
+            f"Получено {r['net_dc']} DC (комиссия {r['fee']:.0f})"
         )
         await _render_into_ephemeral(inter, buf, fname, TradeView(), flash)
     except Exception as ex:
@@ -511,4 +567,4 @@ async def _open_section(inter, section: str):
 
     except Exception as e:
         logger.exception(f"dcc _open_section({section}): {e}")
-        await _safe_edit_original(inter, content=f"❌ Ошибка: {e}")
+        await _safe_edit_original(inter, content=f"Ошибка: {e}")
