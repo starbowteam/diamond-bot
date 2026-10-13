@@ -224,24 +224,12 @@ def _canvas(user_id, subtitle):
                         outline=TEAL + (220,), width=2)
     _icon(d, hx + ls // 2, hy + ls // 2 + 1, I_CHART_LINE, 30, (255, 255, 255))
 
-    # ─── DCC + (плюс выровнен по вертикальному центру «DCC») ───
+    # ─── DCC+ : плюс частью текста, на том же baseline ───
     bx = hx + ls + 20
-    dcc_font = _font(34)
-    dcc_text = "DCC"
-    dcc_y = hy + 4
-
-    # рисуем «DCC»
-    d.text((bx, dcc_y), dcc_text, font=dcc_font, fill=TEXT)
-
-    # замеряем bbox «DCC» — берём реальный вертикальный центр глифов
-    bb = d.textbbox((bx, dcc_y), dcc_text, font=dcc_font)
-    dcc_cy = (bb[1] + bb[3]) // 2
-    dcc_w = bb[2] - bb[0]
-
-    # рисуем «+» с anchor="lm" — левый край по X, середина по Y
-    # получится ровно по центру «DCC», не ниже и не выше
-    d.text((bx + dcc_w + 14, dcc_cy), "+",
-           font=dcc_font, fill=TEAL, anchor="lm")
+    brand_font = _font(34)
+    d.text((bx, hy + 4), "DCC", font=brand_font, fill=TEXT)
+    dcc_w = _tw(d, "DCC", brand_font)
+    d.text((bx + dcc_w, hy + 4), "+", font=brand_font, fill=TEAL)
 
     d.text((bx + 4, hy + 46), "DIAMOND CRYPTO", font=_font(15), fill=MUTED)
 
@@ -583,7 +571,7 @@ def render_my_assets(user_id: int) -> io.BytesIO:
 
     # ── СТЕЙКИ ──
     stakes_y = hero_y + hero_h + 20
-    d.text((rpx1, stakes_y), "🔒 АКТИВНЫЕ СТЕЙКИ",
+    d.text((rpx1, stakes_y), "АКТИВНЫЕ СТЕЙКИ",
            font=_font(13), fill=MUTED)
     stakes_list_y = stakes_y + 30
 
@@ -687,7 +675,7 @@ def render_stake(user_id: int) -> io.BytesIO:
     d.rounded_rectangle((PX, body_y, W - M - PX, body_y + title_h), radius=18,
                         outline=TEAL + (180,), width=2)
 
-    d.text((PX + 30, body_y + 22), "🔒 ВЫБЕРИ СРОК СТЕЙКА",
+    d.text((PX + 30, body_y + 22), "ВЫБЕРИ СРОК СТЕЙКА",
            font=_font(22), fill=TEXT)
     d.text((PX + 30, body_y + 54),
            f"В кошельке: {_fmt_f(balance, 4)} DCC+ · курс {_fmt_f(price, 2)} DC",
@@ -722,48 +710,50 @@ def render_stake(user_id: int) -> io.BytesIO:
         d.rounded_rectangle((cx1, cards_y, cx2, cards_y + cards_h), radius=22,
                             outline=border + (200,), width=3)
 
+        # верхняя плашка «популярно»
+        badge_h = 42
         if is_pop:
-            d.rounded_rectangle((cx1, cards_y, cx2, cards_y + 42), radius=0,
+            d.rounded_rectangle((cx1, cards_y, cx2, cards_y + badge_h), radius=0,
                                 fill=color + (230,))
-            d.rounded_rectangle((cx1, cards_y, cx2, cards_y + 42), corners=(22, 22, 0, 0),
+            d.rounded_rectangle((cx1, cards_y, cx2, cards_y + badge_h),
+                                corners=(22, 22, 0, 0),
                                 fill=color + (230,))
-            d.text(((cx1 + cx2) // 2, cards_y + 21), "★ ПОПУЛЯРНО",
+            d.text(((cx1 + cx2) // 2, cards_y + badge_h // 2), "ПОПУЛЯРНО",
                    font=_font(14), fill=(0, 0, 0), anchor="mm")
 
-        # Иконка
-        ic_cy = cards_y + 130
-        _grad_radial_circle(img, (cx1 + cx2) // 2, ic_cy, 60, color, color, alpha=90)
-        d.ellipse(((cx1 + cx2) // 2 - 60, ic_cy - 60,
-                   (cx1 + cx2) // 2 + 60, ic_cy + 60),
+        inner_top = cards_y + badge_h + 30
+
+        # Круг с иконкой
+        circ_r = 60
+        circ_cx = (cx1 + cx2) // 2
+        circ_cy = inner_top + circ_r
+
+        _grad_radial_circle(img, circ_cx, circ_cy, circ_r, color, color, alpha=90)
+        d.ellipse((circ_cx - circ_r, circ_cy - circ_r,
+                   circ_cx + circ_r, circ_cy + circ_r),
                   outline=border + (255,), width=3)
-        _icon(d, (cx1 + cx2) // 2, ic_cy + 2, I_LOCK, 52, light)
+        _icon(d, circ_cx, circ_cy + 2, I_LOCK, 52, light)
 
-        # Дни
-        days_text = f"{days} ДНЕЙ"
-        dw = _tw(d, days_text, _font(16))
-        d.text(((cx1 + cx2) // 2 - dw // 2, cards_y + 210),
-               days_text, font=_font(16), fill=MUTED)
+        # Срок: "7 дней" одним крупным текстом
+        days_y = circ_cy + circ_r + 30
+        days_text = f"{days} дней" if days != 1 else "1 день"
+        d.text((circ_cx, days_y), days_text,
+               font=_font(32), fill=TEXT, anchor="mt")
 
-        # Большое число дней
-        num_f = _font(64)
-        nw = _tw(d, str(days), num_f)
-        d.text(((cx1 + cx2) // 2 - nw // 2, cards_y + 232),
-               str(days), font=num_f, fill=TEXT)
-
-        # Процент
-        d.text(((cx1 + cx2) // 2, cards_y + 320),
-               "ПРОФИТ", font=_font(12), fill=MUTED, anchor="mm")
-        pct_f = _font(52)
+        # Процент: крупно
+        pct_y = days_y + 60
         pct_text = f"+{int(pct*100)}%"
-        pw = _tw(d, pct_text, pct_f)
-        d.text(((cx1 + cx2) // 2 - pw // 2, cards_y + 342),
-               pct_text, font=pct_f, fill=GREEN)
+        d.text((circ_cx, pct_y), "ПРОФИТ",
+               font=_font(12), fill=MUTED, anchor="mt")
+        d.text((circ_cx, pct_y + 24), pct_text,
+               font=_font(52), fill=GREEN, anchor="mt")
 
-        # Пример
-        example_y = cards_y + cards_h - 180
-        d.rounded_rectangle((cx1 + 24, example_y, cx2 - 24, example_y + 160),
+        # Пример-блок внизу
+        example_h = 160
+        example_y = cards_bottom - example_h - 24
+        d.rounded_rectangle((cx1 + 24, example_y, cx2 - 24, example_y + example_h),
                             radius=14, fill=(0, 0, 0, 60))
-        d.rounded_rectangle((cx1 + 24, example_y, cx2 - 24, example_y + 160),
+        d.rounded_rectangle((cx1 + 24, example_y, cx2 - 24, example_y + example_h),
                             radius=14, outline=INNER_BRD + (255,), width=2)
 
         ex_texts = [
@@ -793,13 +783,12 @@ def render_trade(user_id: int, mode: str = "buy",
                  preview_dc: int = 0, preview_dcc: float = 0.0) -> io.BytesIO:
     """
     mode: 'buy' | 'sell'
-    Для buy: preview_dc — сколько юзер хочет потратить DC
-    Для sell: preview_dcc — сколько юзер хочет продать DCC+
     """
     img, d = _canvas(user_id, f"DCC+ · {'Купить' if mode == 'buy' else 'Продать'}")
 
     body_y = 140
     body_h = H - M - PY - body_y - 26
+    body_bottom = body_y + body_h - 22
 
     left_w = 460
     gap = 28
@@ -830,12 +819,12 @@ def render_trade(user_id: int, mode: str = "buy",
     sub = "обмен DC → DCC+" if mode == "buy" else "обмен DCC+ → DC"
     _right_head(d, rpx1, body_y + 22, rpx2, title, sub)
 
-    # Таб
+    # ─── Табы ───
     tabs_y = body_y + 100
     tab_w = 200
     tab_h = 48
 
-    for i, (lbl, m) in enumerate([("💎 Купить", "buy"), ("💰 Продать", "sell")]):
+    for i, (lbl, m) in enumerate([("Купить", "buy"), ("Продать", "sell")]):
         tb_x = rpx1 + i * (tab_w + 10)
         active = (m == mode)
         if active:
@@ -854,112 +843,129 @@ def render_trade(user_id: int, mode: str = "buy",
         d.text((tb_x + tab_w // 2 - tw_ // 2, tabs_y + 14),
                lbl, font=_font(16), fill=col)
 
-    # Поля обмена
-    field_y = tabs_y + tab_h + 20
-    field_h = 110
-    field_gap = 20
+    # ─── Инфо-блок: прижат к низу ───
+    info_h = 130
+    info_y = body_bottom - info_h
+    info_x1 = rpx1
+    info_x2 = rpx2
 
+    # ─── Поля обмена: между табами и info-блоком ───
+    fields_top = tabs_y + tab_h + 20
+    fields_bottom = info_y - 20
+    fields_total_h = fields_bottom - fields_top
+
+    # Внутри: field1 + gap + arrow(40) + gap + field2
+    arrow_h = 40
+    gap_between = 20
+    field_h = (fields_total_h - arrow_h - gap_between * 2) // 2
+    field_h = max(field_h, 110)
+
+    field1_y = fields_top
+    arrow_y = field1_y + field_h + gap_between
+    field2_y = arrow_y + arrow_h + gap_between
+
+    # Цвета по режиму
     if mode == "buy":
+        from_color_1 = GREEN
+        from_color_2 = TEAL
+        arrow_color = TEAL
+        label_1 = "ТЫ ОТДАЁШЬ"
+        label_2 = "ТЫ ПОЛУЧАЕШЬ"
+        unit_1 = "DC"
+        unit_2 = "DCC+"
+        val_1 = _fmt(preview_dc) if preview_dc > 0 else "0"
+        val_1_color = TEXT if preview_dc > 0 else DIM
+
         dcc_received = preview_dc / price if price > 0 else 0.0
+        val_2 = _fmt_f(dcc_received, 4) if dcc_received > 0 else "0"
+        val_2_color = TEAL if dcc_received > 0 else DIM
 
-        # from DC
-        _grad(img, (rpx1, field_y, rpx2, field_y + field_h), GREEN, GREEN, alpha=10, radius=16)
-        d.rounded_rectangle((rpx1, field_y, rpx2, field_y + field_h), radius=16,
-                            outline=GREEN + (170,), width=2)
-        d.text((rpx1 + 24, field_y + 20), "ТЫ ОТДАЁШЬ",
-               font=_font(13), fill=GREEN)
-        d.text((rpx1 + 24, field_y + 44),
-               f"{_fmt(preview_dc) if preview_dc > 0 else '—'}",
-               font=_font(42), fill=TEXT)
-        d.text((rpx2 - 24, field_y + 44), "DC",
-               font=_font(24), fill=GREEN, anchor="rt")
-        d.text((rpx2 - 24, field_y + 76), f"Баланс: {_fmt(balance_dc)} DC",
-               font=_font(13), fill=MUTED, anchor="rt")
-
-        # arrow
-        arr_y = field_y + field_h + 10
-        _alpha(img, ((rpx1 + rpx2) // 2 - 30, arr_y,
-                     (rpx1 + rpx2) // 2 + 30, arr_y + 40),
-               TEAL, alpha=40, radius=20)
-        _icon(d, (rpx1 + rpx2) // 2, arr_y + 20, I_ARROW_DOWN, 22, TEAL)
-
-        # to DCC
-        field2_y = arr_y + 50
-        _grad(img, (rpx1, field2_y, rpx2, field2_y + field_h), TEAL, TEAL, alpha=15, radius=16)
-        d.rounded_rectangle((rpx1, field2_y, rpx2, field2_y + field_h), radius=16,
-                            outline=TEAL + (200,), width=2)
-        d.text((rpx1 + 24, field2_y + 20), "ТЫ ПОЛУЧАЕШЬ",
-               font=_font(13), fill=TEAL)
-        d.text((rpx1 + 24, field2_y + 44),
-               f"{_fmt_f(dcc_received, 4) if dcc_received > 0 else '—'}",
-               font=_font(42), fill=TEAL)
-        d.text((rpx2 - 24, field2_y + 44), "DCC+",
-               font=_font(24), fill=TEAL, anchor="rt")
-        d.text((rpx2 - 24, field2_y + 76), f"по курсу {_fmt_f(price, 2)} DC",
-               font=_font(13), fill=MUTED, anchor="rt")
-
-        info_y = field2_y + field_h + 24
+        note_1 = f"Баланс: {_fmt(balance_dc)} DC"
+        note_2 = f"по курсу {_fmt_f(price, 2)} DC"
     else:
-        dc_received_gross = preview_dcc * price
-        fee = dc_received_gross * SELL_COMMISSION
-        dc_received_net = dc_received_gross - fee
+        from_color_1 = TEAL
+        from_color_2 = GREEN
+        arrow_color = RED
+        label_1 = "ТЫ ОТДАЁШЬ"
+        label_2 = "ТЫ ПОЛУЧАЕШЬ"
+        unit_1 = "DCC+"
+        unit_2 = "DC"
+        val_1 = _fmt_f(preview_dcc, 4) if preview_dcc > 0 else "0"
+        val_1_color = TEXT if preview_dcc > 0 else DIM
 
-        # from DCC
-        _grad(img, (rpx1, field_y, rpx2, field_y + field_h), TEAL, TEAL, alpha=10, radius=16)
-        d.rounded_rectangle((rpx1, field_y, rpx2, field_y + field_h), radius=16,
-                            outline=TEAL + (170,), width=2)
-        d.text((rpx1 + 24, field_y + 20), "ТЫ ОТДАЁШЬ",
-               font=_font(13), fill=TEAL)
-        d.text((rpx1 + 24, field_y + 44),
-               f"{_fmt_f(preview_dcc, 4) if preview_dcc > 0 else '—'}",
-               font=_font(42), fill=TEXT)
-        d.text((rpx2 - 24, field_y + 44), "DCC+",
-               font=_font(24), fill=TEAL, anchor="rt")
-        d.text((rpx2 - 24, field_y + 76), f"Кошелёк: {_fmt_f(balance_dcc, 4)}",
-               font=_font(13), fill=MUTED, anchor="rt")
+        gross = preview_dcc * price
+        fee = gross * SELL_COMMISSION
+        net = gross - fee
+        val_2 = _fmt(int(net)) if preview_dcc > 0 else "0"
+        val_2_color = GREEN if preview_dcc > 0 else DIM
 
-        arr_y = field_y + field_h + 10
-        _alpha(img, ((rpx1 + rpx2) // 2 - 30, arr_y,
-                     (rpx1 + rpx2) // 2 + 30, arr_y + 40),
-               RED, alpha=40, radius=20)
-        _icon(d, (rpx1 + rpx2) // 2, arr_y + 20, I_ARROW_DOWN, 22, RED)
+        note_1 = f"Кошелёк: {_fmt_f(balance_dcc, 4)}"
+        note_2 = f"−{int(fee)} комиссия (3%)" if preview_dcc > 0 else "комиссия 3%"
 
-        field2_y = arr_y + 50
-        _grad(img, (rpx1, field2_y, rpx2, field2_y + field_h), GREEN, GREEN, alpha=15, radius=16)
-        d.rounded_rectangle((rpx1, field2_y, rpx2, field2_y + field_h), radius=16,
-                            outline=GREEN + (200,), width=2)
-        d.text((rpx1 + 24, field2_y + 20), "ТЫ ПОЛУЧАЕШЬ",
-               font=_font(13), fill=GREEN)
-        d.text((rpx1 + 24, field2_y + 44),
-               f"{_fmt(int(dc_received_net)) if preview_dcc > 0 else '—'}",
-               font=_font(42), fill=GREEN)
-        d.text((rpx2 - 24, field2_y + 44), "DC",
-               font=_font(24), fill=GREEN, anchor="rt")
-        d.text((rpx2 - 24, field2_y + 76),
-               f"−{int(fee)} комиссия (3%)",
-               font=_font(13), fill=RED, anchor="rt")
+    # ─── Поле 1 ───
+    _grad(img, (rpx1, field1_y, rpx2, field1_y + field_h), from_color_1, from_color_1, alpha=10, radius=16)
+    d.rounded_rectangle((rpx1, field1_y, rpx2, field1_y + field_h), radius=16,
+                        outline=from_color_1 + (170,), width=2)
 
-        info_y = field2_y + field_h + 24
+    d.text((rpx1 + 24, field1_y + 20), label_1,
+           font=_font(13), fill=from_color_1)
 
-    # Инфо
-    if info_y + 130 <= body_y + body_h - 22:
-        d.rounded_rectangle((rpx1, info_y, rpx2, info_y + 120),
-                            radius=14, fill=INNER_BG + (255,),
-                            outline=INNER_BRD + (255,), width=2)
-        d.text((rpx1 + 22, info_y + 16), "ЛИМИТЫ И ПРАВИЛА",
-               font=_font(12), fill=MUTED)
+    v1_font = _font(48)
+    v1_shown = _el(d, val_1, v1_font, rpx2 - rpx1 - 240)
+    d.text((rpx1 + 24, field1_y + 50), v1_shown,
+           font=v1_font, fill=val_1_color)
 
-        rows = [
-            ("Мин. покупка", f"{MIN_BUY_DC} DC"),
-            ("Макс. покупка в день", f"{_fmt(MAX_BUY_DC_DAY)} DC"),
-            ("Макс. продажа в час", f"{int(MAX_SELL_DCC_HOUR)} DCC+"),
-            ("Кулдаун между сделками", "60 сек"),
-        ]
-        for i, (lbl, val) in enumerate(rows):
-            y = info_y + 42 + i * 20
-            d.text((rpx1 + 22, y), lbl, font=_font(12), fill=MUTED)
-            vw = _tw(d, val, _font(12))
-            d.text((rpx2 - 22 - vw, y), val, font=_font(12), fill=TEXT_SOFT)
+    # юнит справа
+    d.text((rpx2 - 24, field1_y + 50 + 4), unit_1,
+           font=_font(24), fill=from_color_1, anchor="rt")
+    d.text((rpx2 - 24, field1_y + field_h - 30), note_1,
+           font=_font(13), fill=MUTED, anchor="rt")
+
+    # ─── Стрелка ───
+    arr_cx = (rpx1 + rpx2) // 2
+    _alpha(img, (arr_cx - 30, arrow_y, arr_cx + 30, arrow_y + arrow_h),
+           arrow_color, alpha=40, radius=arrow_h // 2)
+    d.rounded_rectangle((arr_cx - 30, arrow_y, arr_cx + 30, arrow_y + arrow_h),
+                        radius=arrow_h // 2,
+                        outline=arrow_color + (200,), width=2)
+    _icon(d, arr_cx, arrow_y + arrow_h // 2, I_ARROW_DOWN, 22, arrow_color)
+
+    # ─── Поле 2 ───
+    _grad(img, (rpx1, field2_y, rpx2, field2_y + field_h), from_color_2, from_color_2, alpha=15, radius=16)
+    d.rounded_rectangle((rpx1, field2_y, rpx2, field2_y + field_h), radius=16,
+                        outline=from_color_2 + (200,), width=2)
+
+    d.text((rpx1 + 24, field2_y + 20), label_2,
+           font=_font(13), fill=from_color_2)
+
+    v2_font = _font(48)
+    v2_shown = _el(d, val_2, v2_font, rpx2 - rpx1 - 240)
+    d.text((rpx1 + 24, field2_y + 50), v2_shown,
+           font=v2_font, fill=val_2_color)
+
+    d.text((rpx2 - 24, field2_y + 50 + 4), unit_2,
+           font=_font(24), fill=from_color_2, anchor="rt")
+    d.text((rpx2 - 24, field2_y + field_h - 30), note_2,
+           font=_font(13), fill=MUTED, anchor="rt")
+
+    # ─── Инфо-блок ───
+    d.rounded_rectangle((info_x1, info_y, info_x2, info_y + info_h),
+                        radius=14, fill=INNER_BG + (255,),
+                        outline=INNER_BRD + (255,), width=2)
+    d.text((info_x1 + 22, info_y + 16), "ЛИМИТЫ И ПРАВИЛА",
+           font=_font(12), fill=MUTED)
+
+    rows = [
+        ("Мин. покупка", f"{MIN_BUY_DC} DC"),
+        ("Макс. покупка в день", f"{_fmt(MAX_BUY_DC_DAY)} DC"),
+        ("Макс. продажа в час", f"{int(MAX_SELL_DCC_HOUR)} DCC+"),
+        ("Кулдаун между сделками", "60 сек"),
+    ]
+    for i, (lbl, val) in enumerate(rows):
+        y = info_y + 42 + i * 20
+        d.text((info_x1 + 22, y), lbl, font=_font(12), fill=MUTED)
+        vw = _tw(d, val, _font(12))
+        d.text((info_x2 - 22 - vw, y), val, font=_font(12), fill=TEXT_SOFT)
 
     _footer(d, "Используй селект внизу чтобы выбрать действие", "стр. 4 / 6")
 
@@ -1019,7 +1025,7 @@ def render_top(user_id: int) -> io.BytesIO:
     d.rounded_rectangle((rpx1, head_y, rpx2, head_y + head_h), radius=14,
                         outline=TEAL + (170,), width=2)
 
-    d.text((rpx1 + 24, head_y + 16), "🏆 ТОП ПО КОЛИЧЕСТВУ DCC+",
+    d.text((rpx1 + 24, head_y + 16), "ТОП ПО КОЛИЧЕСТВУ DCC+",
            font=_font(15), fill=TEAL)
     d.text((rpx1 + 24, head_y + 40), f"Всего холдеров: {_fmt(holders)}",
            font=_font(13), fill=MUTED)
@@ -1036,12 +1042,13 @@ def render_top(user_id: int) -> io.BytesIO:
 
     if not top:
         cx = (rpx1 + rpx2) // 2
-        cy = (list_y + list_bottom) // 2
+        cy = (list_y + list_bottom) // 2 - 30
+
         _alpha(img, (cx - 60, cy - 60, cx + 60, cy + 60), TEAL, alpha=20, radius=30)
-        _icon(d, cx, cy - 30, I_TROPHY, 52, TEAL)
-        d.text((cx, cy + 70), "Пока нет холдеров",
+        _icon(d, cx, cy, I_TROPHY, 52, TEAL)
+        d.text((cx, cy + 90), "Пока нет холдеров",
                font=_font(22), fill=TEXT, anchor="mm")
-        d.text((cx, cy + 106), "Купи первый DCC+ — займи топ-1",
+        d.text((cx, cy + 124), "Купи первый DCC+ — займи топ-1",
                font=_font(14), fill=MUTED, anchor="mm")
     else:
         rows = min(len(top), 8)
@@ -1079,7 +1086,6 @@ def render_top(user_id: int) -> io.BytesIO:
                                     fill=INNER_BG + (255,),
                                     outline=INNER_BRD + (255,), width=2)
 
-            # Медаль
             bs = 44
             bx = rpx1 + 16
             by = cy + (row_h - bs) // 2
@@ -1096,7 +1102,6 @@ def render_top(user_id: int) -> io.BytesIO:
                 d.text((bx + bs // 2 - nw // 2, by + bs // 2 - nf.size // 2 - 2),
                        num_str, font=nf, fill=medal)
 
-            # Имя
             tx = bx + bs + 16
             name = f"@{entry['user_id']}"
             if is_me:
@@ -1109,7 +1114,6 @@ def render_top(user_id: int) -> io.BytesIO:
             d.text((tx, cy + 38), f"Инвестировано: {_fmt(int(entry['invested']))} DC",
                    font=_font(12), fill=MUTED)
 
-            # Стоимость
             val_str = f"{_fmt_f(entry['balance'], 4)} DCC+"
             vw = _tw(d, val_str, _font(20))
             d.text((rpx2 - 200 - vw, cy + 14), val_str,
@@ -1117,7 +1121,6 @@ def render_top(user_id: int) -> io.BytesIO:
             d.text((rpx2 - 200, cy + 14), f"≈ {_fmt(int(entry['current_value']))} DC",
                    font=_font(14), fill=MUTED, anchor="rt")
 
-            # PnL
             pnl = entry["pnl_pct"]
             pnl_c = GREEN if pnl >= 0 else RED
             pnl_str = f"{pnl:+.2f}%"
@@ -1154,7 +1157,6 @@ def render_history(user_id: int) -> io.BytesIO:
     stats = get_stats_24h()
     recent = get_recent_transactions(limit=5)
 
-    # История за 7 дней
     history_7d = get_price_history(hours=24 * 7, points=80)
 
     if history_7d:
@@ -1189,7 +1191,7 @@ def render_history(user_id: int) -> io.BytesIO:
     chart_h = 380
 
     _panel(img, d, (rpx1, chart_y, rpx2, chart_y + chart_h), radius=16)
-    d.text((rpx1 + 24, chart_y + 20), "📈 DCC+ / DC ЗА 7 ДНЕЙ",
+    d.text((rpx1 + 24, chart_y + 20), "DCC+ / DC ЗА 7 ДНЕЙ",
            font=_font(15), fill=TEXT)
     d.text((rpx2 - 24, chart_y + 20), f"{ch_pct:+.2f}% за период",
            font=_font(14), fill=ch_color, anchor="rt")
@@ -1222,7 +1224,6 @@ def render_history(user_id: int) -> io.BytesIO:
         v_shown = _el(d, val, vf, cx2 - cx1 - 32)
         d.text((cx1 + 16, stats_y + 40), v_shown, font=vf, fill=color)
 
-        # Нижняя подпись
         if lbl == "СЕЙЧАС":
             d.text((cx1 + 16, stats_y + 70), f"{ch_pct:+.2f}%",
                    font=_font(13), fill=ch_color)
@@ -1241,14 +1242,13 @@ def render_history(user_id: int) -> io.BytesIO:
     info_bottom = body_y + body_h - 22
 
     if info_y + 160 <= info_bottom:
-        # Делю на 2 части
         half_w = (rpx2 - rpx1 - 20) // 2
 
         # Левая — статистика 24ч
         d.rounded_rectangle((rpx1, info_y, rpx1 + half_w, info_bottom),
                             radius=14, fill=INNER_BG + (255,),
                             outline=INNER_BRD + (255,), width=2)
-        d.text((rpx1 + 20, info_y + 16), "📊 СТАТИСТИКА 24Ч",
+        d.text((rpx1 + 20, info_y + 16), "СТАТИСТИКА 24Ч",
                font=_font(13), fill=MUTED)
 
         stats_rows = [
@@ -1271,7 +1271,7 @@ def render_history(user_id: int) -> io.BytesIO:
         d.rounded_rectangle((rpx1 + half_w + 20, info_y, rpx2, info_bottom),
                             radius=14, fill=INNER_BG + (255,),
                             outline=INNER_BRD + (255,), width=2)
-        d.text((rpx1 + half_w + 40, info_y + 16), "💰 ПОСЛЕДНИЕ СДЕЛКИ",
+        d.text((rpx1 + half_w + 40, info_y + 16), "ПОСЛЕДНИЕ СДЕЛКИ",
                font=_font(13), fill=MUTED)
 
         type_map = {
