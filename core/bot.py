@@ -567,9 +567,8 @@ async def on_ready():
 
         # ─── 💠 DCC+ ───
         try:
-            from dccplus import init_dccplus, send_dcc_panel
+            from dccplus import init_dccplus
             init_dccplus(bot)
-            bot.loop.create_task(send_dcc_panel(bot))
             logger.info("💠 DCC+ подключён")
         except Exception as e:
             logger.exception(f"init DCC+: {e}")
