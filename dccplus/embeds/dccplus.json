@@ -1,18 +1,19 @@
 {
+  "content": " ",
   "embeds": [
     {
-      "color": 5103841,
+      "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1557678190338637874/image.png?ex=6ac8ac5c&is=6ac75adc&hm=c8963cb5aae650304a346917496ea63f0dd062fc862711c7b4592c933c4c7189&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1559609702894145536/image.png?ex=6acfb339&is=6ace61b9&hm=4a4321ba151014968d39fe1e2c9931b7617df9146ff28f78bd800058a702c8b6&"
       }
     },
     {
-      "title": "💠 DCC+ · Diamond Crypto+",
-      "description": "> Инвестиционная система Diamond. Покупай DCC+ по плавающему курсу, продавай дороже, стейкай под проценты.\n\n**Как это работает:**\n> • **Курс плавает** — от активности сервера и объёма сделок\n> • **Купил дешевле — продал дороже** — реальная прибыль в DC\n> • **Стейкай** — лочи DCC+ на 7/14/30 дней под +5% / +14% / +35%\n> • **Кэп эмиссии** — 100 000 DCC+, больше нельзя создать\n> • **Комиссия продажи** — 3% (половина сгорает → курс растёт)\n\n> Открывай панель — там всё: курс, портфель, стейки, топ холдеров и история.",
-      "color": 5103841,
+      "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac71363&is=6ac5c1e3&hm=8f7b7fc6a795c0d59f4d72ed09bb6205c0ef0302de7ae63c487e106c2013a025&"
-      }
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6acfa523&is=6ace53a3&hm=2a7ce1bebff2b5f07588b044e14e862337eef4daa8029d6d31635f2acfaa3c4c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+      },
+      "title": "Diamond Coin Crypto +",
+      "description": "> Инвестиционная система Diamond. Покупай DCC+ по плавающему курсу, продавай дороже, стейкай под проценты.\n\n>>> Курс плавает — от активности сервера и объёма сдел\nКупил дешевле — продал дороже — реальная прибыль в DC\nСтейки, кэп эмиссии, комиссия продажи"
     }
   ]
 }
