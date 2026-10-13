@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Pillow-рендеры питомцев.
+Pillow-рендеры питомцев. 12 питомцев, общий заработок, компактный каталог.
 """
 import io
 import os
@@ -312,91 +312,75 @@ def _xp_bar(d, img, x, y, w, h, pct):
 
 
 # ============================================================
-# КАТАЛОГ
+# КАТАЛОГ — 12 компактных строк
 # ============================================================
 def _catalog_row(img, d, x, y, w, h, key, cat, selected=False):
     color = RARITY_PALETTE.get(cat["rarity"], SILVER)
     border = _lighten(color, 0.25)
 
     if selected:
-        _grad(img, (x, y, x + w, y + h), color, color, alpha=18, radius=14)
-        d.rounded_rectangle((x, y, x + w, y + h), radius=14,
-                            outline=color + (230,), width=3)
+        _grad(img, (x, y, x + w, y + h), color, color, alpha=20, radius=10)
+        d.rounded_rectangle((x, y, x + w, y + h), radius=10,
+                            outline=color + (230,), width=2)
     else:
-        d.rounded_rectangle((x, y, x + w, y + h), radius=14,
+        d.rounded_rectangle((x, y, x + w, y + h), radius=10,
                             fill=INNER_BG + (255,),
                             outline=INNER_BRD + (255,), width=2)
 
-    pad = 16
-    es = 72
+    pad = 12
+    es = 42
     ex = x + pad
     ey = y + (h - es) // 2
-    _alpha(img, (ex, ey, ex + es, ey + es), color, alpha=40, radius=16)
-    d.rounded_rectangle((ex, ey, ex + es, ey + es), radius=16,
-                        outline=color + (170,), width=2)
-    _icon(d, ex + es // 2, ey + es // 2 + 2, cat["fa_code"], 32, color)
+    _alpha(img, (ex, ey, ex + es, ey + es), color, alpha=40, radius=10)
+    d.rounded_rectangle((ex, ey, ex + es, ey + es), radius=10,
+                        outline=color + (170,), width=1)
+    _icon(d, ex + es // 2, ey + es // 2 + 1, cat["fa_code"], 18, color)
 
-    tx = ex + es + 18
-    tx_max = x + w - pad - 260
+    tx = ex + es + 14
+    tx_max = x + w - pad - 200
 
-    name_f = _font(21)
+    name_f = _font(17)
     name_shown = _el(d, cat["name"], name_f, tx_max - tx)
-    d.text((tx, y + 14), name_shown, font=name_f, fill=TEXT)
+    d.text((tx, y + 8), name_shown, font=name_f, fill=TEXT)
 
+    # Редкость + доход + бонус
     rl = _rarity_label_short(cat["rarity"])
     rlf = _font(10)
-    rlw = _tw(d, rl, rlf) + 16
-    rl_y = y + 44
-    _alpha(img, (tx, rl_y, tx + rlw, rl_y + 20), color, alpha=55, radius=5)
-    d.rounded_rectangle((tx, rl_y, tx + rlw, rl_y + 20), radius=5,
-                        outline=border + (200,), width=1)
-    d.text((tx + 8, rl_y + 3), rl, font=rlf, fill=color)
+    rlw = _tw(d, rl, rlf) + 14
+    _alpha(img, (tx, y + 32, tx + rlw, y + 48), color, alpha=55, radius=4)
+    d.rounded_rectangle((tx, y + 32, tx + rlw, y + 48), radius=4,
+                        outline=color + (200,), width=1)
+    d.text((tx + 7, y + 35), rl, font=rlf, fill=color)
 
-    desc_x = tx + rlw + 12
-    desc_max = tx_max - desc_x
-    if desc_max > 80:
-        desc_f = _font(12)
-        desc_shown = _el(d, cat.get("description", ""), desc_f, desc_max)
-        d.text((desc_x, rl_y + 4), desc_shown, font=desc_f, fill=MUTED)
+    # Доход справа от редкости
+    inc_text = f"{cat['passive_dc']} DC/ч"
+    inc_x = tx + rlw + 10
+    d.text((inc_x, y + 35), inc_text, font=_font(11), fill=GREEN)
+    inc_w = _tw(d, inc_text, _font(11))
 
-    stats_y = y + h - 34
-    base = cat["passive_dc"]
-    max_rate = base * (1 + (MAX_LEVEL - 1) * 0.15)
-
-    d.text((tx, stats_y - 4), "ДОХОД", font=_font(9), fill=MUTED)
-    d.text((tx, stats_y + 10), f"{base} DC/ч", font=_font(15), fill=GREEN)
-
-    bx2_x = tx + 120
-    d.text((bx2_x, stats_y - 4), "МАКС. УР.", font=_font(9), fill=MUTED)
-    d.text((bx2_x, stats_y + 10), f"{max_rate:.0f} DC/ч", font=_font(15), fill=GREEN)
-
+    # Бонус — если есть
     bt = cat.get("bonus_type", "none")
     if bt != "none":
-        bnames = {"review_bonus": "к отзывам", "casino_luck": "к казино", "clan_contrib": "к клану"}
+        bnames = {"review_bonus": "отзывы", "casino_luck": "казино", "clan_contrib": "клан"}
         btext = f"+{int(cat.get('bonus_value', 0) * 100)}% {bnames.get(bt, '')}"
-        bf = _font(11)
-        bw = _tw(d, btext, bf) + 16
-        bx = bx2_x + 120
+        bf = _font(10)
+        bw = _tw(d, btext, bf) + 14
+        bx = inc_x + inc_w + 10
         if bx + bw < tx_max:
-            _alpha(img, (bx, stats_y + 6, bx + bw, stats_y + 28), GOLD, alpha=25, radius=6)
-            d.rounded_rectangle((bx, stats_y + 6, bx + bw, stats_y + 28), radius=6,
+            _alpha(img, (bx, y + 32, bx + bw, y + 48), GOLD, alpha=25, radius=4)
+            d.rounded_rectangle((bx, y + 32, bx + bw, y + 48), radius=4,
                                 outline=GOLD + (150,), width=1)
-            d.text((bx + 8, stats_y + 9), btext, font=bf, fill=GOLD)
+            d.text((bx + 7, y + 35), btext, font=bf, fill=GOLD)
 
+    # Цена справа
     right_x = x + w - pad
     price_str = _fmt(cat["price_dc"])
-    pf = _font(26)
+    pf = _font(20)
     pw = _tw(d, price_str, pf)
-    d.text((right_x - pw - 30, y + 18), price_str, font=pf, fill=SILVER_HI)
-    d.text((right_x - 24, y + 18 + pf.size - 18), "DC",
-           font=_font(14), fill=MUTED)
-
-    if base > 0:
-        days = max(int(cat["price_dc"] / (base * 24)), 1)
-        pb_text = f"~{days} дн окупаемость"
-        pbf = _font(11)
-        pbw = _tw(d, pb_text, pbf)
-        d.text((right_x - pbw, y + 52), pb_text, font=pbf, fill=GREEN)
+    d.text((right_x - pw - 24, y + (h - pf.size) // 2 - 2), price_str,
+           font=pf, fill=SILVER_HI)
+    d.text((right_x - 20, y + (h - pf.size) // 2 - 2 + pf.size - 14),
+           "DC", font=_font(12), fill=MUTED)
 
 
 def render_catalog(user_id, balance, available_pets, selected_key=None):
@@ -419,7 +403,7 @@ def render_catalog(user_id, balance, available_pets, selected_key=None):
     _left_panel(img, d, (lx1, body_y, lx2, body_y + body_h), balance, [
         {"label": "В каталоге", "value": f"{total} питомцев", "icon": I_PAW, "color": BLUE},
         {"label": "У тебя есть", "value": f"{owned_count} из {total}", "icon": I_CHECK, "color": GREEN},
-        {"label": "Топ по доходу", "value": "Даймондик · 20 DC/ч", "icon": I_CROWN, "color": GOLD},
+        {"label": "Топ по доходу", "value": "Крист. Дракон · 25 DC/ч", "icon": I_CROWN, "color": GOLD},
         {"label": "Комиссия подарка", "value": "+10% к цене", "icon": I_GIFT, "color": PURPLE},
     ])
 
@@ -453,10 +437,10 @@ def render_catalog(user_id, balance, available_pets, selected_key=None):
         buf.seek(0)
         return buf
 
-    rows = min(len(available_pets), 6)
-    gap_row = 8
+    rows = min(len(available_pets), 12)
+    gap_row = 6
     row_h = (list_y2 - list_y1 - gap_row * (rows - 1)) // rows
-    row_h = min(row_h, 118)
+    row_h = max(row_h, 52)
 
     for idx, (key, cat) in enumerate(available_pets[:rows]):
         cy = list_y1 + idx * (row_h + gap_row)
@@ -474,7 +458,7 @@ def render_catalog(user_id, balance, available_pets, selected_key=None):
 
 
 # ============================================================
-# КАРТОЧКА ТОВАРА
+# КАРТОЧКА ТОВАРА — с обрезанным описанием
 # ============================================================
 def render_item_card(user_id, balance, pet_key: str):
     img, d = _canvas(user_id, "питомцы · товар")
@@ -492,7 +476,6 @@ def render_item_card(user_id, balance, pet_key: str):
     rx1 = lx2 + gap
     rx2 = W - M - PX
 
-    total = len(CATALOG)
     price = cat.get("price_dc", 0)
     gp = gift_price(pet_key)
     base = cat.get("passive_dc", 0)
@@ -540,6 +523,7 @@ def render_item_card(user_id, balance, pet_key: str):
     d.text((tx, ey + 4), _el(d, cat.get("name", "—"), name_f, tx_max - tx),
            font=name_f, fill=TEXT)
 
+    # Описание — 2 строки, обрезаем
     desc_f = _font(15)
     desc_lines = []
     cur = ""
@@ -699,9 +683,10 @@ def render_item_card(user_id, balance, pet_key: str):
 
 
 # ============================================================
-# МОИ ПИТОМЦЫ
+# МОИ ПИТОМЦЫ — hero показывает ПИТОМЦА С МАКС. ДОХОДОМ
 # ============================================================
-def _hero_active(img, d, x, y, w, h, pet):
+def _hero_top_earning(img, d, x, y, w, h, pet, total_pending: int = 0):
+    """Hero показывает питомца с самым большим доходом в час."""
     cat = CATALOG.get(pet["pet_key"], {})
     color = RARITY_PALETTE.get(cat.get("rarity", "common"), SILVER)
 
@@ -718,9 +703,9 @@ def _hero_active(img, d, x, y, w, h, pet):
     _icon(d, ex + es // 2, ey + es // 2 + 2, cat.get("fa_code", I_PAW), 50, color)
 
     tx = ex + es + 22
-    tx_max = x + w - 260
+    tx_max = x + w - 320
 
-    d.text((tx, y + 20), "✦ АКТИВНЫЙ ПИТОМЕЦ", font=_font(11), fill=GOLD)
+    d.text((tx, y + 20), "✦ ЛУЧШИЙ ПИТОМЕЦ", font=_font(11), fill=GOLD)
 
     name_f = _font(30)
     d.text((tx, y + 40), _el(d, cat.get("name", "—"), name_f, tx_max - tx),
@@ -756,27 +741,21 @@ def _hero_active(img, d, x, y, w, h, pet):
     _xp_bar(d, img, tx, xp_y, xp_w, 10, pct)
 
     right_edge = x + w - 24
-    d.text((right_edge, y + 24), "НАКОПЛЕНО", font=_font(10), fill=GOLD, anchor="rt")
+    d.text((right_edge, y + 24), "ОБЩИЙ ЗАРАБОТОК",
+           font=_font(10), fill=GOLD, anchor="rt")
 
-    val = pet.get("pending_dc") or 0
-    val_full = f"+{_fmt(val)} DC"
-    vf = _font(38)
-    while _tw(d, val_full, vf) > 240 and vf.size > 22:
+    val_full = f"+{_fmt(total_pending)} DC"
+    vf = _font(42)
+    while _tw(d, val_full, vf) > 290 and vf.size > 24:
         vf = _font(vf.size - 2)
     vw = _tw(d, val_full, vf)
     d.text((right_edge - vw, y + 46), val_full, font=vf, fill=GREEN)
 
-    last = pet.get("last_income") or pet.get("purchased_at") or 0
-    elapsed = max(int(time.time()) - last, 0) if last else 0
-    h_el = elapsed // 3600
-    m_el = (elapsed % 3600) // 60
-    time_text = f"{h_el}ч {m_el}м копилось"
-    tf = _font(12)
-    tw_ = _tw(d, time_text, tf)
-    d.text((right_edge - tw_, y + 96), time_text, font=tf, fill=MUTED)
+    d.text((right_edge, y + 108), "со всех питомцев",
+           font=_font(12), fill=MUTED, anchor="rt")
 
     hr = hourly_rate(pet["pet_key"], pet["level"])
-    pill_text = f"⚡ {hr:.0f} DC/час"
+    pill_text = f"⚡ {hr:.0f} DC/час · топ по доходу"
     pf = _font(12)
     pw = _tw(d, pill_text, pf) + 22
     pill_x = right_edge - pw
@@ -789,13 +768,18 @@ def _hero_active(img, d, x, y, w, h, pet):
            font=pf, fill=GREEN, anchor="mm")
 
 
-def _my_pet_row(img, d, x, y, w, h, pet):
+def _my_pet_row(img, d, x, y, w, h, pet, is_top=False):
     cat = CATALOG.get(pet["pet_key"], {})
     color = RARITY_PALETTE.get(cat.get("rarity", "common"), SILVER)
 
-    d.rounded_rectangle((x, y, x + w, y + h), radius=12,
-                        fill=INNER_BG + (255,),
-                        outline=INNER_BRD + (255,), width=2)
+    if is_top:
+        _grad(img, (x, y, x + w, y + h), GOLD, GOLD, alpha=12, radius=12)
+        d.rounded_rectangle((x, y, x + w, y + h), radius=12,
+                            outline=GOLD + (170,), width=2)
+    else:
+        d.rounded_rectangle((x, y, x + w, y + h), radius=12,
+                            fill=INNER_BG + (255,),
+                            outline=INNER_BRD + (255,), width=2)
 
     pad = 14
     es = 60
@@ -809,9 +793,12 @@ def _my_pet_row(img, d, x, y, w, h, pet):
     tx = ex + es + 14
     tx_max = x + w - 240
 
+    name = cat.get("name", "—")
+    if is_top:
+        name += " · топ по доходу"
     name_f = _font(17)
-    d.text((tx, y + 14), _el(d, cat.get("name", "—"), name_f, tx_max - tx),
-           font=name_f, fill=TEXT)
+    d.text((tx, y + 14), _el(d, name, name_f, tx_max - tx),
+           font=name_f, fill=GOLD if is_top else TEXT)
 
     hr = hourly_rate(pet["pet_key"], pet["level"])
     stat_text = f"Ур. {pet['level']} · {hr:.0f} DC/ч · {pet.get('xp', 0)} XP"
@@ -863,7 +850,11 @@ def _placeholder_row(img, d, x, y, w, h):
            text, font=tf, fill=MUTED)
 
 
-def render_my_pets(user_id, balance, pets):
+def render_my_pets(user_id, balance, pets, top_pet=None):
+    """
+    pets — список питомцев
+    top_pet — питомец с максимальным доходом (для hero)
+    """
     img, d = _canvas(user_id, "питомцы · мои")
 
     body_y = 140
@@ -878,15 +869,14 @@ def render_my_pets(user_id, balance, pets):
 
     total_pending = sum((p.get("pending_dc") or 0) for p in pets)
 
-    active = next((p for p in pets if p.get("is_active")), None)
-    active_name = "—"
-    if active:
-        cat = CATALOG.get(active["pet_key"], {})
-        active_name = f"{cat.get('name', '—')} · ур. {active['level']}"
+    top_pet_name = "—"
+    if top_pet:
+        cat = CATALOG.get(top_pet["pet_key"], {})
+        top_pet_name = f"{cat.get('name', '—')} · ур. {top_pet['level']}"
 
     _left_panel(img, d, (lx1, body_y, lx2, body_y + body_h), balance, [
-        {"label": "Активный питомец", "value": active_name, "icon": I_STAR, "color": GOLD},
-        {"label": "Накоплено", "value": f"{_fmt(total_pending)} DC", "icon": I_COINS, "color": GREEN},
+        {"label": "Лучший питомец", "value": top_pet_name, "icon": I_CROWN, "color": GOLD},
+        {"label": "Общий заработок", "value": f"{_fmt(total_pending)} DC", "icon": I_COINS, "color": GREEN},
         {"label": "Всего питомцев", "value": f"{len(pets)} из {len(CATALOG)}", "icon": I_PAW, "color": BLUE},
     ])
 
@@ -922,9 +912,13 @@ def render_my_pets(user_id, balance, pets):
 
     hero_h = 170
     hero_y1 = content_y1
-    _hero_active(img, d, rpx1, hero_y1, rpx2 - rpx1, hero_h, active)
 
-    others = [p for p in pets if not p.get("is_active")]
+    hero_pet = top_pet if top_pet else (pets[0] if pets else None)
+    _hero_top_earning(img, d, rpx1, hero_y1, rpx2 - rpx1, hero_h, hero_pet, total_pending)
+
+    # Остальные (все кроме hero)
+    hero_key = hero_pet["pet_key"] if hero_pet else None
+    others = [p for p in pets if p["pet_key"] != hero_key]
     other_count = len(others)
 
     list_title_y = hero_y1 + hero_h + 16
@@ -951,7 +945,7 @@ def render_my_pets(user_id, balance, pets):
         else:
             _placeholder_row(img, d, rpx1, cy, rpx2 - rpx1, row_h)
 
-    _footer(d, "Забрать накопленное и покормить питомца — в меню ниже", "стр. 2 / 4")
+    _footer(d, "Забрать накопленное и покормить питомцев — в меню ниже", "стр. 2 / 4")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
@@ -1217,9 +1211,6 @@ def render_success_buy(user_id, balance, pet_key: str, price: int):
 # ============================================================
 def render_success_gift(user_id, balance, pet_key: str, price: int,
                         base_price: int, recipient_name: str):
-    """
-    recipient_name — уже отформатированное имя получателя (ник или @id).
-    """
     img, d = _canvas(user_id, "питомцы · подарок")
 
     cat = CATALOG.get(pet_key, {})
@@ -1323,7 +1314,7 @@ def render_success_gift(user_id, balance, pet_key: str, price: int,
 
 
 # ============================================================
-# ТОП — с ником пользователя
+# ТОП
 # ============================================================
 def _top_row(img, d, x, y, w, h, rank, entry, is_me):
     if rank == 1:
@@ -1379,7 +1370,6 @@ def _top_row(img, d, x, y, w, h, rank, entry, is_me):
     tx = ex + es + 16
     tx_max = x + w - 200
 
-    # 👇 НИК ВМЕСТО ID
     name = entry.get("username") or f"@{entry['user_id']}"
     if is_me:
         name += " · это ты"
