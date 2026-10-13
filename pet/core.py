@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Питомцы Diamond — ядро.
+Питомцы Diamond — ядро. 12 питомцев, кормление всей команды.
 """
 import os
 import time
@@ -27,10 +27,7 @@ FEED_STREAK_BONUS = 500
 ACTIVE_SWAP_COOLDOWN = 6 * 3600
 GIFT_COMMISSION = 0.10
 
-# 👇 Юзеры, которых НЕ показываем в топе питомцеводов
-TOP_EXCLUDED_USERS = {
-    796293832751972352,
-}
+TOP_EXCLUDED_USERS = {796293832751972352}
 
 XP_THRESHOLDS = [
     0, 100, 350, 850, 1850, 3850, 7350, 12850, 20850, 32850,
@@ -38,64 +35,81 @@ XP_THRESHOLDS = [
 
 
 CATALOG: Dict[str, dict] = {
+    # ─── COMMON ───
     "cat_ginger": {
-        "name": "Рыжий Кот",
-        "rarity": "common",
-        "price_dc": 300,
-        "passive_dc": 1,
-        "bonus_type": "none",
-        "bonus_value": 0.0,
+        "name": "Рыжий Кот", "rarity": "common", "price_dc": 300,
+        "passive_dc": 1, "bonus_type": "none", "bonus_value": 0.0,
         "description": "Обычный дворовый кот. Спит 20 часов в сутки, но DC приносит исправно.",
         "fa_code": 0xf6be,
     },
+    "hamster": {
+        "name": "Хомяк", "rarity": "common", "price_dc": 450,
+        "passive_dc": 2, "bonus_type": "none", "bonus_value": 0.0,
+        "description": "Маленький пушистый комочек. Таскает зёрнышки в щёки, а DC — тебе.",
+        "fa_code": 0xf1b0,
+    },
+    # ─── RARE ───
     "fox": {
-        "name": "Хитрая Лиса",
-        "rarity": "rare",
-        "price_dc": 600,
-        "passive_dc": 2,
-        "bonus_type": "none",
-        "bonus_value": 0.0,
+        "name": "Хитрая Лиса", "rarity": "rare", "price_dc": 600,
+        "passive_dc": 2, "bonus_type": "none", "bonus_value": 0.0,
         "description": "Хитрая и умная. Всегда найдёт, где взять лишнюю монетку.",
         "fa_code": 0xf6d3,
     },
+    "raccoon": {
+        "name": "Енот", "rarity": "rare", "price_dc": 750,
+        "passive_dc": 3, "bonus_type": "none", "bonus_value": 0.0,
+        "description": "Хитрый воришка. Любит блестяшки, но с хозяином делится.",
+        "fa_code": 0xf700,
+    },
     "owl": {
-        "name": "Ночная Сова",
-        "rarity": "rare",
-        "price_dc": 900,
-        "passive_dc": 3,
-        "bonus_type": "none",
-        "bonus_value": 0.0,
+        "name": "Ночная Сова", "rarity": "rare", "price_dc": 900,
+        "passive_dc": 3, "bonus_type": "none", "bonus_value": 0.0,
         "description": "Не спит по ночам — считает DC, которые ты не тратишь.",
         "fa_code": 0xf4ba,
     },
+    "penguin": {
+        "name": "Пингвин", "rarity": "rare", "price_dc": 1050,
+        "passive_dc": 4, "bonus_type": "none", "bonus_value": 0.0,
+        "description": "Холодный и невозмутимый. Ловит рыбу и DC с одинаковым успехом.",
+        "fa_code": 0xf4ba,
+    },
+    # ─── EPIC ───
     "griffin": {
-        "name": "Грифон",
-        "rarity": "epic",
-        "price_dc": 1200,
-        "passive_dc": 4,
-        "bonus_type": "review_bonus",
-        "bonus_value": 0.03,
+        "name": "Грифон", "rarity": "epic", "price_dc": 1200,
+        "passive_dc": 4, "bonus_type": "review_bonus", "bonus_value": 0.03,
         "description": "Царь птиц. Охраняет твои отзывы и щедро награждает за них.",
         "fa_code": 0xf520,
     },
+    "wolf": {
+        "name": "Волк", "rarity": "epic", "price_dc": 1600,
+        "passive_dc": 6, "bonus_type": "review_bonus", "bonus_value": 0.02,
+        "description": "Верный спутник. Охраняет тебя и приносит удачу в отзывах.",
+        "fa_code": 0xf6d3,
+    },
+    # ─── LEGENDARY ───
     "dragon": {
-        "name": "Дракончик",
-        "rarity": "legendary",
-        "price_dc": 2000,
-        "passive_dc": 7,
-        "bonus_type": "casino_luck",
-        "bonus_value": 0.05,
+        "name": "Дракончик", "rarity": "legendary", "price_dc": 2000,
+        "passive_dc": 7, "bonus_type": "casino_luck", "bonus_value": 0.05,
         "description": "Ещё маленький, но уже дышит огнём. Приносит удачу в казино.",
         "fa_code": 0xf6d5,
     },
+    "phoenix": {
+        "name": "Феникс", "rarity": "legendary", "price_dc": 3000,
+        "passive_dc": 9, "bonus_type": "casino_luck", "bonus_value": 0.04,
+        "description": "Возрождается из пепла и приносит огненную удачу в казино.",
+        "fa_code": 0xf06d,
+    },
+    # ─── MYTHIC ───
     "diamond_pet": {
-        "name": "Даймондик",
-        "rarity": "mythic",
-        "price_dc": 5000,
-        "passive_dc": 20,
-        "bonus_type": "clan_contrib",
-        "bonus_value": 0.10,
+        "name": "Даймондик", "rarity": "mythic", "price_dc": 5000,
+        "passive_dc": 20, "bonus_type": "clan_contrib", "bonus_value": 0.10,
         "description": "Легенда Diamond. Сделан из чистой валюты сервера, знает толк в кланах.",
+        "fa_code": 0xf3a5,
+    },
+    "crystal_dragon": {
+        "name": "Кристальный Дракон", "rarity": "mythic", "price_dc": 7500,
+        "passive_dc": 25, "bonus_type": "clan_contrib", "bonus_value": 0.08,
+        "description": "Древний страж. Знает все секреты клановой копилки.",
         "fa_code": 0xf3a5,
     },
 }
@@ -239,6 +253,15 @@ def get_user_best_pet(user_id: int) -> Optional[dict]:
         "name": cat.get("name", "—"),
         "rarity": cat.get("rarity", "common"),
     }
+
+
+def get_total_pending(user_id: int) -> int:
+    """Сумма накоплений со ВСЕХ питомцев юзера."""
+    row = cur.execute(
+        "SELECT COALESCE(SUM(pending_dc), 0) AS s FROM user_pets WHERE user_id=?",
+        (user_id,)
+    ).fetchone()
+    return int(row["s"]) if row else 0
 
 
 def get_xp_threshold(level: int) -> int:
@@ -456,8 +479,7 @@ def get_swap_cooldown_left(user_id: int) -> int:
 
 
 async def claim_income(user_id: int) -> int:
-    pets = get_user_pets(user_id)
-    total = sum((p.get("pending_dc") or 0) for p in pets)
+    total = get_total_pending(user_id)
     if total <= 0:
         return 0
 
@@ -473,7 +495,7 @@ async def claim_income(user_id: int) -> int:
 
     await log_discord(
         title="💰 Забран доход питомцев",
-        description=f"> **Юзер:** <@{user_id}>\n> **Сумма:** `+{total} DC`",
+        description=f"> **Юзер:** <@{user_id}>\n> **Сумма:** `+{total} DC` (со всех питомцев)",
         color=0x2ecc71,
         channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
     )
@@ -481,17 +503,37 @@ async def claim_income(user_id: int) -> int:
     return total
 
 
-async def feed_active_pet(user_id: int) -> dict:
-    pet = get_active_pet(user_id)
-    if not pet:
-        return {"ok": False, "error": "Нет активного питомца"}
+def get_feed_cooldown_left(user_id: int) -> int:
+    """Кулдаун кормления — общий для юзера."""
+    row = cur.execute(
+        "SELECT MAX(last_fed) AS last_fed FROM user_pets WHERE user_id=?",
+        (user_id,)
+    ).fetchone()
+    if not row or not row["last_fed"]:
+        return 0
+    left = int(row["last_fed"]) + FEED_COOLDOWN - int(time.time())
+    return max(left, 0)
 
-    if pet["level"] >= MAX_LEVEL:
-        return {"ok": False, "error": "Питомец уже максимального уровня"}
+
+async def feed_active_pet(user_id: int) -> dict:
+    """
+    Кормит ВСЕХ питомцев юзера.
+    Списывает FEED_COST DC, делит FEED_XP равномерно между питомцами,
+    которые ещё не достигли MAX_LEVEL.
+    """
+    pets = get_user_pets(user_id)
+    if not pets:
+        return {"ok": False, "error": "У тебя нет питомцев"}
+
+    feedable = [p for p in pets if p["level"] < MAX_LEVEL]
+    if not feedable:
+        return {"ok": False, "error": "Все питомцы уже максимального уровня"}
 
     now = int(time.time())
-    last_fed = pet.get("last_fed") or 0
-    left = last_fed + FEED_COOLDOWN - now
+
+    # Кулдаун
+    last_fed_max = max((p.get("last_fed") or 0) for p in pets)
+    left = last_fed_max + FEED_COOLDOWN - now
     if left > 0:
         h = left // 3600
         m = (left % 3600) // 60
@@ -502,13 +544,18 @@ async def feed_active_pet(user_id: int) -> dict:
         return {"ok": False, "error": f"Нужно {FEED_COST} DC"}
 
     from modules.dc import remove_dc
-    ok = await remove_dc(user_id, FEED_COST, "Кормление питомца")
+    ok = await remove_dc(user_id, FEED_COST, "Кормление питомцев")
     if not ok:
         return {"ok": False, "error": "Не удалось списать DC"}
 
+    # Streak — общий для юзера (берём максимум)
     today = datetime.now(MSK).strftime("%Y-%m-%d")
-    streak = pet.get("feed_streak") or 0
-    last_day = pet.get("last_feed_day")
+    streak = max((p.get("feed_streak") or 0) for p in pets)
+    last_day = None
+    for p in pets:
+        if p.get("last_feed_day"):
+            last_day = p["last_feed_day"]
+            break
 
     if last_day:
         try:
@@ -524,21 +571,45 @@ async def feed_active_pet(user_id: int) -> dict:
     else:
         streak = 1
 
-    xp_gain = FEED_XP
+    # XP делим равномерно
+    n = len(feedable)
+    xp_per_pet = FEED_XP // n
+    remainder = FEED_XP - xp_per_pet * n
+
+    total_xp_base = FEED_XP
     bonus_xp = 0
     if streak >= 7 and streak % 7 == 0:
         bonus_xp = FEED_STREAK_BONUS
-        xp_gain += bonus_xp
+        total_xp_base += bonus_xp
 
-    add_pet_xp_sync(user_id, pet["pet_key"], xp_gain)
+    # Начисляем каждому по xp_per_pet
+    for p in feedable:
+        add_pet_xp_sync(user_id, p["pet_key"], xp_per_pet)
 
+    # Остаток (неподелённый FEED_XP) идёт активному
+    active = get_active_pet(user_id)
+    if remainder > 0 and active and active["level"] < MAX_LEVEL:
+        add_pet_xp_sync(user_id, active["pet_key"], remainder)
+
+    # Бонус streak — активному
+    if bonus_xp > 0 and active and active["level"] < MAX_LEVEL:
+        add_pet_xp_sync(user_id, active["pet_key"], bonus_xp)
+
+    # Обновляем last_fed, streak и day у ВСЕХ
     cur.execute("""
         UPDATE user_pets SET last_fed=?, feed_streak=?, last_feed_day=?
-        WHERE user_id=? AND pet_key=?
-    """, (now, streak, today, user_id, pet["pet_key"]))
+        WHERE user_id=?
+    """, (now, streak, today, user_id))
     db.commit()
 
-    return {"ok": True, "xp": xp_gain, "bonus_xp": bonus_xp, "streak": streak}
+    return {
+        "ok": True,
+        "xp_total": total_xp_base,
+        "xp_per_pet": xp_per_pet,
+        "pets_fed": n,
+        "bonus_xp": bonus_xp,
+        "streak": streak,
+    }
 
 
 def add_pet_xp_sync(user_id: int, pet_key: str, amount: int) -> bool:
@@ -611,15 +682,7 @@ def get_clan_bonus(user_id: int) -> float:
     return _get_active_bonus(user_id, "clan_contrib")
 
 
-# ============================================================
-# ТОП — исключаем заданных юзеров
-# ============================================================
 def get_top_users(limit: int = 10) -> List[dict]:
-    """
-    Топ по максимальному уровню питомца.
-    Юзеры из TOP_EXCLUDED_USERS не показываются.
-    """
-    # Собираем всех с их лучшим уровнем
     rows = cur.execute("""
         SELECT user_id, MAX(level) AS best_level
         FROM user_pets
@@ -630,11 +693,8 @@ def get_top_users(limit: int = 10) -> List[dict]:
     result = []
     for r in rows:
         uid = r["user_id"]
-
-        # 👇 Пропускаем исключённых
         if uid in TOP_EXCLUDED_USERS:
             continue
-
         best = cur.execute("""
             SELECT pet_key, level FROM user_pets
             WHERE user_id=? ORDER BY level DESC LIMIT 1
@@ -643,25 +703,20 @@ def get_top_users(limit: int = 10) -> List[dict]:
             "SELECT COUNT(*) AS c FROM user_pets WHERE user_id=?",
             (uid,)
         ).fetchone()
-
         result.append({
             "user_id": uid,
             "best_level": r["best_level"],
             "pet_key": best["pet_key"] if best else None,
             "pets_count": int(cnt["c"]) if cnt else 0,
         })
-
         if len(result) >= limit:
             break
-
     return result
 
 
 def get_user_place(user_id: int) -> Optional[int]:
-    """Место юзера в топе. Если он в исключениях — None."""
     if user_id in TOP_EXCLUDED_USERS:
         return None
-
     top = get_top_users(limit=1000)
     for i, t in enumerate(top, 1):
         if t["user_id"] == user_id:
