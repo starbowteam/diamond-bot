@@ -18,12 +18,12 @@ def _pad(text: str, left: int = 2, right: int = 2) -> str:
     return f"{P * left}{text}{P * right}"
 
 
-# ───────── ЭМОДЗИ КНОПОК ─────────
-E_MAIN    = PartialEmoji(name="dchart", id=1559221900000000001)
-E_TRADE   = PartialEmoji(name="dswap",  id=1559221900000000002)
-E_STAKE   = PartialEmoji(name="dlock",  id=1559221900000000003)
-E_TOP     = PartialEmoji(name="dtrophy", id=1559221900000000004)
-E_HISTORY = PartialEmoji(name="dhist",  id=1559221900000000005)
+# ───────── ЭМОДЗИ КНОПОК (юникод — работают всегда) ─────────
+E_MAIN    = "📈"
+E_TRADE   = "🔄"
+E_STAKE   = "🔒"
+E_TOP     = "🏆"
+E_HISTORY = "📜"
 
 
 # ═══════════════════════════════════════════
