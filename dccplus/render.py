@@ -224,14 +224,24 @@ def _canvas(user_id, subtitle):
                         outline=TEAL + (220,), width=2)
     _icon(d, hx + ls // 2, hy + ls // 2 + 1, I_CHART_LINE, 30, (255, 255, 255))
 
-    # ─── DCC + (плюс сразу за «DCC», без хардкода отступа) ───
+    # ─── DCC + (плюс выровнен по вертикальному центру «DCC») ───
     bx = hx + ls + 20
     dcc_font = _font(34)
     dcc_text = "DCC"
-    d.text((bx, hy + 4), dcc_text, font=dcc_font, fill=TEXT)
+    dcc_y = hy + 4
 
-    dcc_w = _tw(d, dcc_text, dcc_font)
-    d.text((bx + dcc_w + 10, hy + 4), "+", font=dcc_font, fill=TEAL)
+    # рисуем «DCC»
+    d.text((bx, dcc_y), dcc_text, font=dcc_font, fill=TEXT)
+
+    # замеряем bbox «DCC» — берём реальный вертикальный центр глифов
+    bb = d.textbbox((bx, dcc_y), dcc_text, font=dcc_font)
+    dcc_cy = (bb[1] + bb[3]) // 2
+    dcc_w = bb[2] - bb[0]
+
+    # рисуем «+» с anchor="lm" — левый край по X, середина по Y
+    # получится ровно по центру «DCC», не ниже и не выше
+    d.text((bx + dcc_w + 14, dcc_cy), "+",
+           font=dcc_font, fill=TEAL, anchor="lm")
 
     d.text((bx + 4, hy + 46), "DIAMOND CRYPTO", font=_font(15), fill=MUTED)
 
