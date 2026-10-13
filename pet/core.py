@@ -230,6 +230,25 @@ def get_active_pet(user_id: int) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def get_top_earning_pet(user_id: int) -> Optional[dict]:
+    """
+    Возвращает питомца с самым большим доходом в час.
+    Используется для hero-блока в «Мои питомцы».
+    """
+    pets = get_user_pets(user_id)
+    if not pets:
+        return None
+
+    best = None
+    best_rate = -1.0
+    for p in pets:
+        r = hourly_rate(p["pet_key"], p["level"])
+        if r > best_rate:
+            best_rate = r
+            best = p
+    return best
+
+
 def has_pet(user_id: int, pet_key: str) -> bool:
     row = cur.execute(
         "SELECT 1 FROM user_pets WHERE user_id=? AND pet_key=?",
@@ -256,7 +275,6 @@ def get_user_best_pet(user_id: int) -> Optional[dict]:
 
 
 def get_total_pending(user_id: int) -> int:
-    """Сумма накоплений со ВСЕХ питомцев юзера."""
     row = cur.execute(
         "SELECT COALESCE(SUM(pending_dc), 0) AS s FROM user_pets WHERE user_id=?",
         (user_id,)
@@ -504,7 +522,6 @@ async def claim_income(user_id: int) -> int:
 
 
 def get_feed_cooldown_left(user_id: int) -> int:
-    """Кулдаун кормления — общий для юзера."""
     row = cur.execute(
         "SELECT MAX(last_fed) AS last_fed FROM user_pets WHERE user_id=?",
         (user_id,)
@@ -531,7 +548,6 @@ async def feed_active_pet(user_id: int) -> dict:
 
     now = int(time.time())
 
-    # Кулдаун
     last_fed_max = max((p.get("last_fed") or 0) for p in pets)
     left = last_fed_max + FEED_COOLDOWN - now
     if left > 0:
@@ -548,7 +564,6 @@ async def feed_active_pet(user_id: int) -> dict:
     if not ok:
         return {"ok": False, "error": "Не удалось списать DC"}
 
-    # Streak — общий для юзера (берём максимум)
     today = datetime.now(MSK).strftime("%Y-%m-%d")
     streak = max((p.get("feed_streak") or 0) for p in pets)
     last_day = None
@@ -571,7 +586,6 @@ async def feed_active_pet(user_id: int) -> dict:
     else:
         streak = 1
 
-    # XP делим равномерно
     n = len(feedable)
     xp_per_pet = FEED_XP // n
     remainder = FEED_XP - xp_per_pet * n
@@ -582,20 +596,16 @@ async def feed_active_pet(user_id: int) -> dict:
         bonus_xp = FEED_STREAK_BONUS
         total_xp_base += bonus_xp
 
-    # Начисляем каждому по xp_per_pet
     for p in feedable:
         add_pet_xp_sync(user_id, p["pet_key"], xp_per_pet)
 
-    # Остаток (неподелённый FEED_XP) идёт активному
     active = get_active_pet(user_id)
     if remainder > 0 and active and active["level"] < MAX_LEVEL:
         add_pet_xp_sync(user_id, active["pet_key"], remainder)
 
-    # Бонус streak — активному
     if bonus_xp > 0 and active and active["level"] < MAX_LEVEL:
         add_pet_xp_sync(user_id, active["pet_key"], bonus_xp)
 
-    # Обновляем last_fed, streak и day у ВСЕХ
     cur.execute("""
         UPDATE user_pets SET last_fed=?, feed_streak=?, last_feed_day=?
         WHERE user_id=?
