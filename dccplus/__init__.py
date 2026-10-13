@@ -40,28 +40,42 @@ def _build_panel_embeds():
 
 
 async def send_dcc_panel(bot):
-    ch = bot.get_channel(DCC_CHANNEL_ID)
-    if not ch:
-        try:
-            ch = await bot.fetch_channel(DCC_CHANNEL_ID)
-        except Exception as e:
-            logger.warning(f"dcc panel channel not found: {e}")
+    """Отправляет панель DCC+ в канал. Полностью защищено от падений."""
+    try:
+        ch = bot.get_channel(DCC_CHANNEL_ID)
+        if not ch:
+            try:
+                ch = await bot.fetch_channel(DCC_CHANNEL_ID)
+            except Exception as e:
+                logger.warning(f"dcc panel channel not found: {e}")
+                return
+        if not ch:
+            logger.warning("dcc panel: channel is None")
             return
 
-    # Чистим старые сообщения бота
-    try:
-        async for m in ch.history(limit=50):
-            if m.author == bot.user:
-                try:
-                    await m.delete()
-                except Exception:
-                    pass
-    except Exception:
-        pass
+        # Чистим старые сообщения бота
+        try:
+            async for m in ch.history(limit=50):
+                if m.author == bot.user:
+                    try:
+                        await m.delete()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
-    embeds = _build_panel_embeds()
-    await ch.send(embeds=embeds, view=DCCPanelView())
-    logger.info("💠 DCC+ панель отправлена")
+        embeds = _build_panel_embeds()
+        await ch.send(embeds=embeds, view=DCCPanelView())
+        logger.info("💠 DCC+ панель отправлена")
+
+    except disnake.HTTPException as e:
+        logger.error(f"💠 DCC+ панель: HTTPException {e}")
+        logger.error(
+            "💠 DCC+ панель: скорее всего один из emoji.id невалиден — "
+            "замени кастомные эмодзи кнопок на юникод в dccplus/views.py"
+        )
+    except Exception as e:
+        logger.exception(f"💠 DCC+ панель: {e}")
 
 
 def init_dccplus(bot):
@@ -80,6 +94,7 @@ def init_dccplus(bot):
     except Exception as e:
         logger.warning(f"dcc add_view: {e}")
 
+    # 👇 Панель шлём ТОЛЬКО здесь. Убери дубликат в core/bot.py!
     bot.loop.create_task(send_dcc_panel(bot))
 
     logger.info("💠 DCC+ инициализирован")
