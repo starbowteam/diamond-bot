@@ -224,9 +224,15 @@ def _canvas(user_id, subtitle):
                         outline=TEAL + (220,), width=2)
     _icon(d, hx + ls // 2, hy + ls // 2 + 1, I_CHART_LINE, 30, (255, 255, 255))
 
+    # ─── DCC + (плюс сразу за «DCC», без хардкода отступа) ───
     bx = hx + ls + 20
-    d.text((bx, hy + 4), "DCC", font=_font(34), fill=TEXT)
-    d.text((bx + 96, hy + 4), "+", font=_font(34), fill=TEAL)
+    dcc_font = _font(34)
+    dcc_text = "DCC"
+    d.text((bx, hy + 4), dcc_text, font=dcc_font, fill=TEXT)
+
+    dcc_w = _tw(d, dcc_text, dcc_font)
+    d.text((bx + dcc_w + 10, hy + 4), "+", font=dcc_font, fill=TEAL)
+
     d.text((bx + 4, hy + 46), "DIAMOND CRYPTO", font=_font(15), fill=MUTED)
 
     meta_r = W - M - PX
