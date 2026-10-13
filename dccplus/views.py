@@ -3,17 +3,13 @@
 
 Всё управление — через селекты. Кнопок нет.
 
-Логика сообщений:
-  · 1 публичная панель в канале (DCCPanelView).
-  · Любой клик по селекту открывает ephemeral.
-  · Операции ПЕРЕЗАПИСЫВАЮТ тот же ephemeral.
-  · Исключение — модалки: после них создаётся новое ephemeral.
-
-Ответы на interaction:
-  · ВСЕГДА через edit_original_response (после defer это работает
-    и на первом клике с публичной панели, и на пере-клик по эфемерке).
-  · followup.send используется ТОЛЬКО как последний fallback.
-  · Мёртвые интеракции тихо глотаются, лог не спамится.
+Логика ответов (важно!):
+  · Клик по компоненту ПУБЛИЧНОЙ панели → создаём новое ephemeral
+      (defer(ephemeral=True, with_message=True)).
+  · Клик по компоненту ЭФЕМЕРКИ      → обновляем ту же эфемерку
+      (defer() без флагов = UPDATE_MESSAGE).
+  · Ответ рисуем через edit_original_response.
+  · followup — только fallback для модалок.
 """
 import asyncio
 
@@ -40,7 +36,7 @@ SECTIONS = [
 
 
 # ═══════════════════════════════════════════
-# КЛАССИФИКАЦИЯ ОШИБОК
+# ОШИБКИ — «мёртвые» интеракции
 # ═══════════════════════════════════════════
 _DEAD_MARKERS = (
     "unknown interaction",
@@ -49,10 +45,10 @@ _DEAD_MARKERS = (
     "interactiontimedout",
     "interaction timed out",
     "interaction took more than",
-    "10062",   # Unknown Interaction
-    "10008",   # Unknown Message
+    "10062",
+    "10008",
     "404",
-    "has no attribute 'timeout'",     # ← именно твоя ошибка
+    "has no attribute 'timeout'",
     "has no attribute 'session'",
     "connector is closed",
     "session is closed",
@@ -69,7 +65,6 @@ def _is_dead_interaction_error(ex: Exception) -> bool:
 
 
 def _log_soft(label: str, ex: Exception):
-    """Мёртвые ошибки тихо проглатываем, остальные — в лог."""
     if _is_dead_interaction_error(ex):
         return
     logger.warning(f"{label}: {ex}")
@@ -84,15 +79,48 @@ def _has_components(view) -> bool:
         return False
 
 
+def _is_click_on_ephemeral(inter: disnake.MessageInteraction) -> bool:
+    """
+    True — если юзер кликнул на компонент ЭФЕМЕРНОГО сообщения.
+    Тогда нужно обновлять эту же эфемерку (type 6).
+    False — публичная панель → создать новое ephemeral (type 5).
+    """
+    try:
+        msg = inter.message
+        if msg is None:
+            return False
+        flags = getattr(msg, "flags", None)
+        if flags is None:
+            return False
+        return bool(getattr(flags, "ephemeral", False))
+    except Exception:
+        return False
+
+
 # ═══════════════════════════════════════════
 # БЕЗОПАСНЫЕ ОБЁРТКИ
 # ═══════════════════════════════════════════
 async def _safe_defer(inter, ephemeral: bool = True) -> bool:
+    """
+    Ключевая функция.
+
+    · Клик на публичную панель → defer(ephemeral=True, with_message=True)
+      = type 5, создаётся НОВОЕ ephemeral.
+    · Клик на эфемерку         → defer() без флагов
+      = type 6, ОБНОВЛЯЕТ ту же эфемерку.
+    """
     try:
         if inter.response.is_done():
             return True
-        await inter.response.defer(ephemeral=ephemeral)
+
+        if _is_click_on_ephemeral(inter):
+            # обновляем существующую эфемерку
+            await inter.response.defer()
+        else:
+            # создаём новую эфемерку из публичной панели
+            await inter.response.defer(ephemeral=ephemeral, with_message=True)
         return True
+
     except disnake.InteractionResponded:
         return True
     except Exception as ex:
@@ -101,7 +129,6 @@ async def _safe_defer(inter, ephemeral: bool = True) -> bool:
 
 
 async def _safe_edit_original(inter, **kwargs) -> bool:
-    """Пытается отредактировать исходный ответ. Главный способ."""
     try:
         await inter.edit_original_response(**kwargs)
         return True
@@ -111,7 +138,6 @@ async def _safe_edit_original(inter, **kwargs) -> bool:
 
 
 async def _safe_followup(inter, **kwargs) -> bool:
-    """Резервный способ. Стараемся не использовать без нужды."""
     try:
         fw = getattr(inter, "followup", None)
         if fw is None:
@@ -128,14 +154,15 @@ async def _safe_followup(inter, **kwargs) -> bool:
 # ═══════════════════════════════════════════
 async def _render_into_ephemeral(inter, buf, fname: str, view, flash: str = ""):
     """
-    Показывает картинку в ephemeral-сообщении.
-      1) Всегда сначала edit_original_response — работает после defer.
-      2) Если не получилось (например, edit устарел) — followup fallback.
+    1) Пробуем edit_original_response — после defer он всегда валиден:
+       · если был type 5 — редактирует новую эфемерку,
+       · если был type 6 — редактирует ту же эфемерку.
+    2) Fallback — followup (для модалок).
     """
     try:
         file = disnake.File(buf, filename=fname)
     except Exception as ex:
-        logger.warning(f"dcc render: file build: {ex}")
+        logger.warning(f"dcc render file: {ex}")
         return
 
     e = disnake.Embed(color=0x4dd0e1)
@@ -145,7 +172,6 @@ async def _render_into_ephemeral(inter, buf, fname: str, view, flash: str = ""):
 
     use_view = view if _has_components(view) else None
 
-    # 1) основной путь — edit_original_response
     ok = await _safe_edit_original(
         inter,
         content=None,
@@ -157,7 +183,6 @@ async def _render_into_ephemeral(inter, buf, fname: str, view, flash: str = ""):
     if ok:
         return
 
-    # 2) fallback — followup (только если edit провалился)
     await _safe_followup(
         inter,
         embed=e,
@@ -195,7 +220,6 @@ class DCCPanelView(View):
 
 
 class EmptyView(View):
-    """Пустая вью — передаём view=None, чтобы убрать прошлые селекты."""
     def __init__(self):
         super().__init__(timeout=300)
 
@@ -364,7 +388,7 @@ class StakeModal(Modal):
         except Exception:
             return await inter.response.send_message("❌ Введи число.", ephemeral=True)
 
-        # defer — теперь можно и edit_original, и followup
+        # Для модалок defer всегда без сюрпризов — отдельная эфемерка.
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
@@ -372,8 +396,8 @@ class StakeModal(Modal):
 
         r = await dcc.create_stake(inter.author.id, amount, self.days)
         if not r.get("ok"):
-            await _safe_edit_original(
-                inter, content=f"❌ {r.get('error')}"
+            await _safe_followup(
+                inter, content=f"❌ {r.get('error')}", ephemeral=True
             )
             return
 
