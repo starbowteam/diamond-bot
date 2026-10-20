@@ -286,30 +286,66 @@ async def update_review_counter(silent: bool = False):
 
 async def update_server_banner(review_count: int, silent: bool = False):
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw, ImageFont, ImageSequence
+        import io
 
         gif_paths = [
             os.path.join(ADD_DIR, "banner.gif"),
             os.path.join(ADD_DIR, "copy_5B91850B-07EB-4E52-8E1C-96BDDEDE928C.gif")
         ]
         
+        font_path = os.path.join(ADD_DIR, "Fredoka_One.ttf")
+        
+        # 1. Пробуем GIF с наложенным текстом
         for gif_path in gif_paths:
-            if os.path.exists(gif_path):
+            if os.path.exists(gif_path) and os.path.exists(font_path):
                 try:
                     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
                     if not guild:
-                        logger.warning("update_server_banner: guild not found")
                         return
 
-                    with open(gif_path, "rb") as f:
-                        gif_bytes = f.read()
+                    img = Image.open(gif_path)
+                    frames = []
+                    duration = img.info.get('duration', 100)
+                    
+                    # Проходим по каждому кадру
+                    for frame in ImageSequence.Iterator(img):
+                        frame = frame.convert("RGBA")
+                        draw = ImageDraw.Draw(frame)
+                        
+                        w, h = frame.size
+                        # Адаптивный размер шрифта (как в оригинальном PNG)
+                        font_size = int(h * 0.37)
+                        font = ImageFont.truetype(font_path, font_size)
+                        
+                        # Позиция как в banner.png (31% от левого края, по центру по вертикали)
+                        x = int(w * 0.31)
+                        y = int(h * 0.50)
+                        
+                        # Рисуем текст (с лёгкой тенью для читаемости на любом фоне)
+                        draw.text((x + 4, y + 4), str(review_count), font=font, fill=(0, 0, 0, 150), anchor="mm")
+                        draw.text((x, y), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
+                        
+                        # Конвертируем обратно в палитру для GIF
+                        frames.append(frame.convert("P", palette=Image.ADAPTIVE, colors=255))
 
+                    if not frames:
+                        raise Exception("Не удалось прочитать кадры GIF")
+
+                    # Сохраняем в буфер
+                    buf = io.BytesIO()
+                    frames[0].save(
+                        buf, format="GIF", save_all=True, append_images=frames[1:], 
+                        loop=img.info.get('loop', 0), duration=duration, disposal=2
+                    )
+                    gif_bytes = buf.getvalue()
+                    
                     if len(gif_bytes) > 10 * 1024 * 1024:
-                        logger.error(f"update_server_banner: {os.path.basename(gif_path)} > 10MB, пропускаем")
+                        logger.error("update_server_banner: GIF с текстом > 10MB, пропускаем")
                         continue
                     
                     await guild.edit(banner=gif_bytes)
-                    logger.info(f"✅ Баннер сервера обновлен (анимированный GIF: {os.path.basename(gif_path)})")
+                    logger.info(f"✅ Баннер сервера обновлен (GIF + текст): {os.path.basename(gif_path)}")
                     
                     if not silent:
                         await log_discord(
@@ -317,16 +353,16 @@ async def update_server_banner(review_count: int, silent: bool = False):
                             description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`",
                             color=0x00aaff
                         )
-                    return
+                    return  # Успех, выходим
                     
                 except disnake.HTTPException as e:
                     logger.warning(f"update_server_banner: не удалось загрузить GIF ({e}). Пробуем PNG.")
                 except Exception as e:
-                    logger.warning(f"update_server_banner: системная ошибка при загрузке GIF: {e}")
+                    logger.warning(f"update_server_banner: системная ошибка при обработке GIF: {e}")
 
+        # 2. Фолбэк: если GIF нет или не удалось обработать, генерируем PNG
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
-        font_path = os.path.join(ADD_DIR, "Fredoka_One.ttf")
 
         if not os.path.exists(base_path) or not os.path.exists(font_path):
             logger.warning("update_server_banner: banner.png или шрифт не найдены")
