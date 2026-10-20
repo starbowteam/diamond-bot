@@ -52,7 +52,6 @@ _REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
 
-# 👇 Награды за отзыв по уровню покупателя.
 REVIEW_REWARDS = {
     "bronze":    20,
     "silver":    35,
@@ -61,7 +60,7 @@ REVIEW_REWARDS = {
     "crystalis": 85,
     "pka":       100,
 }
-REVIEW_REWARD_DEFAULT = 15  # страховка для count == 0
+REVIEW_REWARD_DEFAULT = 15
 
 
 def get_review_reward(count: int) -> int:
@@ -91,7 +90,6 @@ _LAST_PAYOUT_DATE = None
 _LAST_REMINDER_DATE = None
 _LAST_BONUS_DATE = None
 
-# 👇 ID канала инвайт-панели адвайтеров
 ADVERTISER_PANEL_CHANNEL_ID = 1557405478890373210
 
 
@@ -296,7 +294,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
         
         font_path = os.path.join(ADD_DIR, "Fredoka_One.ttf")
         
-        # 1. Пробуем GIF с наложенным текстом
         for gif_path in gif_paths:
             if os.path.exists(gif_path) and os.path.exists(font_path):
                 try:
@@ -308,7 +305,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
                     original_frames = [frame.convert("RGBA") for frame in ImageSequence.Iterator(img)]
                     original_duration = img.info.get('duration', 100)
                     
-                    # Конфигурации для сжатия (от лучшего качества к худшему)
                     configs = [
                         {"w": 960, "h": 540, "colors": 128, "step": 1},
                         {"w": 960, "h": 540, "colors": 64,  "step": 1},
@@ -329,18 +325,15 @@ async def update_server_banner(review_count: int, silent: bool = False):
                                 continue
                                 
                             f = frame.copy()
-                            # Уменьшаем кадр
                             f.thumbnail((cfg["w"], cfg["h"]), Image.LANCZOS)
                             
                             draw = ImageDraw.Draw(f)
                             
-                            # Адаптивный шрифт и позиция
                             font_size = int(f.height * 0.37)
                             font = ImageFont.truetype(font_path, font_size)
                             x = int(f.width * 0.31)
                             y = int(f.height * 0.50)
                             
-                            # Рисуем текст с тенью
                             draw.text((x + 4, y + 4), str(review_count), font=font, fill=(0, 0, 0, 150), anchor="mm")
                             draw.text((x, y), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
                             
@@ -363,7 +356,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
                         if size_mb <= 9.5:
                             best_gif_bytes = gif_bytes
                             used_config = cfg
-                            break # Влезли в лимит, дальше не жмем
+                            break
 
                     if best_gif_bytes:
                         await guild.edit(banner=best_gif_bytes)
@@ -375,7 +368,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
                                 description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`\n> **Сжатие:** {used_config['w']}x{used_config['h']} ({used_config['colors']} цв.)",
                                 color=0x00aaff
                             )
-                        return # Успех
+                        return
                     else:
                         logger.error("update_server_banner: все варианты сжатия GIF весят > 9.5MB")
                     
@@ -384,7 +377,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
                 except Exception as e:
                     logger.exception(f"update_server_banner: ошибка при обработке GIF: {e}")
 
-        # 2. Фолбэк: PNG
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
 
@@ -414,7 +406,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
             )
 
     except Exception as e:
-        logger.exception("Banner update error: %s", e) %s", e)
+        logger.exception("Banner update error: %s", e)
 
 
 # ============================================================
@@ -651,7 +643,6 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"clan league init err: {e}")
 
-        # ─── Питомцы ───
         try:
             from pet import init_pet_league
             init_pet_league(bot)
@@ -659,7 +650,6 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"init pets: {e}")
 
-        # ─── Инвайт-панель адвайтеров ───
         try:
             from work import init_advertiser
             from work.views import AdvertiserPanelView, build_panel_embeds
@@ -699,7 +689,6 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"init advertiser: {e}")
 
-        # ─── Бонус-панель ───
         try:
             from bonus import init_bonus
             from bonus.views import BonusPanelView, build_panel_embeds as build_bonus_embeds
@@ -1312,17 +1301,14 @@ async def on_message(message: disnake.Message):
 
         new_count = counts[str(user_id)]
 
-        # 👇 1. Сначала обновляем роль покупателя по НОВОМУ счётчику.
         if isinstance(message.author, disnake.Member):
             try:
                 await update_user_roles(message.author, new_count, keep_pka=True)
             except Exception as e:
                 logger.exception(f"update roles: {e}")
 
-        # 👇 2. Награда — по новой роли
         reward = get_review_reward(new_count)
 
-        # 👇 3. Бонус от активного питомца (epic → +3% к отзывам)
         pet_mult = 1.0
         try:
             from pet.core import get_review_bonus
@@ -1338,7 +1324,6 @@ async def on_message(message: disnake.Message):
         except Exception as e:
             logger.exception(f"DC за отзыв: {e}")
 
-        # XP питомцам за отзыв
         try:
             from pet.core import add_pet_xp
             await add_pet_xp(user_id, 25, "review")
@@ -1440,7 +1425,6 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                     await on_voice_quest_hook(user_id, duration)
                 except Exception as e:
                     logger.warning(f"clan voice hook: {e}")
-                # XP питомцам за час в войсе
                 try:
                     from pet.core import add_pet_xp
                     hours = max(duration // 3600, 1)
