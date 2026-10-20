@@ -53,7 +53,6 @@ REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
 
 # 👇 Награды за отзыв по уровню покупателя.
-# Считаются по НОВОЙ роли (после пересчёта ролей на этом же отзыве).
 REVIEW_REWARDS = {
     "bronze":    20,
     "silver":    35,
@@ -66,17 +65,6 @@ REVIEW_REWARD_DEFAULT = 15  # страховка для count == 0
 
 
 def get_review_reward(count: int) -> int:
-    """
-    Размер награды за отзыв по числу отзывов (= по роли покупателя).
-
-    Переход с роли на роль — даём по НОВОЙ роли:
-      1–5   → bronze    → 20 DC
-      6–10  → silver    → 35 DC
-      11–15 → gold      → 55 DC
-      16–20 → diamond   → 75 DC
-      21–25 → crystalis → 85 DC
-      26+   → pka       → 100 DC
-    """
     if count >= 26: return REVIEW_REWARDS["pka"]
     if count >= 21: return REVIEW_REWARDS["crystalis"]
     if count >= 16: return REVIEW_REWARDS["diamond"]
@@ -297,16 +285,9 @@ async def update_review_counter(silent: bool = False):
 
 
 async def update_server_banner(review_count: int, silent: bool = False):
-    """
-    Обновляет баннер сервера.
-    Приоритет: GIF (banner.gif или скачанный файл) -> PNG.
-    Если сервер не поддерживает анимированные баннеры (нет буст lvl 3),
-    Discord вернет ошибку, и мы просто используем статичный баннер.
-    """
     try:
         from PIL import Image, ImageDraw, ImageFont
 
-        # 1. Проверяем наличие анимированного GIF-баннера
         gif_paths = [
             os.path.join(ADD_DIR, "banner.gif"),
             os.path.join(ADD_DIR, "copy_5B91850B-07EB-4E52-8E1C-96BDDEDE928C.gif")
@@ -336,15 +317,13 @@ async def update_server_banner(review_count: int, silent: bool = False):
                             description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`",
                             color=0x00aaff
                         )
-                    return  # Успешно вышли, если GIF загрузился
+                    return
                     
                 except disnake.HTTPException as e:
-                    # 403/50035 = нет буста 3 уровня или неверный формат
                     logger.warning(f"update_server_banner: не удалось загрузить GIF ({e}). Пробуем PNG.")
                 except Exception as e:
                     logger.warning(f"update_server_banner: системная ошибка при загрузке GIF: {e}")
 
-        # 2. Фолбэк: если GIF нет или не удалось загрузить, работаем по-старому с PNG
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
         font_path = os.path.join(ADD_DIR, "Fredoka_One.ttf")
@@ -417,16 +396,15 @@ async def daily_deal_task():
                 logger.info(f"Товар дня: {deal['item_data']['name']}")
                 try:
                     from bonus.core import announce_deal_change
-                    awaiturch announce_deal_change(bot, deal)
+                    await announce_deal_change(bot, deal)
                 except Exception as e:
                     logger.warning(f"deal announce: {e}")
     except Exception as e:
-        logger.exception(f"daily_deal_task error: {eases}")
+        logger.exception(f"daily_deal_task error: {e}")
 
 
-@tasks.l(boop(minotutes=)
-1)
-async def salary_adv   ance_task():
+@tasks.loop(minutes=1)
+async def salary_advance_task():
     await bot.wait_until_ready()
     try:
         await try_pay_advance()
@@ -455,7 +433,8 @@ async def unused_purchase_reminder_task():
         if _LAST_REMINDER_DATE == today:
             return
         _LAST_REMINDER_DATE = today
-        await check_unused_p except Exception as e:
+        await check_unused_purchases(bot)
+    except Exception as e:
         logger.exception(f"unused_purchase_reminder_task: {e}")
 
 
