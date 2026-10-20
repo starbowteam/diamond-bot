@@ -297,28 +297,83 @@ async def update_review_counter(silent: bool = False):
 
 
 async def update_server_banner(review_count: int, silent: bool = False):
+    """
+    Обновляет баннер сервера.
+    Приоритет: GIF (banner.gif или скачанный файл) -> PNG.
+    Если сервер не поддерживает анимированные баннеры (нет буст lvl 3),
+    Discord вернет ошибку, и мы просто используем статичный баннер.
+    """
     try:
         from PIL import Image, ImageDraw, ImageFont
+
+        # 1. Проверяем наличие анимированного GIF-баннера
+        gif_paths = [
+            os.path.join(ADD_DIR, "banner.gif"),
+            os.path.join(ADD_DIR, "copy_5B91850B-07EB-4E52-8E1C-96BDDEDE928C.gif")
+        ]
+        
+        for gif_path in gif_paths:
+            if os.path.exists(gif_path):
+                try:
+                    guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+                    if not guild:
+                        logger.warning("update_server_banner: guild not found")
+                        return
+
+                    with open(gif_path, "rb") as f:
+                        gif_bytes = f.read()
+
+                    if len(gif_bytes) > 10 * 1024 * 1024:
+                        logger.error(f"update_server_banner: {os.path.basename(gif_path)} > 10MB, пропускаем")
+                        continue
+                    
+                    await guild.edit(banner=gif_bytes)
+                    logger.info(f"✅ Баннер сервера обновлен (анимированный GIF: {os.path.basename(gif_path)})")
+                    
+                    if not silent:
+                        await log_discord(
+                            title="🖼️ Анимированный баннер обновлён",
+                            description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`",
+                            color=0x00aaff
+                        )
+                    return  # Успешно вышли, если GIF загрузился
+                    
+                except disnake.HTTPException as e:
+                    # 403/50035 = нет буста 3 уровня или неверный формат
+                    logger.warning(f"update_server_banner: не удалось загрузить GIF ({e}). Пробуем PNG.")
+                except Exception as e:
+                    logger.warning(f"update_server_banner: системная ошибка при загрузке GIF: {e}")
+
+        # 2. Фолбэк: если GIF нет или не удалось загрузить, работаем по-старому с PNG
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
         font_path = os.path.join(ADD_DIR, "Fredoka_One.ttf")
+
         if not os.path.exists(base_path) or not os.path.exists(font_path):
+            logger.warning("update_server_banner: banner.png или шрифт не найдены")
             return
+
         img = Image.open(base_path).convert("RGBA")
         draw = ImageDraw.Draw(img)
         font = ImageFont.truetype(font_path, 400)
         draw.text((594, 540), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
         img.save(output_path)
+
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
         if not guild:
             return
+
         with open(output_path, "rb") as f:
             await guild.edit(banner=f.read())
-        logger.info("Banner updated with %s reviews", review_count)
+
+        logger.info("Баннер обновлён (статичный PNG)")
         if not silent:
-            await log_discord(title="🖼️ Баннер обновлён",
-                              description=f"> **Количество отзывов:** `{review_count}`",
-                              color=0x00aaff)
+            await log_discord(
+                title="🖼️ Баннер обновлён",
+                description=f"> **Количество отзывов:** `{review_count}`",
+                color=0x00aaff
+            )
+
     except Exception as e:
         logger.exception("Banner update error: %s", e)
 
@@ -362,15 +417,16 @@ async def daily_deal_task():
                 logger.info(f"Товар дня: {deal['item_data']['name']}")
                 try:
                     from bonus.core import announce_deal_change
-                    await announce_deal_change(bot, deal)
+                    awaiturch announce_deal_change(bot, deal)
                 except Exception as e:
                     logger.warning(f"deal announce: {e}")
     except Exception as e:
-        logger.exception(f"daily_deal_task error: {e}")
+        logger.exception(f"daily_deal_task error: {eases}")
 
 
-@tasks.loop(minutes=1)
-async def salary_advance_task():
+@tasks.l(boop(minotutes=)
+1)
+async def salary_adv   ance_task():
     await bot.wait_until_ready()
     try:
         await try_pay_advance()
@@ -399,8 +455,7 @@ async def unused_purchase_reminder_task():
         if _LAST_REMINDER_DATE == today:
             return
         _LAST_REMINDER_DATE = today
-        await check_unused_purchases(bot)
-    except Exception as e:
+        await check_unused_p except Exception as e:
         logger.exception(f"unused_purchase_reminder_task: {e}")
 
 
@@ -557,7 +612,7 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"clan league init err: {e}")
 
-        # ─── 🐾 Питомцы ───
+        # ─── Питомцы ───
         try:
             from pet import init_pet_league
             init_pet_league(bot)
@@ -565,15 +620,7 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"init pets: {e}")
 
-        # ─── 💠 DCC+ ───
-        try:
-            from dccplus import init_dccplus
-            init_dccplus(bot)
-            logger.info("💠 DCC+ подключён")
-        except Exception as e:
-            logger.exception(f"init DCC+: {e}")
-
-        # ─── 📨 Инвайт-панель адвайтеров ───
+        # ─── Инвайт-панель адвайтеров ───
         try:
             from work import init_advertiser
             from work.views import AdvertiserPanelView, build_panel_embeds
@@ -613,7 +660,7 @@ async def on_ready():
         except Exception as e:
             logger.exception(f"init advertiser: {e}")
 
-        # ─── 🎁 Бонус-панель ───
+        # ─── Бонус-панель ───
         try:
             from bonus import init_bonus
             from bonus.views import BonusPanelView, build_panel_embeds as build_bonus_embeds
