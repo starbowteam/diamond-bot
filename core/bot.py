@@ -305,68 +305,79 @@ async def update_server_banner(review_count: int, silent: bool = False):
                         return
 
                     img = Image.open(gif_path)
-                    frames = []
-                    duration = img.info.get('duration', 100)
+                    original_frames = [frame.convert("RGBA") for frame in ImageSequence.Iterator(img)]
+                    original_duration = img.info.get('duration', 100)
                     
-                    # Discord требует соотношение 16:9. 
-                    # Если гифка больше, уменьшаем до 960x540 для экономии веса.
-                    target_w, target_h = 960, 540
+                    # Конфигурации для сжатия (от лучшего качества к худшему)
+                    configs = [
+                        {"w": 960, "h": 540, "colors": 128, "step": 1},
+                        {"w": 960, "h": 540, "colors": 64,  "step": 1},
+                        {"w": 960, "h": 540, "colors": 64,  "step": 2},
+                        {"w": 800, "h": 450, "colors": 64,  "step": 2},
+                        {"w": 640, "h": 360, "colors": 64,  "step": 2},
+                        {"w": 640, "h": 360, "colors": 32,  "step": 3},
+                        {"w": 480, "h": 270, "colors": 32,  "step": 3},
+                    ]
                     
-                    for frame in ImageSequence.Iterator(img):
-                        frame = frame.convert("RGBA")
-                        w, h = frame.size
-                        
-                        # Уменьшаем кадр, если он слишком большой
-                        if w > target_w or h > target_h:
-                            frame.thumbnail((target_w, target_h), Image.LANCZOS)
-                            w, h = frame.size
+                    best_gif_bytes = None
+                    used_config = None
 
-                        draw = ImageDraw.Draw(frame)
-                        
-                        # Адаптивный размер шрифта
-                        font_size = int(h * 0.37)
-                        font = ImageFont.truetype(font_path, font_size)
-                        
-                        # Позиция
-                        x = int(w * 0.31)
-                        y = int(h * 0.50)
-                        
-                        # Рисуем текст (с лёгкой тенью)
-                        draw.text((x + 4, y + 4), str(review_count), font=font, fill=(0, 0, 0, 150), anchor="mm")
-                        draw.text((x, y), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
-                        
-                        # Конвертируем в палитру для GIF
-                        frames.append(frame.convert("P", palette=Image.ADAPTIVE, colors=128))
+                    for cfg in configs:
+                        frames = []
+                        for i, frame in enumerate(original_frames):
+                            if i % cfg["step"] != 0:
+                                continue
+                                
+                            f = frame.copy()
+                            # Уменьшаем кадр
+                            f.thumbnail((cfg["w"], cfg["h"]), Image.LANCZOS)
+                            
+                            draw = ImageDraw.Draw(f)
+                            
+                            # Адаптивный шрифт и позиция
+                            font_size = int(f.height * 0.37)
+                            font = ImageFont.truetype(font_path, font_size)
+                            x = int(f.width * 0.31)
+                            y = int(f.height * 0.50)
+                            
+                            # Рисуем текст с тенью
+                            draw.text((x + 4, y + 4), str(review_count), font=font, fill=(0, 0, 0, 150), anchor="mm")
+                            draw.text((x, y), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
+                            
+                            frames.append(f.convert("P", palette=Image.ADAPTIVE, colors=cfg["colors"]))
 
-                    if not frames:
-                        raise Exception("Не удалось прочитать кадры GIF")
+                        if not frames:
+                            continue
 
-                    # Сохраняем в буфер с оптимизацией
-                    buf = io.BytesIO()
-                    frames[0].save(
-                        buf, format="GIF", save_all=True, append_images=frames[1:], 
-                        loop=0, duration=duration, optimize=True, disposal=2
-                    )
-                    gif_bytes = buf.getvalue()
-                    
-                    size_mb = len(gif_bytes) / (1024 * 1024)
-                    logger.info(f"Размер обработанного GIF: {size_mb:.2f} MB")
-                    
-                    if size_mb > 9.9:
-                        logger.error("update_server_banner: GIF с текстом > 10MB, пропускаем")
-                        continue
-                    
-                    # Пробуем загрузить
-                    await guild.edit(banner=gif_bytes)
-                    logger.info(f"✅ Баннер сервера обновлен (GIF + текст): {os.path.basename(gif_path)}")
-                    
-                    if not silent:
-                        await log_discord(
-                            title="🖼️ Анимированный баннер обновлён",
-                            description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`",
-                            color=0x00aaff
+                        buf = io.BytesIO()
+                        frames[0].save(
+                            buf, format="GIF", save_all=True, append_images=frames[1:], 
+                            loop=0, duration=original_duration * cfg["step"], 
+                            optimize=True, disposal=2
                         )
-                    return  # Успех
+                        gif_bytes = buf.getvalue()
+                        size_mb = len(gif_bytes) / (1024 * 1024)
+                        
+                        logger.info(f"Тест сжатия {cfg['w']}x{cfg['h']}, {cfg['colors']} цв., шаг {cfg['step']}: {size_mb:.2f} MB")
+                        
+                        if size_mb <= 9.5:
+                            best_gif_bytes = gif_bytes
+                            used_config = cfg
+                            break # Влезли в лимит, дальше не жмем
+
+                    if best_gif_bytes:
+                        await guild.edit(banner=best_gif_bytes)
+                        logger.info(f"✅ Баннер обновлён (GIF+текст, сжатие: {used_config['w']}x{used_config['h']}, шаг {used_config['step']})")
+                        
+                        if not silent:
+                            await log_discord(
+                                title="🖼️ Анимированный баннер обновлён",
+                                description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`\n> **Сжатие:** {used_config['w']}x{used_config['h']} ({used_config['colors']} цв.)",
+                                color=0x00aaff
+                            )
+                        return # Успех
+                    else:
+                        logger.error("update_server_banner: все варианты сжатия GIF весят > 9.5MB")
                     
                 except disnake.HTTPException as e:
                     logger.error(f"❌ Discord отклонил GIF: {e.text if hasattr(e, 'text') else e}")
@@ -403,7 +414,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
             )
 
     except Exception as e:
-        logger.exception("Banner update error: %s", e)
+        logger.exception("Banner update error: %s", e) %s", e)
 
 
 # ============================================================
