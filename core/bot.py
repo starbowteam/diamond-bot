@@ -308,42 +308,55 @@ async def update_server_banner(review_count: int, silent: bool = False):
                     frames = []
                     duration = img.info.get('duration', 100)
                     
-                    # Проходим по каждому кадру
+                    # Discord требует соотношение 16:9. 
+                    # Если гифка больше, уменьшаем до 960x540 для экономии веса.
+                    target_w, target_h = 960, 540
+                    
                     for frame in ImageSequence.Iterator(img):
                         frame = frame.convert("RGBA")
+                        w, h = frame.size
+                        
+                        # Уменьшаем кадр, если он слишком большой
+                        if w > target_w or h > target_h:
+                            frame.thumbnail((target_w, target_h), Image.LANCZOS)
+                            w, h = frame.size
+
                         draw = ImageDraw.Draw(frame)
                         
-                        w, h = frame.size
-                        # Адаптивный размер шрифта (как в оригинальном PNG)
+                        # Адаптивный размер шрифта
                         font_size = int(h * 0.37)
                         font = ImageFont.truetype(font_path, font_size)
                         
-                        # Позиция как в banner.png (31% от левого края, по центру по вертикали)
+                        # Позиция
                         x = int(w * 0.31)
                         y = int(h * 0.50)
                         
-                        # Рисуем текст (с лёгкой тенью для читаемости на любом фоне)
+                        # Рисуем текст (с лёгкой тенью)
                         draw.text((x + 4, y + 4), str(review_count), font=font, fill=(0, 0, 0, 150), anchor="mm")
                         draw.text((x, y), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
                         
-                        # Конвертируем обратно в палитру для GIF
-                        frames.append(frame.convert("P", palette=Image.ADAPTIVE, colors=255))
+                        # Конвертируем в палитру для GIF
+                        frames.append(frame.convert("P", palette=Image.ADAPTIVE, colors=128))
 
                     if not frames:
                         raise Exception("Не удалось прочитать кадры GIF")
 
-                    # Сохраняем в буфер
+                    # Сохраняем в буфер с оптимизацией
                     buf = io.BytesIO()
                     frames[0].save(
                         buf, format="GIF", save_all=True, append_images=frames[1:], 
-                        loop=img.info.get('loop', 0), duration=duration, disposal=2
+                        loop=0, duration=duration, optimize=True, disposal=2
                     )
                     gif_bytes = buf.getvalue()
                     
-                    if len(gif_bytes) > 10 * 1024 * 1024:
+                    size_mb = len(gif_bytes) / (1024 * 1024)
+                    logger.info(f"Размер обработанного GIF: {size_mb:.2f} MB")
+                    
+                    if size_mb > 9.9:
                         logger.error("update_server_banner: GIF с текстом > 10MB, пропускаем")
                         continue
                     
+                    # Пробуем загрузить
                     await guild.edit(banner=gif_bytes)
                     logger.info(f"✅ Баннер сервера обновлен (GIF + текст): {os.path.basename(gif_path)}")
                     
@@ -353,14 +366,14 @@ async def update_server_banner(review_count: int, silent: bool = False):
                             description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`",
                             color=0x00aaff
                         )
-                    return  # Успех, выходим
+                    return  # Успех
                     
                 except disnake.HTTPException as e:
-                    logger.warning(f"update_server_banner: не удалось загрузить GIF ({e}). Пробуем PNG.")
+                    logger.error(f"❌ Discord отклонил GIF: {e.text if hasattr(e, 'text') else e}")
                 except Exception as e:
-                    logger.warning(f"update_server_banner: системная ошибка при обработке GIF: {e}")
+                    logger.exception(f"update_server_banner: ошибка при обработке GIF: {e}")
 
-        # 2. Фолбэк: если GIF нет или не удалось обработать, генерируем PNG
+        # 2. Фолбэк: PNG
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
 
