@@ -500,7 +500,8 @@ def generate_receipt_png(
                font=_font(15), fill=value_color)
         cur_y += row_h
 
-    _info_row("Менеджер", f"@{manager_name}")
+    # Убрали менеджера, поставили статус
+    _info_row("Статус", "Заказ оформляется", GREEN)
     _info_row("Заказчик", f"@{customer_name}")
 
     d.line((info_in_x1, cur_y + 2, info_in_x2, cur_y + 2),
