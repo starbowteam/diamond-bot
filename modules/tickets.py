@@ -500,7 +500,6 @@ def generate_receipt_png(
                font=_font(15), fill=value_color)
         cur_y += row_h
 
-    # Убрали менеджера, поставили статус
     _info_row("Статус", "Заказ оформляется", GREEN)
     _info_row("Заказчик", f"@{customer_name}")
 
@@ -980,6 +979,7 @@ async def show_policy(inter: disnake.MessageInteraction):
 # ============================================================
 # БЛОК 4: КОДЕКС МАГАЗИНА
 # ============================================================
+# 👇 Employer (1471190371181789234) УДАЛЕН
 SALARY_ROLES = [
     {
         "role_id": 1471844291595731016,
@@ -1007,15 +1007,6 @@ SALARY_ROLES = [
         "salary": 1250,
         "color": (0x39, 0xf4, 0x7b),
         "icon": I_HAND,
-    },
-    {
-        "role_id": 1471190371181789234,
-        "name": "Employer",
-        "tag": "EMPLOY",
-        "advance": 450,
-        "salary": 1000,
-        "color": (0x5c, 0x5c, 0x5c),
-        "icon": I_USERS,
     },
     {
         "role_id": 1457964854441672806,
