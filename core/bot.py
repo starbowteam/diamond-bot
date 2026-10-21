@@ -19,7 +19,7 @@ from core.utils import (
     log_discord,
     BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR,
     get_dc_cache, save_dc_cache, sync_dc_to_json,
-    assign_ticket_manager, get_ticket_manager, get_ticket_owner, clear_ticket_manager,
+    get_ticket_owner, clear_ticket_manager,
     increment_manager_closed, add_manager_rating,
     add_closed_order
 )
@@ -62,7 +62,6 @@ REVIEW_REWARDS = {
 }
 REVIEW_REWARD_DEFAULT = 15
 
-
 def get_review_reward(count: int) -> int:
     if count >= 26: return REVIEW_REWARDS["pka"]
     if count >= 21: return REVIEW_REWARDS["crystalis"]
@@ -72,16 +71,12 @@ def get_review_reward(count: int) -> int:
     if count >= 1:  return REVIEW_REWARDS["bronze"]
     return REVIEW_REWARD_DEFAULT
 
-
 WELCOME_BONUS_DC = 50
-
 MSK = timezone(timedelta(hours=3))
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
-
 IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1556733201970626732/image.png?backend=b2&ex=6ac5e506&is=6ac49386&hm=574cd55b0658621f44bee53d8ed386f3b7e7372997e73326c327efef482daca5&"
 
 SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
@@ -92,17 +87,14 @@ _LAST_BONUS_DATE = None
 
 ADVERTISER_PANEL_CHANNEL_ID = 1557405478890373210
 
-
 # ============================================================
 # СОСТОЯНИЕ ЗАРПЛАТ
 # ============================================================
 def load_salary_state() -> dict:
     return load_json(SALARY_STATE_FILE, {"advance": "", "salary": ""})
 
-
 def save_salary_state(state: dict):
     save_json(SALARY_STATE_FILE, state)
-
 
 # ============================================================
 # ЗАРПЛАТЫ И АВАНСЫ
@@ -122,7 +114,6 @@ SALARY_ROLE_ORDER = [
     1471190371181789234,
     1457964854441672806,
 ]
-
 
 async def process_salary(mode: str):
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -195,7 +186,6 @@ async def process_salary(mode: str):
         color=0x00ff00
     )
 
-
 # ============================================================
 # CATCH-UP
 # ============================================================
@@ -216,7 +206,6 @@ async def try_pay_advance() -> bool:
     state["advance"] = month_key
     save_salary_state(state)
     return True
-
 
 async def try_pay_salary() -> bool:
     state = load_salary_state()
@@ -240,12 +229,10 @@ async def try_pay_salary() -> bool:
     save_salary_state(state)
     return True
 
-
 # ============================================================
 # БАННЕР / СЧЁТЧИК
 # ============================================================
 _banner_last_update = 0.0
-
 
 async def schedule_banner_update():
     global _banner_last_update
@@ -257,7 +244,6 @@ async def schedule_banner_update():
         await update_review_counter(silent=True)
     except Exception as e:
         logger.exception(f"schedule_banner_update error: {e}")
-
 
 async def update_review_counter(silent: bool = False):
     try:
@@ -280,7 +266,6 @@ async def update_review_counter(silent: bool = False):
                 description=f"> **Ошибка:** `{str(e)}`",
                 color=0xff0000
             )
-
 
 async def update_server_banner(review_count: int, silent: bool = False):
     try:
@@ -408,7 +393,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
     except Exception as e:
         logger.exception("Banner update error: %s", e)
 
-
 # ============================================================
 # ТАСКИ
 # ============================================================
@@ -416,7 +400,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
 async def review_counter_task():
     await bot.wait_until_ready()
     await update_review_counter(silent=False)
-
 
 @tasks.loop(minutes=1)
 async def daily_bonus_task():
@@ -434,7 +417,6 @@ async def daily_bonus_task():
         await daily_bonus()
     except Exception as e:
         logger.exception(f"daily_bonus_task: {e}")
-
 
 @tasks.loop(minutes=5)
 async def daily_deal_task():
@@ -454,7 +436,6 @@ async def daily_deal_task():
     except Exception as e:
         logger.exception(f"daily_deal_task error: {e}")
 
-
 @tasks.loop(minutes=1)
 async def salary_advance_task():
     await bot.wait_until_ready()
@@ -463,7 +444,6 @@ async def salary_advance_task():
     except Exception as e:
         logger.exception(f"salary_advance_task: {e}")
 
-
 @tasks.loop(minutes=1)
 async def salary_main_task():
     await bot.wait_until_ready()
@@ -471,7 +451,6 @@ async def salary_main_task():
         await try_pay_salary()
     except Exception as e:
         logger.exception(f"salary_main_task: {e}")
-
 
 @tasks.loop(minutes=1)
 async def unused_purchase_reminder_task():
@@ -489,7 +468,6 @@ async def unused_purchase_reminder_task():
     except Exception as e:
         logger.exception(f"unused_purchase_reminder_task: {e}")
 
-
 @tasks.loop(minutes=1)
 async def daily_activity_payout_task():
     global _LAST_PAYOUT_DATE
@@ -506,7 +484,6 @@ async def daily_activity_payout_task():
         await daily_activity_payout()
     except Exception as e:
         logger.exception(f"daily_activity_payout_task: {e}")
-
 
 # ============================================================
 # ON READY
@@ -528,9 +505,7 @@ async def on_ready():
             SelectView, CatalogTypeView, CatalogView,
             QuestionTicketView,
         )
-        from modules.tickets import (
-            RatingStep1View, RatingFinishView, ReceiptView,
-        )
+        from modules.tickets import ReceiptView
         from modules.commands_profile import (
             send_profile_panel, ProfilePanelView, ProfileCardView,
         )
@@ -548,12 +523,7 @@ async def on_ready():
         bot.add_view(SelectView())
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
-
-        bot.add_view(RatingStep1View())
-        bot.add_view(RatingFinishView())
-
         bot.add_view(ReceiptView())
-
         bot.add_view(TarologyView())
         bot.add_view(ProfilePanelView())
         bot.add_view(ProfileCardView())
@@ -776,38 +746,6 @@ async def keep_voice_alive():
 
 
 # ============================================================
-# ПЕРЕСТРОЙКА ПРАВ ТИКЕТА
-# ============================================================
-async def reassign_ticket_permissions(channel: disnake.TextChannel, manager: disnake.Member):
-    guild = channel.guild
-    for role_id in CONFIG["TICKET_MANAGE_ROLES"]:
-        role = guild.get_role(role_id)
-        if role:
-            await channel.set_permissions(role, overwrite=disnake.PermissionOverwrite(
-                view_channel=True, send_messages=False, read_message_history=True,
-                add_reactions=False, create_public_threads=False
-            ))
-    await channel.set_permissions(manager, overwrite=disnake.PermissionOverwrite(
-        view_channel=True, send_messages=True, read_message_history=True,
-        add_reactions=True, create_public_threads=True, embed_links=True, attach_files=True
-    ))
-    owner_id = get_ticket_owner(channel.id)
-    if owner_id:
-        owner = guild.get_member(owner_id)
-        if owner and owner.id != manager.id:
-            await channel.set_permissions(owner, overwrite=disnake.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True,
-                add_reactions=True, create_public_threads=True
-            ))
-    await log_discord(
-        title="🔐 Права тикета обновлены",
-        description=f"> **Тикет:** {channel.mention}\n> **Менеджер:** {manager.mention}",
-        color=0x00aaff,
-        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-    )
-
-
-# ============================================================
 # СОБЫТИЯ
 # ============================================================
 @bot.event
@@ -949,7 +887,6 @@ async def on_member_join(member: disnake.Member):
         color=0x00aaff
     )
 
-
 @bot.event
 async def on_member_remove(member: disnake.Member):
     guild = member.guild
@@ -978,7 +915,6 @@ async def on_member_remove(member: disnake.Member):
             color=0xff6600
         )
     db.commit()
-
 
 @bot.event
 async def on_member_update(before: disnake.Member, after: disnake.Member):
@@ -1044,12 +980,10 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
             color=0xffff00
         )
 
-
 @bot.event
 async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
     if payload.channel_id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         asyncio.create_task(schedule_banner_update())
-
 
 @bot.event
 async def on_message_delete(message: disnake.Message):
@@ -1066,7 +1000,6 @@ async def on_message_delete(message: disnake.Message):
         color=0xff6600
     )
 
-
 @bot.event
 async def on_bulk_message_delete(messages: List[disnake.Message]):
     if not messages:
@@ -1080,7 +1013,6 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
         description=f"> **Канал:** {channel.mention}\n> **Количество:** `{len(messages)}`",
         color=0xff6600
     )
-
 
 @bot.event
 async def on_message_edit(before: disnake.Message, after: disnake.Message):
@@ -1096,20 +1028,17 @@ async def on_message_edit(before: disnake.Message, after: disnake.Message):
         color=0xffff00
     )
 
-
 @bot.event
 async def on_guild_channel_create(channel: disnake.abc.GuildChannel):
     await log_discord(title="➕ Создан канал",
                       description=f"> **{channel.mention}** (`{channel.name}`)\n> **ID:** `{channel.id}`",
                       color=0x00ff00)
 
-
 @bot.event
 async def on_guild_channel_delete(channel: disnake.abc.GuildChannel):
     await log_discord(title="➖ Удалён канал",
                       description=f"> **{channel.name}**\n> **ID:** `{channel.id}`",
                       color=0xff0000)
-
 
 @bot.event
 async def on_guild_channel_update(before, after):
@@ -1118,13 +1047,11 @@ async def on_guild_channel_update(before, after):
                           description=f"> **{after.mention}**\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
                           color=0xffff00)
 
-
 @bot.event
 async def on_guild_role_create(role: disnake.Role):
     await log_discord(title="➕ Создана роль",
                       description=f"> **{role.mention}** (`{role.name}`)\n> **ID:** `{role.id}`",
                       color=0x00ff00)
-
 
 @bot.event
 async def on_guild_role_delete(role: disnake.Role):
@@ -1132,14 +1059,12 @@ async def on_guild_role_delete(role: disnake.Role):
                       description=f"> **{role.name}**\n> **ID:** `{role.id}`",
                       color=0xff0000)
 
-
 @bot.event
 async def on_guild_role_update(before: disnake.Role, after: disnake.Role):
     if before.name != after.name:
         await log_discord(title="✏️ Изменена роль",
                           description=f"> **{after.mention}**\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
                           color=0xffff00)
-
 
 @bot.event
 async def on_invite_create(invite: disnake.Invite):
@@ -1151,7 +1076,6 @@ async def on_invite_create(invite: disnake.Invite):
                       description=f"> **Код:** `{invite.code}`\n> **Создатель:** {invite.inviter.mention if invite.inviter else '?'}",
                       color=0x00aaff)
 
-
 @bot.event
 async def on_invite_delete(invite: disnake.Invite):
     db.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
@@ -1159,7 +1083,6 @@ async def on_invite_delete(invite: disnake.Invite):
     await log_discord(title="🗑️ Удалён инвайт",
                       description=f"> **Код:** `{invite.code}`",
                       color=0xff6600)
-
 
 @bot.event
 async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
@@ -1179,7 +1102,6 @@ async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
                 await payload.member.add_roles(role)
             except Exception as e:
                 logger.error(f"reaction role: {e}")
-
 
 @bot.event
 async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
@@ -1202,7 +1124,6 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
                 except Exception as e:
                     logger.error(f"reaction remove: {e}")
 
-
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
     try:
@@ -1211,36 +1132,12 @@ async def on_interaction(inter: disnake.MessageInteraction):
     except Exception as e:
         logger.warning(f"clan interaction err: {e}")
 
-
 @bot.event
 async def on_message(message: disnake.Message):
     if message.author.bot:
         return
 
     is_guild_text = isinstance(message.channel, disnake.TextChannel)
-
-    if is_guild_text and message.channel.category:
-        cat_id = message.channel.category.id
-        if cat_id in [CONFIG["TICKET_CATEGORY_ID"], CONFIG["PAID_CATEGORY_ID"], CONFIG["COINS_CATEGORY_ID"]]:
-            if get_ticket_manager(message.channel.id) is None:
-                owner_id = get_ticket_owner(message.channel.id)
-                if message.author.id != owner_id and any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in message.author.roles):
-                    assign_ticket_manager(message.channel.id, message.author.id)
-                    embed = disnake.Embed(
-                        title="✅ Менеджер назначен",
-                        description=f"> **Менеджер:** {message.author.mention}\n> **Тикет:** {message.channel.mention}",
-                        color=0x00ff00,
-                        timestamp=datetime.now(timezone.utc)
-                    )
-                    embed.set_image(url=IMG_STRIPE)
-                    await message.channel.send(embed=embed)
-                    await log_discord(
-                        title="📌 Менеджер назначен",
-                        description=f"> **Тикет:** {message.channel.mention}\n> **Менеджер:** {message.author.mention}",
-                        color=0x00aaff,
-                        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-                    )
-                    await reassign_ticket_permissions(message.channel, message.author)
 
     if is_guild_text:
         from modules.dc import add_message_dc
@@ -1394,7 +1291,6 @@ async def on_message(message: disnake.Message):
 
 
 voice_track = {}
-
 
 @bot.event
 async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceState, after: disnake.VoiceState):
