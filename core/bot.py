@@ -62,6 +62,7 @@ REVIEW_REWARDS = {
 }
 REVIEW_REWARD_DEFAULT = 15
 
+
 def get_review_reward(count: int) -> int:
     if count >= 26: return REVIEW_REWARDS["pka"]
     if count >= 21: return REVIEW_REWARDS["crystalis"]
@@ -70,6 +71,7 @@ def get_review_reward(count: int) -> int:
     if count >= 6:  return REVIEW_REWARDS["silver"]
     if count >= 1:  return REVIEW_REWARDS["bronze"]
     return REVIEW_REWARD_DEFAULT
+
 
 WELCOME_BONUS_DC = 50
 MSK = timezone(timedelta(hours=3))
@@ -87,14 +89,17 @@ _LAST_BONUS_DATE = None
 
 ADVERTISER_PANEL_CHANNEL_ID = 1557405478890373210
 
+
 # ============================================================
 # СОСТОЯНИЕ ЗАРПЛАТ
 # ============================================================
 def load_salary_state() -> dict:
     return load_json(SALARY_STATE_FILE, {"advance": "", "salary": ""})
 
+
 def save_salary_state(state: dict):
     save_json(SALARY_STATE_FILE, state)
+
 
 # ============================================================
 # ЗАРПЛАТЫ И АВАНСЫ
@@ -114,6 +119,7 @@ SALARY_ROLE_ORDER = [
     1471190371181789234,
     1457964854441672806,
 ]
+
 
 async def process_salary(mode: str):
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -186,6 +192,7 @@ async def process_salary(mode: str):
         color=0x00ff00
     )
 
+
 # ============================================================
 # CATCH-UP
 # ============================================================
@@ -206,6 +213,7 @@ async def try_pay_advance() -> bool:
     state["advance"] = month_key
     save_salary_state(state)
     return True
+
 
 async def try_pay_salary() -> bool:
     state = load_salary_state()
@@ -229,10 +237,12 @@ async def try_pay_salary() -> bool:
     save_salary_state(state)
     return True
 
+
 # ============================================================
 # БАННЕР / СЧЁТЧИК
 # ============================================================
 _banner_last_update = 0.0
+
 
 async def schedule_banner_update():
     global _banner_last_update
@@ -244,6 +254,7 @@ async def schedule_banner_update():
         await update_review_counter(silent=True)
     except Exception as e:
         logger.exception(f"schedule_banner_update error: {e}")
+
 
 async def update_review_counter(silent: bool = False):
     try:
@@ -267,18 +278,86 @@ async def update_review_counter(silent: bool = False):
                 color=0xff0000
             )
 
+
+def _process_banner_gif(gif_path: str, font_path: str, review_count: int):
+    """
+    Синхронная тяжёлая функция — запускается через asyncio.to_thread,
+    чтобы НЕ блокировать event loop.
+    Возвращает (gif_bytes, used_config) или (None, None).
+    """
+    from PIL import Image, ImageDraw, ImageFont, ImageSequence
+    import io
+
+    img = Image.open(gif_path)
+    original_frames = [frame.convert("RGBA") for frame in ImageSequence.Iterator(img)]
+    original_duration = img.info.get('duration', 100)
+
+    configs = [
+        {"w": 960, "h": 540, "colors": 128, "step": 1},
+        {"w": 960, "h": 540, "colors": 64,  "step": 1},
+        {"w": 960, "h": 540, "colors": 64,  "step": 2},
+        {"w": 800, "h": 450, "colors": 64,  "step": 2},
+        {"w": 640, "h": 360, "colors": 64,  "step": 2},
+        {"w": 640, "h": 360, "colors": 32,  "step": 3},
+        {"w": 480, "h": 270, "colors": 32,  "step": 3},
+    ]
+
+    for cfg in configs:
+        frames = []
+        for i, frame in enumerate(original_frames):
+            if i % cfg["step"] != 0:
+                continue
+
+            f = frame.copy()
+            f.thumbnail((cfg["w"], cfg["h"]), Image.LANCZOS)
+
+            draw = ImageDraw.Draw(f)
+
+            font_size = int(f.height * 0.37)
+            font = ImageFont.truetype(font_path, font_size)
+            x = int(f.width * 0.31)
+            y = int(f.height * 0.50)
+
+            draw.text((x + 4, y + 4), str(review_count), font=font, fill=(0, 0, 0, 150), anchor="mm")
+            draw.text((x, y), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
+
+            frames.append(f.convert("P", palette=Image.ADAPTIVE, colors=cfg["colors"]))
+
+        if not frames:
+            continue
+
+        buf = io.BytesIO()
+        frames[0].save(
+            buf, format="GIF", save_all=True, append_images=frames[1:],
+            loop=0, duration=original_duration * cfg["step"],
+            optimize=True, disposal=2
+        )
+        gif_bytes = buf.getvalue()
+        size_mb = len(gif_bytes) / (1024 * 1024)
+
+        logger.info(
+            f"Тест сжатия {cfg['w']}x{cfg['h']}, {cfg['colors']} цв., "
+            f"шаг {cfg['step']}: {size_mb:.2f} MB"
+        )
+
+        if size_mb <= 9.5:
+            return gif_bytes, cfg
+
+    return None, None
+
+
 async def update_server_banner(review_count: int, silent: bool = False):
     try:
-        from PIL import Image, ImageDraw, ImageFont, ImageSequence
+        from PIL import Image, ImageDraw, ImageFont
         import io
 
         gif_paths = [
             os.path.join(ADD_DIR, "banner.gif"),
             os.path.join(ADD_DIR, "copy_5B91850B-07EB-4E52-8E1C-96BDDEDE928C.gif")
         ]
-        
+
         font_path = os.path.join(ADD_DIR, "Fredoka_One.ttf")
-        
+
         for gif_path in gif_paths:
             if os.path.exists(gif_path) and os.path.exists(font_path):
                 try:
@@ -286,82 +365,41 @@ async def update_server_banner(review_count: int, silent: bool = False):
                     if not guild:
                         return
 
-                    img = Image.open(gif_path)
-                    original_frames = [frame.convert("RGBA") for frame in ImageSequence.Iterator(img)]
-                    original_duration = img.info.get('duration', 100)
-                    
-                    configs = [
-                        {"w": 960, "h": 540, "colors": 128, "step": 1},
-                        {"w": 960, "h": 540, "colors": 64,  "step": 1},
-                        {"w": 960, "h": 540, "colors": 64,  "step": 2},
-                        {"w": 800, "h": 450, "colors": 64,  "step": 2},
-                        {"w": 640, "h": 360, "colors": 64,  "step": 2},
-                        {"w": 640, "h": 360, "colors": 32,  "step": 3},
-                        {"w": 480, "h": 270, "colors": 32,  "step": 3},
-                    ]
-                    
-                    best_gif_bytes = None
-                    used_config = None
-
-                    for cfg in configs:
-                        frames = []
-                        for i, frame in enumerate(original_frames):
-                            if i % cfg["step"] != 0:
-                                continue
-                                
-                            f = frame.copy()
-                            f.thumbnail((cfg["w"], cfg["h"]), Image.LANCZOS)
-                            
-                            draw = ImageDraw.Draw(f)
-                            
-                            font_size = int(f.height * 0.37)
-                            font = ImageFont.truetype(font_path, font_size)
-                            x = int(f.width * 0.31)
-                            y = int(f.height * 0.50)
-                            
-                            draw.text((x + 4, y + 4), str(review_count), font=font, fill=(0, 0, 0, 150), anchor="mm")
-                            draw.text((x, y), str(review_count), font=font, fill=(255, 255, 255), anchor="mm")
-                            
-                            frames.append(f.convert("P", palette=Image.ADAPTIVE, colors=cfg["colors"]))
-
-                        if not frames:
-                            continue
-
-                        buf = io.BytesIO()
-                        frames[0].save(
-                            buf, format="GIF", save_all=True, append_images=frames[1:], 
-                            loop=0, duration=original_duration * cfg["step"], 
-                            optimize=True, disposal=2
-                        )
-                        gif_bytes = buf.getvalue()
-                        size_mb = len(gif_bytes) / (1024 * 1024)
-                        
-                        logger.info(f"Тест сжатия {cfg['w']}x{cfg['h']}, {cfg['colors']} цв., шаг {cfg['step']}: {size_mb:.2f} MB")
-                        
-                        if size_mb <= 9.5:
-                            best_gif_bytes = gif_bytes
-                            used_config = cfg
-                            break
+                    # 👇 Тяжёлая работа в ОТДЕЛЬНОМ ПОТОКЕ — event loop остаётся свободным
+                    best_gif_bytes, used_config = await asyncio.to_thread(
+                        _process_banner_gif, gif_path, font_path, review_count
+                    )
 
                     if best_gif_bytes:
                         await guild.edit(banner=best_gif_bytes)
-                        logger.info(f"✅ Баннер обновлён (GIF+текст, сжатие: {used_config['w']}x{used_config['h']}, шаг {used_config['step']})")
-                        
+                        logger.info(
+                            f"✅ Баннер обновлён (GIF+текст, сжатие: "
+                            f"{used_config['w']}x{used_config['h']}, шаг {used_config['step']})"
+                        )
+
                         if not silent:
                             await log_discord(
                                 title="🖼️ Анимированный баннер обновлён",
-                                description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`\n> **Сжатие:** {used_config['w']}x{used_config['h']} ({used_config['colors']} цв.)",
+                                description=(
+                                    f"> **Файл:** `{os.path.basename(gif_path)}`\n"
+                                    f"> **Количество отзывов:** `{review_count}`\n"
+                                    f"> **Сжатие:** {used_config['w']}x{used_config['h']} "
+                                    f"({used_config['colors']} цв.)"
+                                ),
                                 color=0x00aaff
                             )
                         return
                     else:
-                        logger.error("update_server_banner: все варианты сжатия GIF весят > 9.5MB")
-                    
+                        logger.error(
+                            "update_server_banner: все варианты сжатия GIF весят > 9.5MB"
+                        )
+
                 except disnake.HTTPException as e:
                     logger.error(f"❌ Discord отклонил GIF: {e.text if hasattr(e, 'text') else e}")
                 except Exception as e:
                     logger.exception(f"update_server_banner: ошибка при обработке GIF: {e}")
 
+        # Fallback — статичный PNG
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
 
@@ -393,6 +431,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
     except Exception as e:
         logger.exception("Banner update error: %s", e)
 
+
 # ============================================================
 # ТАСКИ
 # ============================================================
@@ -400,6 +439,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
 async def review_counter_task():
     await bot.wait_until_ready()
     await update_review_counter(silent=False)
+
 
 @tasks.loop(minutes=1)
 async def daily_bonus_task():
@@ -417,6 +457,7 @@ async def daily_bonus_task():
         await daily_bonus()
     except Exception as e:
         logger.exception(f"daily_bonus_task: {e}")
+
 
 @tasks.loop(minutes=5)
 async def daily_deal_task():
@@ -436,6 +477,7 @@ async def daily_deal_task():
     except Exception as e:
         logger.exception(f"daily_deal_task error: {e}")
 
+
 @tasks.loop(minutes=1)
 async def salary_advance_task():
     await bot.wait_until_ready()
@@ -444,6 +486,7 @@ async def salary_advance_task():
     except Exception as e:
         logger.exception(f"salary_advance_task: {e}")
 
+
 @tasks.loop(minutes=1)
 async def salary_main_task():
     await bot.wait_until_ready()
@@ -451,6 +494,7 @@ async def salary_main_task():
         await try_pay_salary()
     except Exception as e:
         logger.exception(f"salary_main_task: {e}")
+
 
 @tasks.loop(minutes=1)
 async def unused_purchase_reminder_task():
@@ -468,6 +512,7 @@ async def unused_purchase_reminder_task():
     except Exception as e:
         logger.exception(f"unused_purchase_reminder_task: {e}")
 
+
 @tasks.loop(minutes=1)
 async def daily_activity_payout_task():
     global _LAST_PAYOUT_DATE
@@ -484,6 +529,7 @@ async def daily_activity_payout_task():
         await daily_activity_payout()
     except Exception as e:
         logger.exception(f"daily_activity_payout_task: {e}")
+
 
 # ============================================================
 # ON READY
@@ -559,7 +605,8 @@ async def on_ready():
                         await update_user_roles(member, count, keep_pka=True)
                 logger.info(f"Роли обновлены для {len(counts)} пользователей")
 
-        await update_review_counter(silent=False)
+        # 👇 НЕ ждём — баннер обновится в фоне. Event loop не блокируется.
+        bot.loop.create_task(update_review_counter(silent=False))
 
         try:
             paid_advance = await try_pay_advance()
@@ -887,6 +934,7 @@ async def on_member_join(member: disnake.Member):
         color=0x00aaff
     )
 
+
 @bot.event
 async def on_member_remove(member: disnake.Member):
     guild = member.guild
@@ -915,6 +963,7 @@ async def on_member_remove(member: disnake.Member):
             color=0xff6600
         )
     db.commit()
+
 
 @bot.event
 async def on_member_update(before: disnake.Member, after: disnake.Member):
@@ -980,10 +1029,12 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
             color=0xffff00
         )
 
+
 @bot.event
 async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
     if payload.channel_id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         asyncio.create_task(schedule_banner_update())
+
 
 @bot.event
 async def on_message_delete(message: disnake.Message):
@@ -1000,6 +1051,7 @@ async def on_message_delete(message: disnake.Message):
         color=0xff6600
     )
 
+
 @bot.event
 async def on_bulk_message_delete(messages: List[disnake.Message]):
     if not messages:
@@ -1013,6 +1065,7 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
         description=f"> **Канал:** {channel.mention}\n> **Количество:** `{len(messages)}`",
         color=0xff6600
     )
+
 
 @bot.event
 async def on_message_edit(before: disnake.Message, after: disnake.Message):
@@ -1028,17 +1081,20 @@ async def on_message_edit(before: disnake.Message, after: disnake.Message):
         color=0xffff00
     )
 
+
 @bot.event
 async def on_guild_channel_create(channel: disnake.abc.GuildChannel):
     await log_discord(title="➕ Создан канал",
                       description=f"> **{channel.mention}** (`{channel.name}`)\n> **ID:** `{channel.id}`",
                       color=0x00ff00)
 
+
 @bot.event
 async def on_guild_channel_delete(channel: disnake.abc.GuildChannel):
     await log_discord(title="➖ Удалён канал",
                       description=f"> **{channel.name}**\n> **ID:** `{channel.id}`",
                       color=0xff0000)
+
 
 @bot.event
 async def on_guild_channel_update(before, after):
@@ -1047,11 +1103,13 @@ async def on_guild_channel_update(before, after):
                           description=f"> **{after.mention}**\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
                           color=0xffff00)
 
+
 @bot.event
 async def on_guild_role_create(role: disnake.Role):
     await log_discord(title="➕ Создана роль",
                       description=f"> **{role.mention}** (`{role.name}`)\n> **ID:** `{role.id}`",
                       color=0x00ff00)
+
 
 @bot.event
 async def on_guild_role_delete(role: disnake.Role):
@@ -1059,12 +1117,14 @@ async def on_guild_role_delete(role: disnake.Role):
                       description=f"> **{role.name}**\n> **ID:** `{role.id}`",
                       color=0xff0000)
 
+
 @bot.event
 async def on_guild_role_update(before: disnake.Role, after: disnake.Role):
     if before.name != after.name:
         await log_discord(title="✏️ Изменена роль",
                           description=f"> **{after.mention}**\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
                           color=0xffff00)
+
 
 @bot.event
 async def on_invite_create(invite: disnake.Invite):
@@ -1076,6 +1136,7 @@ async def on_invite_create(invite: disnake.Invite):
                       description=f"> **Код:** `{invite.code}`\n> **Создатель:** {invite.inviter.mention if invite.inviter else '?'}",
                       color=0x00aaff)
 
+
 @bot.event
 async def on_invite_delete(invite: disnake.Invite):
     db.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
@@ -1083,6 +1144,7 @@ async def on_invite_delete(invite: disnake.Invite):
     await log_discord(title="🗑️ Удалён инвайт",
                       description=f"> **Код:** `{invite.code}`",
                       color=0xff6600)
+
 
 @bot.event
 async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
@@ -1102,6 +1164,7 @@ async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
                 await payload.member.add_roles(role)
             except Exception as e:
                 logger.error(f"reaction role: {e}")
+
 
 @bot.event
 async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
@@ -1124,6 +1187,7 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
                 except Exception as e:
                     logger.error(f"reaction remove: {e}")
 
+
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
     try:
@@ -1131,6 +1195,7 @@ async def on_interaction(inter: disnake.MessageInteraction):
         await handle_clan_interaction(inter)
     except Exception as e:
         logger.warning(f"clan interaction err: {e}")
+
 
 @bot.event
 async def on_message(message: disnake.Message):
@@ -1291,6 +1356,7 @@ async def on_message(message: disnake.Message):
 
 
 voice_track = {}
+
 
 @bot.event
 async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceState, after: disnake.VoiceState):
