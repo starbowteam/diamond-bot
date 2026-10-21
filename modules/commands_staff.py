@@ -49,7 +49,6 @@ TICKET_PANEL_CHANNEL_ID = 1462136361711829053
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
-
 # ============================================================
 # ЭКОНОМИКА
 # ============================================================
@@ -656,41 +655,6 @@ async def _send_work_screen(inter: disnake.MessageInteraction, buf, fname: str):
             )
         except Exception:
             pass
-
-
-def _collect_staff_list(inter: disnake.MessageInteraction) -> list:
-    guild = inter.guild
-    sales_role = guild.get_role(1154757071330365490)
-    if not sales_role:
-        return []
-
-    rows = cur.execute(
-        "SELECT user_id, closed_tickets, total_rating, ratings_count "
-        "FROM manager_stats"
-    ).fetchall()
-    stats = {row["user_id"]: row for row in rows}
-
-    members = [m for m in guild.members if sales_role in m.roles and not m.bot]
-
-    data = []
-    for m in members:
-        s = stats.get(m.id)
-        closed = s["closed_tickets"] if s else 0
-        tr = s["total_rating"] if s else 0
-        rc = s["ratings_count"] if s else 0
-        data.append({
-            "user_id": m.id,
-            "user_name": m.display_name,
-            "closed_tickets": closed,
-            "total_rating": tr,
-            "ratings_count": rc,
-        })
-
-    data.sort(key=lambda x: (
-        -x["closed_tickets"],
-        -(x["total_rating"] / x["ratings_count"] if x["ratings_count"] else 0),
-    ))
-    return data
 
 
 class WorkSelect(disnake.ui.StringSelect):
