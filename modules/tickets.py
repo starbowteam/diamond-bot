@@ -1,24 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Единый модуль тикетов и счётов.
-
 Объединяет:
   · генерацию счёта на оплату (Pillow, 1800×1000)
   · Discord-View с селектом реквизитов
-  · флоу оценки менеджера + закрытие тикета
-  · Pillow-рендеры политики / оценки / отзыва
-  · Pillow-рендеры «Кодекса магазина» (зарплата / топ / правила)
-
-Импортируется как:
-    from modules.tickets import (
-        generate_receipt_png, generate_receipt_id,
-        ReceiptView,
-        show_rating_flow, show_dc_close, show_policy,
-        RatingStep1View, RatingFinishView,
-        render_work_salary, render_work_top, render_work_tickets,
-    )
+  · Pillow-рендеры политики
+  · Pillow-рендеры «Кодекса магазина» (зарплата / правила)
 """
-
 import asyncio
 import io
 import os
@@ -35,14 +23,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.utils import (
     ADD_DIR, CONFIG, logger, log_discord,
-    get_ticket_owner, get_ticket_manager,
+    get_ticket_owner,
     remove_ticket_owner,
-    save_ticket_review, get_ticket_review, clear_ticket_review,
-    clear_ticket_manager,
-    increment_manager_closed, add_closed_order, add_manager_rating,
     cur, db,
 )
-
 
 # ============================================================
 # ШРИФТЫ
@@ -53,7 +37,6 @@ FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
 _FONT_CACHE: dict = {}
 _FA_CACHE: dict = {}
 
-
 def _font(size: int):
     if size in _FONT_CACHE:
         return _FONT_CACHE[size]
@@ -63,7 +46,6 @@ def _font(size: int):
         f = ImageFont.load_default()
     _FONT_CACHE[size] = f
     return f
-
 
 def _fa(size: int):
     if size in _FA_CACHE:
@@ -76,7 +58,6 @@ def _fa(size: int):
             pass
     _FA_CACHE[size] = f
     return f
-
 
 # ============================================================
 # ПАЛИТРА
@@ -121,7 +102,6 @@ IMG_STRIPE = (
     "hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 )
 
-
 # ============================================================
 # FA5-ИКОНКИ
 # ============================================================
@@ -135,7 +115,6 @@ I_USERS      = 0xf0c0
 I_USER       = 0xf007
 I_USER_TIE   = 0xf508
 I_HAND       = 0xf4c0
-I_HAND_PTR   = 0xf25a
 I_CHART      = 0xf201
 I_CLOCK      = 0xf017
 I_LIST       = 0xf03a
@@ -157,21 +136,15 @@ I_BRIEFCASE  = 0xf0b1
 I_CALENDAR   = 0xf133
 I_BOOK       = 0xf02d
 I_GAVEL      = 0xf0e3
-
-# счёт
 I_RECEIPT    = 0xf543
 I_BUILDING   = 0xf19c
 I_MOBILE     = 0xf3cd
 I_CREDIT     = 0xf09d
-
-# оценка / политика
 I_BAN        = 0xf05e
 I_ROTATE     = 0xf2ea
 I_BOX        = 0xf466
 I_HEAD       = 0xf590
 I_COMMENTS   = 0xf086
-
-# кодекс
 I_MIC        = 0xf130
 I_DICE       = 0xf522
 I_MOUSE      = 0xf8cc
@@ -181,17 +154,14 @@ I_DICE5      = 0xf523
 I_SACK       = 0xf81d
 I_MONEY      = 0xf53a
 
-
 # ============================================================
 # ОБЩИЕ УТИЛИТЫ
 # ============================================================
 MSK = timezone(timedelta(hours=3))
 
-
 def _tw(d, text, font):
     b = d.textbbox((0, 0), text, font=font)
     return b[2] - b[0]
-
 
 def _ellipsis(d, text, font, max_w):
     if _tw(d, text, font) <= max_w:
@@ -200,7 +170,6 @@ def _ellipsis(d, text, font, max_w):
     while t and _tw(d, t + "…", font) > max_w:
         t = t[:-1]
     return t + "…"
-
 
 def _wrap(d, text, font, max_w, max_lines=4):
     words = (text or "").split()
@@ -221,13 +190,11 @@ def _wrap(d, text, font, max_w, max_lines=4):
         lines.append(cur)
     return lines or [""]
 
-
 def _fmt(n) -> str:
     try:
         return f"{int(n):,}".replace(",", " ")
     except Exception:
         return str(n)
-
 
 def _draw_icon(d, cx, cy, code, size, color):
     f = _fa(size)
@@ -237,7 +204,6 @@ def _draw_icon(d, cx, cy, code, size, color):
         d.text((cx, cy), chr(code), font=f, fill=color, anchor="mm")
     except Exception:
         pass
-
 
 def _alpha_fill(base, box, color, alpha=30, radius=0):
     x1, y1, x2, y2 = box
@@ -251,7 +217,6 @@ def _alpha_fill(base, box, color, alpha=30, radius=0):
     else:
         ld.rectangle((0, 0, w - 1, h - 1), fill=color + (alpha,))
     base.paste(layer, (x1, y1), layer)
-
 
 def _gradient_box(base, box, c1, c2, alpha=30, radius=0, horizontal=True):
     x1, y1, x2, y2 = box
@@ -278,7 +243,6 @@ def _gradient_box(base, box, c1, c2, alpha=30, radius=0, horizontal=True):
         layer.putalpha(alpha_ch)
     base.paste(layer, (x1, y1), layer)
 
-
 def _draw_stack_panel(base, d, box, radius=22):
     x1, y1, x2, y2 = box
     _alpha_fill(base, (x1 + 12, y1 + 12, x2 + 12, y2 + 12),
@@ -289,7 +253,6 @@ def _draw_stack_panel(base, d, box, radius=22):
                         fill=STACK_BG + (255,),
                         outline=STACK_BRD + (255,), width=3)
 
-
 def _lighten(c, amount: float = 0.4):
     amount = max(0.0, min(1.0, amount))
     return (
@@ -298,9 +261,7 @@ def _lighten(c, amount: float = 0.4):
         min(int(c[2] + (255 - c[2]) * amount), 255),
     )
 
-
 _ALLOWED_SPECIAL = set("—–‑‒―“”«»„‘’…№·•▪●◆◇■□")
-
 
 def _sanitize(text: str, fallback: str = "") -> str:
     if not text:
@@ -321,10 +282,8 @@ def _sanitize(text: str, fallback: str = "") -> str:
         result = result.replace("  ", " ")
     return result or fallback
 
-
 def _now_msk_str() -> str:
     return datetime.now(MSK).strftime("%d.%m.%Y %H:%M")
-
 
 # ============================================================
 # КАРКАС
@@ -334,12 +293,7 @@ M = 14
 PAD_X = 40
 PAD_Y = 40
 
-
 def _base_canvas(user_id: int, uid_label: str, status_label: Optional[str] = None):
-    """
-    status_label=None  → показываем «UID · {user_id}» (work-панели)
-    status_label=строка → показываем её (tickets-панели)
-    """
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), BG + (255,))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle(
@@ -383,7 +337,6 @@ def _base_canvas(user_id: int, uid_label: str, status_label: Optional[str] = Non
 
     return img, d
 
-
 def _draw_footer(d, left_text: str, page: str):
     y = CANVAS_H - M - PAD_Y + 6
     d.line((PAD_X, y - 10, CANVAS_W - M - PAD_X, y - 10),
@@ -393,7 +346,6 @@ def _draw_footer(d, left_text: str, page: str):
     pw = _tw(d, page, _font(15))
     d.text((CANVAS_W - M - PAD_X - pw, y), page, font=_font(15), fill=DIM)
 
-
 def _draw_right_head(d, x1, y1, x2, title: str, sub: str):
     d.rounded_rectangle((x1, y1 + 4, x1 + 6, y1 + 50), radius=3,
                         fill=SILVER + (255,))
@@ -402,9 +354,8 @@ def _draw_right_head(d, x1, y1, x2, title: str, sub: str):
     d.text((x2 - sub_w, y1 + 20), sub.upper(), font=_font(15), fill=MUTED)
     d.line((x1, y1 + 66, x2, y1 + 66), fill=STACK_HDR + (255,), width=2)
 
-
 # ============================================================
-# БЛОК 1: СЧЁТ (Pillow) — из receipt.py
+# БЛОК 1: СЧЁТ (Pillow)
 # ============================================================
 REQUISITES = [
     ("Т-Банк",     "2200 7020 8029 9345", I_BUILDING),
@@ -412,7 +363,6 @@ REQUISITES = [
     ("ОзонБанк",   "2204 3204 4881 5151", I_BUILDING),
     ("СБП",        "+7 983 694 76 41",    I_MOBILE),
 ]
-
 
 def generate_receipt_png(
     manager_name: str,
@@ -725,13 +675,11 @@ def generate_receipt_png(
     logger.info(f"Счёт сгенерирован: {order_id} · {total} Р")
     return buf
 
-
 def generate_receipt_id() -> str:
     return f"D-{int(time.time())}-{random.randint(100, 999)}"
 
-
 # ============================================================
-# БЛОК 2: VIEW СЧЁТА — из receipt_view.py
+# БЛОК 2: VIEW СЧЁТА
 # ============================================================
 EMOJI_BANKS = PartialEmoji(name="banks", id=1556311895106003075)
 EMOJI_PHONE = PartialEmoji(name="phone", id=1556311870627905657)
@@ -770,7 +718,6 @@ REQ_OPTIONS = {
         "type": "Карта",
     },
 }
-
 
 class ReceiptSelect(Select):
     def __init__(self):
@@ -821,18 +768,15 @@ class ReceiptSelect(Select):
         except Exception as e:
             logger.warning(f"ReceiptSelect send req {key}: {e}")
 
-
 class ReceiptView(View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(ReceiptSelect())
 
-
 # ============================================================
-# БЛОК 3: РЕНДЕРЫ ТИКЕТОВ — из tickets_render.py
+# БЛОК 3: РЕНДЕРЫ ТИКЕТОВ (Политика)
 # ============================================================
 REVIEW_CHANNEL_NAME = "отзывы"
-
 
 def _draw_policy_block(img, d, x, y, w, h, color, icon_code, title, text):
     border = tuple(min(int(c + (255 - c) * 0.25), 255) for c in color)
@@ -863,7 +807,6 @@ def _draw_policy_block(img, d, x, y, w, h, color, icon_code, title, text):
     for i, line in enumerate(lines):
         d.text((tx, text_y + i * 22), line, font=text_font, fill=TEXT_SOFT)
 
-
 def _draw_left_block(img, d, x, y, w, h, color, icon_code, label, value):
     border = tuple(min(int(c + (255 - c) * 0.25), 255) for c in color)
     light = tuple(min(int(c + (255 - c) * 0.45), 255) for c in color)
@@ -892,9 +835,7 @@ def _draw_left_block(img, d, x, y, w, h, color, icon_code, label, value):
     val_shown = _ellipsis(d, value, val_font, max_w)
     d.text((tx, y + 44), val_shown, font=val_font, fill=color)
 
-
 def _draw_left_panel_rating(img, d, box, top_icon, top_label, top_value, blocks):
-    """Левая панель для tickets-экранов (rating/policy)."""
     _draw_stack_panel(img, d, box, radius=22)
     x1, y1, x2, y2 = box
     pad = 28
@@ -934,109 +875,6 @@ def _draw_left_panel_rating(img, d, box, top_icon, top_label, top_value, blocks)
                 img, d, x1 + pad, by1, (x2 - pad) - (x1 + pad), bb_h,
                 blk["color"], blk["icon"], blk["label"], blk["value"],
             )
-
-
-def _draw_review_hero(img, d, rx1, rx2, hero_y1, hero_y2, has_review: bool):
-    main_color = GREEN if has_review else PURPLE
-    _gradient_box(img, (rx1, hero_y1, rx2, hero_y2),
-                  main_color, main_color, alpha=18, radius=20)
-    d.rounded_rectangle((rx1, hero_y1, rx2, hero_y2),
-                        radius=20, outline=main_color + (200,), width=3)
-
-    cx = (rx1 + rx2) // 2
-    cy = (hero_y1 + hero_y2) // 2
-
-    tag_text = "ОТЗЫВ ОСТАВЛЕН" if has_review else "ФИНАЛЬНЫЙ ШАГ"
-    tag_font = _font(14)
-    tag_text_w = _tw(d, tag_text, tag_font)
-    tag_pad = 30
-    icon_size_tag = 16
-    gap_icon_text = 12
-    tag_w = tag_text_w + tag_pad * 2 + icon_size_tag + gap_icon_text
-    tag_h = 38
-    tag_x = cx - tag_w // 2
-    tag_y = cy - 190
-
-    _alpha_fill(img, (tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
-                main_color, alpha=60, radius=tag_h // 2)
-    d.rounded_rectangle((tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
-                        radius=tag_h // 2, outline=main_color + (220,), width=2)
-
-    icon_cx = tag_x + tag_pad + icon_size_tag // 2
-    icon_cy = tag_y + tag_h // 2
-    _draw_icon(d, icon_cx, icon_cy,
-               I_CHECK if has_review else I_COMMENTS, icon_size_tag, main_color)
-
-    d.text((icon_cx + icon_size_tag // 2 + gap_icon_text, icon_cy),
-           tag_text, font=tag_font, fill=main_color, anchor="lm")
-
-    title_text = "Всё готово — можно закрывать" if has_review else "Напиши отзыв о заказе"
-    title_font = _font(30)
-    tw = _tw(d, title_text, title_font)
-    d.text((cx - tw // 2, tag_y + tag_h + 22), title_text,
-           font=title_font, fill=TEXT)
-
-    pill_y = tag_y + tag_h + 92
-    pill_h = 60
-    pill_icon_size = 34
-    pill_pad = 20
-    pill_gap = 14
-
-    channel_text = REVIEW_CHANNEL_NAME
-    channel_font = _font(24)
-    channel_text_w = _tw(d, channel_text, channel_font)
-
-    pill_w = pill_pad * 2 + pill_icon_size + pill_gap + channel_text_w
-    pill_x = cx - pill_w // 2
-
-    _alpha_fill(img, (pill_x, pill_y, pill_x + pill_w, pill_y + pill_h),
-                main_color, alpha=30, radius=14)
-    d.rounded_rectangle((pill_x, pill_y, pill_x + pill_w, pill_y + pill_h),
-                        radius=14, outline=main_color + (200,), width=2)
-
-    ib_x = pill_x + pill_pad
-    ib_y = pill_y + (pill_h - pill_icon_size) // 2
-
-    _alpha_fill(img, (ib_x, ib_y, ib_x + pill_icon_size, ib_y + pill_icon_size),
-                main_color, alpha=65, radius=10)
-    d.rounded_rectangle((ib_x, ib_y, ib_x + pill_icon_size, ib_y + pill_icon_size),
-                        radius=10, outline=main_color + (230,), width=2)
-    _draw_icon(d, ib_x + pill_icon_size // 2, ib_y + pill_icon_size // 2 + 1,
-               I_GEM, 18, main_color)
-
-    d.text((ib_x + pill_icon_size + pill_gap, pill_y + pill_h // 2),
-           channel_text, font=channel_font, fill=main_color, anchor="lm")
-
-    if has_review:
-        sub_text = "Отзыв найден — нажми кнопку ниже, чтобы завершить заказ"
-    else:
-        sub_text = "Пара тёплых слов о работе — за одобренный отзыв начислим +15 DC"
-    sub_font = _font(16)
-    sub_lines = _wrap(d, sub_text, sub_font, rx2 - rx1 - 80, max_lines=2)
-    sub_y = pill_y + pill_h + 26
-    for i, line in enumerate(sub_lines):
-        lw = _tw(d, line, sub_font)
-        d.text((cx - lw // 2, sub_y + i * 26), line, font=sub_font, fill=TEXT_SOFT)
-
-    if not has_review:
-        hint_text = "Без отзыва тикет не закроется"
-        hint_font = _font(15)
-        hint_text_w = _tw(d, hint_text, hint_font)
-        hint_icon_size = 18
-        hint_gap = 12
-        hint_w = hint_text_w + hint_icon_size + hint_gap + 40
-        hint_h = 40
-        hint_x = cx - hint_w // 2
-        hint_y = sub_y + len(sub_lines) * 26 + 22
-
-        _alpha_fill(img, (hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
-                    main_color, alpha=25, radius=hint_h // 2)
-        d.rounded_rectangle((hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
-                            radius=hint_h // 2, outline=main_color + (130,), width=2)
-        _draw_icon(d, hint_x + 20, hint_y + hint_h // 2, I_INFO, hint_icon_size, main_color)
-        d.text((hint_x + 20 + hint_icon_size // 2 + hint_gap, hint_y + hint_h // 2),
-               hint_text, font=hint_font, fill=TEXT_SOFT, anchor="lm")
-
 
 def render_policy(user_id: int) -> io.BytesIO:
     img, d = _base_canvas(user_id, "политика магазина", "действует с 26.07.26")
@@ -1114,232 +952,32 @@ def render_policy(user_id: int) -> io.BytesIO:
     buf.seek(0)
     return buf
 
+async def show_policy(inter: disnake.MessageInteraction):
+    if not inter.response.is_done():
+        try:
+            await inter.response.defer(ephemeral=True)
+        except Exception:
+            pass
 
-def render_rating_step1(user_id: int, manager_name: str,
-                        product_name: str, order_id: int) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "оценка · менеджер", "шаг 1 из 2")
-
-    body_y = 140
-    body_h = CANVAS_H - M - PAD_Y - body_y - 26
-
-    left_w = 460
-    gap = 30
-    left_x1 = PAD_X
-    left_x2 = left_x1 + left_w
-    right_x1 = left_x2 + gap
-    right_x2 = CANVAS_W - M - PAD_X
-
-    _draw_left_panel_rating(
-        img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        top_icon=I_HEAD, top_label="Менеджер", top_value=f"@{manager_name}",
-        blocks=[
-            {"color": SILVER, "icon": I_BOX,    "label": "Товар",         "value": product_name},
-            {"color": GREEN,  "icon": I_CHECK,  "label": "Статус заказа", "value": "Выполнен"},
-            {"color": BLUE,   "icon": I_CLOCK,  "label": "Номер заказа",  "value": f"#{order_id}"},
-        ],
-    )
-
-    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
-    rx1 = right_x1 + 30
-    rx2 = right_x2 - 30
-
-    _draw_right_head(d, rx1, body_y + 22, rx2,
-                     "Оцени работу", "шаг 1 из 2")
-
-    hero_y1 = body_y + 118
-    hero_y2 = body_y + body_h - 22
-    hero_h = hero_y2 - hero_y1
-
-    _gradient_box(img, (rx1, hero_y1, rx2, hero_y2),
-                  GOLD, GOLD, alpha=18, radius=20)
-    d.rounded_rectangle((rx1, hero_y1, rx2, hero_y2),
-                        radius=20, outline=GOLD + (180,), width=3)
-
-    cx = (rx1 + rx2) // 2
-    cy = (hero_y1 + hero_y2) // 2
-
-    tag_text = "ОЦЕНКА МЕНЕДЖЕРА"
-    tag_font = _font(14)
-    tag_text_w = _tw(d, tag_text, tag_font)
-    tag_pad = 30
-    icon_size_tag = 16
-    gap_icon_text = 12
-    tag_w = tag_text_w + tag_pad * 2 + icon_size_tag + gap_icon_text
-    tag_h = 38
-    tag_x = cx - tag_w // 2
-    tag_y = cy - 180
-
-    _alpha_fill(img, (tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
-                GOLD, alpha=55, radius=tag_h // 2)
-    d.rounded_rectangle((tag_x, tag_y, tag_x + tag_w, tag_y + tag_h),
-                        radius=tag_h // 2, outline=GOLD + (200,), width=2)
-
-    icon_cx = tag_x + tag_pad + icon_size_tag // 2
-    icon_cy = tag_y + tag_h // 2
-    _draw_icon(d, icon_cx, icon_cy, I_STAR, icon_size_tag, GOLD)
-
-    d.text((icon_cx + icon_size_tag // 2 + gap_icon_text, icon_cy),
-           tag_text, font=tag_font, fill=GOLD, anchor="lm")
-
-    title_text = "Как прошёл заказ?"
-    title_font = _font(32)
-    tw = _tw(d, title_text, title_font)
-    d.text((cx - tw // 2, tag_y + tag_h + 22), title_text,
-           font=title_font, fill=TEXT)
-
-    sub_text = "Твоя оценка пойдёт в рейтинг менеджера"
-    sub_font = _font(16)
-    sw = _tw(d, sub_text, sub_font)
-    d.text((cx - sw // 2, tag_y + tag_h + 66), sub_text,
-           font=sub_font, fill=MUTED)
-
-    star_size = 110
-    star_gap = 32
-    star_y = tag_y + tag_h + 130
-    total_stars_w = star_size * 5 + star_gap * 4
-    star_x_start = cx - total_stars_w // 2
-
-    for i in range(5):
-        sx1 = star_x_start + i * (star_size + star_gap)
-        sy1 = star_y
-
-        _gradient_box(img, (sx1, sy1, sx1 + star_size, sy1 + star_size),
-                      GOLD, GOLD, alpha=50, radius=24)
-        d.rounded_rectangle((sx1, sy1, sx1 + star_size, sy1 + star_size),
-                            radius=24, outline=GOLD + (220,), width=3)
-        _draw_icon(d, sx1 + star_size // 2, sy1 + star_size // 2 - 8,
-                   I_STAR, 52, GOLD)
-
-        num_text = str(i + 1)
-        nw = _tw(d, num_text, _font(16))
-        d.text((sx1 + star_size // 2 - nw // 2, sy1 + star_size - 28),
-               num_text, font=_font(16), fill=GOLD)
-
-    hint_y = star_y + star_size + 26
-    hint_text = "Нажми на кнопку ниже — откроется форма оценки"
-    hint_font = _font(15)
-    hint_text_w = _tw(d, hint_text, hint_font)
-    hint_icon_size = 18
-    hint_gap = 12
-    hint_w = hint_text_w + hint_icon_size + hint_gap + 40
-    hint_h = 40
-    hint_x = cx - hint_w // 2
-
-    _alpha_fill(img, (hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
-                GOLD, alpha=25, radius=hint_h // 2)
-    d.rounded_rectangle((hint_x, hint_y, hint_x + hint_w, hint_y + hint_h),
-                        radius=hint_h // 2, outline=GOLD + (130,), width=2)
-    _draw_icon(d, hint_x + 20, hint_y + hint_h // 2, I_HAND_PTR, hint_icon_size, GOLD)
-    d.text((hint_x + 20 + hint_icon_size // 2 + hint_gap, hint_y + hint_h // 2),
-           hint_text, font=hint_font, fill=TEXT_SOFT, anchor="lm")
-
-    _draw_footer(d, f"Оценка менеджера · данные на {_now_msk_str()} МСК", "оценка · шаг 1")
-
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
-
-def render_rating_step2(user_id: int, manager_name: str,
-                        rating: int, has_review: bool = False) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "отзыв · канал", "шаг 2 из 2")
-
-    body_y = 140
-    body_h = CANVAS_H - M - PAD_Y - body_y - 26
-
-    left_w = 460
-    gap = 30
-    left_x1 = PAD_X
-    left_x2 = left_x1 + left_w
-    right_x1 = left_x2 + gap
-    right_x2 = CANVAS_W - M - PAD_X
-
-    _draw_left_panel_rating(
-        img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        top_icon=I_CHECK if has_review else I_COMMENTS,
-        top_label="Статус",
-        top_value="Отзыв оставлен" if has_review else "Ждём отзыв",
-        blocks=[
-            {"color": PURPLE, "icon": I_COMMENTS, "label": "Следующий шаг", "value": "Отзыв в канале"},
-            {"color": GOLD,   "icon": I_GIFT,     "label": "Бонус за отзыв", "value": "+15 DC"},
-            {"color": GREEN if has_review else SILVER,
-             "icon": I_CHECK,
-             "label": "Проверка отзыва",
-             "value": "Готово" if has_review else "Ожидание"},
-        ],
-    )
-
-    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
-    rx1 = right_x1 + 30
-    rx2 = right_x2 - 30
-
-    _draw_right_head(d, rx1, body_y + 22, rx2,
-                     "Оставь отзыв", "шаг 2 из 2")
-
-    hero_y1 = body_y + 118
-    hero_y2 = body_y + body_h - 22
-
-    _draw_review_hero(img, d, rx1, rx2, hero_y1, hero_y2, has_review)
-
-    _draw_footer(d, f"Отзыв в канале · данные на {_now_msk_str()} МСК", "отзыв · шаг 2")
-
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
-
-def render_review_only(user_id: int, has_review: bool = False) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "отзыв · канал", "финальный шаг")
-
-    body_y = 140
-    body_h = CANVAS_H - M - PAD_Y - body_y - 26
-
-    left_w = 460
-    gap = 30
-    left_x1 = PAD_X
-    left_x2 = left_x1 + left_w
-    right_x1 = left_x2 + gap
-    right_x2 = CANVAS_W - M - PAD_X
-
-    _draw_left_panel_rating(
-        img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        top_icon=I_CHECK if has_review else I_COMMENTS,
-        top_label="Статус",
-        top_value="Отзыв оставлен" if has_review else "Ждём отзыв",
-        blocks=[
-            {"color": PURPLE, "icon": I_COMMENTS, "label": "Следующий шаг", "value": "Отзыв в канале"},
-            {"color": GOLD,   "icon": I_GIFT,     "label": "Бонус за отзыв", "value": "+15 DC"},
-            {"color": GREEN if has_review else SILVER,
-             "icon": I_CHECK,
-             "label": "Проверка отзыва",
-             "value": "Готово" if has_review else "Ожидание"},
-        ],
-    )
-
-    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
-    rx1 = right_x1 + 30
-    rx2 = right_x2 - 30
-
-    _draw_right_head(d, rx1, body_y + 22, rx2,
-                     "Оставь отзыв", "финальный шаг")
-
-    hero_y1 = body_y + 118
-    hero_y2 = body_y + body_h - 22
-
-    _draw_review_hero(img, d, rx1, rx2, hero_y1, hero_y2, has_review)
-
-    _draw_footer(d, f"Отзыв в канале · данные на {_now_msk_str()} МСК", "отзыв · финал")
-
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
+    try:
+        buf = await asyncio.to_thread(render_policy, inter.author.id)
+        fname = f"policy_{inter.author.id}.png"
+        file = disnake.File(buf, filename=fname)
+        embed = disnake.Embed(color=6776679)
+        embed.set_image(url=f"attachment://{fname}")
+        await inter.followup.send(embed=embed, file=file, ephemeral=True)
+    except Exception as e:
+        logger.exception(f"show_policy: {e}")
+        try:
+            if inter.response.is_done():
+                await inter.followup.send(f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
+            else:
+                await inter.response.send_message(f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
+        except Exception:
+            pass
 
 # ============================================================
-# БЛОК 4: КОДЕКС МАГАЗИНА — из work_render.py
+# БЛОК 4: КОДЕКС МАГАЗИНА
 # ============================================================
 SALARY_ROLES = [
     {
@@ -1389,9 +1027,7 @@ SALARY_ROLES = [
     },
 ]
 
-
 def _draw_left_panel_work(img, d, box, extra_blocks=None, header_icon=I_GEM):
-    """Левая панель для work-экранов (кодекс магазина)."""
     _draw_stack_panel(img, d, box, radius=22)
     x1, y1, x2, y2 = box
     pad = 28
@@ -1455,7 +1091,6 @@ def _draw_left_panel_work(img, d, box, extra_blocks=None, header_icon=I_GEM):
             max_w2 = bx2 - 18 - tx
             bv_shown = _ellipsis(d, bv, val_font, max_w2)
             d.text((tx, by1 + 42), bv_shown, font=val_font, fill=base_color)
-
 
 def _draw_salary_card(img, d, x, y, w, h, role_data: dict):
     color = role_data["color"]
@@ -1543,78 +1178,58 @@ def _draw_salary_card(img, d, x, y, w, h, role_data: dict):
     d.text((sal_x1 + 14 + sw + 6, adv_y1 + 26 + 28 - 18),
            "DC", font=_font(14), fill=GREEN)
 
+def render_work_salary(user_id: int) -> io.BytesIO:
+    img, d = _base_canvas(user_id, "кодекс · зарплата")
 
-def _draw_staff_row(img, d, x, y, w, h, rank: int,
-                    name: str, closed: int, avg_rating: float,
-                    has_rating: bool):
-    if rank == 1:
-        medal_color = GOLD
-    elif rank == 2:
-        medal_color = SILVER
-    elif rank == 3:
-        medal_color = BRONZE
-    else:
-        medal_color = DIM
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
 
-    _gradient_box(img, (x, y, x + w, y + h), medal_color, medal_color,
-                  alpha=15 if rank > 3 else 25, radius=14)
-    d.rounded_rectangle((x, y, x + w, y + h),
-                        radius=14, outline=medal_color + (170,), width=2)
+    left_w = 460
+    gap = 30
+    left_x1 = PAD_X
+    left_x2 = left_x1 + left_w
+    right_x1 = left_x2 + gap
+    right_x2 = CANVAS_W - M - PAD_X
 
-    badge_size = 52
-    bx = x + 18
-    by = y + (h - badge_size) // 2
+    _draw_left_panel_work(
+        img, d, (left_x1, body_y, left_x2, body_y + body_h),
+        extra_blocks=[
+            {"label": "Дата аванса", "value": "15 число",
+             "icon": I_CALENDAR, "color": BLUE},
+            {"label": "Дата зарплаты", "value": "29 число",
+             "icon": I_CALENDAR, "color": GREEN},
+            {"label": "Ролей в системе", "value": f"{len(SALARY_ROLES)}",
+             "icon": I_USERS, "color": SILVER},
+        ],
+        header_icon=I_COINS,
+    )
 
-    _alpha_fill(img, (bx, by, bx + badge_size, by + badge_size),
-                medal_color, alpha=70, radius=14)
-    d.rounded_rectangle((bx, by, bx + badge_size, by + badge_size),
-                        radius=14, outline=medal_color + (220,), width=2)
+    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
+    rx1 = right_x1 + 30
+    rx2 = right_x2 - 30
 
-    if rank <= 3:
-        _draw_icon(d, bx + badge_size // 2, by + badge_size // 2 + 1,
-                   I_MEDAL, 26, medal_color)
-    else:
-        num_str = str(rank)
-        num_font = _font(22)
-        nw = _tw(d, num_str, num_font)
-        d.text((bx + badge_size // 2 - nw // 2,
-                by + badge_size // 2 - num_font.size // 2 - 2),
-               num_str, font=num_font, fill=medal_color)
+    _draw_right_head(d, rx1, body_y + 22, rx2,
+                     "Зарплата и аванс",
+                     "выплаты дважды в месяц")
 
-    tx = bx + badge_size + 18
-    name_str = f"@{name}"
-    name_font = _font(24)
-    max_name_w = (x + w - 30) - tx - 460
-    name_shown = _ellipsis(d, name_str, name_font, max_name_w)
-    d.text((tx, y + h // 2 - 18), name_shown, font=name_font, fill=TEXT)
+    list_y = body_y + 118
+    list_bottom = body_y + body_h - 22
+    gap_card = 12
 
-    closed_x = x + w - 470
-    d.text((closed_x, y + h // 2 - 30), "ЗАКРЫТО",
-           font=_font(11), fill=MUTED)
-    closed_str = str(closed)
-    d.text((closed_x, y + h // 2 - 10), closed_str,
-           font=_font(26), fill=medal_color if rank <= 3 else SILVER_HI)
+    n = max(len(SALARY_ROLES), 1)
+    card_h = (list_bottom - list_y - gap_card * (n - 1)) // n
+    card_h = max(card_h, 100)
 
-    rating_x = x + w - 240
-    d.text((rating_x, y + h // 2 - 30), "РЕЙТИНГ",
-           font=_font(11), fill=MUTED)
+    for i, role in enumerate(SALARY_ROLES):
+        cy = list_y + i * (card_h + gap_card)
+        _draw_salary_card(img, d, rx1, cy, rx2 - rx1, card_h, role)
 
-    if has_rating:
-        rating_str = f"{avg_rating:.1f}"
-        rating_color = GOLD if avg_rating >= 4.5 else (
-            GREEN if avg_rating >= 3.5 else (
-                BLUE if avg_rating >= 2.5 else RED
-            )
-        )
-        d.text((rating_x, y + h // 2 - 10), rating_str,
-               font=_font(26), fill=rating_color)
-        rw = _tw(d, rating_str, _font(26))
-        _draw_icon(d, rating_x + rw + 18, y + h // 2 + 4,
-                   I_STAR, 16, rating_color)
-    else:
-        d.text((rating_x, y + h // 2 - 10), "—",
-               font=_font(26), fill=DIM)
+    _draw_footer(d, "Зарплата начисляется в Diamond Coins", "стр. 1 / 2")
 
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 def _draw_rule_card(img, d, x, y, w, h, rule: dict):
     color = rule["color"]
@@ -1665,159 +1280,6 @@ def _draw_rule_card(img, d, x, y, w, h, rule: dict):
 
         _draw_icon(d, x + 24 + 16, ex_y + ex_h // 2, I_INFO, 14, light)
         d.text((x + 24 + 34, ex_y + 9), example, font=ex_font, fill=light)
-
-
-def render_work_salary(user_id: int) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "кодекс · зарплата")
-
-    body_y = 140
-    body_h = CANVAS_H - M - PAD_Y - body_y - 26
-
-    left_w = 460
-    gap = 30
-    left_x1 = PAD_X
-    left_x2 = left_x1 + left_w
-    right_x1 = left_x2 + gap
-    right_x2 = CANVAS_W - M - PAD_X
-
-    _draw_left_panel_work(
-        img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        extra_blocks=[
-            {"label": "Дата аванса", "value": "15 число",
-             "icon": I_CALENDAR, "color": BLUE},
-            {"label": "Дата зарплаты", "value": "29 число",
-             "icon": I_CALENDAR, "color": GREEN},
-            {"label": "Ролей в системе", "value": f"{len(SALARY_ROLES)}",
-             "icon": I_USERS, "color": SILVER},
-        ],
-        header_icon=I_COINS,
-    )
-
-    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
-    rx1 = right_x1 + 30
-    rx2 = right_x2 - 30
-
-    _draw_right_head(d, rx1, body_y + 22, rx2,
-                     "Зарплата и аванс",
-                     "выплаты дважды в месяц")
-
-    list_y = body_y + 118
-    list_bottom = body_y + body_h - 22
-    gap_card = 12
-
-    n = max(len(SALARY_ROLES), 1)
-    card_h = (list_bottom - list_y - gap_card * (n - 1)) // n
-    card_h = max(card_h, 100)
-
-    for i, role in enumerate(SALARY_ROLES):
-        cy = list_y + i * (card_h + gap_card)
-        _draw_salary_card(img, d, rx1, cy, rx2 - rx1, card_h, role)
-
-    _draw_footer(d, "Зарплата начисляется в Diamond Coins", "стр. 1 / 3")
-
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
-
-def render_work_top(user_id: int, staff_list: List[Dict]) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "кодекс · топ")
-
-    body_y = 140
-    body_h = CANVAS_H - M - PAD_Y - body_y - 26
-
-    left_w = 460
-    gap = 30
-    left_x1 = PAD_X
-    left_x2 = left_x1 + left_w
-    right_x1 = left_x2 + gap
-    right_x2 = CANVAS_W - M - PAD_X
-
-    total = len(staff_list)
-    best_name = "—"
-    if staff_list:
-        best = staff_list[0]
-        best_name = f"@{best.get('user_name', '—')}"
-
-    with_rating = [s for s in staff_list if s.get("ratings_count", 0) > 0]
-    avg_all = 0.0
-    if with_rating:
-        avg_all = sum(s["total_rating"] / s["ratings_count"]
-                      for s in with_rating) / len(with_rating)
-
-    _draw_left_panel_work(
-        img, d, (left_x1, body_y, left_x2, body_y + body_h),
-        extra_blocks=[
-            {"label": "Менеджеров", "value": f"{total}",
-             "icon": I_USERS, "color": SILVER},
-            {"label": "Работник недели", "value": best_name,
-             "icon": I_CROWN, "color": GOLD},
-            {"label": "Средний рейтинг",
-             "value": f"{avg_all:.1f}" if avg_all else "—",
-             "icon": I_STAR,
-             "color": GREEN if avg_all >= 4 else BLUE},
-        ],
-        header_icon=I_TROPHY,
-    )
-
-    _draw_stack_panel(img, d, (right_x1, body_y, right_x2, body_y + body_h), radius=22)
-    rx1 = right_x1 + 30
-    rx2 = right_x2 - 30
-
-    _draw_right_head(d, rx1, body_y + 22, rx2,
-                     "Топ Sales Manager",
-                     "живой рейтинг · закрытые заказы")
-
-    list_y = body_y + 118
-    list_bottom = body_y + body_h - 22
-    gap_row = 10
-
-    rows = 8
-    row_h = (list_bottom - list_y - gap_row * (rows - 1)) // rows
-    row_h = max(row_h, 60)
-
-    if not staff_list:
-        box = (rx1, list_y, rx2, list_bottom)
-        d.rounded_rectangle(box, radius=16,
-                            fill=INNER_BG + (255,),
-                            outline=INNER_BRD + (255,), width=2)
-
-        icon_cx = (rx1 + rx2) // 2
-        icon_cy = (list_y + list_bottom) // 2 - 40
-        _alpha_fill(img, (icon_cx - 50, icon_cy - 50, icon_cx + 50, icon_cy + 50),
-                    SILVER, alpha=25, radius=22)
-        _draw_icon(d, icon_cx, icon_cy, I_TROPHY, 44, SILVER)
-        d.text((icon_cx, list_y + (list_bottom - list_y) // 2 + 50),
-               "Пока нет данных", font=_font(26), fill=TEXT, anchor="mm")
-        d.text((icon_cx, list_y + (list_bottom - list_y) // 2 + 88),
-               "Как только менеджеры начнут закрывать заказы — появятся здесь.",
-               font=_font(15), fill=MUTED, anchor="mm")
-    else:
-        for i, s in enumerate(staff_list[:rows]):
-            cy = list_y + i * (row_h + gap_row)
-
-            closed = s.get("closed_tickets", 0)
-            tr = s.get("total_rating", 0)
-            rc = s.get("ratings_count", 0)
-            avg = tr / rc if rc else 0.0
-
-            _draw_staff_row(
-                img, d, rx1, cy, rx2 - rx1, row_h,
-                rank=i + 1,
-                name=s.get("user_name", s.get("user_id", "—")),
-                closed=closed,
-                avg_rating=avg,
-                has_rating=(rc > 0),
-            )
-
-    _draw_footer(d, "Сортировка: закрытые заказы → рейтинг", "стр. 2 / 3")
-
-    buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
 
 def render_work_tickets(user_id: int) -> io.BytesIO:
     img, d = _base_canvas(user_id, "кодекс · правила")
@@ -1889,435 +1351,9 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
         cy = items_y + i * (item_h + gap_item)
         _draw_rule_card(img, d, rx1, cy, rx2 - rx1, item_h, rule)
 
-    _draw_footer(d, "Обязательно к прочтению каждым менеджером", "стр. 3 / 3")
+    _draw_footer(d, "Обязательно к прочтению каждым менеджером", "стр. 2 / 2")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
     return buf
-
-
-# ============================================================
-# БЛОК 5: ФЛОУ ОЦЕНКИ — из ticket_rating.py
-# ============================================================
-P = "\u2800"
-_BTN_LABEL_MAX = 46
-ADMIN_OVERRIDE_ID = 796293832751972352
-
-EMOJI_OTZIV = PartialEmoji(name="Otziv", id=1541808692314243172)
-EMOJI_OFF   = PartialEmoji(name="OffTicket", id=1539657125716824185)
-
-
-def _btn_label(text: str, total: int = _BTN_LABEL_MAX) -> str:
-    text = text.strip()
-    if len(text) >= total:
-        return text[:total]
-    padding = total - len(text)
-    left = padding // 2
-    right = padding - left
-    return f"{P * left}{text}{P * right}"
-
-
-def _clear_ticket_owner(channel: disnake.TextChannel):
-    uid = get_ticket_owner(channel.id)
-    if uid:
-        remove_ticket_owner(channel.id)
-
-
-async def _send_image_to_channel(inter: disnake.MessageInteraction,
-                                  buf, filename: str, view: View = None):
-    """Постит картинку В КАНАЛ (не эфемерно). Кнопки видны всем."""
-    try:
-        file = disnake.File(buf, filename=filename)
-        embed = disnake.Embed(color=6776679)
-        embed.set_image(url=f"attachment://{filename}")
-
-        kwargs = {"embed": embed, "file": file}
-        if view is not None:
-            kwargs["view"] = view
-
-        await inter.channel.send(**kwargs)
-    except Exception as e:
-        logger.exception(f"_send_image_to_channel: {e}")
-        try:
-            await inter.channel.send(f"❌ Ошибка отправки: `{str(e)[:200]}`")
-        except Exception:
-            pass
-
-
-async def _has_review_in_channel(channel: disnake.TextChannel, user_id: int) -> bool:
-    review_channel = channel.guild.get_channel(CONFIG["REVIEW_COUNT_CHANNEL"])
-    if not review_channel:
-        return False
-    try:
-        created_at = channel.created_at
-        async for msg in review_channel.history(after=created_at, limit=300):
-            if msg.author.bot:
-                continue
-            if msg.author.id == user_id:
-                return True
-    except Exception as e:
-        logger.warning(f"_has_review_in_channel err: {e}")
-    return False
-
-
-async def _ephemeral(inter: disnake.MessageInteraction, content: str):
-    try:
-        if inter.response.is_done():
-            await inter.followup.send(content=content, ephemeral=True)
-        else:
-            await inter.response.send_message(content=content, ephemeral=True)
-    except Exception as e:
-        logger.warning(f"_ephemeral: {e}")
-
-
-async def _check_and_run_close(inter: disnake.MessageInteraction) -> bool:
-    """Финальное закрытие — проверяет отзыв, потом удаляет тикет."""
-    channel = inter.channel
-    owner_id = get_ticket_owner(channel.id)
-    if not owner_id:
-        await _ephemeral(inter, "❌ У тикета нет владельца.")
-        return False
-
-    has_review = await _has_review_in_channel(channel, owner_id)
-    if not has_review:
-        await _ephemeral(
-            inter,
-            f"❌ **Сначала оставь отзыв в канале** `отзывы`.\n"
-            f"> После этого сможешь завершить заказ.",
-        )
-        return False
-
-    await _ephemeral(inter, "✅ Всё готово! Закрываю тикет...")
-    await asyncio.sleep(2)
-
-    try:
-        manager_id = get_ticket_manager(channel.id)
-
-        is_paid = channel.category and channel.category.id == CONFIG.get("PAID_CATEGORY_ID")
-        is_rub  = channel.category and channel.category.id == CONFIG.get("TICKET_CATEGORY_ID")
-
-        if manager_id and (is_paid or is_rub):
-            try:
-                increment_manager_closed(manager_id)
-                add_closed_order(manager_id, channel.id)
-            except Exception as e:
-                logger.warning(f"increment_manager_closed: {e}")
-
-        try:
-            if manager_id:
-                from clan.achievements import check_and_unlock
-                from core.bot import bot
-                row = cur.execute(
-                    "SELECT closed_tickets FROM manager_stats WHERE user_id=?",
-                    (manager_id,)
-                ).fetchone()
-                total_closed = row["closed_tickets"] if row else 0
-                await check_and_unlock(manager_id, "staff_tickets", value=total_closed, bot=bot)
-        except Exception as e:
-            logger.warning(f"staff tickets ach: {e}")
-
-        _clear_ticket_owner(channel)
-        clear_ticket_manager(channel.id)
-        clear_ticket_review(channel.id)
-
-        await channel.delete()
-
-        await log_discord(
-            title="🗑️ Тикет закрыт",
-            description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {channel.name}",
-            color=0xff6600,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"],
-        )
-
-        try:
-            from modules.commands_staff import send_manager_top
-            await send_manager_top()
-        except Exception as e:
-            logger.warning(f"send_manager_top: {e}")
-
-        return True
-    except Exception as e:
-        logger.exception(f"_check_and_run_close: {e}")
-        return False
-
-
-class RatingStep1View(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @disnake.ui.button(
-        label=_btn_label("Оценить менеджера"),
-        style=ButtonStyle.gray,
-        custom_id="rating_step1:open",
-        emoji=EMOJI_OTZIV,
-    )
-    async def open_rating(self, button: Button, inter: disnake.MessageInteraction):
-        channel = inter.channel
-
-        owner_id = get_ticket_owner(channel.id)
-        if not owner_id:
-            return await inter.response.send_message(
-                "❌ У тикета нет владельца.", ephemeral=True,
-            )
-        if inter.author.id != owner_id and inter.author.id != ADMIN_OVERRIDE_ID:
-            return await inter.response.send_message(
-                "⛔ Оценить менеджера может только владелец тикета.", ephemeral=True,
-            )
-
-        manager_id = get_ticket_manager(channel.id)
-        if not manager_id:
-            return await inter.response.send_message(
-                "❌ Менеджер не назначен.", ephemeral=True,
-            )
-
-        existing = get_ticket_review(channel.id)
-        if existing:
-            return await inter.response.send_message(
-                "⛔ Ты уже оценил менеджера.", ephemeral=True,
-            )
-
-        try:
-            await inter.response.send_modal(RatingStarsModal(channel, manager_id))
-        except Exception as e:
-            logger.warning(f"open_rating modal: {e}")
-
-
-class RatingStarsModal(Modal):
-    def __init__(self, channel: disnake.TextChannel, manager_id: int):
-        self.channel = channel
-        self.manager_id = manager_id
-        components = [
-            TextInput(
-                label="Оценка от 1 до 5",
-                placeholder="Введи число от 1 до 5",
-                custom_id="rating",
-                min_length=1,
-                max_length=1,
-            )
-        ]
-        super().__init__(title="Оценка менеджера", components=components)
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        raw = inter.text_values["rating"].strip()
-        if not raw.isdigit() or int(raw) < 1 or int(raw) > 5:
-            return await inter.response.send_message(
-                "❌ Оценка должна быть от 1 до 5.", ephemeral=True,
-            )
-        rating = int(raw)
-        if not self.manager_id:
-            return await inter.response.send_message(
-                "❌ Менеджер не назначен.", ephemeral=True,
-            )
-
-        try:
-            add_manager_rating(self.manager_id, rating)
-            save_ticket_review(self.channel.id, inter.author.id, self.manager_id, rating)
-        except Exception as e:
-            logger.exception(f"save rating: {e}")
-
-        try:
-            if rating == 5:
-                row = cur.execute(
-                    "SELECT COUNT(*) as c FROM ticket_reviews WHERE manager_id=? AND rating=5",
-                    (self.manager_id,),
-                ).fetchone()
-                cnt = row["c"] if row else 0
-                if cnt >= 10:
-                    from clan.achievements import unlock_achievement
-                    from core.bot import bot
-                    await unlock_achievement(self.manager_id, "staff_perfect", bot=bot)
-        except Exception as e:
-            logger.warning(f"staff perfect ach: {e}")
-
-        await log_discord(
-            title="⭐ Оценка менеджера",
-            description=(
-                f"> **Менеджер:** <@{self.manager_id}>\n"
-                f"> **Оценка:** {rating}/5\n"
-                f"> **Тикет:** {self.channel.mention}"
-            ),
-            color=0xffaa00,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"],
-        )
-
-        await inter.response.defer(ephemeral=True)
-
-        try:
-            buf = await asyncio.to_thread(
-                render_rating_step2,
-                inter.author.id,
-                inter.author.display_name,
-                rating,
-                False,
-            )
-            fname = f"rating_step2_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            await _send_image_to_channel(inter, buf, fname, RatingFinishView())
-        except Exception as e:
-            logger.exception(f"rating_step2 render: {e}")
-
-        try:
-            from modules.commands_staff import send_manager_top
-            await send_manager_top()
-        except Exception as e:
-            logger.warning(f"send_manager_top: {e}")
-
-
-class RatingFinishView(View):
-    """Кнопка «Завершить заказ» — используется и после оценки, и в review_only."""
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @disnake.ui.button(
-        label=_btn_label("Завершить заказ"),
-        style=ButtonStyle.gray,
-        custom_id="review:finish",
-        emoji=EMOJI_OFF,
-    )
-    async def finish(self, button: Button, inter: disnake.MessageInteraction):
-        channel = inter.channel
-
-        manager_id = get_ticket_manager(channel.id)
-        is_admin = inter.author.id == ADMIN_OVERRIDE_ID
-
-        try:
-            from core.utils import has_admin_command_roles
-            if has_admin_command_roles(inter.author):
-                is_admin = True
-        except Exception:
-            pass
-
-        if not is_admin and inter.author.id != manager_id:
-            return await inter.response.send_message(
-                "⛔ Завершить заказ может только админ или назначенный менеджер.",
-                ephemeral=True,
-            )
-
-        if not inter.response.is_done():
-            try:
-                await inter.response.defer(ephemeral=True)
-            except Exception:
-                pass
-
-        await _check_and_run_close(inter)
-
-
-async def show_rating_flow(inter: disnake.MessageInteraction):
-    """Показывает step1 / step2 / review_only в зависимости от статуса."""
-    channel = inter.channel
-
-    if not inter.response.is_done():
-        try:
-            await inter.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
-    owner_id = get_ticket_owner(channel.id)
-    if not owner_id:
-        return await _ephemeral(inter, "❌ У тикета нет владельца.")
-
-    manager_id = get_ticket_manager(channel.id)
-    existing = get_ticket_review(channel.id)
-
-    # Нет менеджера И нет оценки → просто отзыв (review_only)
-    if not manager_id and not existing:
-        has_review = await _has_review_in_channel(channel, owner_id)
-        try:
-            buf = await asyncio.to_thread(
-                render_review_only, owner_id, has_review,
-            )
-            fname = f"review_only_{int(datetime.now(timezone.utc).timestamp())}.png"
-            await _send_image_to_channel(inter, buf, fname, RatingFinishView())
-        except Exception as e:
-            logger.exception(f"review_only render: {e}")
-            await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
-        return
-
-    # Оценки нет, но менеджер есть → step1
-    if not existing:
-        manager_name = "—"
-        if manager_id:
-            m = channel.guild.get_member(manager_id)
-            manager_name = m.display_name if m else str(manager_id)
-
-        try:
-            buf = await asyncio.to_thread(
-                render_rating_step1,
-                owner_id,
-                manager_name,
-                channel.name,
-                channel.id % 10000,
-            )
-            fname = f"rating_step1_{int(datetime.now(timezone.utc).timestamp())}.png"
-            await _send_image_to_channel(inter, buf, fname, RatingStep1View())
-        except Exception as e:
-            logger.exception(f"rating_step1 render: {e}")
-            await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
-        return
-
-    # Оценка есть → step2
-    rating = existing.get("rating", 0) if isinstance(existing, dict) else 0
-    manager_name = "—"
-    if manager_id:
-        m = channel.guild.get_member(manager_id)
-        manager_name = m.display_name if m else str(manager_id)
-
-    has_review = await _has_review_in_channel(channel, owner_id)
-
-    try:
-        buf = await asyncio.to_thread(
-            render_rating_step2,
-            owner_id,
-            manager_name,
-            rating,
-            has_review,
-        )
-        fname = f"rating_step2_{int(datetime.now(timezone.utc).timestamp())}.png"
-        await _send_image_to_channel(inter, buf, fname, RatingFinishView())
-    except Exception as e:
-        logger.exception(f"rating_step2 render: {e}")
-        await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
-
-
-async def show_dc_close(inter: disnake.MessageInteraction):
-    """Для DC-тикетов — панель «оставь отзыв» (без оценки)."""
-    channel = inter.channel
-
-    if not inter.response.is_done():
-        try:
-            await inter.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
-    owner_id = get_ticket_owner(channel.id)
-    if not owner_id:
-        return await _ephemeral(inter, "❌ У тикета нет владельца.")
-
-    has_review = await _has_review_in_channel(channel, owner_id)
-
-    try:
-        buf = await asyncio.to_thread(render_review_only, owner_id, has_review)
-        fname = f"review_only_{int(datetime.now(timezone.utc).timestamp())}.png"
-        await _send_image_to_channel(inter, buf, fname, RatingFinishView())
-    except Exception as e:
-        logger.exception(f"show_dc_close render: {e}")
-        await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
-
-
-async def show_policy(inter: disnake.MessageInteraction):
-    if not inter.response.is_done():
-        try:
-            await inter.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
-    try:
-        buf = await asyncio.to_thread(render_policy, inter.author.id)
-        fname = f"policy_{inter.author.id}.png"
-        file = disnake.File(buf, filename=fname)
-        embed = disnake.Embed(color=6776679)
-        embed.set_image(url=f"attachment://{fname}")
-        await inter.followup.send(embed=embed, file=file, ephemeral=True)
-    except Exception as e:
-        logger.exception(f"show_policy: {e}")
-        await _ephemeral(inter, f"❌ Ошибка рендера: `{str(e)[:200]}`")
