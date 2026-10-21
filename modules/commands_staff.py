@@ -39,10 +39,8 @@ from modules.dc import (
 from modules.commands_profile import load_embed_from_file
 from modules.tickets import (
     render_work_salary,
-    render_work_top,
     render_work_tickets,
 )
-
 
 STAFF_PANEL_CHANNEL_ID  = 1551276116679860314
 TAROLOGY_CHANNEL_ID     = 1536796929873420308
@@ -700,8 +698,6 @@ class WorkSelect(disnake.ui.StringSelect):
         options = [
             disnake.SelectOption(label="・Зарплата", description="О заработной плате работников",
                                  emoji="<:shopf:1541881304981966920>", value="salary"),
-            disnake.SelectOption(label="・Топ Sales Manager", description="Статистика менеджеров продаж",
-                                 emoji="<:diagram:1541881258873983046>", value="top"),
             disnake.SelectOption(label="・Правила по тикетам", description="Строго для прочтения Sales-Manager-ам.",
                                  emoji="<:banne1:1538551829246513312>", value="tickets"),
         ]
@@ -736,20 +732,6 @@ class WorkSelect(disnake.ui.StringSelect):
                 )
             await _send_work_screen(
                 inter, buf, f"work_salary_{inter.author.id}.png"
-            )
-
-        elif value == "top":
-            try:
-                staff = _collect_staff_list(inter)
-                buf = render_work_top(inter.author.id, staff)
-            except Exception as e:
-                logger.exception(f"render_work_top: {e}")
-                return await inter.followup.send(
-                    f"❌ Ошибка рендера: `{str(e)[:200]}`",
-                    ephemeral=True,
-                )
-            await _send_work_screen(
-                inter, buf, f"work_top_{inter.author.id}.png"
             )
 
         elif value == "tickets":
@@ -1078,7 +1060,7 @@ async def dc_file(
 
 
 # ============================================================
-# ТОП МЕНЕДЖЕРОВ
+# ТОП МЕНЕДЖЕРОВ (ОСТАВЛЯЕМ ТОЛЬКО СБРОС СТАТИСТИКИ)
 # ============================================================
 class ResetStatsView(View):
     def __init__(self):
@@ -1090,7 +1072,6 @@ class ResetStatsView(View):
             return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
         from core.utils import reset_manager_stats
         reset_manager_stats()
-        await send_work_panel()
         await log_discord(
             title="📊 Статистика сброшена",
             description=f"> **Админ:** {inter.author.mention}\n> Статистика менеджеров обнулена.",
