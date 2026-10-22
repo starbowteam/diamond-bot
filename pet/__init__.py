@@ -6,9 +6,9 @@ import disnake
 from core.utils import logger, load_json, CONFIG
 from pet.core import (
     init_pet_tables,
-    migrate_old_pets,
-    get_clan_pet,
+    start_pet_tasks,
 )
+from pet.views import ClanPetMainView
 
 PET_CHANNEL_ID = 1558887828920995880
 PET_EMBED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet.json")
@@ -49,7 +49,6 @@ async def send_pet_panel(bot):
         pass
 
     try:
-        from pet.views import ClanPetMainView
         embeds = _build_panel_embeds()
         await ch.send(embeds=embeds, view=ClanPetMainView())
         logger.info("🐾 Панель питомцев отправлена")
@@ -59,13 +58,10 @@ async def send_pet_panel(bot):
 def init_pet_league(bot):
     """Инициализация модуля питомцев."""
     init_pet_tables()
+    start_pet_tasks(bot)
     
-    # Запуск миграции в фоне (чтобы не блокировать старт)
-    bot.loop.create_task(migrate_old_pets())
-
     # Регистрация View
     try:
-        from pet.views import ClanPetMainView
         bot.add_view(ClanPetMainView())
     except Exception as e:
         logger.warning(f"pet add_view: {e}")
