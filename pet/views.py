@@ -17,8 +17,9 @@ E_ABOUT = PartialEmoji(name="info", id=1539657202170859561)
 def _pad(text: str, total: int) -> str:
     base = len(text)
     extra = max(0, total - base)
-    left = extra // 2
-    right = extra - left
+    # Убираем по 2 пробела с каждой стороны
+    left = max(0, (extra // 2) - 2)
+    right = max(0, (extra - (extra // 2)) - 2)
     return f"{P * left}{text}{P * right}"
 
 class ClanPetMainView(View):
