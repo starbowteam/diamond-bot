@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Ядро кланового питомца ("Душа клана").
+Ядро кланового питомца ("Душа клана"). Доход капает раз в 24 часа напрямую в копилку.
 """
 import os
 import time
@@ -27,6 +27,7 @@ FEED_COOLDOWN = 0
 
 BONUS_PER_LEVEL = 0.03 
 BASE_INCOME = 30.0 # 30 DC/ч на 1 уровне
+PAYOUT_INTERVAL = 86400 # 24 часа
 
 CLAN_PETS = {
     1: {"name": "Грифон", "fa": 0xf520},
@@ -35,7 +36,7 @@ CLAN_PETS = {
 }
 
 # ============================================================
-# ИНИЦИАЛИЗАЦИЯ И МИГРАЦИЯ
+# ИНИЦИАЛИЗАЦИЯ
 # ============================================================
 def init_pet_tables():
     cur.executescript("""
@@ -43,7 +44,8 @@ def init_pet_tables():
         clan_id    INTEGER PRIMARY KEY,
         level      INTEGER DEFAULT 1,
         xp         INTEGER DEFAULT 0,
-        total_fed  INTEGER DEFAULT 0
+        total_fed  INTEGER DEFAULT 0,
+        last_tick  INTEGER DEFAULT 0
     );
     
     CREATE TABLE IF NOT EXISTS clan_pet_feedings (
@@ -57,17 +59,9 @@ def init_pet_tables():
     """)
     db.commit()
     
-    # Добавляем колонки, если их нет (с логами)
+    # Миграция: добавляем last_tick, если его нет
     cols = [r[1] for r in cur.execute("PRAGMA table_info(clan_pets)").fetchall()]
     
-    if "pending_dc" not in cols:
-        try:
-            cur.execute("ALTER TABLE clan_pets ADD COLUMN pending_dc REAL DEFAULT 0")
-            db.commit()
-            logger.info("✅ Миграция clan_pets.pending_dc добавлена")
-        except Exception as e:
-            logger.error(f"❌ Ошибка миграции pending_dc: {e}")
-            
     if "last_tick" not in cols:
         try:
             cur.execute("ALTER TABLE clan_pets ADD COLUMN last_tick INTEGER DEFAULT 0")
@@ -76,7 +70,6 @@ def init_pet_tables():
         except Exception as e:
             logger.error(f"❌ Ошибка миграции last_tick: {e}")
     
-    # Инициализация питомцев для всех кланов
     for cid in CLAN_PETS.keys():
         cur.execute("INSERT OR IGNORE INTO clan_pets (clan_id, last_tick) VALUES (?, ?)", (cid, int(time.time())))
     db.commit()
@@ -115,47 +108,50 @@ def get_xp_progress(xp: int, level: int) -> tuple:
     percent = min(int((xp / need) * 100), 100)
     return (xp, need, percent)
 
-@tasks.loop(minutes=5)
-async def pet_income_task(bot):
-    """Каждые 5 минут начисляет накопления всем кланам."""
+def get_time_to_payout(clan_id: int) -> int:
+    """Возвращает секунды до следующего начисления."""
+    pet = get_clan_pet(clan_id)
+    last = pet.get("last_tick") or int(time.time())
+    elapsed = int(time.time()) - last
+    left = PAYOUT_INTERVAL - elapsed
+    return max(left, 0)
+
+@tasks.loop(minutes=1)
+async def pet_daily_payout_task(bot):
+    """Раз в сутки начисляет доход питомца напрямую в копилку клана."""
     await bot.wait_until_ready()
     now = int(time.time())
+    
     try:
+        cycle = get_current_cycle()
+        cycle_id = cycle["id"] if cycle else 0
+        if not cycle_id:
+            return # Нет активного сезона — не начисляем
+            
         rows = cur.execute("SELECT * FROM clan_pets").fetchall()
         for r in rows:
             last = r["last_tick"] or now
             elapsed = now - last
-            if elapsed <= 0: continue
             
-            capped_elapsed = min(elapsed, 86400) # кап 24ч
-            hourly = get_pet_hourly_income(r["level"])
-            earned = hourly * (capped_elapsed / 3600.0)
-            
-            if earned >= 0.1:
-                cur.execute("UPDATE clan_pets SET pending_dc = pending_dc + ?, last_tick = ? WHERE clan_id = ?", (earned, now, r["clan_id"]))
-            else:
+            if elapsed >= PAYOUT_INTERVAL:
+                # Защита от бесконечного накопления, если бот лежал неделю
+                capped_elapsed = min(elapsed, PAYOUT_INTERVAL * 2) 
+                hourly = get_pet_hourly_income(r["level"])
+                earned = int(hourly * (capped_elapsed / 3600.0))
+                
+                if earned > 0:
+                    cur.execute(
+                        "INSERT INTO clan_contributions (cycle_id, clan_id, user_id, amount, reason, ts) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (cycle_id, r["clan_id"], 0, earned, "Ежедневный доход питомца", now)
+                    )
+                    logger.info(f"🐾 Питомец клана {r['clan_id']} накопил {earned} DC и отправил в копилку.")
+                
                 cur.execute("UPDATE clan_pets SET last_tick = ? WHERE clan_id = ?", (now, r["clan_id"]))
+            
         db.commit()
     except Exception as e:
-        logger.exception(f"pet_income_task: {e}")
-
-async def claim_pet_income(clan_id: int) -> int:
-    """Забирает накопленные DC питомца в копилку клана."""
-    pet = get_clan_pet(clan_id)
-    amount = int(pet["pending_dc"])
-    if amount <= 0: return 0
-        
-    cur.execute("UPDATE clan_pets SET pending_dc = 0 WHERE clan_id=?", (clan_id,))
-    
-    cycle = get_current_cycle()
-    if cycle:
-        cur.execute(
-            "INSERT INTO clan_contributions (cycle_id, clan_id, user_id, amount, reason, ts) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (cycle["id"], clan_id, 0, amount, "Доход питомца клана", int(time.time()))
-        )
-    db.commit()
-    return amount
+        logger.exception(f"pet_daily_payout_task: {e}")
 
 async def feed_clan_pet(user_id: int, amount_dc: int) -> dict:
     clan = get_user_clan(user_id)
@@ -208,5 +204,5 @@ def get_clan_pet_top(clan_id: int) -> List[dict]:
     return result
 
 def start_pet_tasks(bot):
-    if not pet_income_task.is_running():
-        pet_income_task.start(bot)
+    if not pet_daily_payout_task.is_running():
+        pet_daily_payout_task.start(bot)
