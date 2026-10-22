@@ -27,7 +27,6 @@ MIN_BALANCE     = 45
 
 HARD_EXCLUDED_USERS = {
     1124040555240898631,
-    796293832751972352,
 }
 
 EXCLUDE_FROM_CLAN = HARD_EXCLUDED_USERS
@@ -55,7 +54,6 @@ MIN_CONTRIB_FOR_PAYOUT = 50
 
 REPORT_DM_USER_ID = 796293832751972352
 
-# 👇 ЛИМИТ ВКЛАДА В БАНК — 2500 DC/СУТКИ
 DAILY_CLAN_LIMIT = 2500
 
 IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
@@ -63,7 +61,6 @@ IMG_STRIPE = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
               "hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&")
 
 EMBEDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embeds")
-
 
 # ============================================================
 # НАЗВАНИЯ СЕЗОНОВ
@@ -80,18 +77,15 @@ SEASON_NAMES = {
     9: "Магнитуда сияния",
 }
 
-
 def get_season_name(number: int) -> str:
     if number in SEASON_NAMES:
         return SEASON_NAMES[number]
     return f"Сезон #{number}"
 
-
 def get_season_title(number: int) -> str:
     if number in SEASON_NAMES:
         return f"Сезон {number} — {SEASON_NAMES[number]}"
     return f"Сезон #{number}"
-
 
 # ============================================================
 # КЛАНЫ
@@ -129,7 +123,6 @@ CLANS_DATA = [
     },
 ]
 
-
 # ============================================================
 # ИНИЦИАЛИЗАЦИЯ
 # ============================================================
@@ -151,6 +144,19 @@ def init_clan_core():
     db.commit()
     cleanup_excluded_users()
     ensure_active_cycle()
+    
+    # Принудительно даем создателю 1-й клан, если его нет
+    try:
+        from core.utils import get_dc_cache
+        if not get_user_clan(796293832751972352):
+            cur.execute(
+                "INSERT OR IGNORE INTO clan_members (user_id, clan_id, joined_at, left_at) VALUES (?, ?, ?, NULL)", 
+                (796293832751972352, 1, int(time.time()))
+            )
+            db.commit()
+            logger.info("👑 Создатель принудительно добавлен в клан Мультяшности.")
+    except Exception as e:
+        logger.warning(f"Force assign creator: {e}")
 
 
 def ensure_active_cycle() -> Optional[dict]:
@@ -1175,7 +1181,6 @@ async def add_clan_contribution(user_id: int, amount: int, reason: str):
 
     _add_daily_contributed(user_id, actual_amount)
 
-    # 👇 ФИКС: get_user_contribution живёт здесь же, в clan.core
     try:
         from clan.achievements import check_and_unlock
         from core.bot import bot
