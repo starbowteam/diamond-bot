@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Ядро бонус-панели: акция дня, реферальная система, кейсы.
+Ядро бонус-панели: акция дня, реферальная система (обычные + адвайтеры).
 """
 import os
 import json
@@ -26,143 +26,15 @@ from modules.dc import add_dc, remove_dc, get_user_balance, add_purchase
 BONUS_CHANNEL_ID       = 1557590012667891774   # канал Бонусы
 REF_INVITE_CHANNEL_ID  = 1552700701128400979   # канал для реф-ссылок
 CLUB_ROLE_ID           = 1284697274655576186   # роль «Клуб»
+ADVERTISER_ROLE_ID     = 1457964854441672806   # роль «Адвайтер»
 SUPREME_USER_ID        = 796293832751972352    # доступ без роли
 
 REF_MIN_ALIVE_SECONDS  = 3600                  # 1 час — порог зачёта
-REF_REWARD_BALANCE     = 100                   # DC юзеру за приглашённого
-REF_REWARD_CLAN        = 100                   # DC в копилку клана
+REF_REWARD_BALANCE     = 50                    # 50 DC юзеру за приглашённого
 REF_COOLDOWN_MIN       = 15                    # таск каждые 15 мин
 
 DEAL_PING_ROLE_ID      = 1127428607606796290   # пинг в анонсе акции
 DEAL_SLOT_SECONDS      = 5 * 3600
-
-
-# ============================================================
-# КЕЙСЫ · return ~78% · много призов, часто «около ставки»
-# ============================================================
-CASES: List[dict] = [
-    # ─── КЕЙС 1 · Попробуй удачу · 100 DC · return ~79% ───
-    {
-        "num": 1, "key": "luck", "price": 100,
-        "name": "Попробуй удачу",
-        "icon": "fa-gift",
-        "color": "blue",
-        "desc": "Лёгкий вход. Много мелких призов и шанс на хороший куш.",
-        "prizes": [
-            {"type": "dc", "value": 8,    "chance": 15.0},
-            {"type": "dc", "value": 20,   "chance": 20.0},
-            {"type": "dc", "value": 40,   "chance": 20.0},
-            {"type": "dc", "value": 60,   "chance": 15.0},
-            {"type": "dc", "value": 80,   "chance": 12.0},
-            {"type": "dc", "value": 120,  "chance": 8.0},
-            {"type": "dc", "value": 200,  "chance": 5.0},
-            {"type": "dc", "value": 360,  "chance": 3.0},
-            {"type": "dc", "value": 640,  "chance": 1.5},
-            {"type": "dc", "value": 1400, "chance": 0.5},
-        ],
-    },
-
-    # ─── КЕЙС 2 · Быстрый куш · 300 DC · return ~78% ───
-    {
-        "num": 2, "key": "fast", "price": 300,
-        "name": "Быстрый куш",
-        "icon": "fa-coins",
-        "color": "green",
-        "desc": "Много средних DC, плюс редкий шанс на буст и роль.",
-        "prizes": [
-            {"type": "dc", "value": 25,   "chance": 15.0},
-            {"type": "dc", "value": 60,   "chance": 20.0},
-            {"type": "dc", "value": 120,  "chance": 20.0},
-            {"type": "dc", "value": 180,  "chance": 15.0},
-            {"type": "dc", "value": 240,  "chance": 11.5},
-            {"type": "dc", "value": 360,  "chance": 8.0},
-            {"type": "dc", "value": 600,  "chance": 5.0},
-            {"type": "dc", "value": 1080, "chance": 3.0},
-            {"type": "dc", "value": 1920, "chance": 1.5},
-            {"type": "dc", "value": 4200, "chance": 0.5},
-            {"type": "boost", "key": "boost_messages_x2", "chance": 0.3},
-            {"type": "boost", "key": "boost_all_x2",      "chance": 0.1},
-            {"type": "role",  "key": "role_helper", "days": 7, "chance": 0.1},
-        ],
-    },
-
-    # ─── КЕЙС 3 · Серьёзный куш · 500 DC · return ~78% ───
-    {
-        "num": 3, "key": "serious", "price": 500,
-        "name": "Серьёзный куш",
-        "icon": "fa-gem",
-        "color": "gold",
-        "desc": "Средний азарт. Ловит бусты, скидки и крупные суммы.",
-        "prizes": [
-            {"type": "dc", "value": 40,   "chance": 15.0},
-            {"type": "dc", "value": 100,  "chance": 20.0},
-            {"type": "dc", "value": 200,  "chance": 20.0},
-            {"type": "dc", "value": 300,  "chance": 15.0},
-            {"type": "dc", "value": 400,  "chance": 11.3},
-            {"type": "dc", "value": 600,  "chance": 8.0},
-            {"type": "dc", "value": 1000, "chance": 5.0},
-            {"type": "dc", "value": 1800, "chance": 3.0},
-            {"type": "dc", "value": 3200, "chance": 1.5},
-            {"type": "dc", "value": 7000, "chance": 0.5},
-            {"type": "boost",    "key": "boost_all_x2", "chance": 0.2},
-            {"type": "discount", "key": "5", "chance": 0.2},
-            {"type": "role",     "key": "role_helper", "days": 7, "chance": 0.1},
-        ],
-    },
-
-    # ─── КЕЙС 4 · Королевский куш · 1000 DC · return ~78% ───
-    {
-        "num": 4, "key": "royal", "price": 1000,
-        "name": "Королевский куш",
-        "icon": "fa-crown",
-        "color": "purple",
-        "desc": "Для серьёзного шага. Роли, бусты и шанс вытащить 14 000 DC.",
-        "prizes": [
-            {"type": "dc", "value": 80,    "chance": 15.0},
-            {"type": "dc", "value": 200,   "chance": 20.0},
-            {"type": "dc", "value": 400,   "chance": 20.0},
-            {"type": "dc", "value": 600,   "chance": 15.0},
-            {"type": "dc", "value": 800,   "chance": 11.4},
-            {"type": "dc", "value": 1200,  "chance": 8.0},
-            {"type": "dc", "value": 2000,  "chance": 5.0},
-            {"type": "dc", "value": 3600,  "chance": 3.0},
-            {"type": "dc", "value": 6400,  "chance": 1.5},
-            {"type": "dc", "value": 14000, "chance": 0.5},
-            {"type": "boost",    "key": "boost_review_x2", "chance": 0.2},
-            {"type": "discount", "key": "5", "chance": 0.2},
-            {"type": "role",     "key": "role_legend",     "days": 0, "chance": 0.1},
-            {"type": "role",     "key": "role_dc_magnate", "days": 0, "chance": 0.1},
-        ],
-    },
-
-    # ─── КЕЙС 5 · Мифический куш · 2000 DC · return ~78% ───
-    {
-        "num": 5, "key": "mythic", "price": 2000,
-        "name": "Мифический куш",
-        "icon": "fa-trophy",
-        "color": "red",
-        "desc": "Максимум азарта. Крупные DC, дорогие роли и джекпот — 28 000 DC.",
-        "prizes": [
-            {"type": "dc", "value": 160,   "chance": 15.0},
-            {"type": "dc", "value": 400,   "chance": 20.0},
-            {"type": "dc", "value": 800,   "chance": 20.0},
-            {"type": "dc", "value": 1200,  "chance": 15.0},
-            {"type": "dc", "value": 1600,  "chance": 11.3},
-            {"type": "dc", "value": 2400,  "chance": 8.0},
-            {"type": "dc", "value": 4000,  "chance": 5.0},
-            {"type": "dc", "value": 7200,  "chance": 3.0},
-            {"type": "dc", "value": 12800, "chance": 1.5},
-            {"type": "dc", "value": 28000, "chance": 0.5},
-            {"type": "boost",    "key": "boost_review_x2", "chance": 0.2},
-            {"type": "discount", "key": "7", "chance": 0.2},
-            {"type": "role",     "key": "role_dc_magnate", "days": 0, "chance": 0.15},
-            {"type": "role",     "key": "role_legend",     "days": 0, "chance": 0.1},
-            {"type": "role",     "key": "role_helper",     "days": 0, "chance": 0.05},
-        ],
-    },
-]
-
-CASES_BY_NUM = {c["num"]: c for c in CASES}
 
 
 # ============================================================
@@ -176,17 +48,6 @@ def init_bonus_tables():
         invite_url  TEXT,
         created_at  INTEGER
     );
-    CREATE TABLE IF NOT EXISTS bonus_case_opens (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id     INTEGER,
-        case_num    INTEGER,
-        price       INTEGER,
-        prize_type  TEXT,
-        prize_value TEXT,
-        prize_desc  TEXT,
-        opened_at   INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS idx_case_opens_user ON bonus_case_opens (user_id);
     """)
     db.commit()
 
@@ -204,7 +65,7 @@ def init_bonus_tables():
 
 
 # ============================================================
-# РОЛЬ И ДОСТУП
+# РОЛИ И ДОСТУП
 # ============================================================
 def has_club_role(member) -> bool:
     if member is None:
@@ -214,13 +75,20 @@ def has_club_role(member) -> bool:
     except Exception:
         return False
 
+def has_advertiser_role(member) -> bool:
+    if member is None:
+        return False
+    try:
+        return any(r.id == ADVERTISER_ROLE_ID for r in member.roles)
+    except Exception:
+        return False
 
 def has_bonus_access(member) -> bool:
     if member is None:
         return False
     if member.id == SUPREME_USER_ID:
         return True
-    return has_club_role(member)
+    return has_club_role(member) or has_advertiser_role(member)
 
 
 # ============================================================
@@ -232,7 +100,6 @@ def get_user_ref_link(user_id: int) -> Optional[dict]:
     ).fetchone()
     return dict(row) if row else None
 
-
 def get_user_by_ref_code(code: str) -> Optional[int]:
     if not code:
         return None
@@ -240,7 +107,6 @@ def get_user_by_ref_code(code: str) -> Optional[int]:
         "SELECT user_id FROM user_ref_links WHERE invite_code=?", (code,)
     ).fetchone()
     return row["user_id"] if row else None
-
 
 async def ensure_user_ref_link(bot, user_id: int) -> Optional[dict]:
     existing = get_user_ref_link(user_id)
@@ -287,7 +153,6 @@ async def ensure_user_ref_link(bot, user_id: int) -> Optional[dict]:
 def _is_alive(row) -> bool:
     return row["left_at"] is None
 
-
 def _is_valid(row) -> bool:
     joined_at = row["joined_at"] or 0
     left_at = row["left_at"]
@@ -296,14 +161,12 @@ def _is_valid(row) -> bool:
         return (left_at - joined_at) >= REF_MIN_ALIVE_SECONDS
     return (now - joined_at) >= REF_MIN_ALIVE_SECONDS
 
-
 def _is_on_review(row) -> bool:
     joined_at = row["joined_at"] or 0
     left_at = row["left_at"]
     if not left_at:
         return False
     return (left_at - joined_at) < REF_MIN_ALIVE_SECONDS
-
 
 def get_user_ref_stats(user_id: int) -> dict:
     rows = cur.execute(
@@ -325,6 +188,58 @@ def get_user_ref_stats(user_id: int) -> dict:
         "alive": alive,
         "earned": rewarded * REF_REWARD_BALANCE,
     }
+
+
+# ============================================================
+# ТОПЫ
+# ============================================================
+def get_top_referrals(is_advertiser: bool = False, limit: int = 10) -> List[dict]:
+    """Возвращает топ по количеству засчитанных приглашений."""
+    # Получаем всех, у кого есть ссылки
+    rows = cur.execute("SELECT user_id FROM user_ref_links").fetchall()
+    
+    result = []
+    guild = None
+    try:
+        from core.bot import bot
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+    except Exception:
+        pass
+
+    for r in rows:
+        uid = r["user_id"]
+        
+        # Фильтруем по роли (если передан флаг)
+        if guild:
+            member = guild.get_member(uid)
+            if is_advertiser and not has_advertiser_role(member):
+                continue
+            if not is_advertiser and has_advertiser_role(member):
+                continue
+                
+        stats = get_user_ref_stats(uid)
+        if stats["total"] > 0:
+            result.append({
+                "user_id": uid,
+                "username": _resolve_username(guild, uid),
+                "rewarded": stats["rewarded"],
+                "total": stats["total"],
+                "earned": stats["earned"],
+            })
+
+    result.sort(key=lambda x: (-x["rewarded"], -x["total"]))
+    return result[:limit]
+
+def _resolve_username(guild, user_id: int) -> str:
+    if guild is None:
+        return f"@{user_id}"
+    try:
+        m = guild.get_member(user_id)
+        if m is not None:
+            return m.display_name
+    except Exception:
+        pass
+    return f"@{user_id}"
 
 
 # ============================================================
@@ -366,7 +281,7 @@ async def _pay_ref_rewards(bot):
 
             try:
                 from clan.core import add_clan_contribution
-                await add_clan_contribution(uid, REF_REWARD_CLAN, f"Реф: {r['member_id']}")
+                await add_clan_contribution(uid, REF_REWARD_BALANCE, f"Реф: {r['member_id']}")
             except Exception as e:
                 logger.warning(f"ref clan contribution: {e}")
 
@@ -380,7 +295,7 @@ async def _pay_ref_rewards(bot):
                     f"> **Юзер:** <@{uid}>\n"
                     f"> **Приглашённый:** <@{r['member_id']}>\n"
                     f"> **Баланс:** `+{REF_REWARD_BALANCE} DC`\n"
-                    f"> **В копилку:** `+{REF_REWARD_CLAN} DC`"
+                    f"> **В копилку:** `+{REF_REWARD_BALANCE} DC`"
                 ),
                 color=0x2ecc71,
                 channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
@@ -402,195 +317,6 @@ async def ref_reward_task(bot):
 
 
 # ============================================================
-# КЕЙСЫ · ВНУТРЕННЯЯ ЛОГИКА
-# ============================================================
-def _roll_case(case_num: int) -> Optional[dict]:
-    case = CASES_BY_NUM.get(case_num)
-    if not case:
-        return None
-    total = sum(p["chance"] for p in case["prizes"])
-    r = random.uniform(0, total)
-    cum = 0.0
-    for p in case["prizes"]:
-        cum += p["chance"]
-        if r <= cum:
-            return dict(p)
-    return dict(case["prizes"][-1])
-
-
-def _load_shop_catalog() -> dict:
-    path = os.path.join(CATALOG_DIR, "shop_catalog.json")
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning(f"load_shop_catalog: {e}")
-        return {}
-
-
-def _prize_description(prize: dict) -> str:
-    t = prize.get("type")
-    if t == "dc":
-        return f"{prize['value']} DC"
-    if t == "role":
-        cat = _load_shop_catalog()
-        item = cat.get("roles", {}).get("items", {}).get(prize["key"], {})
-        name = item.get("name", "Роль")
-        days = prize.get("days", 0)
-        return f"{name}" + (f" на {days} дн." if days else " навсегда")
-    if t == "boost":
-        cat = _load_shop_catalog()
-        item = cat.get("boosts", {}).get("items", {}).get(prize["key"], {})
-        return item.get("name", "Буст")
-    if t == "discount":
-        return f"Скидка {prize['key']}%"
-    return "—"
-
-
-async def apply_prize(bot, user_id: int, prize: dict) -> str:
-    """Выдаёт приз. Возвращает текстовое описание."""
-    t = prize.get("type")
-    cat = _load_shop_catalog()
-
-    if t == "dc":
-        amount = int(prize["value"])
-        await add_dc(user_id, amount, f"Выигрыш в кейсе", notify=False, log=False, to_clan_pool=False)
-        return f"+{amount} DC на баланс"
-
-    if t == "boost":
-        item = cat.get("boosts", {}).get("items", {}).get(prize["key"], {})
-        try:
-            activate_item(
-                user_id=user_id,
-                item_key=prize["key"],
-                item_type="boosts",
-                value=float(item.get("value", 0) or 0),
-                duration_hours=int(item.get("duration_hours", 0) or 0),
-                uses=int(item.get("uses", -1)),
-            )
-            return f"Буст «{item.get('name', prize['key'])}» активирован"
-        except Exception as e:
-            logger.warning(f"apply boost: {e}")
-            return "Буст активирован"
-
-    if t == "discount":
-        try:
-            await add_purchase(user_id, "discounts", f"Скидка {prize['key']}%")
-            return f"Скидка {prize['key']}% в инвентаре"
-        except Exception as e:
-            logger.warning(f"apply discount: {e}")
-            return f"Скидка {prize['key']}%"
-
-    if t == "role":
-        item = cat.get("roles", {}).get("items", {}).get(prize["key"], {})
-        role_id = item.get("role_id")
-        days = int(prize.get("days", 0) or 0)
-        if not role_id:
-            return "Роль (ошибка выдачи)"
-        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-        if not guild:
-            return "Роль (ошибка сервера)"
-        member = guild.get_member(user_id)
-        role = guild.get_role(int(role_id))
-        if not member or not role:
-            return "Роль (ошибка)"
-        try:
-            await member.add_roles(role, reason="Выигрыш в кейсе")
-        except Exception as e:
-            logger.warning(f"apply role: {e}")
-            return "Роль (ошибка выдачи)"
-        if days > 0:
-            return f"Роль «{role.name}» на {days} дн."
-        return f"Роль «{role.name}» навсегда"
-
-    return "Приз"
-
-
-async def open_case(bot, user_id: int, case_num: int) -> dict:
-    """
-    Открывает кейс: списывает DC, роллит приз, выдаёт, пишет в лог.
-    Возвращает {"ok": bool, "error": str, "prize": dict, "desc": str}
-    """
-    case = CASES_BY_NUM.get(case_num)
-    if not case:
-        return {"ok": False, "error": "Кейс не найден"}
-
-    balance = await get_user_balance(user_id)
-    if balance < case["price"]:
-        return {"ok": False, "error": f"Недостаточно DC. Нужно {case['price']}, у тебя {balance}"}
-
-    ok = await remove_dc(user_id, case["price"], f"Открытие кейса «{case['name']}»")
-    if not ok:
-        return {"ok": False, "error": "Не удалось списать DC"}
-
-    prize = _roll_case(case_num)
-    desc = _prize_description(prize)
-
-    try:
-        await apply_prize(bot, user_id, prize)
-    except Exception as e:
-        logger.exception(f"open_case apply: {e}")
-
-    cur.execute(
-        "INSERT INTO bonus_case_opens "
-        "(user_id, case_num, price, prize_type, prize_value, prize_desc, opened_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, case_num, case["price"], prize.get("type", ""),
-         json.dumps(prize, ensure_ascii=False), desc, int(time.time()))
-    )
-    db.commit()
-
-    await log_discord(
-        title="🎰 Кейс открыт",
-        description=(
-            f"> **Юзер:** <@{user_id}>\n"
-            f"> **Кейс:** {case['name']} · `{case['price']} DC`\n"
-            f"> **Выпало:** {desc}"
-        ),
-        color=0xffaa00,
-        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-    )
-
-    return {"ok": True, "prize": prize, "desc": desc, "case": case}
-
-
-def get_case_history(user_id: int, limit: int = 8) -> List[dict]:
-    rows = cur.execute(
-        "SELECT * FROM bonus_case_opens WHERE user_id=? "
-        "ORDER BY opened_at DESC LIMIT ?",
-        (user_id, limit)
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def get_case_stats(user_id: int) -> dict:
-    row = cur.execute(
-        "SELECT COUNT(*) AS c, COALESCE(SUM(price), 0) AS s "
-        "FROM bonus_case_opens WHERE user_id=?",
-        (user_id,)
-    ).fetchone()
-    total = row["c"] or 0
-    spent = row["s"] or 0
-
-    best = 0
-    for r in cur.execute(
-        "SELECT prize_type, prize_value FROM bonus_case_opens WHERE user_id=?",
-        (user_id,)
-    ).fetchall():
-        if r["prize_type"] == "dc":
-            try:
-                v = int(json.loads(r["prize_value"]).get("value", 0))
-                if v > best:
-                    best = v
-            except Exception:
-                pass
-
-    return {"opened": total, "spent": spent, "best": best}
-
-
-# ============================================================
 # АНОНС АКЦИИ ДНЯ
 # ============================================================
 DEAL_ANNOUNCE_STATE = os.path.join(DATA_DIR, "bonus_deal_announce.json")
@@ -599,29 +325,15 @@ DEAL_ANNOUNCE_IMG = (
     "https://cdn.discordapp.com/attachments/1527006158282555412/"
     "1537851307757539390/image.png?ex=6ac864e3&is=6ac71363&"
     "hm=8fc2a4970e9d4a67c7031812597700fbd32286d0919ee5aa1a460ec0a5316ad6&"
-    "https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F"
-    "1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
-    "https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F"
-    "1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
-    "https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F"
-    "1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
 )
-
 
 def _load_announce_state() -> dict:
     return load_json(DEAL_ANNOUNCE_STATE, {"slot": 0, "message_id": 0})
 
-
 def _save_announce_state(state: dict):
     save_json(DEAL_ANNOUNCE_STATE, state)
 
-
 async def announce_deal_change(bot, deal: dict):
-    """
-    Постит анонс новой акции дня в канал Бонусы.
-    Если slot не менялся — ничего не делает.
-    Если slot поменялся — удаляет старое сообщение и постит новое.
-    """
     state = _load_announce_state()
     slot = int(time.time() // DEAL_SLOT_SECONDS)
 
@@ -678,7 +390,6 @@ async def announce_deal_change(bot, deal: dict):
     state["slot"] = slot
     state["message_id"] = msg.id
     _save_announce_state(state)
-
     logger.info(f"🔥 Анонс акции: {name} · слот {slot}")
 
 
