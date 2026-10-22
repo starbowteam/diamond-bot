@@ -3,7 +3,10 @@ import io
 import os
 from PIL import Image, ImageDraw, ImageFont
 from core.utils import ADD_DIR
-from pet.core import get_xp_progress, get_pet_name, get_pet_fa, get_pet_bonus, get_xp_for_next, MAX_LEVEL
+from pet.core import (
+    get_xp_progress, get_pet_name, get_pet_fa, get_pet_bonus, 
+    get_xp_for_next, MAX_LEVEL, get_clan_pet, BONUS_PER_LEVEL
+)
 
 FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
 FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
@@ -55,6 +58,7 @@ I_USER = 0xf007
 I_MEDAL = 0xf5a2
 I_TROPHY = 0xf091
 I_STAR = 0xf005
+I_INFO = 0xf05a
 
 def _tw(d, t, f):
     b = d.textbbox((0, 0), t, font=f); return b[2] - b[0]
@@ -127,6 +131,7 @@ def render_pet_main(user_id, clan_name, clan_id, balance):
     
     pet_fa = get_pet_fa(clan_id)
     pet_name = get_pet_name(clan_id)
+    pet = get_clan_pet(clan_id)
     
     c_glow = (lx1 + (lx2-lx1)//2, ly1 + 160)
     for i in range(3):
@@ -137,8 +142,6 @@ def render_pet_main(user_id, clan_name, clan_id, balance):
     _icon(d, c_glow[0], c_glow[1]+2, pet_fa, 60, PURPLE)
 
     d.text((c_glow[0], c_glow[1]+120), pet_name, font=_font(36), fill=TEXT, anchor="mm")
-    
-    pet = get_clan_pet(clan_id)
     d.text((c_glow[0], c_glow[1]+170), f"Уровень {pet['level']}", font=_font(22), fill=PURPLE, anchor="mm")
     
     xp, need, pct = get_xp_progress(pet["xp"], pet["level"])
@@ -186,14 +189,14 @@ def render_pet_main(user_id, clan_name, clan_id, balance):
     if pet["level"] < MAX_LEVEL:
         next_need = get_xp_for_next(pet["level"])
         rem_xp = next_need - pet["xp"]
-        rem_dc = rem_xp # Теперь 1 XP = 1 DC
+        rem_dc = rem_xp
         d.text((tx+60, info_y+40), f"До {pet['level']+1} уровня осталось: {rem_xp} XP (~{rem_dc} DC). Бонус вырастет до +{int((pet['level'])*BONUS_PER_LEVEL*100)}%.", font=_font(16), fill=TEXT_SOFT)
     else:
         d.text((tx+60, info_y+40), "Питомец достиг максимального уровня!", font=_font(16), fill=TEXT_SOFT)
 
     info_y += info_h + 20
     d.rounded_rectangle((tx, info_y, rx2-rpad, info_y+info_h), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
-    _icon(d, tx+30, info_y+45, 0xf05a, 24, PURPLE)
+    _icon(d, tx+30, info_y+45, I_INFO, 24, PURPLE)
     d.text((tx+60, info_y+15), "КАК КАЧАТЬ?", font=_font(16), fill=PURPLE)
     d.text((tx+60, info_y+40), "• 1 DC = 1 XP. Любой участник клана может кормить. Лимит: 10 000 DC в день.", font=_font(16), fill=TEXT_SOFT)
 
@@ -237,39 +240,86 @@ def render_pet_top(user_id, clan_name, clan_id, top_list):
     return buf
 
 # ============================================================
-# СОСТОЯНИЕ 3: О ПИТОМЦЕ
+# СОСТОЯНИЕ 3: О ПИТОМЦЕ (НОВЫЙ КРАСИВЫЙ ЭКРАН)
 # ============================================================
-def render_pet_about(user_id, clan_name):
+def render_pet_about(user_id, clan_name, clan_id):
     img, d = _canvas("О питомце", user_id, clan_name)
     
-    cx = W // 2
-    _icon(d, cx, 250, 0xf3a5, 100, SILVER_HI)
+    lx1, lx2 = PAD_X, PAD_X + 460
+    rx1, rx2 = lx2 + 36, W - PAD_X
+    ly1, ly2 = BODY_Y, BODY_Y + BODY_H
+
+    # Левая панель (Питомец)
+    d.rounded_rectangle((lx1, ly1, lx2, ly2), radius=24, fill=STACK_BG + (255,), outline=STACK_BRD + (255,), width=2)
     
-    d.text((cx, 370), "О ПИТОМЦЕ", font=_font(56), fill=SILVER_HI, anchor="mm")
+    pet_fa = get_pet_fa(clan_id)
+    pet_name = get_pet_name(clan_id)
+    pet = get_clan_pet(clan_id)
     
-    desc = (
-        "Ваш клановый питомец — это не просто зверёк, а душа вашего союза.\n"
-        "Он растёт вместе с вами и приносит пользу всему клану.\n\n"
-        "• Питомца нельзя сменить или выкинуть. Он привязан к клану навсегда.\n"
-        "• Прокачивают его все участники клана сообща.\n"
-        "• Бонус от уровня прибавляется к общей выплате в конце сезона (до +30%).\n"
-        "• Каждое кормление увеличивает ваш вклад в Топ кормильцев."
+    c_glow = (lx1 + (lx2-lx1)//2, ly1 + 180)
+    for i in range(3):
+        r = 140 - i*20
+        d.ellipse((c_glow[0]-r, c_glow[1]-r, c_glow[0]+r, c_glow[1]+r), fill=(179, 157, 219, 10 + i*10))
+
+    d.ellipse((c_glow[0]-90, c_glow[1]-90, c_glow[0]+90, c_glow[1]+90), fill=(30,30,35,255), outline=PURPLE+(255,), width=5)
+    _icon(d, c_glow[0], c_glow[1]+2, pet_fa, 70, PURPLE)
+
+    d.text((c_glow[0], c_glow[1]+130), pet_name, font=_font(38), fill=TEXT, anchor="mm")
+    d.text((c_glow[0], c_glow[1]+180), f"Уровень {pet['level']}", font=_font(24), fill=PURPLE, anchor="mm")
+
+    # Правая панель (Инфо)
+    d.rounded_rectangle((rx1, ly1, rx2, ly2), radius=24, fill=STACK_BG + (255,), outline=STACK_BRD + (255,), width=2)
+    
+    rpad = 40
+    tx = rx1 + rpad
+    ty = ly1 + rpad
+
+    d.text((tx, ty), "О Питомце", font=_font(36), fill=TEXT)
+    
+    # Статы
+    st_y = ty + 70
+    box_w = 320
+    box_h = 110
+    gap = 30
+    
+    # Блок 1 (Всего скормлено)
+    d.rounded_rectangle((tx, st_y, tx+box_w, st_y+box_h), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
+    d.rounded_rectangle((tx, st_y, tx+6, st_y+box_h), radius=3, fill=SILVER+(255,))
+    d.text((tx+24, st_y+20), "ВСЕГО СКОРМЛЕНО", font=_font(14), fill=MUTED)
+    d.text((tx+24, st_y+50), f"{pet['total_fed']:,} DC".replace(",", " "), font=_font(36), fill=SILVER)
+
+    # Блок 2 (Бонус)
+    d.rounded_rectangle((tx+box_w+gap, st_y, tx+box_w*2+gap, st_y+box_h), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
+    d.rounded_rectangle((tx+box_w+gap, st_y, tx+box_w+gap+6, st_y+box_h), radius=3, fill=GREEN+(255,))
+    d.text((tx+box_w+gap+24, st_y+20), "ТЕКУЩИЙ БОНУС", font=_font(14), fill=MUTED)
+    bonus = get_pet_bonus(pet["level"])
+    d.text((tx+box_w+gap+24, st_y+50), f"+{int(bonus*100)}%", font=_font(36), fill=GREEN)
+
+    # Блок 3 (Уровень)
+    d.rounded_rectangle((tx+box_w*2+gap*2, st_y, tx+box_w*3+gap*2, st_y+box_h), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
+    d.rounded_rectangle((tx+box_w*2+gap*2, st_y, tx+box_w*2+gap*2+6, st_y+box_h), radius=3, fill=PURPLE+(255,))
+    d.text((tx+box_w*2+gap*2+24, st_y+20), "УРОВЕНЬ", font=_font(14), fill=MUTED)
+    d.text((tx+box_w*2+gap*2+24, st_y+50), f"{pet['level']} / {MAX_LEVEL}", font=_font(36), fill=PURPLE)
+
+    # Описание
+    desc_y = st_y + box_h + 40
+    d.rounded_rectangle((tx, desc_y, rx2-rpad, desc_y+280), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
+    _icon(d, tx+30, desc_y+35, I_INFO, 24, SILVER)
+    d.text((tx+60, desc_y+20), "КАК ЭТО РАБОТАЕТ?", font=_font(20), fill=SILVER)
+    
+    desc_text = (
+        "• Ваш клановый питомец — это душа вашего союза.\n"
+        "• Его нельзя сменить или выкинуть, он привязан к клану навсегда.\n"
+        "• Каждый участник клана может его кормить (1 DC = 1 XP).\n"
+        "• Чем выше уровень, тем больше бонус к выплате в конце сезона.\n"
+        "• Бонус прибавляется к общей копилке клана при распределении."
     )
     
-    box_w = 1200
-    box_h = 350
-    bx1 = cx - box_w//2
-    by1 = 430
-    d.rounded_rectangle((bx1, by1, bx1+box_w, by1+box_h), radius=24, fill=INNER_BG+(255,), outline=STACK_BRD+(255,), width=2)
-    
-    lines = desc.split('\n')
-    ty = by1 + 40
+    lines = desc_text.split('\n')
+    ty_desc = desc_y + 60
     for line in lines:
-        if not line:
-            ty += 20
-            continue
-        d.text((bx1+50, ty), line, font=_font(22), fill=TEXT_SOFT)
-        ty += 40
+        d.text((tx+30, ty_desc), line, font=_font(18), fill=TEXT_SOFT)
+        ty_desc += 30
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
