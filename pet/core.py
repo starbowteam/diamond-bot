@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Ядро кланового питомца ("Душа клана").
-Включает миграцию старых личных питомцев с выплатой компенсации.
 """
 import os
 import time
@@ -22,11 +21,10 @@ from clan.core import get_user_clan, get_clan, get_current_cycle
 # КОНСТАНТЫ
 # ============================================================
 MAX_LEVEL = 10
-FEED_COST = 100# 1000 DC = 100 XP
+FEED_COST = 100     # 100 DC = 100 XP (1 к 1)
 XP_PER_FEED = 100
-FEED_COOLDOWN = 0 # Пока без кулдауна на кормление, можно спамить если есть DC
+FEED_COOLDOWN = 0 
 
-# Бонус за уровень (например, 3% за каждый уровень выше 1-го)
 BONUS_PER_LEVEL = 0.03 
 
 CLAN_PETS = {
@@ -58,7 +56,6 @@ def init_pet_tables():
     """)
     db.commit()
     
-    # Создаем питомцев для всех кланов, если их нет
     for cid in CLAN_PETS.keys():
         cur.execute("INSERT OR IGNORE INTO clan_pets (clan_id) VALUES (?)", (cid,))
     db.commit()
@@ -66,10 +63,9 @@ def init_pet_tables():
 async def migrate_old_pets():
     """Одноразовая миграция: выдача компенсации за старых питомцев и их удаление."""
     try:
-        # Проверяем, существует ли старая таблица
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_pets'")
         if not cur.fetchone():
-            return # Миграция уже проведена или таблицы не было
+            return
             
         rows = cur.execute("SELECT user_id, pet_key FROM user_pets").fetchall()
         if not rows:
@@ -89,28 +85,26 @@ async def migrate_old_pets():
                 user_pets_map[uid] = []
             user_pets_map[uid].append(r["pet_key"])
             
-        logger.info(f"🐾 Начинаю миграцию питомцев: найдено {len(user_pets_map)} юзеров со старыми питомцами.")
+        logger.info(f"🐾 Начинаю миграцию питомцев: найдено {len(user_pets_map)} юзеров.")
         
         for uid, pets in user_pets_map.items():
-            # Считаем сколько потрачено на кормление из истории
             hist = get_dc_cache(uid).get("history", [])
             total_fed = sum(abs(h["amount"]) for h in hist if "Кормление" in h.get("reason", ""))
             
             total_comp = 0
             for p_key in pets:
                 price = PRICES.get(p_key, 0)
-                total_comp += price + 50 # 50 DC за удаление каждого
+                total_comp += price + 50
             
             total_comp += total_fed
             
             if total_comp > 0:
                 await add_dc(
                     uid, total_comp,
-                    "Компенсация за удаление личных питомцев (цена + кормление + 50 DC)",
+                    "Компенсация за удаление личных питомцев",
                     notify=True, log=False
                 )
                 
-                # Уведомление в ЛС
                 try:
                     from core.bot import bot
                     user = bot.get_user(uid) or await bot.fetch_user(uid)
@@ -126,13 +120,12 @@ async def migrate_old_pets():
                     
             await asyncio.sleep(0.2)
 
-        # Удаляем старую таблицу
         cur.execute("DROP TABLE user_pets")
         cur.execute("DROP TABLE IF EXISTS pet_xp_log")
         cur.execute("DROP TABLE IF EXISTS pet_purchases")
         cur.execute("DROP TABLE IF EXISTS pet_active_cooldown")
         db.commit()
-        logger.info("🐾 Миграция личных питомцев успешно завершена. Таблицы удалены.")
+        logger.info("🐾 Миграция личных питомцев успешно завершена.")
         
     except Exception as e:
         logger.exception(f"migrate_old_pets: {e}")
@@ -172,7 +165,6 @@ def get_xp_progress(xp: int, level: int) -> tuple:
     return (xp, need, percent)
 
 async def feed_clan_pet(user_id: int, amount_dc: int) -> dict:
-    """Кормление кланового питомца."""
     clan = get_user_clan(user_id)
     if not clan:
         return {"ok": False, "error": "Ты не в клане."}
@@ -184,14 +176,12 @@ async def feed_clan_pet(user_id: int, amount_dc: int) -> dict:
     if balance < amount_dc:
         return {"ok": False, "error": f"Не хватает DC. У тебя {balance}."}
         
-    # Списываем
     ok = await remove_dc(user_id, amount_dc, f"Кормление питомца клана {clan['name']}")
     if not ok:
         return {"ok": False, "error": "Ошибка списания."}
 
     xp_to_add = int((amount_dc / FEED_COST) * XP_PER_FEED)
     
-    # Начисляем
     cur.execute("""
         UPDATE clan_pets 
         SET xp = xp + ?, total_fed = total_fed + ? 
@@ -204,7 +194,6 @@ async def feed_clan_pet(user_id: int, amount_dc: int) -> dict:
     """, (clan["id"], user_id, amount_dc, int(time.time())))
     db.commit()
 
-    # Проверка левел-апа
     pet = get_clan_pet(clan["id"])
     leveled_up = False
     while pet["level"] < MAX_LEVEL and pet["xp"] >= get_xp_for_next(pet["level"]):
@@ -223,7 +212,6 @@ async def feed_clan_pet(user_id: int, amount_dc: int) -> dict:
     return {"ok": True, "xp_added": xp_to_add, "leveled_up": leveled_up, "new_level": pet["level"]}
 
 def get_clan_pet_top(clan_id: int) -> List[dict]:
-    """Топ кормильцев для конкретного клана."""
     rows = cur.execute("""
         SELECT user_id, SUM(amount) as total 
         FROM clan_pet_feedings 
