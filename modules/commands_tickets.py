@@ -252,11 +252,6 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
     await asyncio.sleep(5)
 
     try:
-        manager_id = get_ticket_owner(channel.id)
-        if manager_id and _is_paid_ticket(channel):
-            increment_manager_closed(manager_id)
-            add_closed_order(manager_id, channel.id)
-
         clear_ticket_owner(channel)
         await channel.delete()
 
@@ -266,8 +261,6 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
             color=0xff6600,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
-        from modules.commands_staff import send_manager_top
-        await send_manager_top()
     except Exception as e:
         logger.error(f"Ошибка закрытия тикета: {e}")
 
