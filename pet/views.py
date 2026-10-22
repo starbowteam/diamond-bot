@@ -9,7 +9,6 @@ from clan.core import get_user_clan
 from pet import core as pcore
 from pet import render as prender
 
-# 1 пробел с каждой стороны
 P = "\u3164"
 
 E_FEED = PartialEmoji(name="drumstick", id=1539657202170859561)
@@ -57,7 +56,8 @@ class ClanPetMainView(View):
         clan = get_user_clan(inter.author.id)
         if not clan: return await inter.followup.send("❌ Ты не в клане.", ephemeral=True)
         
-        buf = await asyncio.to_thread(prender.render_pet_about, inter.author.id, clan["name"])
+        # Передаем clan["id"] для отрисовки статистики
+        buf = await asyncio.to_thread(prender.render_pet_about, inter.author.id, clan["name"], clan["id"])
         
         fname = f"cp_about_{inter.author.id}.png"
         file = disnake.File(buf, filename=fname)
@@ -105,7 +105,7 @@ class FeedPetModal(Modal):
         # Сначала текст об успехе
         await inter.followup.send(msg, ephemeral=True)
 
-        # Затем обновленная картинка (тоже эфемерно)
+        # Затем обновленная картинка
         clan = get_user_clan(inter.author.id)
         balance = get_dc_cache(inter.author.id).get("balance", 0)
         buf = await asyncio.to_thread(prender.render_pet_main, inter.author.id, clan["name"], clan["id"], balance)
