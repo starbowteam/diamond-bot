@@ -799,13 +799,6 @@ async def on_member_join(member: disnake.Member):
     is_bot = 1 if member.bot else 0
     joined_at = now_ts()
 
-    advertiser_id = None
-    try:
-        from work.core import get_advertiser_by_code # ОШИБКА! work удалён. Нужно заменить.
-        advertiser_id = get_advertiser_by_code(used_invite.code)
-    except Exception as e:
-        logger.warning(f"get_advertiser_by_code on join: {e}")
-
     ref_user_id = None
     try:
         from bonus.core import get_user_by_ref_code
@@ -815,10 +808,10 @@ async def on_member_join(member: disnake.Member):
 
     db.execute(
         "INSERT INTO invites "
-        "(guild_id, inviter_id, member_id, joined_at, is_bot, invite_code, advertiser_id, ref_user_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(guild_id, inviter_id, member_id, joined_at, is_bot, invite_code, ref_user_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (guild.id, inviter_id, member.id, joined_at, is_bot,
-         used_invite.code, advertiser_id, ref_user_id)
+         used_invite.code, ref_user_id)
     )
     db.commit()
 
@@ -828,7 +821,6 @@ async def on_member_join(member: disnake.Member):
             f"> **Пользователь:** {member.mention}\n"
             f"> **Пригласил:** <@{inviter_id}>\n"
             f"> **Код:** `{used_invite.code}`"
-            + (f"\n> **Адвайтер:** <@{advertiser_id}>" if advertiser_id else "")
             + (f"\n> **Реферал:** <@{ref_user_id}>" if ref_user_id else "")
         ),
         color=0x00aaff
@@ -912,7 +904,6 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in removed)}",
                 color=0xff0000
             )
-            # Удалён вызов work.core.reset_advertiser, так как work больше нет
 
     if before.display_avatar.url != after.display_avatar.url:
         await log_discord(
