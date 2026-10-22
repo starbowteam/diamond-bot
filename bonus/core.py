@@ -191,51 +191,60 @@ def get_user_ref_stats(user_id: int) -> dict:
 
 
 # ============================================================
-# ТОПЫ
+# ТОПЫ (ОБЩИЙ)
 # ============================================================
-def get_top_referrals(is_advertiser: bool = False, limit: int = 10) -> List[dict]:
-    """Возвращает топ по количеству засчитанных приглашений из таблицы invites."""
+def get_top_all(limit: int = 10) -> dict:
+    """Возвращает два списка: обычные и адвайтеры, собирая данные из обеих колонок."""
     rows = cur.execute("""
-        SELECT ref_user_id, 
-               COUNT(id) as total, 
-               SUM(CASE WHEN rewarded=1 THEN 1 ELSE 0 END) as rewarded
+        SELECT 
+            COALESCE(ref_user_id, advertiser_id) as inviter_id,
+            COUNT(id) as total, 
+            SUM(CASE WHEN rewarded=1 THEN 1 ELSE 0 END) as rewarded
         FROM invites 
-        WHERE ref_user_id IS NOT NULL AND is_bot=0 AND is_fake=0
-        GROUP BY ref_user_id
+        WHERE (ref_user_id IS NOT NULL OR advertiser_id IS NOT NULL) AND is_bot=0 AND is_fake=0
+        GROUP BY COALESCE(ref_user_id, advertiser_id)
     """).fetchall()
     
-    result = []
     guild = None
     try:
         from core.bot import bot
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     except Exception:
         pass
-
-    for r in rows:
-        uid = r["ref_user_id"]
         
-        # Фильтруем по роли (если передан флаг)
+    regular_list = []
+    adv_list = []
+    
+    for r in rows:
+        uid = r["inviter_id"]
+        if not uid: continue
+        rewarded = r["rewarded"]
+        total = r["total"]
+        
+        entry = {
+            "user_id": uid,
+            "username": _resolve_username(guild, uid),
+            "rewarded": rewarded,
+            "total": total,
+            "earned": rewarded * REF_REWARD_BALANCE,
+        }
+        
         if guild:
             member = guild.get_member(uid)
-            if is_advertiser and not has_advertiser_role(member):
-                continue
-            if not is_advertiser and has_advertiser_role(member):
-                continue
-                
-        total = r["total"]
-        if total > 0:
-            rewarded = r["rewarded"]
-            result.append({
-                "user_id": uid,
-                "username": _resolve_username(guild, uid),
-                "rewarded": rewarded,
-                "total": total,
-                "earned": rewarded * REF_REWARD_BALANCE,
-            })
-
-    result.sort(key=lambda x: (-x["rewarded"], -x["total"]))
-    return result[:limit]
+            if has_advertiser_role(member):
+                adv_list.append(entry)
+            else:
+                regular_list.append(entry)
+        else:
+            regular_list.append(entry)
+            
+    regular_list.sort(key=lambda x: (-x["rewarded"], -x["total"]))
+    adv_list.sort(key=lambda x: (-x["rewarded"], -x["total"]))
+    
+    return {
+        "regular": regular_list[:limit],
+        "advertiser": adv_list[:limit]
+    }
 
 def _resolve_username(guild, user_id: int) -> str:
     if guild is None:
