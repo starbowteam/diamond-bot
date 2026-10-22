@@ -65,6 +65,16 @@ def _init_tables():
     );
     CREATE INDEX IF NOT EXISTS idx_giveaways_message ON giveaways(message_id);
     CREATE INDEX IF NOT EXISTS idx_giveaways_status  ON giveaways(status);
+
+    CREATE TABLE IF NOT EXISTS giveaway_pending_payouts (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        giveaway_id INTEGER,
+        user_id     INTEGER,
+        amount      INTEGER,
+        status      TEXT DEFAULT 'waiting_review',
+        ts          INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_gpp_user ON giveaway_pending_payouts (user_id);
     """)
     db.commit()
 
@@ -185,9 +195,6 @@ class GiveawayView(disnake.ui.View):
         super().__init__(timeout=None)
         self.add_item(JoinButton())
 
-# ==========================================
-# ИСПРАВЛЕНИЕ БАГА С КОРНЕВЫМ СООБЩЕНИЕМ
-# ==========================================
 class GiveawaySelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -290,22 +297,54 @@ async def schedule_end(gid: int):
     if delay > 0: await asyncio.sleep(delay)
     await finish_giveaway(gid)
 
+# ============================================================
+# НОВАЯ ЛОГИКА: ОЧЕРЕДЬ НА ВЫПЛАТУ
+# ============================================================
 async def _auto_payout(gid: int, row, winners: List[int]) -> int:
     if not row["auto_payout"] or row["payout_done"] or not winners:
         if not winners: cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,)); db.commit()
         return 0
+        
     total_amount = _parse_dc_amount(row["prize"])
     if total_amount <= 0: return 0
     share = total_amount // len(winners)
     if share <= 0: return 0
-    try: from modules.dc import add_dc
-    except Exception: return 0
+
+    # Кладем в очередь ожидания
     for uid in winners:
-        try: await add_dc(uid, share, f"Победа в розыгрыше #{gid}", notify=True, log=False, to_clan_pool=True)
-        except Exception as e: logger.warning(f"[giveaways] не начислить {uid}: {e}")
+        cur.execute(
+            "INSERT INTO giveaway_pending_payouts (giveaway_id, user_id, amount, status, ts) "
+            "VALUES (?, ?, ?, 'waiting_review', ?)",
+            (gid, uid, share, int(time.time()))
+        )
+    
     cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,))
     db.commit()
     return share
+
+async def check_giveaway_payout_on_review(bot, member: disnake.Member):
+    """Вызывается, когда юзер пишет в канал отзывов."""
+    rows = cur.execute(
+        "SELECT id, amount FROM giveaway_pending_payouts WHERE user_id=? AND status='waiting_review'",
+        (member.id,)
+    ).fetchall()
+    
+    if not rows: return
+    
+    total_amount = 0
+    for r in rows:
+        total_amount += r["amount"]
+        cur.execute("UPDATE giveaway_pending_payouts SET status='paid' WHERE id=?", (r["id"],))
+    db.commit()
+
+    if total_amount > 0:
+        from modules.dc import add_dc
+        await add_dc(member.id, total_amount, "Приз за розыгрыш (после отзыва)")
+        try:
+            await member.send(f"✅ **Спасибо за отзыв!**\n> Твой приз за розыгрыш в размере **{total_amount} DC** зачислен на баланс.")
+        except Exception:
+            pass
+        logger.info(f"💰 Выплачен отложенный приз за розыгрыш юзеру {member.id}: {total_amount} DC")
 
 async def finish_giveaway(gid: int):
     try:
@@ -333,7 +372,9 @@ async def finish_giveaway(gid: int):
         embed_msg = await channel.send(embeds=finished_embeds)
         cur.execute("UPDATE giveaways SET final_embed_id=? WHERE giveaway_id=?", (embed_msg.id, gid))
         db.commit()
+        
         share = await _auto_payout(gid, row, winners)
+        
         await send_giveaway_report(gid=gid, prize=row["prize"], winners=winners, share=share, is_auto=bool(row["auto_payout"]))
         prize_name = row["prize"]
         is_auto = bool(row["auto_payout"])
@@ -343,9 +384,12 @@ async def finish_giveaway(gid: int):
             if not member: continue
             try:
                 if uid in winner_ids:
-                    if is_auto: dm = _build_template_winner_dm(gid=gid, prize=prize_name, share=share if share > 0 else (_parse_dc_amount(prize_name) // max(len(winners), 1)))
-                    else: dm = _build_manual_winner_dm(gid=gid, prize=prize_name)
-                else: dm = _build_loser_dm(gid=gid, prize=prize_name)
+                    if is_auto: 
+                        dm = _build_template_winner_dm_wait_review(gid=gid, prize=prize_name, share=share)
+                    else: 
+                        dm = _build_manual_winner_dm(gid=gid, prize=prize_name)
+                else: 
+                    dm = _build_loser_dm(gid=gid, prize=prize_name)
                 await member.send(embeds=dm)
             except Exception: pass
     except Exception as e:
@@ -358,10 +402,20 @@ def _build_manual_winner_dm(gid: int, prize: str) -> list:
     e2.set_image(url=IMG_STRIPE)
     return [e1, e2]
 
-def _build_template_winner_dm(gid: int, prize: str, share: int) -> list:
+def _build_template_winner_dm_wait_review(gid: int, prize: str, share: int) -> list:
     e1 = disnake.Embed(color=0x00ff88)
     e1.set_image(url=IMG_STRIPE)
-    e2 = disnake.Embed(title="💎 Приз зачислен на баланс!", description=f"> **Приз:** {prize}\n> **Твоя доля:** `+{share} DC`\n> **ID розыгрыша:** `#{gid}`\n\n> ✨ **DC уже на твоём балансе** — ничего делать не нужно.", color=0x00ff88)
+    e2 = disnake.Embed(
+        title="🏆 Ты победил в розыгрыше!",
+        description=(
+            f"> **Приз:** {prize}\n"
+            f"> **Твоя доля:** `{share} DC`\n"
+            f"> **ID розыгрыша:** `#{gid}`\n\n"
+            f"> ⚠️ **Чтобы получить приз, напиши отзыв** в канале <#{REVIEW_CHANNEL_ID}>.\n"
+            f"> Как только напишешь — бот сразу начислит {share} DC на баланс."
+        ),
+        color=0x00ff88
+    )
     e2.set_image(url=IMG_STRIPE)
     return [e1, e2]
 
@@ -380,10 +434,10 @@ async def send_giveaway_report(gid: int, prize: str, winners: list, share: int =
         file_data = io.BytesIO(content.encode("utf-8"))
         file = disnake.File(file_data, filename=f"winners_{gid}.txt")
         winners_mentions = " ".join(f"<@{u}>" for u in winners)
-        type_label = "💎 Шаблонный (авто)" if is_auto else "📩 Ручной"
+        type_label = "💎 Шаблонный (ожидание отзыва)" if is_auto else "📩 Ручной"
         e1 = disnake.Embed(color=6776679)
         e1.set_image(url=IMG_STRIPE)
-        extra = f"> **Каждому:** `+{share} DC`\n> **Всего выдано:** `{share * len(winners)} DC`\n> ✅ **DC начислены автоматически**\n\n" if is_auto and share > 0 else "> ⏳ **Ждём отписи в ЛС** от каждого победителя\n> (в течение 24ч, иначе приз уйдёт следующему)\n\n"
+        extra = f"> **Каждому:** `{share} DC` (после отзыва)\n\n" if is_auto and share > 0 else "> ⏳ **Ждём отписи в ЛС** от каждого победителя\n\n"
         e2 = disnake.Embed(title=f"📊 Победители розыгрыша #{gid}", description=f"> **Приз:** {prize}\n> **Тип:** {type_label}\n> **Победителей:** `{len(winners)}`\n\n{extra}> 🏆 **Список победителей:**\n> {winners_mentions}", color=6776679)
         e2.set_image(url=IMG_STRIPE)
         await user.send(embeds=[e1, e2], file=file)
@@ -448,7 +502,7 @@ class RerollModal(ui.Modal):
         await reroll_giveaway(inter, gid)
 
 async def show_templates_panel(inter: disnake.MessageInteraction):
-    e = disnake.Embed(title="💎 Шаблонные розыгрыши", description="> Выберите тип ниже — розыгрыш стартует сразу.\n\n> ⏱ **Длительность:** 1 день\n> 🚫 **Инвайты:** не требуются\n> 💰 **Автовыдача:** DC начисляются победителям автоматически\n> ⭐ **Отзыв:** победителям предложим оставить отзыв\n\n**Доступные шаблоны:** 1, 2, 3, 5, 7, 9, 12, 15, 18, 20 победителей", color=6776679)
+    e = disnake.Embed(title="💎 Шаблонные розыгрыши", description="> Выберите тип ниже — розыгрыш стартует сразу.\n\n> ⏱ **Длительность:** 1 день\n> 🚫 **Инвайты:** не требуются\n> 💰 **Автовыдача:** DC начисляются после отзыва\n> ⭐ **Отзыв:** обязателен для получения приза!\n\n**Доступные шаблоны:** 1, 2, 3, 5, 7, 9, 12, 15, 18, 20 победителей", color=6776679)
     e.set_image(url=IMG_STRIPE)
     await inter.response.send_message(embed=e, view=TemplateStartView(), ephemeral=True)
 
@@ -489,7 +543,7 @@ class TemplateSelect(disnake.ui.StringSelect):
         db.commit()
         gid = cur.lastrowid
         asyncio.create_task(schedule_end(gid))
-        await inter.edit_original_response(content=f"✅ Шаблонный розыгрыш **{prize}** создан! ID: `{gid}`\n> 💰 DC начислятся автоматически победителям ({winners_count} чел.)", embeds=[], view=None)
+        await inter.edit_original_response(content=f"✅ Шаблонный розыгрыш **{prize}** создан! ID: `{gid}`\n> 💰 DC начислятся автоматически **после отзыва** ({winners_count} чел.)", embeds=[], view=None)
 
 class TemplateStartView(disnake.ui.View):
     def __init__(self):
@@ -512,7 +566,6 @@ async def list_giveaways(inter: disnake.MessageInteraction):
         lines.append(f"{status_icon} **ID {r['giveaway_id']}**{auto_str} — {r['prize']}\n> Участников: **{participants_count}** | {time_str}{winners_str}")
     embed = disnake.Embed(title="📋 Список розыгрышей (последние 20)", description="\n\n".join(lines), color=6776679)
     embed.set_footer(text="💎 = автовыдача DC · 📩 = ручной (вручную)")
-    # ОТПРАВЛЯЕМ НОВОЕ ЭФЕМЕРНОЕ СООБЩЕНИЕ, А НЕ РЕДАКТИРУЕМ КОРЕНЬ
     await inter.followup.send(embed=embed, ephemeral=True)
 
 async def send_giveaway_panel():
@@ -529,13 +582,12 @@ async def send_giveaway_panel():
                             break
         except Exception: pass
 
-        # Убрал картинку и эмодзи
         e1 = disnake.Embed(
             title="Управление розыгрышами",
             description=(
                 "> Панель для управления всеми розыгрышами сервера.\n\n"
                 "> **Начать розыгрыш** — создать вручную с настройками.\n"
-                "> **Шаблонные розыгрыши** — готовые DC-розыгрыши с авто-выдачей.\n"
+                "> **Шаблонные розыгрыши** — готовые DC-розыгрыши с авто-выдачей после отзыва.\n"
                 "> **Лист розыгрышей** — все текущие и завершённые.\n"
                 "> **Завершить принудительно** — закрыть досрочно.\n"
                 "> **Перевыбрать победителя** — реролл после завершения."
