@@ -1,22 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Питомцы Diamond — точка входа пакета."""
 import os
 import asyncio
-
 import disnake
 
 from core.utils import logger, load_json, CONFIG
 from pet.core import (
     init_pet_tables,
-    pets_income_task,
-    install_hooks,
+    migrate_old_pets,
+    get_clan_pet,
 )
-from pet.views import PetPanelView
-
+from pet.views import ClanPetMainView
 
 PET_CHANNEL_ID = 1558887828920995880
 PET_EMBED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet.json")
-
 
 def _build_panel_embeds():
     data = load_json(PET_EMBED_FILE, {})
@@ -28,12 +24,11 @@ def _build_panel_embeds():
             logger.warning(f"pet embed: {exc}")
     if not embeds:
         embeds = [disnake.Embed(
-            title="🐾 Зоопарк Diamond",
-            description="> Питомцы приносят DC пока ты спишь.",
+            title="🐾 Душа Клана",
+            description="> Корми питомца и получай бонус.",
             color=6776679,
         )]
     return embeds
-
 
 async def send_pet_panel(bot):
     ch = bot.get_channel(PET_CHANNEL_ID)
@@ -44,7 +39,6 @@ async def send_pet_panel(bot):
             logger.warning(f"pet panel channel not found: {e}")
             return
 
-    # Чистим старые сообщения бота
     try:
         async for m in ch.history(limit=50):
             if m.author == bot.user:
@@ -56,31 +50,23 @@ async def send_pet_panel(bot):
         pass
 
     embeds = _build_panel_embeds()
-    await ch.send(embeds=embeds, view=PetPanelView())
+    await ch.send(embeds=embeds, view=ClanPetMainView())
     logger.info("🐾 Панель питомцев отправлена")
 
-
 def init_pet_league(bot):
-    """Инициализация модуля питомцев. Вызывается из bot.on_ready()."""
+    """Инициализация модуля питомцев."""
     init_pet_tables()
-
-    # Подписка на события для XP
-    try:
-        install_hooks(bot)
-    except Exception as e:
-        logger.warning(f"pet install_hooks: {e}")
-
-    # Таск накопления
-    if not pets_income_task.is_running():
-        pets_income_task.start(bot)
+    
+    # Запуск миграции в фоне (чтобы не блокировать старт)
+    bot.loop.create_task(migrate_old_pets())
 
     # Регистрация View
     try:
-        bot.add_view(PetPanelView())
+        bot.add_view(ClanPetMainView())
     except Exception as e:
         logger.warning(f"pet add_view: {e}")
 
-    # Отправляем панель в канал (с задержкой)
+    # Отправляем панель
     bot.loop.create_task(send_pet_panel(bot))
 
-    logger.info("🐾 Питомцы инициализированы")
+    logger.info("🐾 Клановые питомцы инициализированы")
