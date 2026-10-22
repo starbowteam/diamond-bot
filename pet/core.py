@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+"""
+Ядро кланового питомца ("Душа клана").
+"""
 import os
 import time
 import asyncio
@@ -40,9 +43,7 @@ def init_pet_tables():
         clan_id    INTEGER PRIMARY KEY,
         level      INTEGER DEFAULT 1,
         xp         INTEGER DEFAULT 0,
-        total_fed  INTEGER DEFAULT 0,
-        pending_dc REAL DEFAULT 0,
-        last_tick  INTEGER DEFAULT 0
+        total_fed  INTEGER DEFAULT 0
     );
     
     CREATE TABLE IF NOT EXISTS clan_pet_feedings (
@@ -56,18 +57,26 @@ def init_pet_tables():
     """)
     db.commit()
     
-    for col, ddl in [
-        ("pending_dc", "pending_dc REAL DEFAULT 0"),
-        ("last_tick", "last_tick INTEGER DEFAULT 0")
-    ]:
-        try:
-            cols = [r[1] for r in cur.execute("PRAGMA table_info(clan_pets)").fetchall()]
-            if col not in cols:
-                cur.execute(f"ALTER TABLE clan_pets ADD COLUMN {ddl}")
-                db.commit()
-        except Exception:
-            pass
+    # Добавляем колонки, если их нет (с логами)
+    cols = [r[1] for r in cur.execute("PRAGMA table_info(clan_pets)").fetchall()]
     
+    if "pending_dc" not in cols:
+        try:
+            cur.execute("ALTER TABLE clan_pets ADD COLUMN pending_dc REAL DEFAULT 0")
+            db.commit()
+            logger.info("✅ Миграция clan_pets.pending_dc добавлена")
+        except Exception as e:
+            logger.error(f"❌ Ошибка миграции pending_dc: {e}")
+            
+    if "last_tick" not in cols:
+        try:
+            cur.execute("ALTER TABLE clan_pets ADD COLUMN last_tick INTEGER DEFAULT 0")
+            db.commit()
+            logger.info("✅ Миграция clan_pets.last_tick добавлена")
+        except Exception as e:
+            logger.error(f"❌ Ошибка миграции last_tick: {e}")
+    
+    # Инициализация питомцев для всех кланов
     for cid in CLAN_PETS.keys():
         cur.execute("INSERT OR IGNORE INTO clan_pets (clan_id, last_tick) VALUES (?, ?)", (cid, int(time.time())))
     db.commit()
@@ -98,7 +107,6 @@ def get_pet_hourly_income(level: int) -> float:
 
 def get_xp_for_next(level: int) -> int:
     if level >= MAX_LEVEL: return 0
-    # 300, 500, 700, 900... (+200)
     return 300 + (level - 1) * 200
 
 def get_xp_progress(xp: int, level: int) -> tuple:
