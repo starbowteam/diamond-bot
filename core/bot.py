@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
 import os
-import sys
 import asyncio
 import time
-import random
 from datetime import datetime, timezone, timedelta
-from datetime import time as dt_time
 from typing import List
 import disnake
 from disnake.ext import commands, tasks
-from disnake import PartialEmoji, ButtonStyle, ui
+from disnake import PartialEmoji, ButtonStyle
 
 from core.utils import (
     CONFIG, FILES, logger, db, cur,
@@ -19,9 +16,6 @@ from core.utils import (
     log_discord,
     BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR,
     get_dc_cache, save_dc_cache, sync_dc_to_json,
-    get_ticket_owner, clear_ticket_manager,
-    increment_manager_closed, add_manager_rating,
-    add_closed_order
 )
 
 from modules.actions import refresh_daily_deal
@@ -104,7 +98,6 @@ def save_salary_state(state: dict):
 # ============================================================
 # ЗАРПЛАТЫ И АВАНСЫ
 # ============================================================
-# 👇 Employer (1471190371181789234) УДАЛЕН
 SALARY_ROLES = {
     1471844291595731016: {"advance": 750, "salary": 1750},
     1513935883475226796: {"advance": 550, "salary": 1250},
@@ -279,11 +272,6 @@ async def update_review_counter(silent: bool = False):
 
 
 def _process_banner_gif(gif_path: str, font_path: str, review_count: int):
-    """
-    Синхронная тяжёлая функция — запускается через asyncio.to_thread,
-    чтобы НЕ блокировать event loop.
-    Возвращает (gif_bytes, used_config) или (None, None).
-    """
     from PIL import Image, ImageDraw, ImageFont, ImageSequence
     import io
 
@@ -364,7 +352,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
                     if not guild:
                         return
 
-                    # 👇 Тяжёлая работа в ОТДЕЛЬНОМ ПОТОКЕ — event loop остаётся свободным
                     best_gif_bytes, used_config = await asyncio.to_thread(
                         _process_banner_gif, gif_path, font_path, review_count
                     )
@@ -398,7 +385,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
                 except Exception as e:
                     logger.exception(f"update_server_banner: ошибка при обработке GIF: {e}")
 
-        # Fallback — статичный PNG
         base_path = os.path.join(ADD_DIR, "banner.png")
         output_path = os.path.join(DATA_DIR, "banner_ready.png")
 
@@ -582,7 +568,6 @@ async def on_ready():
         bot.loop.create_task(send_ticket_panel())
         bot.loop.create_task(send_profile_panel())
         bot.loop.create_task(send_work_panel())
-        bot.loop.create_task(keep_voice_alive())
         bot.loop.create_task(send_staff_panels())
 
         guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -604,7 +589,6 @@ async def on_ready():
                         await update_user_roles(member, count, keep_pka=True)
                 logger.info(f"Роли обновлены для {len(counts)} пользователей")
 
-        # 👇 НЕ ждём — баннер обновится в фоне. Event loop не блокируется.
         bot.loop.create_task(update_review_counter(silent=False))
 
         try:
@@ -767,28 +751,6 @@ async def on_ready():
         logger.exception("on_ready error: %s", e)
         await log_discord(title="❌ Ошибка при запуске",
                           description=f"> **Ошибка:** `{str(e)}`", color=0xff0000)
-
-
-async def keep_voice_alive():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-            if guild:
-                vc = guild.voice_client
-                if not vc or not vc.is_connected():
-                    try:
-                        voice_channel = guild.get_channel(CONFIG["VOICE_CHANNEL_ID"])
-                        if not voice_channel:
-                            voice_channel = await bot.fetch_channel(CONFIG["VOICE_CHANNEL_ID"])
-                        if voice_channel and isinstance(voice_channel, disnake.VoiceChannel):
-                            await voice_channel.connect()
-                            logger.info("Подключился к голосовому: %s", voice_channel.name)
-                    except Exception as e:
-                        logger.debug("keep_voice_alive connect: %s", e)
-        except Exception as e:
-            logger.exception("keep_voice_alive loop: %s", e)
-        await asyncio.sleep(60)
 
 
 # ============================================================
