@@ -20,62 +20,18 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 
 SUPREME_USER_ID = 796293832751972352
 
-
-# ============================================================
-# ЭМОДЗИ
-# ============================================================
 E_DEAL  = PartialEmoji(name="b1kns", id=1557755707854422088)
 E_REF   = PartialEmoji(name="wmore", id=1552330925684162580)
-E_CASES = PartialEmoji(name="S21",   id=1552381035092648026)
-
-E_CASE_1 = PartialEmoji(name="odin",    id=1557754584158441574)
-E_CASE_2 = PartialEmoji(name="dva",     id=1557754603389583370)
-E_CASE_3 = PartialEmoji(name="tri",     id=1557754619252179066)
-E_CASE_4 = PartialEmoji(name="chetiry", id=1557754636100833340)
-E_CASE_5 = PartialEmoji(name="puiat",   id=1557754652316139592)
-
+E_TOP   = PartialEmoji(name="d1edf", id=1552730601155596348)
+E_ADV   = PartialEmoji(name="reklama", id=1555654392202535073)
 E_SHOP  = PartialEmoji(name="shop1", id=1555654407776112750)
-E_PRIZE = PartialEmoji(name="prize", id=1539657202170859561)
 
-CASE_EMOJI = {
-    1: E_CASE_1,
-    2: E_CASE_2,
-    3: E_CASE_3,
-    4: E_CASE_4,
-    5: E_CASE_5,
-}
-
-
-# ============================================================
-# ХЕЛПЕР: ПАДДИНГ ПОДПИСЕЙ
-# ============================================================
 def _btn_pad(text: str, total: int) -> str:
     base = len(text)
     extra = max(0, total - base)
     left = extra // 2
     right = extra - left
     return f"{P * left}{text}{P * right}"
-
-
-def _btn_labels_total(labels, total):
-    base = sum(len(s) for s in labels)
-    extra = max(0, total - base)
-    n = len(labels)
-    if n == 0:
-        return labels
-    per = extra // n
-    rem = extra % n
-    result = []
-    for i, s in enumerate(labels):
-        pad = per + (1 if i < rem else 0)
-        left = pad // 2
-        right = pad - left
-        result.append(f"{P * left}{s}{P * right}")
-    return result
-
-
-_L_AGAIN, _L_MYCASES = _btn_labels_total(["Купить ещё", "Мои кейсы"], 32)
-
 
 def build_panel_embeds():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "embed.json")
@@ -89,18 +45,15 @@ def build_panel_embeds():
     return [disnake.Embed.from_dict(e) for e in data["embeds"]]
 
 
-# ============================================================
-# СЕЛЕКТ ПАНЕЛИ
-# ============================================================
 class BonusSelect(Select):
     def __init__(self):
         options = [
             SelectOption(label="Акция дня", description="Скидка дня на товар — торопись",
                          emoji=E_DEAL, value="deal"),
-            SelectOption(label="Реферальная система", description="Приглашай друзей — получай DC",
+            SelectOption(label="Мои рефералы", description="Приглашай друзей — получай DC",
                          emoji=E_REF, value="ref"),
-            SelectOption(label="Кейсы", description="Испытай удачу — забери ценный приз",
-                         emoji=E_CASES, value="cases"),
+            SelectOption(label="Топы", description="Топ рефералов и адвайтеров",
+                         emoji=E_TOP, value="top"),
         ]
         super().__init__(
             placeholder="Выбери желаемый раздел бонусов...",
@@ -120,9 +73,6 @@ class BonusPanelView(View):
         self.add_item(BonusSelect())
 
 
-# ============================================================
-# ЭФЕМЕРНЫЕ ЭКРАНЫ
-# ============================================================
 async def _open_screen(inter, screen):
     try:
         await inter.response.defer(ephemeral=True)
@@ -132,7 +82,7 @@ async def _open_screen(inter, screen):
     if inter.author.id != SUPREME_USER_ID and not bcore.has_bonus_access(inter.author):
         try:
             await inter.followup.send(
-                "⛔ Доступ только с ролью <@&1284697274655576186>.",
+                "⛔ Доступ только с ролью <@&1284697274655576186> или Адвайтер.",
                 ephemeral=True,
             )
         except Exception:
@@ -163,9 +113,7 @@ async def _switch(inter, screen):
     if not embeds:
         return
     try:
-        await inter.edit_original_response(
-            embeds=embeds, file=file, attachments=[], view=view,
-        )
+        await inter.edit_original_response(embeds=embeds, file=file, attachments=[], view=view)
     except Exception as e:
         logger.exception(f"bonus switch: {e}")
 
@@ -182,14 +130,11 @@ async def _build_payload(inter, screen):
         next_ts = ((int(_t.time()) // slot_sec) + 1) * slot_sec
         hours_left = max((next_ts - int(_t.time())) // 3600, 0)
 
-        buf = await asyncio.to_thread(
-            brender.render_daily_deal, user_id, balance, deal, hours_left,
-        )
+        buf = await asyncio.to_thread(brender.render_daily_deal, user_id, balance, deal, hours_left)
         fname = f"bonus_deal_{user_id}.png"
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
-
         view = DealView(deal) if deal else DealNoDealView()
         return [e], file, view
 
@@ -199,10 +144,7 @@ async def _build_payload(inter, screen):
             return None, None, None
 
         stats = bcore.get_user_ref_stats(user_id)
-        buf = await asyncio.to_thread(
-            brender.render_ref_panel, user_id, inter.author.display_name, stats,
-            link.get("invite_url"),
-        )
+        buf = await asyncio.to_thread(brender.render_ref_panel, user_id, inter.author.display_name, stats, link.get("invite_url"))
         fname = f"bonus_ref_{user_id}.png"
         file = disnake.File(buf, filename=fname)
 
@@ -215,43 +157,41 @@ async def _build_payload(inter, screen):
             description=(
                 f"> Скопируй и делись:\n"
                 f"```\n{url}\n```\n"
-                f"> За каждого друга, кто проживёт **1 час** и больше — "
-                f"получаешь **100 DC** + **100 DC** в копилку клана."
+                f"> За каждого друга, кто проживёт **1 час** — получаешь **50 DC** + **50 DC** в копилку клана."
             ),
             color=6776679,
         )
         e2.set_image(url=IMG_STRIPE)
-
         view = View(timeout=300)
         return [e1, e2], file, view
 
-    if screen == "cases":
-        balance = await get_user_balance(user_id)
-        stats = bcore.get_case_stats(user_id)
-        buf = await asyncio.to_thread(
-            brender.render_cases, user_id, inter.author.display_name, balance, stats,
+    if screen == "top":
+        # Возвращаем меню выбора топа
+        e = disnake.Embed(
+            title="🏆 Топы рефералов",
+            description="> Выбери, какой топ ты хочешь посмотреть.",
+            color=6776679
         )
-        fname = f"bonus_cases_{user_id}.png"
+        e.set_image(url=IMG_STRIPE)
+        return [e], None, TopSelectView()
+
+    if screen == "top_reg":
+        top_list = bcore.get_top_referrals(is_advertiser=False, limit=10)
+        buf = await asyncio.to_thread(brender.render_ref_top, user_id, inter.author.display_name, top_list, False)
+        fname = f"bonus_top_reg_{user_id}.png"
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
+        return [e], file, TopBackView()
 
-        view = CasesSelectView()
-        return [e], file, view
-
-    if screen == "mycases":
-        stats = bcore.get_case_stats(user_id)
-        history = bcore.get_case_history(user_id, limit=8)
-        buf = await asyncio.to_thread(
-            brender.render_my_cases, user_id, inter.author.display_name, stats, history,
-        )
-        fname = f"bonus_mycases_{user_id}.png"
+    if screen == "top_adv":
+        top_list = bcore.get_top_referrals(is_advertiser=True, limit=10)
+        buf = await asyncio.to_thread(brender.render_ref_top, user_id, inter.author.display_name, top_list, True)
+        fname = f"bonus_top_adv_{user_id}.png"
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
-
-        view = MyCasesBackView()
-        return [e], file, view
+        return [e], file, TopBackView()
 
     return None, None, None
 
@@ -266,13 +206,7 @@ class DealView(View):
         price = deal.get("new_price", 0)
         lbl = _btn_pad(f"Купить за {price} DC", 36)
 
-        btn = Button(
-            label=lbl,
-            style=ButtonStyle.secondary,
-            custom_id="bonus_deal:buy",
-            emoji=E_SHOP,
-            row=0,
-        )
+        btn = Button(label=lbl, style=ButtonStyle.secondary, custom_id="bonus_deal:buy", emoji=E_SHOP, row=0)
         btn.callback = self._buy
         self.add_item(btn)
 
@@ -295,19 +229,13 @@ class DealView(View):
         if role_id and member is not None:
             try:
                 if member.get_role(int(role_id)):
-                    return await inter.followup.send(
-                        f"⛔ Роль «{name}» уже у тебя на аккаунте.",
-                        ephemeral=True,
-                    )
+                    return await inter.followup.send(f"⛔ Роль «{name}» уже у тебя на аккаунте.", ephemeral=True)
             except Exception:
                 pass
 
         balance = await get_user_balance(inter.author.id)
         if balance < price:
-            return await inter.followup.send(
-                f"❌ Недостаточно DC. Нужно {price}, у тебя {balance}.",
-                ephemeral=True,
-            )
+            return await inter.followup.send(f"❌ Недостаточно DC. Нужно {price}, у тебя {balance}.", ephemeral=True)
 
         ok = await remove_dc(inter.author.id, price, f"Акция дня: {name}")
         if not ok:
@@ -325,7 +253,6 @@ class DealView(View):
                 role_name = role.name if role else name
             except Exception as e:
                 logger.warning(f"deal auto role: {e}")
-
         elif item.get("boost_type"):
             kind = "boost"
             try:
@@ -340,50 +267,32 @@ class DealView(View):
                 )
             except Exception as e:
                 logger.warning(f"deal boost: {e}")
-
         else:
             await add_purchase(inter.author.id, cat_key, name)
 
         try:
             await bcore.log_discord(
                 title="🛒 Покупка по акции дня",
-                description=(
-                    f"> **Юзер:** {inter.author.mention}\n"
-                    f"> **Товар:** {name}\n"
-                    f"> **Цена:** {price} DC\n"
-                    f"> **Тип:** {kind}"
-                ),
+                description=f"> **Юзер:** {inter.author.mention}\n> **Товар:** {name}\n> **Цена:** {price} DC\n> **Тип:** {kind}",
                 color=0x00aaff,
                 channel_id=bcore.CONFIG["LOG_TICKET_CHANNEL_ID"],
             )
         except Exception:
             pass
 
-        outcome = {
-            "kind": kind,
-            "name": name,
-            "price": price,
-            "role_name": role_name,
-        }
+        outcome = {"kind": kind, "name": name, "price": price, "role_name": role_name}
 
         try:
-            buf = await asyncio.to_thread(
-                brender.render_deal_success, inter.author.id, self.deal, outcome,
-            )
+            from bonus import render_deal_success
+            buf = await asyncio.to_thread(brender.render_deal_success, inter.author.id, self.deal, outcome)
             fname = f"bonus_deal_ok_{inter.author.id}.png"
             file = disnake.File(buf, filename=fname)
             e = disnake.Embed(color=6776679)
             e.set_image(url=f"attachment://{fname}")
-
-            await inter.edit_original_response(
-                embeds=[e], file=file, attachments=[], view=None,
-            )
+            await inter.edit_original_response(embeds=[e], file=file, attachments=[], view=None)
         except Exception as e:
             logger.exception(f"deal success render: {e}")
-            await inter.followup.send(
-                f"✅ Куплено! {name} · {price} DC",
-                ephemeral=True,
-            )
+            await inter.followup.send(f"✅ Куплено! {name} · {price} DC", ephemeral=True)
 
 
 class DealNoDealView(View):
@@ -392,148 +301,33 @@ class DealNoDealView(View):
 
 
 # ============================================================
-# VIEW: ВЫБОР КЕЙСА (СЕЛЕКТ)
+# VIEW: ТОПЫ
 # ============================================================
-class CaseSelect(Select):
+class TopSelect(Select):
     def __init__(self):
-        from bonus.core import CASES
-        options = []
-        for case in CASES:
-            desc = (case.get("desc") or "").strip()
-            if len(desc) > 95:
-                desc = desc[:92] + "..."
-            options.append(SelectOption(
-                label=f"{case['name']} · {case['price']} DC",
-                description=desc or f"Кейс за {case['price']} DC",
-                emoji=CASE_EMOJI.get(case["num"]),
-                value=str(case["num"]),
-            ))
-        super().__init__(
-            placeholder="Выбери кейс для открытия...",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="bonus_case_select",
-        )
+        options = [
+            SelectOption(label="Топ рефералов", description="Обычные пользователи", emoji=E_TOP, value="top_reg"),
+            SelectOption(label="Топ адвайтеров", description="Только для адвайтеров", emoji=E_ADV, value="top_adv"),
+        ]
+        super().__init__(placeholder="Какой топ показать?", min_values=1, max_values=1, options=options, custom_id="bonus_top_select")
 
     async def callback(self, inter: disnake.MessageInteraction):
-        try:
-            case_num = int(inter.data.values[0])
-        except Exception:
-            return
-        await _open_case(inter, case_num)
+        value = inter.data.values[0]
+        await _switch(inter, value)
 
 
-class CasesSelectView(View):
+class TopSelectView(View):
     def __init__(self):
         super().__init__(timeout=300)
-        self.add_item(CaseSelect())
+        self.add_item(TopSelect())
 
 
-# ============================================================
-# VIEW: ПОСЛЕ КЕЙСА
-# ============================================================
-class CaseAfterView(View):
+class TopBackView(View):
     def __init__(self):
         super().__init__(timeout=300)
-
-        btn_again = Button(
-            label=_L_AGAIN,
-            style=ButtonStyle.secondary,
-            custom_id="bonus_after:again",
-            emoji=E_SHOP,
-            row=0,
-        )
-        btn_again.callback = self._again
-        self.add_item(btn_again)
-
-        btn_my = Button(
-            label=_L_MYCASES,
-            style=ButtonStyle.secondary,
-            custom_id="bonus_after:mycases",
-            emoji=E_PRIZE,
-            row=0,
-        )
-        btn_my.callback = self._mycases
-        self.add_item(btn_my)
-
-    async def _again(self, inter):
-        await _switch(inter, "cases")
-
-    async def _mycases(self, inter):
-        await _switch(inter, "mycases")
-
-
-class MyCasesBackView(View):
-    def __init__(self):
-        super().__init__(timeout=300)
-
-        btn = Button(
-            label=_btn_pad("К кейсам", 33),
-            style=ButtonStyle.secondary,
-            custom_id="bonus_mycases:back",
-            row=0,
-        )
+        btn = Button(label=_btn_pad("Назад к топам", 30), style=ButtonStyle.secondary, custom_id="bonus_top:back", emoji=E_TOP)
         btn.callback = self._back
         self.add_item(btn)
 
     async def _back(self, inter):
-        await _switch(inter, "cases")
-
-
-# ============================================================
-# ОТКРЫТИЕ КЕЙСА
-# ============================================================
-async def _open_case(inter, case_num: int):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    case = bcore.CASES_BY_NUM.get(case_num)
-    if not case:
-        return await inter.followup.send("❌ Кейс не найден", ephemeral=True)
-
-    balance = await get_user_balance(inter.author.id)
-    if balance < case["price"]:
-        return await inter.followup.send(
-            f"❌ Нужно **{case['price']} DC**, у тебя **{balance} DC**.",
-            ephemeral=True,
-        )
-
-    try:
-        buf = await asyncio.to_thread(brender.render_spin, case)
-        fname = f"bonus_spin_{inter.author.id}.png"
-        file = disnake.File(buf, filename=fname)
-        e = disnake.Embed(color=6776679)
-        e.set_image(url=f"attachment://{fname}")
-        await inter.edit_original_response(embeds=[e], file=file, attachments=[], view=None)
-    except Exception as e:
-        logger.exception(f"spin render: {e}")
-
-    await asyncio.sleep(2.0)
-
-    result = await bcore.open_case(inter.bot, inter.author.id, case_num)
-    if not result["ok"]:
-        return await inter.followup.send(
-            f"❌ {result.get('error', 'Ошибка')}", ephemeral=True,
-        )
-
-    new_balance = await get_user_balance(inter.author.id)
-    try:
-        buf = await asyncio.to_thread(
-            brender.render_result,
-            case, result["prize"], result["desc"], new_balance,
-        )
-        fname = f"bonus_result_{inter.author.id}.png"
-        file = disnake.File(buf, filename=fname)
-        e = disnake.Embed(color=6776679)
-        e.set_image(url=f"attachment://{fname}")
-        await inter.edit_original_response(
-            embeds=[e], file=file, attachments=[], view=CaseAfterView(),
-        )
-    except Exception as e:
-        logger.exception(f"result render: {e}")
-        await inter.followup.send(
-            f"🎉 Выпало: **{result['desc']}**", ephemeral=True,
-        )
+        await _switch(inter, "top")
