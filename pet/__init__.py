@@ -9,7 +9,6 @@ from pet.core import (
     migrate_old_pets,
     get_clan_pet,
 )
-from pet.views import ClanPetMainView
 
 PET_CHANNEL_ID = 1558887828920995880
 PET_EMBED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet.json")
@@ -49,9 +48,13 @@ async def send_pet_panel(bot):
     except Exception:
         pass
 
-    embeds = _build_panel_embeds()
-    await ch.send(embeds=embeds, view=ClanPetMainView())
-    logger.info("🐾 Панель питомцев отправлена")
+    try:
+        from pet.views import ClanPetMainView
+        embeds = _build_panel_embeds()
+        await ch.send(embeds=embeds, view=ClanPetMainView())
+        logger.info("🐾 Панель питомцев отправлена")
+    except Exception as e:
+        logger.exception(f"Ошибка отправки панели питомцев: {e}")
 
 def init_pet_league(bot):
     """Инициализация модуля питомцев."""
@@ -62,6 +65,7 @@ def init_pet_league(bot):
 
     # Регистрация View
     try:
+        from pet.views import ClanPetMainView
         bot.add_view(ClanPetMainView())
     except Exception as e:
         logger.warning(f"pet add_view: {e}")
