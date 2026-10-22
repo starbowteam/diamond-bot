@@ -368,8 +368,9 @@ def render_ref_panel(user_id, username, stats, link_url):
     _grad(img, (x1 + pad, hint_y, x2 - pad, hint_y + 150), GREEN, GREEN, alpha=15, radius=16)
     d.rounded_rectangle((x1 + pad, hint_y, x2 - pad, hint_y + 150), radius=16, outline=GREEN + (200,), width=2)
 
-    _icon(d, x1 + pad + 32, hint_y + 30, I_GIFT, 20, DIM)
-    d.text((x1 + pad + 54, hint_y + 20), "КАК ЗАРАБОТАТЬ", font=_font(12), fill=GREEN)
+    # Белая иконка
+    _icon(d, x1 + pad + 32, hint_y + 30, I_GIFT, 20, TEXT)
+    d.text((x1 + pad + 54, hint_y + 20), "КАК ЗАРАБОТАТЬ", font=_font(12), fill=TEXT)
 
     for i, ln in enumerate([
         "50 DC на баланс за друга",
@@ -379,7 +380,7 @@ def render_ref_panel(user_id, username, stats, link_url):
         dy = hint_y + 60 + i * 26
         # Белые точки
         d.ellipse((x1 + pad + 24, dy + 6, x1 + pad + 32, dy + 14), fill=(255, 255, 255, 255))
-        d.text((x1 + pad + 44, dy), ln, font=_font(15), fill=GREEN)
+        d.text((x1 + pad + 44, dy), ln, font=_font(15), fill=SILVER_HI)
 
     _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=20)
     rpx1 = rx1 + 28; rpx2 = rx2 - 12 - 28; rpy = BODY_Y + 24
@@ -466,7 +467,7 @@ def render_ref_panel(user_id, username, stats, link_url):
     return buf
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 3: ТОПЫ
+# ЭКРАН 3: ТОПЫ (НОВЫЙ МАКЕТ)
 # ═══════════════════════════════════════════════════
 def render_ref_top(user_id, username, top_list, is_advertiser=False):
     img, d = _canvas("топ адвайтеров" if is_advertiser else "топ рефералов")
@@ -475,13 +476,23 @@ def render_ref_top(user_id, username, top_list, is_advertiser=False):
     title = "ТОП АДВАЙТЕРОВ" if is_advertiser else "ТОП РЕФЕРАЛОВ"
     
     cx = W // 2
-    d.text((cx, 160), title, font=_font(48), fill=color, anchor="mm")
+    d.text((cx, 150), title, font=_font(48), fill=color, anchor="mm")
     
-    list_y = 240
-    row_h = 70
-    gap = 12
-    col_w = 900
+    # Шапка таблицы
+    head_y = 230
+    col_w = 1000
     start_x = cx - col_w // 2
+    
+    d.line((start_x, head_y + 40, start_x + col_w, head_y + 40), fill=STACK_HDR + (255,), width=2)
+    
+    d.text((start_x + 70, head_y), "МЕСТО", font=_font(14), fill=MUTED)
+    d.text((start_x + 180, head_y), "ПОЛЬЗОВАТЕЛЬ", font=_font(14), fill=MUTED)
+    d.text((start_x + 550, head_y), "ВСЕГО", font=_font(14), fill=MUTED)
+    d.text((start_x + 750, head_y), "ЗАРАБОТАНО", font=_font(14), fill=MUTED)
+    
+    list_y = head_y + 60
+    row_h = 75
+    gap = 12
     
     if not top_list:
         _icon(d, cx, 500, I_ELL, 60, DIM)
@@ -499,13 +510,18 @@ def render_ref_top(user_id, username, top_list, is_advertiser=False):
             d.rounded_rectangle((start_x, ry, start_x + col_w, ry + row_h), radius=16,
                                 fill=INNER_BG + (255,), outline=medal + (150,), width=2)
             
-            _icon(d, start_x + 40, ry + row_h//2, I_MEDAL, 26, medal)
-            d.text((start_x + 70, ry + row_h//2), f"#{i+1}", font=_font(24), fill=medal, anchor="lm")
+            # Место
+            _icon(d, start_x + 60, ry + row_h//2, I_MEDAL, 26, medal)
+            d.text((start_x + 90, ry + row_h//2), f"#{i+1}", font=_font(24), fill=medal, anchor="lm")
             
-            d.text((start_x + 150, ry + row_h//2), entry['username'], font=_font(22), fill=TEXT, anchor="lm")
+            # Имя
+            d.text((start_x + 180, ry + row_h//2), entry['username'], font=_font(22), fill=TEXT, anchor="lm")
             
-            d.text((start_x + col_w - 250, ry + row_h//2), f"Засчитано: {entry['rewarded']}", font=_font(18), fill=GREEN, anchor="lm")
-            d.text((start_x + col_w - 80, ry + row_h//2), f"+{entry['earned']} DC", font=_font(20), fill=GOLD, anchor="rm")
+            # Всего
+            d.text((start_x + 550, ry + row_h//2), f"{entry['total']} чел.", font=_font(20), fill=SILVER_HI, anchor="lm")
+            
+            # Заработано
+            d.text((start_x + 750, ry + row_h//2), f"+{entry['earned']} DC", font=_font(24), fill=GREEN, anchor="lm")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
