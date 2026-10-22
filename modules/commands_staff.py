@@ -49,6 +49,7 @@ TICKET_PANEL_CHANNEL_ID = 1462136361711829053
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
+
 # ============================================================
 # ЭКОНОМИКА
 # ============================================================
@@ -793,7 +794,6 @@ class SpisatZakazModal(Modal):
                         (manager_id,))
             db.commit()
             await inter2.response.send_message("✅ Заказ списан. Статистика обновлена.", ephemeral=True)
-            await send_work_panel()
             await log_discord(
                 title="🗑️ Заказ списан",
                 description=f"> **Админ:** {inter2.author.mention}\n> **Менеджер:** <@{manager_id}>\n> **Заказ:** #{order_id}",
@@ -1021,55 +1021,6 @@ async def dc_file(
             await ctx.edit_original_response(content=f"❌ Ошибка: {e}")
         except Exception:
             pass
-
-
-# ============================================================
-# ТОП МЕНЕДЖЕРОВ (ОСТАВЛЯЕМ ТОЛЬКО СБРОС СТАТИСТИКИ)
-# ============================================================
-class ResetStatsView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @disnake.ui.button(label="Сбросить статистику", style=ButtonStyle.danger, custom_id="reset_stats")
-    async def reset(self, button, inter):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ У вас нет прав на сброс.", ephemeral=True)
-        from core.utils import reset_manager_stats
-        reset_manager_stats()
-        await log_discord(
-            title="📊 Статистика сброшена",
-            description=f"> **Админ:** {inter.author.mention}\n> Статистика менеджеров обнулена.",
-            color=0xff6600
-        )
-        await inter.response.send_message("✅ Статистика сброшена.", ephemeral=True)
-
-
-async def send_manager_top():
-    from core.bot import bot
-    await bot.wait_until_ready()
-
-    log_channel = bot.get_channel(1462418981825810535)
-    if log_channel:
-        async for msg in log_channel.history(limit=50):
-            if msg.author == bot.user and msg.components:
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-                break
-        embed_log = disnake.Embed(
-            title="🗑️ Управление статистикой менеджеров",
-            description="> Нажмите кнопку ниже, чтобы сбросить статистику менеджеров (только для администраторов).",
-            color=0xff6600
-        )
-        embed_log.set_image(url=IMG_STRIPE)
-        await log_channel.send(embed=embed_log, view=ResetStatsView())
-
-    await log_discord(
-        title="📊 Статистика менеджеров обновлена",
-        description="> Панель работы и логи обновлены.",
-        color=0x00ff00
-    )
 
 
 # ============================================================
