@@ -48,7 +48,8 @@ def clan_cut(amount: int) -> int:
         return int(amount * CLAN_POOL_SMALL)
     return int(amount * CLAN_POOL_BIG)
 
-TOP_BONUSES = [3.00, 2.00, 1.50]
+# 👇 НОВЫЕ МНОЖИТЕЛИ (Топ-1 = 7, Топ-2 = 5, Топ-3 = 3)
+TOP_BONUSES = [7.00, 5.00, 3.00]
 
 MIN_CONTRIB_FOR_PAYOUT = 50
 
@@ -1002,7 +1003,7 @@ def close_cycle_and_pay(bot) -> bool:
                 m["bonus"] = TOP_BONUSES[idx]
                 m["place"] = idx + 1
             else:
-                m["bonus"] = 1.0
+                m["bonus"] = 1.5 # 👈 ОБЫЧНЫЙ МНОЖИТЕЛЬ 1.5x
                 m["place"] = None
 
             m["eff"] = (m["weight"] * m["bonus"]) if m["eligible"] else 0.0
@@ -1206,7 +1207,10 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
                 f"**Как играть:**\n"
                 f"> • Зарабатывай DC — до 100 DC вся сумма в копилку, больше — 40%\n"
                 f"> • Выполняй квесты в <#1552700973753827509> — **100%** в копилку\n"
-                f"> • Топ-3 по вкладу получат бонус ×3.00 / ×2.00 / ×1.50\n"
+                f"> • Топ-1 по вкладу получит бонус ×7.00\n"
+                f"> • Топ-2 по вкладу получит бонус ×5.00\n"
+                f"> • Топ-3 по вкладу получит бонус ×3.00\n"
+                f"> • Остальные участники получат бонус ×1.50\n"
                 f"> • В конце цикла банк делится между всеми участниками\n"
                 f"> • Дневной лимит вклада — **2500 DC**\n\n"
                 f"**Где смотреть:**\n"
@@ -1453,6 +1457,8 @@ async def send_payout_dms(bot, report: dict):
             ]
             if p["place"]:
                 lines.append(f"> Место по вкладу: `#{p['place']}`")
+                lines.append(f"> Множитель: `×{p['bonus']:.2f}`")
+            else:
                 lines.append(f"> Множитель: `×{p['bonus']:.2f}`")
 
             lines += ["", "────────────────────"]
