@@ -1,470 +1,154 @@
 # -*- coding: utf-8 -*-
-"""Discord UI для панели питомцев. Все кнопки серые."""
 import asyncio
-
 import disnake
-from disnake import ButtonStyle, SelectOption, PartialEmoji
-from disnake.ui import View, Button, Select, Modal, TextInput
+from disnake import ButtonStyle, PartialEmoji
+from disnake.ui import View, Button, Modal, TextInput
 
-from core.utils import logger, CONFIG
+from core.utils import logger, get_dc_cache
+from clan.core import get_user_clan
 from pet import core as pcore
 from pet import render as prender
 
-
 P = "\u3164"
+E_FEED = PartialEmoji(name="drumstick", id=1539657202170859561)
+E_TOP = PartialEmoji(name="prize", id=1539657202170859561)
+E_ABOUT = PartialEmoji(name="info", id=1539657202170859561)
 
-
-def _pad(text: str, left: int = 2, right: int = 2) -> str:
+def _pad(text: str, total: int) -> str:
+    base = len(text)
+    extra = max(0, total - base)
+    left = extra // 2
+    right = extra - left
     return f"{P * left}{text}{P * right}"
 
-
-# ============================================================
-# ЭМОДЗИ
-# ============================================================
-E_PETS     = PartialEmoji(name="pe121t",  id=1559221896774553670)
-E_CATALOG  = PartialEmoji(name="bo1s1",   id=1559221873999351869)
-E_TOP      = PartialEmoji(name="d1edf",   id=1552730601155596348)
-
-E_CLAIM    = PartialEmoji(name="1d1ds",   id=1552730624572391584)
-E_FEED     = PartialEmoji(name="mea1w1",  id=1559221849177723041)
-
-E_BUY      = PartialEmoji(name="shop1",   id=1555654407776112750)
-E_GIFT     = PartialEmoji(name="gid1",    id=1555654337953267794)
-
-
-def _get_username(guild, user_id: int) -> str:
-    if guild is not None:
-        try:
-            m = guild.get_member(user_id)
-            if m is not None:
-                return m.display_name
-        except Exception:
-            pass
-    return f"@{user_id}"
-
-
-# ============================================================
-# ПАНЕЛЬ В КАНАЛЕ
-# ============================================================
-class PetPanelView(View):
+class ClanPetMainView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label=_pad("Питомцы", 2, 1), style=ButtonStyle.gray,
-                       custom_id="pet_panel:my", emoji=E_PETS, row=0)
-    async def my_pets(self, button, inter: disnake.MessageInteraction):
-        await _open_my_pets(inter)
+    @disnake.ui.button(label=_pad("Покормить", 15), style=ButtonStyle.gray, custom_id="cp_main:feed", emoji=E_FEED, row=0)
+    async def feed(self, button, inter):
+        await inter.response.send_modal(FeedPetModal())
 
-    @disnake.ui.button(label=_pad("Каталог", 2, 2), style=ButtonStyle.gray,
-                       custom_id="pet_panel:catalog", emoji=E_CATALOG, row=0)
-    async def catalog(self, button, inter: disnake.MessageInteraction):
-        await _open_catalog(inter)
-
-    @disnake.ui.button(label=_pad("Топ", 2, 1), style=ButtonStyle.gray,
-                       custom_id="pet_panel:top", emoji=E_TOP, row=0)
-    async def top(self, button, inter: disnake.MessageInteraction):
-        await _open_top(inter)
-
-
-# ============================================================
-# МОИ ПИТОМЦЫ
-# ============================================================
-class MyPetsView(View):
-    def __init__(self):
-        super().__init__(timeout=300)
-
-    @disnake.ui.button(label=_pad("Забрать накопленное", 2, 1),
-                       style=ButtonStyle.gray,
-                       custom_id="pet_my:claim", emoji=E_CLAIM, row=0)
-    async def claim(self, button, inter: disnake.MessageInteraction):
-        await _claim_income(inter)
-
-    @disnake.ui.button(label=_pad("Покормить питомцев", 1, 1),
-                       style=ButtonStyle.gray,
-                       custom_id="pet_my:feed", emoji=E_FEED, row=0)
-    async def feed(self, button, inter: disnake.MessageInteraction):
-        await _feed_active(inter)
-
-
-# ============================================================
-# КАТАЛОГ — короткие описания в селекте
-# ============================================================
-class CatalogSelect(Select):
-    def __init__(self, available):
-        options = []
-        for key, cat in available[:25]:
-            price = cat["price_dc"]
-            label = f"{cat['name']} · {price} DC"
-            if len(label) > 90:
-                label = label[:87] + "..."
-            # 👇 КОРОТКОЕ описание
-            bt = cat.get("bonus_type", "none")
-            bonus_short = ""
-            if bt != "none":
-                bonus_short = f" · +{int(cat.get('bonus_value', 0) * 100)}%"
-            desc = (
-                f"{pcore.RARITY_LABEL[cat['rarity']]} · "
-                f"+{cat['passive_dc']} DC/ч{bonus_short}"
-            )
-            options.append(SelectOption(
-                label=label,
-                description=desc[:100],
-                value=key,
-            ))
-        super().__init__(
-            placeholder="Выбери питомца чтобы купить или подарить",
-            min_values=1, max_values=1,
-            options=options, custom_id="pet_cat:select",
-        )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        await _on_select_catalog(inter)
-
-
-class CatalogView(View):
-    def __init__(self, available):
-        super().__init__(timeout=300)
-        self.available = available
-        if available:
-            self.add_item(CatalogSelect(available))
-
-
-# ============================================================
-# КАРТОЧКА ТОВАРА
-# ============================================================
-class CardActionSelect(Select):
-    def __init__(self, pet_key: str):
-        cat = pcore.CATALOG.get(pet_key, {})
-        price = cat.get("price_dc", 0)
-        gp = pcore.gift_price(pet_key)
-
-        super().__init__(
-            placeholder="Что сделать с питомцем?",
-            min_values=1, max_values=1,
-            options=[
-                SelectOption(
-                    label=f"Купить себе · {price} DC",
-                    description="Питомец появится в твоей коллекции",
-                    emoji=E_BUY,
-                    value="buy",
-                ),
-                SelectOption(
-                    label=f"Подарить · {gp} DC",
-                    description="Отправить другому юзеру (+10%)",
-                    emoji=E_GIFT,
-                    value="gift",
-                ),
-            ],
-            custom_id=f"pet_card_action:{pet_key}",
-        )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        pet_key = self.custom_id.split(":")[-1]
-        action = inter.data.values[0]
-
-        if action == "buy":
-            await _card_buy(inter, pet_key)
-        elif action == "gift":
-            await _card_gift(inter, pet_key)
-
-
-class CatalogCardView(View):
-    def __init__(self, pet_key: str, can_buy: bool):
-        super().__init__(timeout=300)
-        self.pet_key = pet_key
-        self.add_item(CardActionSelect(pet_key))
-
-
-# ============================================================
-# МОДАЛКА ПОДАРКА
-# ============================================================
-class GiftPetModal(Modal):
-    def __init__(self, pet_key: str):
-        self.pet_key = pet_key
-        cat = pcore.CATALOG.get(pet_key, {})
-        price = pcore.gift_price(pet_key)
-        super().__init__(
-            title=f"Подарить: {cat.get('name', '—')}",
-            components=[
-                TextInput(
-                    label=f"ID получателя · итого {price} DC",
-                    placeholder="Например: 123456789012345678",
-                    custom_id="recipient_id",
-                    min_length=1,
-                    max_length=32,
-                )
-            ],
-            custom_id=f"pet_gift_modal:{pet_key}",
-        )
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        raw = (self.text_values.get("recipient_id") or "").strip()
-        if not raw.isdigit():
-            return await inter.response.send_message(
-                "❌ ID должен состоять только из цифр.", ephemeral=True
-            )
-
-        recipient_id = int(raw)
-
-        try:
-            await inter.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
-        result = await pcore.gift_pet(
-            inter.bot, inter.author.id, recipient_id, self.pet_key
-        )
-
-        if not result.get("ok"):
-            await inter.followup.send(
-                f"❌ {result.get('error', 'Ошибка')}", ephemeral=True
-            )
-            return
-
-        cat = pcore.CATALOG.get(self.pet_key, {})
-        price = result.get("price", 0)
-        base_price = cat.get("price_dc", 0)
-
-        user_id = inter.author.id
-        balance = _get_balance(user_id)
-
-        recipient_name = _get_username(inter.guild, recipient_id)
-
-        buf = await asyncio.to_thread(
-            prender.render_success_gift,
-            user_id, balance, self.pet_key, price, base_price, recipient_name,
-        )
-        fname = f"pet_gift_ok_{user_id}.png"
+    @disnake.ui.button(label=_pad("Топ кормильцев", 18), style=ButtonStyle.gray, custom_id="cp_main:top", emoji=E_TOP, row=0)
+    async def top(self, button, inter):
+        try: await inter.response.defer(ephemeral=True)
+        except: pass
+        
+        clan = get_user_clan(inter.author.id)
+        if not clan: return await inter.followup.send("❌ Ты не в клане.", ephemeral=True)
+        
+        top_list = pcore.get_clan_pet_top(clan["id"])
+        buf = await asyncio.to_thread(prender.render_pet_top, inter.author.id, clan["name"], clan["id"], top_list)
+        
+        fname = f"cp_top_{inter.author.id}.png"
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
+        
+        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetTopView())
 
-        try:
-            await inter.edit_original_response(
-                content=None, embed=e, file=file, attachments=[], view=None,
-            )
-        except Exception:
-            try:
-                await inter.followup.send(embed=e, file=file, ephemeral=True)
-            except Exception as ex:
-                logger.warning(f"gift success render: {ex}")
+    @disnake.ui.button(label=_pad("О питомце", 12), style=ButtonStyle.gray, custom_id="cp_main:about", emoji=E_ABOUT, row=0)
+    async def about(self, button, inter):
+        try: await inter.response.defer(ephemeral=True)
+        except: pass
+        
+        clan = get_user_clan(inter.author.id)
+        if not clan: return await inter.followup.send("❌ Ты не в клане.", ephemeral=True)
+        
+        buf = await asyncio.to_thread(prender.render_pet_about, inter.author.id, clan["name"])
+        
+        fname = f"cp_about_{inter.author.id}.png"
+        file = disnake.File(buf, filename=fname)
+        e = disnake.Embed(color=6776679)
+        e.set_image(url=f"attachment://{fname}")
+        
+        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetAboutView())
 
-
-# ============================================================
-# ТОП
-# ============================================================
-class TopView(View):
+class ClanPetTopView(View):
     def __init__(self):
         super().__init__(timeout=300)
 
+    @disnake.ui.button(label=_pad("Назад", 12), style=ButtonStyle.gray, custom_id="cp_top:back", emoji=PartialEmoji(name="arrow_left", id=1539657202170859561), row=0)
+    async def back(self, button, inter):
+        try: await inter.response.defer(ephemeral=True)
+        except: pass
+        
+        clan = get_user_clan(inter.author.id)
+        if not clan: return await inter.followup.send("❌ Ты не в клане.", ephemeral=True)
+        
+        balance = get_dc_cache(inter.author.id).get("balance", 0)
+        buf = await asyncio.to_thread(prender.render_pet_main, inter.author.id, clan["name"], clan["id"], balance)
+        
+        fname = f"cp_main_{inter.author.id}.png"
+        file = disnake.File(buf, filename=fname)
+        e = disnake.Embed(color=6776679)
+        e.set_image(url=f"attachment://{fname}")
+        
+        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetMainView())
 
-# ============================================================
-# ХЕЛПЕРЫ
-# ============================================================
-def _is_ephemeral_message(inter: disnake.MessageInteraction) -> bool:
-    try:
-        msg = inter.message
-        if msg is None:
-            return False
-        flags = getattr(msg, "flags", None)
-        if flags is None:
-            return False
-        return bool(getattr(flags, "ephemeral", False))
-    except Exception:
-        return False
+class ClanPetAboutView(View):
+    def __init__(self):
+        super().__init__(timeout=300)
 
+    @disnake.ui.button(label=_pad("Назад", 12), style=ButtonStyle.gray, custom_id="cp_about:back", emoji=PartialEmoji(name="arrow_left", id=1539657202170859561), row=0)
+    async def back(self, button, inter):
+        try: await inter.response.defer(ephemeral=True)
+        except: pass
+        
+        clan = get_user_clan(inter.author.id)
+        if not clan: return await inter.followup.send("❌ Ты не в клане.", ephemeral=True)
+        
+        balance = get_dc_cache(inter.author.id).get("balance", 0)
+        buf = await asyncio.to_thread(prender.render_pet_main, inter.author.id, clan["name"], clan["id"], balance)
+        
+        fname = f"cp_main_{inter.author.id}.png"
+        file = disnake.File(buf, filename=fname)
+        e = disnake.Embed(color=6776679)
+        e.set_image(url=f"attachment://{fname}")
+        
+        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetMainView())
 
-async def _display_screen(inter: disnake.MessageInteraction,
-                          buf, fname: str, view: View):
-    file = disnake.File(buf, filename=fname)
-    e = disnake.Embed(color=6776679)
-    e.set_image(url=f"attachment://{fname}")
-
-    if _is_ephemeral_message(inter):
-        try:
-            await inter.edit_original_response(
-                content=None, embed=e, file=file, attachments=[], view=view
-            )
-            return
-        except Exception as ex:
-            logger.warning(f"pet edit_original: {ex}")
-
-    try:
-        await inter.followup.send(embed=e, file=file, view=view, ephemeral=True)
-    except Exception as ex:
-        logger.warning(f"pet followup: {ex}")
-
-
-def _get_balance(user_id: int) -> int:
-    from core.utils import get_dc_cache
-    return get_dc_cache(user_id).get("balance", 0)
-
-
-def _get_available_pets(user_id: int):
-    owned = {p["pet_key"] for p in pcore.get_user_pets(user_id)}
-    return [(k, c) for k, c in pcore.CATALOG.items() if k not in owned]
-
-
-# ============================================================
-# ОТКРЫТИЕ
-# ============================================================
-async def _open_my_pets(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-    user_id = inter.author.id
-    balance = _get_balance(user_id)
-    pets = pcore.get_user_pets(user_id)
-    top_pet = pcore.get_top_earning_pet(user_id)
-    buf = await asyncio.to_thread(
-        prender.render_my_pets, user_id, balance, pets, top_pet
-    )
-    await _display_screen(inter, buf, f"pet_my_{user_id}.png", MyPetsView())
-
-
-async def _open_catalog(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-    user_id = inter.author.id
-    balance = _get_balance(user_id)
-    available = _get_available_pets(user_id)
-    buf = await asyncio.to_thread(
-        prender.render_catalog, user_id, balance, available, None
-    )
-    await _display_screen(inter, buf, f"pet_cat_{user_id}.png", CatalogView(available))
-
-
-async def _open_top(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-    user_id = inter.author.id
-    balance = _get_balance(user_id)
-    top = pcore.get_top_users(limit=10)
-    place = pcore.get_user_place(user_id)
-    best_pet = pcore.get_user_best_pet(user_id)
-
-    guild = inter.guild
-    for t in top:
-        t["username"] = _get_username(guild, t["user_id"])
-
-    buf = await asyncio.to_thread(
-        prender.render_top, user_id, balance, top, place, best_pet
-    )
-    await _display_screen(inter, buf, f"pet_top_{user_id}.png", TopView())
-
-
-# ============================================================
-# ДЕЙСТВИЯ
-# ============================================================
-async def _claim_income(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-    user_id = inter.author.id
-    amount = await pcore.claim_income(user_id)
-    if amount <= 0:
-        await inter.followup.send("💰 Накоплений пока нет.", ephemeral=True)
-        return
-    await inter.followup.send(f"💰 Получено **+{amount} DC** со всех питомцев!", ephemeral=True)
-    await _open_my_pets(inter)
-
-
-async def _feed_active(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-    user_id = inter.author.id
-    result = await pcore.feed_active_pet(user_id)
-    if not result.get("ok"):
-        await inter.followup.send(
-            f"❌ {result.get('error', 'Ошибка')}", ephemeral=True
+class FeedPetModal(Modal):
+    def __init__(self):
+        super().__init__(
+            title="Покормить питомца",
+            components=[
+                TextInput(
+                    label="Сколько DC скормить?",
+                    placeholder="Например: 5000",
+                    custom_id="amount",
+                    min_length=1, max_length=10
+                )
+            ]
         )
-        return
 
-    n = result.get("pets_fed", 1)
-    xp_per = result.get("xp_per_pet", 0)
-    bonus = result.get("bonus_xp", 0)
+    async def callback(self, inter: disnake.ModalInteraction):
+        raw = inter.text_values["amount"].strip()
+        if not raw.isdigit():
+            return await inter.response.send_message("❌ Введи целое число.", ephemeral=True)
+            
+        amount = int(raw)
+        
+        try: await inter.response.defer(ephemeral=True)
+        except: pass
 
-    if n == 1:
-        msg = f"🍖 Питомец покормлен! **+{xp_per} XP**"
-    else:
-        msg = f"🍖 Покормил **{n} питомцев**! Каждому **+{xp_per} XP**"
+        result = await pcore.feed_clan_pet(inter.author.id, amount)
+        if not result["ok"]:
+            return await inter.followup.send(f"❌ {result['error']}", ephemeral=True)
 
-    if bonus > 0:
-        msg += f"\n🔥 Бонус за streak: **+{bonus} XP** активному"
+        msg = f"✅ Ты скормил **{amount:,} DC** питомцу! Получено **+{result['xp_added']} XP**."
+        if result["leveled_up"]:
+            msg += f"\n🎉 **Питомец повысил уровень до {result['new_level']}!**"
+            
+        await inter.followup.send(msg, ephemeral=True)
 
-    await inter.followup.send(msg, ephemeral=True)
-    await _open_my_pets(inter)
-
-
-async def _on_select_catalog(inter: disnake.MessageInteraction):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    pet_key = inter.data.values[0]
-    user_id = inter.author.id
-
-    if pcore.has_pet(user_id, pet_key):
-        await inter.followup.send(
-            "❌ У тебя уже есть этот питомец.", ephemeral=True
-        )
-        await _open_catalog(inter)
-        return
-
-    cat = pcore.CATALOG.get(pet_key, {})
-    balance = _get_balance(user_id)
-    can_buy = balance >= cat.get("price_dc", 0)
-
-    buf = await asyncio.to_thread(
-        prender.render_item_card, user_id, balance, pet_key
-    )
-    fname = f"pet_item_{user_id}_{pet_key}.png"
-    view = CatalogCardView(pet_key, can_buy)
-    await _display_screen(inter, buf, fname, view)
-
-
-async def _card_buy(inter: disnake.MessageInteraction, pet_key: str):
-    try:
-        await inter.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    user_id = inter.author.id
-
-    if pcore.has_pet(user_id, pet_key):
-        await inter.followup.send("❌ У тебя уже есть этот питомец.", ephemeral=True)
-        await _open_catalog(inter)
-        return
-
-    cat = pcore.CATALOG.get(pet_key, {})
-    price = cat.get("price_dc", 0)
-
-    result = await pcore.buy_pet(inter.bot, user_id, pet_key)
-    if not result.get("ok"):
-        await inter.followup.send(
-            f"❌ {result.get('error', 'Ошибка')}", ephemeral=True
-        )
-        return
-
-    balance = _get_balance(user_id)
-    buf = await asyncio.to_thread(
-        prender.render_success_buy, user_id, balance, pet_key, price
-    )
-    fname = f"pet_buy_ok_{user_id}.png"
-    await _display_screen(inter, buf, fname, TopView())
-
-
-async def _card_gift(inter: disnake.MessageInteraction, pet_key: str):
-    try:
-        await inter.response.send_modal(GiftPetModal(pet_key))
-    except Exception as e:
-        logger.warning(f"gift modal: {e}")
+        clan = get_user_clan(inter.author.id)
+        balance = get_dc_cache(inter.author.id).get("balance", 0)
+        buf = await asyncio.to_thread(prender.render_pet_main, inter.author.id, clan["name"], clan["id"], balance)
+        
+        fname = f"cp_main_{inter.author.id}.png"
+        file = disnake.File(buf, filename=fname)
+        e = disnake.Embed(color=6776679)
+        e.set_image(url=f"attachment://{fname}")
+        
+        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetMainView())
