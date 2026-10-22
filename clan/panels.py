@@ -65,9 +65,7 @@ EMOJI_ROULETTE  = "<:ropulet:1550563615675781282>"
 EMOJI_BLACKJACK = "<:joke:1551288467659428020>"
 EMOJI_COINFLIP  = "<:coins:1539649259245408340>"
 
-IMG_SLOTS_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
-                 "1552731239398768711/image.png?ex=6ab6ad27&is=6ab55ba7&"
-                 "hm=60031b3eef30f7e7448875045e47612b869469755e50801f3819ae2dfbbb8913&")
+IMG_SLOTS_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/1562685534244053065/image.png?ex=6adae3d0&is=6ad99250&hm=44b63eacd2ddd814b5ef4d6ae1551c704239ee049554dbfd310a822466269a17&")
 
 IMG_SEASON_TOP = ("https://cdn.discordapp.com/attachments/1527006158282555412/"
                   "1556729820300316823/image.png?backend=b2&ex=6ac5391f&is=6ac3e79f&"
@@ -459,7 +457,7 @@ class ClanGamesView(View):
         e1.set_image(url=IMG_SLOTS_TOP)
 
         e2 = disnake.Embed(
-            title="Игровые автоматы DC",
+            title="Игровые автоматы",
             description=(
                 "> Выбери игру, чтобы сыграть.\n"
                 "> Все выигрыши — до 100 DC вся сумма в копилку, больше — 40%."
@@ -482,16 +480,6 @@ class ClanGamesView(View):
         select.callback = _clan_games_select_callback
         view.add_item(select)
         await inter.response.send_message(embeds=[e1, e2], view=view, ephemeral=True)
-
-    @disnake.ui.button(
-        label=f"{P}Кейсы{P}",
-        style=ButtonStyle.gray,
-        custom_id="clan_games:cases",
-        emoji=EMOJI_CASES
-    )
-    async def cases_button(self, button, inter: disnake.MessageInteraction):
-        await on_panel_click_quest_hook(inter.author.id)
-        await show_cases_screen(inter)
 
 async def _clan_games_select_callback(inter: disnake.MessageInteraction):
     value = inter.data.values[0]
