@@ -10,6 +10,7 @@ from typing import Optional, List, Dict
 import disnake
 from disnake import ButtonStyle, SelectOption, PartialEmoji
 from disnake.ui import Button, Select, View
+from disnake.ext import tasks
 
 from core.utils import (
     CONFIG, logger, db, cur, load_json, save_json, log_discord,
@@ -54,7 +55,7 @@ EMOJI_HOWTO  = PartialEmoji.from_str("<:infor:1552730394795970621>")
 
 EMOJI_QUESTS = PartialEmoji.from_str("<:d11d1:1552732333394763776>")
 EMOJI_SLOTS  = PartialEmoji.from_str("<:game1:1552732315606589460>")
-EMOJI_CASES  = PartialEmoji(name="S21", id=1552381035092648026) # Новая иконка для кейсов
+EMOJI_CASES  = PartialEmoji(name="S21", id=1552381035092648026)
 
 EMOJI_DEPOSITS = PartialEmoji.from_str("<:Otziv:1541808692314243172>")
 EMOJI_LAST     = PartialEmoji.from_str("<:warn:1552325395171381388>")
@@ -103,7 +104,6 @@ async def _send_clan_screen(inter: disnake.MessageInteraction, buf, fname: str):
         except Exception:
             pass
 
-
 def _time_ago(ts: int) -> str:
     try:
         sec = int(datetime.now(timezone.utc).timestamp()) - int(ts)
@@ -114,7 +114,6 @@ def _time_ago(ts: int) -> str:
     if sec < 86400: return f"{sec // 3600} ч назад"
     if sec < 86400 * 2: return "вчера"
     return f"{sec // 86400} дн назад"
-
 
 async def _get_balance(user_id: int) -> int:
     try:
@@ -127,7 +126,6 @@ async def _get_balance(user_id: int) -> int:
         except Exception:
             return 0
 
-
 def _guild_name(inter: disnake.MessageInteraction, user_id: int) -> str:
     try:
         m = inter.guild.get_member(user_id) if inter.guild else None
@@ -136,7 +134,6 @@ def _guild_name(inter: disnake.MessageInteraction, user_id: int) -> str:
     except Exception:
         pass
     return str(user_id)
-
 
 # ============================================================
 # 1. КОПИЛКА — СТАТИЧНЫЙ ЭМБЕД
@@ -316,7 +313,6 @@ class ClanPoolView(View):
             return await inter.response.send_message(f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
         await _send_clan_screen(inter, buf, f"clan_howto_{inter.author.id}.png")
 
-
 # ============================================================
 # 5. КНОПКИ СЕЗОНА
 # ============================================================
@@ -422,7 +418,6 @@ class ClanSeasonView(View):
 
         await _send_clan_screen(inter, buf, f"clan_pool_{inter.author.id}.png")
 
-
 # ============================================================
 # 6. КНОПКИ ИГР
 # ============================================================
@@ -480,7 +475,7 @@ class ClanGamesView(View):
                 SelectOption(label="Рулетка", description="Поставь Diamond Coins на удачу!", emoji=EMOJI_ROULETTE, value="roulette"),
                 SelectOption(label="Блэкджек", description="21 очко — классика казино!", emoji=EMOJI_BLACKJACK, value="blackjack"),
                 SelectOption(label="Монетка", description="Орёл или решка? Быстрая игра!", emoji=EMOJI_COINFLIP, value="coinflip"),
-                SelectOption(label="Кейсы", description="Испытай удачу и забери ценный приз", emoji=EMOJI_CASES, value="cases"), # НОВОЕ
+                SelectOption(label="Кейсы", description="Испытай удачу и забери ценный приз", emoji=EMOJI_CASES, value="cases"),
             ],
             custom_id="clan_games_select"
         )
@@ -496,4 +491,569 @@ class ClanGamesView(View):
     )
     async def cases_button(self, button, inter: disnake.MessageInteraction):
         await on_panel_click_quest_hook(inter.author.id)
-        await show
+        await show_cases_screen(inter)
+
+async def _clan_games_select_callback(inter: disnake.MessageInteraction):
+    value = inter.data.values[0]
+    
+    if value == "cases":
+        await show_cases_screen(inter)
+        return
+        
+    from modules.actions import RouletteModal, BlackjackBetModal, CoinflipBetModal
+
+    if value == "roulette":
+        await inter.response.send_modal(RouletteModal())
+    elif value == "blackjack":
+        await inter.response.send_modal(BlackjackBetModal())
+    elif value == "coinflip":
+        await inter.response.send_modal(CoinflipBetModal())
+
+# ============================================================
+# 7. ОТПРАВКА ПАНЕЛЕЙ
+# ============================================================
+async def send_clan_pool_panel(bot):
+    ch = bot.get_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
+    if not ch:
+        try:
+            ch = await bot.fetch_channel(CONFIG["CLAN_POOL_CHANNEL_ID"])
+        except Exception:
+            ch = None
+    if not ch:
+        logger.warning("Clan pool channel not found")
+        return
+
+    async for msg in ch.history(limit=50):
+        if msg.author == bot.user:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+    embeds = _build_static_pool_embeds()
+    await ch.send(embeds=embeds, view=ClanPoolView())
+    logger.info("Клан-копилка: панель отправлена")
+
+async def send_clan_season_panel(bot):
+    ch = bot.get_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
+    if not ch:
+        try:
+            ch = await bot.fetch_channel(CONFIG["CLAN_SEASON_CHANNEL_ID"])
+        except Exception:
+            ch = None
+    if not ch:
+        logger.warning("Clan season channel not found")
+        return
+
+    async for msg in ch.history(limit=50):
+        if msg.author == bot.user and msg.components:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            break
+
+    embeds = _build_season_static_embeds()
+    await ch.send(embeds=embeds, view=ClanSeasonView())
+    logger.info("Клан-сезон: панель отправлена")
+
+async def send_clan_games_panel(bot):
+    ch = bot.get_channel(CONFIG["CLAN_GAMES_CHANNEL_ID"])
+    if not ch:
+        try:
+            ch = await bot.fetch_channel(CONFIG["CLAN_GAMES_CHANNEL_ID"])
+        except Exception:
+            ch = None
+    if not ch:
+        logger.warning("Clan games channel not found")
+        return
+
+    async for msg in ch.history(limit=50):
+        if msg.author == bot.user:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+    embeds = _build_games_embeds()
+    await ch.send(embeds=embeds, view=ClanGamesView())
+    logger.info("Клан-игры: панель отправлена")
+
+async def update_clan_pool_embed(bot):
+    await send_clan_pool_panel(bot)
+    await send_clan_season_panel(bot)
+    await send_clan_games_panel(bot)
+
+# ============================================================
+# 8. НОВОСТИ
+# ============================================================
+async def _post_clan_news(bot, title: str, news: str, description: str):
+    try:
+        ch = bot.get_channel(CONFIG["CLAN_NEWS_CHANNEL_ID"])
+        if not ch:
+            ch = await bot.fetch_channel(CONFIG["CLAN_NEWS_CHANNEL_ID"])
+        if not ch:
+            logger.warning("Clan news channel not found")
+            return
+
+        e1 = disnake.Embed(color=6776679)
+        e1.set_image(url=IMG_NEWS_TOP)
+
+        e2 = disnake.Embed(
+            title=title,
+            description=f"> Новость: {news}\n\n> Описание: {description}\n",
+            color=6776679
+        )
+        e2.set_image(url=IMG_STRIPE)
+
+        await ch.send(embeds=[e1, e2])
+        logger.info(f"Клан-новость отправлена: {title}")
+    except Exception as e:
+        logger.exception(f"_post_clan_news: {e}")
+
+async def post_news_season_start(bot):
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+    season_title = get_season_title(cycle["number"])
+    news = f"Стартует новый сезон — **{season_title}**."
+    desc = (
+        f"{season_title} официально открыт. "
+        f"Копилки кланов обнулены, отсчёт пошёл. "
+        f"Участники могут зарабатывать DC, выполнять квесты и вносить вклад в банк клана. "
+        f"Финал — **28 числа в 20:00 МСК**."
+    )
+    await _post_clan_news(bot, f"Старт — {season_title}", news, desc)
+
+async def post_news_season_3days(bot):
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+    season_name = get_season_name(cycle["number"])
+    news = f"До финала сезона «{season_name}» осталось 3 дня."
+    desc = (
+        f"Самое время увеличить свой вклад в банк клана. "
+        f"Топ-3 участника получат бонусы ×3.00 / ×2.00 / ×1.50. "
+        f"Финал — **28 числа в 20:00 МСК**."
+    )
+    await _post_clan_news(bot, "До финала клубной лиги 3 дня", news, desc)
+
+async def post_news_season_1hour(bot):
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+    season_name = get_season_name(cycle["number"])
+    news = f"Остался последний час до финала сезона «{season_name}»."
+    desc = (
+        f"Успей внести последний вклад в свой клан. "
+        f"После 20:00 МСК банк будет распределён между участниками. "
+        f"Топ-3 забирают бонусы ×3.00 / ×2.00 / ×1.50."
+    )
+    await _post_clan_news(bot, "Час до финала клубной лиги", news, desc)
+
+async def post_news_season_end(bot, report: dict):
+    cycle = report["cycle"]
+    season_title = get_season_title(cycle["number"])
+    total = sum(c["bank"] for c in report["clans"])
+    top_clan = max(report["clans"], key=lambda x: x["bank"]) if report["clans"] else None
+
+    news = f"{season_title} официально завершён."
+    winner_line = ""
+    if top_clan:
+        winner_line = (
+            f"Победитель сезона — "
+            f"{top_clan['clan']['emoji']} **{top_clan['clan']['name'].upper()}** "
+            f"с банком {top_clan['bank']} DC. "
+        )
+    desc = (
+        winner_line +
+        f"Общий пул всех кланов составил {total} DC. "
+        f"Выплаты произведены всем участникам, "
+        f"топ-3 по вкладу получили повышенные коэффициенты. "
+        f"Новый сезон стартует через 5 минут."
+    )
+    await _post_clan_news(bot, f"{season_title} завершён", news, desc)
+
+async def post_news_weekly(bot):
+    cycle = get_current_cycle()
+    if not cycle:
+        return
+
+    total_bank = 0
+    top_clan = None
+    top_bank = -1
+    for c in get_all_clans():
+        bank = get_clan_bank(c["id"])
+        total_bank += bank
+        if bank > top_bank:
+            top_bank = bank
+            top_clan = c
+
+    season_name = get_season_name(cycle["number"])
+    news = f"Еженедельный отчёт по сезону «{season_name}»."
+    if top_clan:
+        desc = (
+            f"В лидерах — {top_clan['emoji']} **{top_clan['name'].upper()}** "
+            f"с банком {top_bank} DC. "
+            f"Общий пул всех кланов составляет {total_bank} DC. "
+            f"До конца сезона осталось совсем немного — успей поддержать свой клан."
+        )
+    else:
+        desc = f"Общий пул кланов: {total_bank} DC. Успей поддержать свой клан."
+    await _post_clan_news(bot, "Итоги недели в клубной лиге", news, desc)
+
+# ============================================================
+# 9. АДМИН-ПАНЕЛЬ
+# ============================================================
+class ClanAdminSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            SelectOption(
+                label="・Обновление кланов",
+                description="Роли + чистка по условиям + распределение + панели",
+                emoji="🔄",
+                value="update_clans"
+            ),
+            SelectOption(
+                label="・Пересобрать кланы (рандом)",
+                description="СНЯТЬ ВСЕХ из кланов и раскидать заново случайно",
+                emoji="🎲",
+                value="rebuild_clans"
+            ),
+            SelectOption(
+                label="・Пересчитать достижения",
+                description="Прогнать всех юзеров и выдать недостающие достижения",
+                emoji="🏆",
+                value="recalc_ach"
+            ),
+            SelectOption(
+                label="・Обновить панели",
+                description="Пересобрать эмбеды копилки и сезона",
+                emoji="🖼",
+                value="refresh"
+            ),
+        ]
+        super().__init__(
+            placeholder="Выберите действие...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="clan_admin_select"
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        if not _is_admin(inter):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+
+        value = inter.data.values[0]
+
+        await inter.response.defer(with_message=True, ephemeral=True)
+
+        if value == "update_clans":
+            await self._update_clans(inter)
+        elif value == "rebuild_clans":
+            await self._confirm_rebuild(inter)
+        elif value == "recalc_ach":
+            await self._recalc_ach(inter)
+        elif value == "refresh":
+            await update_clan_pool_embed(inter.bot)
+            await inter.edit_original_response(content="✅ Панели обновлены.")
+
+    async def _confirm_rebuild(self, inter: disnake.MessageInteraction):
+        await inter.edit_original_response(
+            content=(
+                "⚠️ **Полная пересборка кланов**\n\n"
+                "> Снимет роли кланов **у всех** и раскидает заново случайно.\n"
+                "> Вклады за сезон переедут за людьми в их новые кланы.\n\n"
+                "> Точно делаем?"
+            ),
+            view=ClanRebuildConfirmView()
+        )
+
+    async def _update_clans(self, inter: disnake.MessageInteraction):
+        try:
+            from clan.core import (
+                recalculate_clan_league, MIN_BALANCE, INACTIVE_DAYS_LIMIT,
+            )
+
+            await inter.edit_original_response(
+                content="⏳ Обновляю кланы: роли, чистка, распределение...\n"
+                        "> Это может занять пару минут."
+            )
+
+            stats = await recalculate_clan_league(inter.guild)
+
+            await update_clan_pool_embed(inter.bot)
+
+            await inter.edit_original_response(
+                content=(
+                    f"✅ **Обновление кланов завершено**\n\n"
+                    f"**Роли покупателей**\n"
+                    f"> 🔍 Пересчитано (есть отзыв): **{stats['roles_checked']}**\n"
+                    f"> ⚠️ Ошибок: **{stats['roles_errors']}**\n\n"
+                    f"**Чистка кланов**\n"
+                    f"> 📋 Условия (провалил любое — вон): баланс < {MIN_BALANCE} DC, "
+                    f"нет роли покупателя, нет действий {INACTIVE_DAYS_LIMIT} дн.\n"
+                    f"> 👀 Проверено участников: **{stats['members_checked']}**\n"
+                    f"> 🚪 Исключено из клана: **{stats['removed']}**\n"
+                    f"> 💸 Вкладов вычищено: **{stats.get('removed_dc', 0)} DC**\n"
+                    f"> ⏳ Первый отсчёт активности: **{stats.get('seeded', 0)}**\n\n"
+                    f"**Распределение**\n"
+                    f"> ♻️ Возвращены снятые роли: **{stats.get('repaired', 0)}**\n"
+                    f"> 🔄 Вклады перенесены в текущий клан: **{stats.get('moved', 0)}**\n"
+                    f"> ✅ Выдан клан заново: **{stats['assigned']}**\n"
+                    f"> 👥 Уже были в клане (роль на месте): **{stats['skipped']}**\n"
+                    f"> ⛔ В жёстком исключении: **{stats['excluded']}**"
+                )
+            )
+        except Exception as e:
+            logger.exception(f"update_clans: {e}")
+            await inter.edit_original_response(
+                content=f"❌ Ошибка обновления кланов: `{str(e)[:300]}`"
+            )
+
+    async def _recalc_ach(self, inter: disnake.MessageInteraction):
+        try:
+            from clan.achievements import recalculate_all_achievements
+            await inter.edit_original_response(
+                content="⏳ Начинаю пересчёт достижений для всех юзеров...\n"
+                        "> Это может занять несколько минут, всем получателям придут ЛС."
+            )
+            stats = await recalculate_all_achievements(inter.bot)
+            await inter.edit_original_response(
+                content=(
+                    f"✅ **Пересчёт достижений завершён!**\n\n"
+                    f"> **Проверено юзеров:** `{stats['checked']}`\n"
+                    f"> **Ошибок:** `{stats['errors']}`\n\n"
+                    f"> Всем получателям отправлены ЛС о новых достижениях. "
+                    f"Теперь они отображаются в профиле."
+                )
+            )
+        except Exception as e:
+            logger.exception(f"recalc_ach: {e}")
+            await inter.edit_original_response(
+                content=f"❌ Ошибка пересчёта: `{str(e)[:300]}`"
+            )
+
+class ClanAdminView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(ClanAdminSelect())
+
+def _is_admin(inter: disnake.MessageInteraction) -> bool:
+    from core.utils import has_admin_command_roles
+    return has_admin_command_roles(inter.author)
+
+# ============================================================
+# 10. ПОДТВЕРЖДЕНИЕ ПОЛНОЙ ПЕРЕСБОРКИ
+# ============================================================
+class ClanRebuildConfirmView(View):
+    def __init__(self):
+        super().__init__(timeout=120)
+
+    @disnake.ui.button(
+        label="Да, снять всех и раскидать",
+        style=ButtonStyle.danger,
+        custom_id="clan_rebuild:yes",
+        emoji="🎲",
+    )
+    async def confirm(self, button, inter: disnake.MessageInteraction):
+        if not _is_admin(inter):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        await inter.response.defer(with_message=True, ephemeral=True)
+        await _run_clan_rebuild(inter)
+
+    @disnake.ui.button(
+        label="Отмена",
+        style=ButtonStyle.secondary,
+        custom_id="clan_rebuild:no",
+    )
+    async def cancel(self, button, inter: disnake.MessageInteraction):
+        await inter.response.edit_message(
+            content="❌ Пересборка кланов отменена.", view=None
+        )
+
+async def _run_clan_rebuild(inter: disnake.MessageInteraction):
+    try:
+        from clan.core import rebuild_clans_random
+
+        await inter.edit_original_response(
+            content="🎲 Пересобираю кланы: снимаю всех и раскидываю заново...\n"
+                    "> Может занять пару минут, не трогай панель.",
+            view=None
+        )
+
+        stats = await rebuild_clans_random(inter.guild)
+
+        await update_clan_pool_embed(inter.bot)
+
+        dist_lines = "\n".join(
+            f"> · {name}: **{count}**" for name, count in stats["distribution"].items()
+        )
+
+        await inter.edit_original_response(
+            content=(
+                f"🎲 **Кланы пересобраны с нуля**\n\n"
+                f"**Снято**\n"
+                f"> 🚪 Освобождено от кланов: **{stats['stripped']}** чел.\n"
+                f"> ⚠️ Ошибок снятия: **{stats['strip_errors']}**\n\n"
+                f"**Раскидано заново (случайно)**\n"
+                f"> ✅ Получили клан: **{stats['assigned']}**\n"
+                f"> 🚫 Не прошли условия: **{stats['skipped']}**\n"
+                f"> ⚠️ Ошибок с ролями: **{stats['role_errors']}**\n\n"
+                f"**Новая раскладка**\n{dist_lines}\n\n"
+                f"> 🔄 Вклады перенесены: **{stats['moved']}** записей"
+            ),
+            view=None
+        )
+    except Exception as e:
+        logger.exception(f"_run_clan_rebuild: {e}")
+        await inter.edit_original_response(
+            content=f"❌ Ошибка пересборки: `{str(e)[:300]}`", view=None
+        )
+
+async def send_clan_admin_panel(bot):
+    """Отправляет админ-панель лиги с селектом + красивой шапкой."""
+    STAFF_CHANNEL = 1551276116679860314
+    ch = bot.get_channel(STAFF_CHANNEL)
+    if not ch:
+        ch = await bot.fetch_channel(STAFF_CHANNEL)
+    if not ch:
+        return
+
+    async for msg in ch.history(limit=30):
+        if msg.author == bot.user and msg.embeds:
+            for e in msg.embeds:
+                if e.title and "клановой лигой" in e.title.lower():
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                    break
+
+    e = disnake.Embed(
+        title="Управление клановой лигой",
+        description=(
+            "> Обновление кланов, пересборка случайно, пересчёт достижений, обновление панелей.\n"
+            "> Сезон идёт автоматически: старт и выплата 28-го числа в 20:00 МСК.\n"
+            "> Условие нахождения в клане: баланс ≥ 45 DC, роль покупателя, активность за 30 дней."
+        ),
+        color=0x676767
+    )
+    e.set_image(url=IMG_STRIPE)
+
+    await ch.send(embed=e, view=ClanAdminView())
+
+# ============================================================
+# 11. ХЕНДЛЕР
+# ============================================================
+async def handle_clan_interaction(inter: disnake.MessageInteraction):
+    pass
+
+# ============================================================
+# 12. ТАСКИ
+# ============================================================
+_last_payout_date = None
+_news_sent = {
+    "3days": None,
+    "1hour": None,
+    "weekly": None,
+}
+
+def start_clan_tasks(bot):
+    if not _clan_cycle_task.is_running():
+        _clan_cycle_task.start(bot)
+    if not _clan_daily_reset_task.is_running():
+        _clan_daily_reset_task.start(bot)
+    if not _clan_weekly_reset_task.is_running():
+        _clan_weekly_reset_task.start(bot)
+    if not _clan_news_task.is_running():
+        _clan_news_task.start(bot)
+    if not _clan_prune_task.is_running():
+        _clan_prune_task.start(bot)
+
+@tasks.loop(minutes=1)
+async def _clan_cycle_task(bot):
+    global _last_payout_date
+    await bot.wait_until_ready()
+
+    now = datetime.now(MSK)
+    today = now.date()
+
+    cycle = get_current_cycle()
+
+    if not cycle:
+        if now.day == 28 and now.hour == 20 and now.minute < 2:
+            start_new_cycle()
+            await update_clan_pool_embed(bot)
+            await post_news_season_start(bot)
+        return
+
+    if cycle["ends_at"] <= int(time.time()):
+        if _last_payout_date == today:
+            return
+        _last_payout_date = today
+        await close_cycle_and_pay(bot)
+
+@tasks.loop(minutes=1)
+async def _clan_daily_reset_task(bot):
+    await bot.wait_until_ready()
+    now = datetime.now(MSK)
+    if now.hour == 0 and now.minute == 0:
+        reset_daily_quests()
+
+@tasks.loop(minutes=1)
+async def _clan_weekly_reset_task(bot):
+    await bot.wait_until_ready()
+    now = datetime.now(MSK)
+    if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
+        reset_weekly_quests()
+
+@tasks.loop(minutes=1)
+async def _clan_news_task(bot):
+    await bot.wait_until_ready()
+    try:
+        now = datetime.now(MSK)
+        today = now.date()
+        cycle = get_current_cycle()
+        if not cycle:
+            return
+
+        if now.day == 25 and now.hour == 20 and now.minute < 2:
+            if _news_sent["3days"] != today:
+                _news_sent["3days"] = today
+                await post_news_season_3days(bot)
+
+        if now.day == 28 and now.hour == 19 and now.minute < 2:
+            if _news_sent["1hour"] != today:
+                _news_sent["1hour"] = today
+                await post_news_season_1hour(bot)
+
+        if now.weekday() == 6 and now.hour == 20 and now.minute < 2:
+            if _news_sent["weekly"] != today:
+                _news_sent["weekly"] = today
+                await post_news_weekly(bot)
+    except Exception as e:
+        logger.exception(f"clan news task: {e}")
+
+@tasks.loop(hours=6)
+async def _clan_prune_task(bot):
+    """Автоматическая чистка кланов каждые 6 часов."""
+    await bot.wait_until_ready()
+    try:
+        from clan.core import prune_ineligible_clan_members
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+        if not guild:
+            return
+        result = await prune_ineligible_clan_members(guild)
+        if result["removed"] > 0:
+            logger.info(
+                f"🧹 Авто-чистка кланов: исключено {result['removed']} чел., "
+                f"вычищено {result.get('removed_dc', 0)} DC из копилок"
+            )
+            await update_clan_pool_embed(bot)
+    except Exception as e:
+        logger.exception(f"_clan_prune_task: {e}")
+
+def init_clan_panels():
+    pass
