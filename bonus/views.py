@@ -21,7 +21,7 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 SUPREME_USER_ID = 796293832751972352
 
 E_DEAL  = PartialEmoji(name="b1kns", id=1557755707854422088)
-E_REF   = PartialEmoji(name="wmore", id=1552330925684162580)
+E_REF   = PartialEmoji(name="sabm1", id=1562685033293152336)
 E_TOP   = PartialEmoji(name="d1edf", id=1552730601155596348)
 E_ADV   = PartialEmoji(name="reklama", id=1555654392202535073)
 E_SHOP  = PartialEmoji(name="shop1", id=1555654407776112750)
@@ -98,7 +98,10 @@ async def _open_screen(inter, screen):
         return
 
     try:
-        await inter.followup.send(embeds=embeds, file=file, view=view, ephemeral=True)
+        kwargs = {"embeds": embeds, "view": view, "ephemeral": True}
+        if file:
+            kwargs["file"] = file
+        await inter.followup.send(**kwargs)
     except Exception as e:
         logger.exception(f"bonus open_screen: {e}")
 
@@ -112,8 +115,12 @@ async def _switch(inter, screen):
     embeds, file, view = await _build_payload(inter, screen)
     if not embeds:
         return
+
     try:
-        await inter.edit_original_response(embeds=embeds, file=file, attachments=[], view=view)
+        kwargs = {"embeds": embeds, "view": view, "attachments": []}
+        if file:
+            kwargs["file"] = file
+        await inter.edit_original_response(**kwargs)
     except Exception as e:
         logger.exception(f"bonus switch: {e}")
 
@@ -166,7 +173,6 @@ async def _build_payload(inter, screen):
         return [e1, e2], file, view
 
     if screen == "top":
-        # Возвращаем меню выбора топа
         e = disnake.Embed(
             title="🏆 Топы рефералов",
             description="> Выбери, какой топ ты хочешь посмотреть.",
