@@ -56,7 +56,6 @@ REVIEW_REWARDS = {
 }
 REVIEW_REWARD_DEFAULT = 15
 
-
 def get_review_reward(count: int) -> int:
     if count >= 26: return REVIEW_REWARDS["pka"]
     if count >= 21: return REVIEW_REWARDS["crystalis"]
@@ -65,7 +64,6 @@ def get_review_reward(count: int) -> int:
     if count >= 6:  return REVIEW_REWARDS["silver"]
     if count >= 1:  return REVIEW_REWARDS["bronze"]
     return REVIEW_REWARD_DEFAULT
-
 
 WELCOME_BONUS_DC = 50
 MSK = timezone(timedelta(hours=3))
@@ -83,17 +81,14 @@ _LAST_BONUS_DATE = None
 
 ADVERTISER_PANEL_CHANNEL_ID = 1557405478890373210
 
-
 # ============================================================
 # СОСТОЯНИЕ ЗАРПЛАТ
 # ============================================================
 def load_salary_state() -> dict:
     return load_json(SALARY_STATE_FILE, {"advance": "", "salary": ""})
 
-
 def save_salary_state(state: dict):
     save_json(SALARY_STATE_FILE, state)
-
 
 # ============================================================
 # ЗАРПЛАТЫ И АВАНСЫ
@@ -111,7 +106,6 @@ SALARY_ROLE_ORDER = [
     1154757071330365490,
     1457964854441672806,
 ]
-
 
 async def process_salary(mode: str):
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
@@ -184,7 +178,6 @@ async def process_salary(mode: str):
         color=0x00ff00
     )
 
-
 # ============================================================
 # CATCH-UP
 # ============================================================
@@ -205,7 +198,6 @@ async def try_pay_advance() -> bool:
     state["advance"] = month_key
     save_salary_state(state)
     return True
-
 
 async def try_pay_salary() -> bool:
     state = load_salary_state()
@@ -229,12 +221,10 @@ async def try_pay_salary() -> bool:
     save_salary_state(state)
     return True
 
-
 # ============================================================
 # БАННЕР / СЧЁТЧИК
 # ============================================================
 _banner_last_update = 0.0
-
 
 async def schedule_banner_update():
     global _banner_last_update
@@ -246,7 +236,6 @@ async def schedule_banner_update():
         await update_review_counter(silent=True)
     except Exception as e:
         logger.exception(f"schedule_banner_update error: {e}")
-
 
 async def update_review_counter(silent: bool = False):
     try:
@@ -269,7 +258,6 @@ async def update_review_counter(silent: bool = False):
                 description=f"> **Ошибка:** `{str(e)}`",
                 color=0xff0000
             )
-
 
 def _process_banner_gif(gif_path: str, font_path: str, review_count: int):
     from PIL import Image, ImageDraw, ImageFont, ImageSequence
@@ -331,7 +319,6 @@ def _process_banner_gif(gif_path: str, font_path: str, review_count: int):
             return gif_bytes, cfg
 
     return None, None
-
 
 async def update_server_banner(review_count: int, silent: bool = False):
     try:
@@ -416,7 +403,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
     except Exception as e:
         logger.exception("Banner update error: %s", e)
 
-
 # ============================================================
 # ТАСКИ
 # ============================================================
@@ -424,7 +410,6 @@ async def update_server_banner(review_count: int, silent: bool = False):
 async def review_counter_task():
     await bot.wait_until_ready()
     await update_review_counter(silent=False)
-
 
 @tasks.loop(minutes=1)
 async def daily_bonus_task():
@@ -442,7 +427,6 @@ async def daily_bonus_task():
         await daily_bonus()
     except Exception as e:
         logger.exception(f"daily_bonus_task: {e}")
-
 
 @tasks.loop(minutes=5)
 async def daily_deal_task():
@@ -462,7 +446,6 @@ async def daily_deal_task():
     except Exception as e:
         logger.exception(f"daily_deal_task error: {e}")
 
-
 @tasks.loop(minutes=1)
 async def salary_advance_task():
     await bot.wait_until_ready()
@@ -471,7 +454,6 @@ async def salary_advance_task():
     except Exception as e:
         logger.exception(f"salary_advance_task: {e}")
 
-
 @tasks.loop(minutes=1)
 async def salary_main_task():
     await bot.wait_until_ready()
@@ -479,7 +461,6 @@ async def salary_main_task():
         await try_pay_salary()
     except Exception as e:
         logger.exception(f"salary_main_task: {e}")
-
 
 @tasks.loop(minutes=1)
 async def unused_purchase_reminder_task():
@@ -497,7 +478,6 @@ async def unused_purchase_reminder_task():
     except Exception as e:
         logger.exception(f"unused_purchase_reminder_task: {e}")
 
-
 @tasks.loop(minutes=1)
 async def daily_activity_payout_task():
     global _LAST_PAYOUT_DATE
@@ -514,7 +494,6 @@ async def daily_activity_payout_task():
         await daily_activity_payout()
     except Exception as e:
         logger.exception(f"daily_activity_payout_task: {e}")
-
 
 # ============================================================
 # ON READY
@@ -615,7 +594,7 @@ async def on_ready():
             bot.loop.create_task(send_clan_pool_panel(bot))
             bot.loop.create_task(send_clan_season_panel(bot))
             bot.loop.create_task(send_clan_games_panel(bot))
-            logger.info("Клан-лига инициализирована")
+            logger.info("Клан-лига инициализирована (с кейсами)")
 
             try:
                 from clan.core import (
@@ -651,45 +630,6 @@ async def on_ready():
             logger.exception(f"init pets: {e}")
 
         try:
-            from work import init_advertiser
-            from work.views import AdvertiserPanelView, build_panel_embeds
-            from work.core import start_advertiser_tasks
-
-            init_advertiser(bot)
-            start_advertiser_tasks(bot)
-
-            bot.add_view(AdvertiserPanelView())
-
-            async def _post_advertiser_panel():
-                await asyncio.sleep(8)
-                try:
-                    ch = bot.get_channel(ADVERTISER_PANEL_CHANNEL_ID)
-                    if not ch:
-                        try:
-                            ch = await bot.fetch_channel(ADVERTISER_PANEL_CHANNEL_ID)
-                        except Exception as e:
-                            logger.warning(f"advertiser panel fetch: {e}")
-                            return
-                    if not ch:
-                        return
-                    async for m in ch.history(limit=30):
-                        if m.author == bot.user and m.components:
-                            try:
-                                await m.delete()
-                            except Exception:
-                                pass
-                            break
-                    await ch.send(embeds=build_panel_embeds(), view=AdvertiserPanelView())
-                    logger.info(f"📨 Инвайт-панель отправлена в {ch.name}")
-                except Exception as e:
-                    logger.exception(f"_post_advertiser_panel: {e}")
-
-            bot.loop.create_task(_post_advertiser_panel())
-            logger.info("📨 Инвайт-панель адвайтеров инициализирована")
-        except Exception as e:
-            logger.exception(f"init advertiser: {e}")
-
-        try:
             from bonus import init_bonus
             from bonus.views import BonusPanelView, build_panel_embeds as build_bonus_embeds
             from bonus.core import BONUS_CHANNEL_ID
@@ -722,7 +662,7 @@ async def on_ready():
                     logger.exception(f"_post_bonus_panel: {e}")
 
             bot.loop.create_task(_post_bonus_panel())
-            logger.info("🎁 Бонус-панель инициализирована")
+            logger.info("🎁 Бонус-панель инициализирована (Рефералы + Адвайтеры)")
         except Exception as e:
             logger.exception(f"init bonus: {e}")
 
@@ -751,7 +691,6 @@ async def on_ready():
         logger.exception("on_ready error: %s", e)
         await log_discord(title="❌ Ошибка при запуске",
                           description=f"> **Ошибка:** `{str(e)}`", color=0xff0000)
-
 
 # ============================================================
 # СОБЫТИЯ
@@ -862,7 +801,7 @@ async def on_member_join(member: disnake.Member):
 
     advertiser_id = None
     try:
-        from work.core import get_advertiser_by_code
+        from work.core import get_advertiser_by_code # ОШИБКА! work удалён. Нужно заменить.
         advertiser_id = get_advertiser_by_code(used_invite.code)
     except Exception as e:
         logger.warning(f"get_advertiser_by_code on join: {e}")
@@ -895,7 +834,6 @@ async def on_member_join(member: disnake.Member):
         color=0x00aaff
     )
 
-
 @bot.event
 async def on_member_remove(member: disnake.Member):
     guild = member.guild
@@ -924,7 +862,6 @@ async def on_member_remove(member: disnake.Member):
             color=0xff6600
         )
     db.commit()
-
 
 @bot.event
 async def on_member_update(before: disnake.Member, after: disnake.Member):
@@ -975,13 +912,7 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in removed)}",
                 color=0xff0000
             )
-
-            try:
-                from work.core import ADVERTISER_ROLE_ID, reset_advertiser
-                if any(r.id == ADVERTISER_ROLE_ID for r in removed):
-                    reset_advertiser(after.id)
-            except Exception as e:
-                logger.warning(f"advertiser role reset: {e}")
+            # Удалён вызов work.core.reset_advertiser, так как work больше нет
 
     if before.display_avatar.url != after.display_avatar.url:
         await log_discord(
@@ -990,12 +921,10 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
             color=0xffff00
         )
 
-
 @bot.event
 async def on_raw_message_delete(payload: disnake.RawMessageDeleteEvent):
     if payload.channel_id == CONFIG["REVIEW_COUNT_CHANNEL"]:
         asyncio.create_task(schedule_banner_update())
-
 
 @bot.event
 async def on_message_delete(message: disnake.Message):
@@ -1012,7 +941,6 @@ async def on_message_delete(message: disnake.Message):
         color=0xff6600
     )
 
-
 @bot.event
 async def on_bulk_message_delete(messages: List[disnake.Message]):
     if not messages:
@@ -1026,7 +954,6 @@ async def on_bulk_message_delete(messages: List[disnake.Message]):
         description=f"> **Канал:** {channel.mention}\n> **Количество:** `{len(messages)}`",
         color=0xff6600
     )
-
 
 @bot.event
 async def on_message_edit(before: disnake.Message, after: disnake.Message):
@@ -1042,20 +969,17 @@ async def on_message_edit(before: disnake.Message, after: disnake.Message):
         color=0xffff00
     )
 
-
 @bot.event
 async def on_guild_channel_create(channel: disnake.abc.GuildChannel):
     await log_discord(title="➕ Создан канал",
                       description=f"> **{channel.mention}** (`{channel.name}`)\n> **ID:** `{channel.id}`",
                       color=0x00ff00)
 
-
 @bot.event
 async def on_guild_channel_delete(channel: disnake.abc.GuildChannel):
     await log_discord(title="➖ Удалён канал",
                       description=f"> **{channel.name}**\n> **ID:** `{channel.id}`",
                       color=0xff0000)
-
 
 @bot.event
 async def on_guild_channel_update(before, after):
@@ -1064,13 +988,11 @@ async def on_guild_channel_update(before, after):
                           description=f"> **{after.mention}**\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
                           color=0xffff00)
 
-
 @bot.event
 async def on_guild_role_create(role: disnake.Role):
     await log_discord(title="➕ Создана роль",
                       description=f"> **{role.mention}** (`{role.name}`)\n> **ID:** `{role.id}`",
                       color=0x00ff00)
-
 
 @bot.event
 async def on_guild_role_delete(role: disnake.Role):
@@ -1078,14 +1000,12 @@ async def on_guild_role_delete(role: disnake.Role):
                       description=f"> **{role.name}**\n> **ID:** `{role.id}`",
                       color=0xff0000)
 
-
 @bot.event
 async def on_guild_role_update(before: disnake.Role, after: disnake.Role):
     if before.name != after.name:
         await log_discord(title="✏️ Изменена роль",
                           description=f"> **{after.mention}**\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`",
                           color=0xffff00)
-
 
 @bot.event
 async def on_invite_create(invite: disnake.Invite):
@@ -1097,7 +1017,6 @@ async def on_invite_create(invite: disnake.Invite):
                       description=f"> **Код:** `{invite.code}`\n> **Создатель:** {invite.inviter.mention if invite.inviter else '?'}",
                       color=0x00aaff)
 
-
 @bot.event
 async def on_invite_delete(invite: disnake.Invite):
     db.execute("DELETE FROM invites_snapshot WHERE invite_code=?", (invite.code,))
@@ -1105,7 +1024,6 @@ async def on_invite_delete(invite: disnake.Invite):
     await log_discord(title="🗑️ Удалён инвайт",
                       description=f"> **Код:** `{invite.code}`",
                       color=0xff6600)
-
 
 @bot.event
 async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
@@ -1125,7 +1043,6 @@ async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent):
                 await payload.member.add_roles(role)
             except Exception as e:
                 logger.error(f"reaction role: {e}")
-
 
 @bot.event
 async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
@@ -1148,7 +1065,6 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
                 except Exception as e:
                     logger.error(f"reaction remove: {e}")
 
-
 @bot.event
 async def on_interaction(inter: disnake.MessageInteraction):
     try:
@@ -1156,7 +1072,6 @@ async def on_interaction(inter: disnake.MessageInteraction):
         await handle_clan_interaction(inter)
     except Exception as e:
         logger.warning(f"clan interaction err: {e}")
-
 
 @bot.event
 async def on_message(message: disnake.Message):
@@ -1317,7 +1232,6 @@ async def on_message(message: disnake.Message):
 
 
 voice_track = {}
-
 
 @bot.event
 async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceState, after: disnake.VoiceState):
