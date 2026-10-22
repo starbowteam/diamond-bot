@@ -194,9 +194,15 @@ def get_user_ref_stats(user_id: int) -> dict:
 # ТОПЫ
 # ============================================================
 def get_top_referrals(is_advertiser: bool = False, limit: int = 10) -> List[dict]:
-    """Возвращает топ по количеству засчитанных приглашений."""
-    # Получаем всех, у кого есть ссылки
-    rows = cur.execute("SELECT user_id FROM user_ref_links").fetchall()
+    """Возвращает топ по количеству засчитанных приглашений из таблицы invites."""
+    rows = cur.execute("""
+        SELECT ref_user_id, 
+               COUNT(id) as total, 
+               SUM(CASE WHEN rewarded=1 THEN 1 ELSE 0 END) as rewarded
+        FROM invites 
+        WHERE ref_user_id IS NOT NULL AND is_bot=0 AND is_fake=0
+        GROUP BY ref_user_id
+    """).fetchall()
     
     result = []
     guild = None
@@ -207,7 +213,7 @@ def get_top_referrals(is_advertiser: bool = False, limit: int = 10) -> List[dict
         pass
 
     for r in rows:
-        uid = r["user_id"]
+        uid = r["ref_user_id"]
         
         # Фильтруем по роли (если передан флаг)
         if guild:
@@ -217,14 +223,15 @@ def get_top_referrals(is_advertiser: bool = False, limit: int = 10) -> List[dict
             if not is_advertiser and has_advertiser_role(member):
                 continue
                 
-        stats = get_user_ref_stats(uid)
-        if stats["total"] > 0:
+        total = r["total"]
+        if total > 0:
+            rewarded = r["rewarded"]
             result.append({
                 "user_id": uid,
                 "username": _resolve_username(guild, uid),
-                "rewarded": stats["rewarded"],
-                "total": stats["total"],
-                "earned": stats["earned"],
+                "rewarded": rewarded,
+                "total": total,
+                "earned": rewarded * REF_REWARD_BALANCE,
             })
 
     result.sort(key=lambda x: (-x["rewarded"], -x["total"]))
