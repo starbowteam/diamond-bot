@@ -467,40 +467,39 @@ def render_ref_panel(user_id, username, stats, link_url):
     return buf
 
 # ═══════════════════════════════════════════════════
-# ЭКРАН 3: ТОПЫ (НОВЫЙ МАКЕТ)
+# ЭКРАН 3: ТОПЫ (ОБЩИЙ)
 # ═══════════════════════════════════════════════════
-def render_ref_top(user_id, username, top_list, is_advertiser=False):
-    img, d = _canvas("топ адвайтеров" if is_advertiser else "топ рефералов")
-    
-    color = GOLD if is_advertiser else GREEN
-    title = "ТОП АДВАЙТЕРОВ" if is_advertiser else "ТОП РЕФЕРАЛОВ"
+def render_ref_tops(user_id, username, tops_data):
+    img, d = _canvas("топ рефералов")
     
     cx = W // 2
-    d.text((cx, 150), title, font=_font(48), fill=color, anchor="mm")
+    d.text((cx, 150), "ТОП РЕФЕРАЛОВ", font=_font(48), fill=GREEN, anchor="mm")
     
-    # Шапка таблицы
-    head_y = 230
-    col_w = 1000
-    start_x = cx - col_w // 2
+    # Левая колонка (обычные)
+    col_w = 800
+    start_x1 = cx - col_w - 20
+    start_x2 = cx + 20
+    head_y = 240
     
-    d.line((start_x, head_y + 40, start_x + col_w, head_y + 40), fill=STACK_HDR + (255,), width=2)
+    d.text((start_x1 + col_w//2, head_y), "ОБЫЧНЫЕ ПОЛЬЗОВАТЕЛИ", font=_font(24), fill=SILVER_HI, anchor="mm")
+    d.line((start_x1 + 50, head_y + 30, start_x1 + col_w - 50, head_y + 30), fill=STACK_HDR + (255,), width=2)
     
-    d.text((start_x + 70, head_y), "МЕСТО", font=_font(14), fill=MUTED)
-    d.text((start_x + 180, head_y), "ПОЛЬЗОВАТЕЛЬ", font=_font(14), fill=MUTED)
-    d.text((start_x + 550, head_y), "ВСЕГО", font=_font(14), fill=MUTED)
-    d.text((start_x + 750, head_y), "ЗАРАБОТАНО", font=_font(14), fill=MUTED)
+    # Правая колонка (адв)
+    d.text((start_x2 + col_w//2, head_y), "АДВАЙТЕРЫ", font=_font(24), fill=GOLD, anchor="mm")
+    d.line((start_x2 + 50, head_y + 30, start_x2 + col_w - 50, head_y + 30), fill=STACK_HDR + (255,), width=2)
     
-    list_y = head_y + 60
+    list_y = head_y + 50
     row_h = 75
-    gap = 12
+    gap = 10
     
-    if not top_list:
-        _icon(d, cx, 500, I_ELL, 60, DIM)
-        d.text((cx, 580), "Пока нет данных", font=_font(24), fill=DIM, anchor="mm")
-    else:
-        for i, entry in enumerate(top_list[:10]):
+    def draw_list(start_x, data, is_adv=False):
+        if not data:
+            _icon(d, start_x + col_w//2, list_y + 100, I_ELL, 40, DIM)
+            d.text((start_x + col_w//2, list_y + 150), "Пока нет данных", font=_font(18), fill=DIM, anchor="mm")
+            return
+            
+        for i, entry in enumerate(data[:5]):
             ry = list_y + i * (row_h + gap)
-            if ry + row_h > H - PAD_Y - 40: break
             
             if i == 0: medal = GOLD
             elif i == 1: medal = SILVER
@@ -510,18 +509,16 @@ def render_ref_top(user_id, username, top_list, is_advertiser=False):
             d.rounded_rectangle((start_x, ry, start_x + col_w, ry + row_h), radius=16,
                                 fill=INNER_BG + (255,), outline=medal + (150,), width=2)
             
-            # Место
-            _icon(d, start_x + 60, ry + row_h//2, I_MEDAL, 26, medal)
-            d.text((start_x + 90, ry + row_h//2), f"#{i+1}", font=_font(24), fill=medal, anchor="lm")
+            _icon(d, start_x + 40, ry + row_h//2, I_MEDAL, 24, medal)
+            d.text((start_x + 70, ry + row_h//2), f"#{i+1}", font=_font(20), fill=medal, anchor="lm")
             
-            # Имя
-            d.text((start_x + 180, ry + row_h//2), entry['username'], font=_font(22), fill=TEXT, anchor="lm")
+            d.text((start_x + 130, ry + row_h//2), entry['username'], font=_font(20), fill=TEXT, anchor="lm")
             
-            # Всего
-            d.text((start_x + 550, ry + row_h//2), f"{entry['total']} чел.", font=_font(20), fill=SILVER_HI, anchor="lm")
-            
-            # Заработано
-            d.text((start_x + 750, ry + row_h//2), f"+{entry['earned']} DC", font=_font(24), fill=GREEN, anchor="lm")
+            d.text((start_x + 480, ry + row_h//2), f"{entry['total']} чел.", font=_font(18), fill=SILVER_HI, anchor="lm")
+            d.text((start_x + 600, ry + row_h//2), f"+{entry['earned']} DC", font=_font(20), fill=GREEN if not is_adv else GOLD, anchor="lm")
+
+    draw_list(start_x1, tops_data["regular"], False)
+    draw_list(start_x2, tops_data["advertiser"], True)
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
