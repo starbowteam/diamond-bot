@@ -21,9 +21,8 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 SUPREME_USER_ID = 796293832751972352
 
 E_DEAL  = PartialEmoji(name="b1kns", id=1557755707854422088)
-E_REF   = PartialEmoji(name="wmore", id=1552330925684162580)
-E_TOP   = PartialEmoji(name="sabm1", id=1562685033293152336)
-E_ADV   = PartialEmoji(name="reklama", id=1555654392202535073)
+E_REF   = PartialEmoji(name="wmore", id=1552330925684162580)  # Старый
+E_TOP   = PartialEmoji(name="sabm1", id=1562685033293152336)  # Новый
 E_SHOP  = PartialEmoji(name="shop1", id=1555654407776112750)
 
 def _btn_pad(text: str, total: int) -> str:
@@ -52,7 +51,7 @@ class BonusSelect(Select):
                          emoji=E_DEAL, value="deal"),
             SelectOption(label="Мои рефералы", description="Приглашай друзей — получай DC",
                          emoji=E_REF, value="ref"),
-            SelectOption(label="Топы", description="Топ рефералов и адвайтеров",
+            SelectOption(label="Топы", description="Общий топ рефералов и адвайтеров",
                          emoji=E_TOP, value="top"),
         ]
         super().__init__(
@@ -176,31 +175,13 @@ async def _build_payload(inter, screen):
         return [e1, e2], file, view
 
     if screen == "top":
-        e = disnake.Embed(
-            title="🏆 Топы рефералов",
-            description="> Выбери, какой топ ты хочешь посмотреть.",
-            color=6776679
-        )
-        e.set_image(url=IMG_STRIPE)
-        return [e], None, TopSelectView()
-
-    if screen == "top_reg":
-        top_list = bcore.get_top_referrals(is_advertiser=False, limit=10)
-        buf = await asyncio.to_thread(brender.render_ref_top, user_id, inter.author.display_name, top_list, False)
-        fname = f"bonus_top_reg_{user_id}.png"
+        tops_data = bcore.get_top_all(limit=5)
+        buf = await asyncio.to_thread(brender.render_ref_tops, user_id, inter.author.display_name, tops_data)
+        fname = f"bonus_top_{user_id}.png"
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
-        return [e], file, None # Без кнопок
-
-    if screen == "top_adv":
-        top_list = bcore.get_top_referrals(is_advertiser=True, limit=10)
-        buf = await asyncio.to_thread(brender.render_ref_top, user_id, inter.author.display_name, top_list, True)
-        fname = f"bonus_top_adv_{user_id}.png"
-        file = disnake.File(buf, filename=fname)
-        e = disnake.Embed(color=6776679)
-        e.set_image(url=f"attachment://{fname}")
-        return [e], file, None # Без кнопок
+        return [e], file, None
 
     return None, None, None
 
@@ -307,25 +288,3 @@ class DealView(View):
 class DealNoDealView(View):
     def __init__(self):
         super().__init__(timeout=300)
-
-
-# ============================================================
-# VIEW: ТОПЫ
-# ============================================================
-class TopSelect(Select):
-    def __init__(self):
-        options = [
-            SelectOption(label="Топ рефералов", description="Обычные пользователи", emoji=E_TOP, value="top_reg"),
-            SelectOption(label="Топ адвайтеров", description="Только для адвайтеров", emoji=E_ADV, value="top_adv"),
-        ]
-        super().__init__(placeholder="Какой топ показать?", min_values=1, max_values=1, options=options, custom_id="bonus_top_select")
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        value = inter.data.values[0]
-        await _switch(inter, value)
-
-
-class TopSelectView(View):
-    def __init__(self):
-        super().__init__(timeout=300)
-        self.add_item(TopSelect())
