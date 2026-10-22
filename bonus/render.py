@@ -377,7 +377,8 @@ def render_ref_panel(user_id, username, stats, link_url):
         "Порог зачёта — 1 час",
     ]):
         dy = hint_y + 60 + i * 26
-        d.ellipse((x1 + pad + 24, dy + 6, x1 + pad + 32, dy + 14), fill=DIM + (255,))
+        # Белые точки
+        d.ellipse((x1 + pad + 24, dy + 6, x1 + pad + 32, dy + 14), fill=(255, 255, 255, 255))
         d.text((x1 + pad + 44, dy), ln, font=_font(15), fill=GREEN)
 
     _panel(img, d, (rx1, BODY_Y, rx2 - 12, BODY_Y + BODY_H - 12), radius=20)
@@ -476,7 +477,6 @@ def render_ref_top(user_id, username, top_list, is_advertiser=False):
     cx = W // 2
     d.text((cx, 160), title, font=_font(48), fill=color, anchor="mm")
     
-    # Таблица
     list_y = 240
     row_h = 70
     gap = 12
@@ -499,14 +499,11 @@ def render_ref_top(user_id, username, top_list, is_advertiser=False):
             d.rounded_rectangle((start_x, ry, start_x + col_w, ry + row_h), radius=16,
                                 fill=INNER_BG + (255,), outline=medal + (150,), width=2)
             
-            # Место
             _icon(d, start_x + 40, ry + row_h//2, I_MEDAL, 26, medal)
             d.text((start_x + 70, ry + row_h//2), f"#{i+1}", font=_font(24), fill=medal, anchor="lm")
             
-            # Имя
             d.text((start_x + 150, ry + row_h//2), entry['username'], font=_font(22), fill=TEXT, anchor="lm")
             
-            # Статы
             d.text((start_x + col_w - 250, ry + row_h//2), f"Засчитано: {entry['rewarded']}", font=_font(18), fill=GREEN, anchor="lm")
             d.text((start_x + col_w - 80, ry + row_h//2), f"+{entry['earned']} DC", font=_font(20), fill=GOLD, anchor="rm")
 
