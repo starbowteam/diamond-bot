@@ -21,8 +21,8 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 SUPREME_USER_ID = 796293832751972352
 
 E_DEAL  = PartialEmoji(name="b1kns", id=1557755707854422088)
-E_REF   = PartialEmoji(name="sabm1", id=1562685033293152336)
-E_TOP   = PartialEmoji(name="d1edf", id=1552730601155596348)
+E_REF   = PartialEmoji(name="wmore", id=1552330925684162580)
+E_TOP   = PartialEmoji(name="sabm1", id=1562685033293152336)
 E_ADV   = PartialEmoji(name="reklama", id=1555654392202535073)
 E_SHOP  = PartialEmoji(name="shop1", id=1555654407776112750)
 
@@ -98,9 +98,11 @@ async def _open_screen(inter, screen):
         return
 
     try:
-        kwargs = {"embeds": embeds, "view": view, "ephemeral": True}
+        kwargs = {"embeds": embeds, "ephemeral": True}
         if file:
             kwargs["file"] = file
+        if view:
+            kwargs["view"] = view
         await inter.followup.send(**kwargs)
     except Exception as e:
         logger.exception(f"bonus open_screen: {e}")
@@ -117,9 +119,10 @@ async def _switch(inter, screen):
         return
 
     try:
-        kwargs = {"embeds": embeds, "view": view, "attachments": []}
+        kwargs = {"embeds": embeds, "attachments": []}
         if file:
             kwargs["file"] = file
+        kwargs["view"] = view if view else None
         await inter.edit_original_response(**kwargs)
     except Exception as e:
         logger.exception(f"bonus switch: {e}")
@@ -188,7 +191,7 @@ async def _build_payload(inter, screen):
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
-        return [e], file, TopBackView()
+        return [e], file, None # Без кнопок
 
     if screen == "top_adv":
         top_list = bcore.get_top_referrals(is_advertiser=True, limit=10)
@@ -197,7 +200,7 @@ async def _build_payload(inter, screen):
         file = disnake.File(buf, filename=fname)
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
-        return [e], file, TopBackView()
+        return [e], file, None # Без кнопок
 
     return None, None, None
 
@@ -326,14 +329,3 @@ class TopSelectView(View):
     def __init__(self):
         super().__init__(timeout=300)
         self.add_item(TopSelect())
-
-
-class TopBackView(View):
-    def __init__(self):
-        super().__init__(timeout=300)
-        btn = Button(label=_btn_pad("Назад к топам", 30), style=ButtonStyle.secondary, custom_id="bonus_top:back", emoji=E_TOP)
-        btn.callback = self._back
-        self.add_item(btn)
-
-    async def _back(self, inter):
-        await _switch(inter, "top")
