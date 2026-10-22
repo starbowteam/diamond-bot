@@ -11,9 +11,9 @@ from pet import render as prender
 
 P = "\u3164"
 
-E_FEED = PartialEmoji(name="drumstick", id=1539657202170859561)
-E_TOP = PartialEmoji(name="prize", id=1539657202170859561)
-E_ABOUT = PartialEmoji(name="info", id=1539657202170859561)
+E_FEED = PartialEmoji(name="mea1w1", id=1559221849177723041)
+E_TOP = PartialEmoji(name="d1edf", id=1552730601155596348)
+E_ABOUT = PartialEmoji(name="infor", id=1552730394795970621)
 
 class ClanPetMainView(View):
     def __init__(self):
