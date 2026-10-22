@@ -606,6 +606,15 @@ async def on_message(message: disnake.Message):
 
         try: await add_dc(user_id, reward, "Отзыв о покупке", notify=False, log=False, to_clan_pool=True)
         except Exception: pass
+
+        # 👇 Проверка выплаты шаблонного розыгрыша после засчитанного отзыва
+        try:
+            from modules.giveaways import check_giveaway_payout_on_review
+            await check_giveaway_payout_on_review(bot, message.author)
+        except Exception as e:
+            logger.warning(f"giveaway review payout err: {e}")
+        # 👆
+
         try:
             from pet.core import add_pet_xp
             await add_pet_xp(user_id, 25, "review")
