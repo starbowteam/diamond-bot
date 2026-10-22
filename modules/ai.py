@@ -1,11 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Diamond AI v3.2 — умный консультант магазина.
-
-Что нового против v3.1:
-  · ДОБАВЛЕНО: знает про питомцев (каталог, доход, бонусы, уровни)
-  · ДОБАВЛЕНО: знает про твоих питомцев (уровни, накопления, активный)
-  · ДОБАВЛЕНО: функция show_pets — показать питомцев юзера
+Diamond AI v3.3 — умный консультант магазина.
 """
 import os
 import re
@@ -284,33 +279,28 @@ SYSTEM_PROMPT = """
 - ежедневный бонус с ролью клуб = +10 dc (нужна активность за сутки)
 - подарок в панели профиля = 10–30 dc, кулдаун 24ч
 - казино: рулетка, блэкджек, монетка (ставки 20–4000 dc)
+- кейсы: 100, 300, 500, 1000, 2000 dc.
 
 **роли покупателей** (по отзывам):
 1–5 → bronze · 6–10 → silver · 11–15 → gold · 16–20 → diamond · 21–25 → crystalis · 26+ → pka
 
 **покупки**: витрина → каталог → валюта (dc или реал) → в dc выбрать товар → оформить тикет.
 **тикеты**: создаются через кнопку «купить». менеджер назначается автоматически.
-**клан**: 3 клана, сезон 28 дней, выплата 28 числа. вклад: до 100 dc — 100%, больше — 40%. топ-3 ×3/×2/×1.5.
+**клан**: 3 клана, сезон 28 дней, выплата 28 числа. вклад: до 100 dc — 100%, больше — 40%. 
+Бонусы при распределении: Топ-1 ×7.00, Топ-2 ×5.00, Топ-3 ×3.00, остальные ×1.50.
 
-🔴 ПИТОМЦЫ — новая механика:
-Панель питомцев: канал с 3 кнопками — Питомцы · Каталог · Топ.
-- **Каталог** — 6 питомцев, от Common до Mythic. Цены от 300 до 5000 DC.
-- **Купить** — питомец начинает приносить DC каждый час автоматически. Копилка наполняется 24ч, потом останавливается — надо заходить и забирать.
-- **Подарить** другому юзеру — цена +10% (комиссия магазина). Нужен ID получателя.
-- **Уровни 1–10** — опыт капает с сообщений, войса, отзывов, казино. На макс. уровне доход ×2.35.
-- **Кормить** — 200 DC = +100 XP питомцу. Кулдаун 4ч. Streak 7 дней = +500 XP.
-- **Смена активного питомца** — кулдаун 6ч.
-
-Каталог питомцев:
-• Рыжий Кот (Common) — 300 DC · 1 DC/ч
-• Хитрая Лиса (Rare) — 600 DC · 2 DC/ч
-• Ночная Сова (Rare) — 900 DC · 3 DC/ч
-• Грифон (Epic) — 1200 DC · 4 DC/ч · +3% к отзывам
-• Дракончик (Legendary) — 2000 DC · 7 DC/ч · +5% к казино
-• Даймондик (Mythic) — 5000 DC · 20 DC/ч · +10% к копилке клана
+🔴 ДУША КЛАНА (Клановый питомец):
+Новая механика. Теперь питомец один на весь клан — это "Душа Клана".
+- Питомца нельзя сменить или выкинуть. Он привязан к клану навсегда.
+- Прокачивают его все участники клана сообща (кормят).
+- **Кормление:** 1 DC = 1 XP. Любой участник клана может кормить. Дневной лимит: 10 000 DC.
+- **Уровни:** 1 ур. (300 XP), 2 ур. (500 XP), 3 ур. (700 XP) и так по +200 XP. Максимум 10 уровень.
+- **Пассивный доход:** Питомец сам копит DC. Доход зависит от уровня: 1 ур = 30 DC/ч, каждый следующий уровень умножает доход на 1.5.
+- **Автокопилка:** Раз в 24 часа питомец автоматически скидывает все накопленные DC прямо в копилку клана.
+- **Бонус к выплате:** Чем выше уровень питомца, тем больше бонус к итоговой выплате клана в конце сезона (от +3% до +27%).
 
 🔴 О СЕБЕ (если спросят «ты кто» / «что умеешь»):
-коротко: я diamond ai, консультант магазина. умею рассказать про товары/роли/dc/клан/питомцев, показать твой профиль, забрать подарок, открыть кейс, найти что-то в каталоге.
+коротко: я diamond ai, консультант магазина. умею рассказать про товары/роли/dc/клан/душу клана, показать твой профиль, забрать подарок, открыть кейс, найти что-то в каталоге.
 """.strip()
 
 
@@ -585,58 +575,31 @@ def _role_key_for_reviews(reviews: int) -> str:
     return "none"
 
 
-def build_pets_block(user_id: int) -> str:
-    """Инфа про питомцев юзера."""
+def build_clan_pet_block(user_id: int) -> str:
+    """Инфа про питомца клана (Душа Клана)."""
     try:
-        from pet import core as pcore
-    except Exception:
-        return ""
-
-    try:
-        pets = pcore.get_user_pets(user_id)
-        if not pets:
-            return "питомцы: у юзера пока нет питомцев"
-
-        lines = ["питомцы юзера:"]
-
-        active = None
-        total_pending = 0
-        for p in pets:
-            cat = pcore.CATALOG.get(p["pet_key"], {})
-            name = cat.get("name", "—")
-            lvl = p["level"]
-            pending = p.get("pending_dc", 0)
-            total_pending += pending
-
-            if p.get("is_active"):
-                active = f"{name} · ур. {lvl}"
-                hr = pcore.hourly_rate(p["pet_key"], lvl)
-                lines.append(f"- активный: {name} (ур. {lvl}) · {hr:.0f} DC/ч")
-
-        lines.append(f"- всего питомцев: {len(pets)} из {len(pcore.CATALOG)}")
-        lines.append(f"- накоплено у всех: {total_pending} DC")
-
-        # Место в топе
-        try:
-            place = pcore.get_user_place(user_id)
-            if place:
-                lines.append(f"- место в топе питомцеводов: #{place}")
-        except Exception:
-            pass
-
-        # Список остальных (кратко)
-        others = []
-        for p in pets:
-            if p.get("is_active"):
-                continue
-            cat = pcore.CATALOG.get(p["pet_key"], {})
-            others.append(f"{cat.get('name', '—')} ур.{p['level']}")
-        if others:
-            lines.append(f"- остальные: {', '.join(others[:6])}")
-
-        return "\n".join(lines)
+        from clan.core import get_user_clan
+        from pet.core import get_clan_pet, get_pet_name, get_pet_bonus, get_pet_hourly_income
+        
+        clan = get_user_clan(user_id)
+        if not clan:
+            return "клановый питомец: юзер не состоит в клане"
+            
+        pet = get_clan_pet(clan["id"])
+        pet_name = get_pet_name(clan["id"])
+        bonus = get_pet_bonus(pet["level"])
+        income = get_pet_hourly_income(pet["level"])
+        
+        return (
+            f"клановый питомец (Душа Клана):\n"
+            f"- клан: {clan['name']}\n"
+            f"- питомец: {pet_name} (уровень {pet['level']})\n"
+            f"- бонус к выплате клана: +{int(bonus*100)}%\n"
+            f"- пассивный доход: {income:.0f} DC/ч (раз в сутки падает в копилку)\n"
+            f"- всего скормлено кланом: {pet['total_fed']} DC"
+        )
     except Exception as e:
-        logger.warning(f"build_pets_block: {e}")
+        logger.warning(f"build_clan_pet_block: {e}")
         return ""
 
 
@@ -704,11 +667,11 @@ def build_user_block(user_id: int, member: Optional[disnake.Member]) -> str:
     except Exception:
         pass
 
-    # Питомцы
-    pets_block = build_pets_block(user_id)
-    if pets_block:
+    # Питомец клана
+    pet_block = build_clan_pet_block(user_id)
+    if pet_block:
         lines.append("")
-        lines.append(pets_block)
+        lines.append(pet_block)
 
     return "\n".join(lines)
 
@@ -727,34 +690,6 @@ def build_shop_block() -> str:
                 if prices:
                     lines.append(f"- {label}: от {min(prices)} до {max(prices)} dc")
         return "\n".join(lines) if len(lines) > 1 else ""
-    except Exception:
-        return ""
-
-
-def build_pets_catalog_block() -> str:
-    """Краткий каталог питомцев для контекста."""
-    try:
-        from pet import core as pcore
-    except Exception:
-        return ""
-
-    try:
-        lines = ["каталог питомцев (можно купить):"]
-        for key, cat in pcore.CATALOG.items():
-            bonus = ""
-            bt = cat.get("bonus_type", "none")
-            if bt != "none":
-                bnames = {
-                    "review_bonus": "отзывы",
-                    "casino_luck": "казино",
-                    "clan_contrib": "копилка клана",
-                }
-                bonus = f" · +{int(cat.get('bonus_value', 0) * 100)}% к {bnames.get(bt, '')}"
-            lines.append(
-                f"- {cat['name']} ({pcore.RARITY_LABEL[cat['rarity']]}): "
-                f"{cat['price_dc']} dc · {cat['passive_dc']} dc/ч{bonus}"
-            )
-        return "\n".join(lines)
     except Exception:
         return ""
 
@@ -826,10 +761,6 @@ def build_context_block(user_id: int, member: Optional[disnake.Member]) -> str:
     shop = build_shop_block()
     if shop:
         parts.append(shop)
-
-    pets_cat = build_pets_catalog_block()
-    if pets_cat:
-        parts.append(pets_cat)
 
     active = build_active_block()
     if active:
@@ -976,7 +907,7 @@ async def quick_action(message: disnake.Message, text: str) -> Optional[str]:
     if _match_any(text, ABOUT_TRIGGERS):
         return (
             "я diamond ai, консультант магазина. умею рассказать про товары, роли, dc, "
-            "клан, питомцев, казино. могу показать твой профиль, забрать подарок, "
+            "клан, душу клана, казино. могу показать твой профиль, забрать подарок, "
             "открыть кейс, найти что-то в каталоге. спрашивай."
         )
 
@@ -1094,14 +1025,15 @@ async def build_digest_reply(user_id: int) -> str:
     except Exception:
         pass
 
-    # Питомцы юзера
+    # Питомец клана
     try:
-        from pet import core as pcore
-        pets = pcore.get_user_pets(user_id)
-        if pets:
-            total_pending = sum((p.get("pending_dc") or 0) for p in pets)
-            if total_pending > 0:
-                parts.append(f"🐾 у питомцев накоплено **{total_pending} DC** — можно забрать")
+        from clan.core import get_user_clan
+        from pet.core import get_clan_pet, get_pet_hourly_income
+        clan = get_user_clan(user_id)
+        if clan:
+            pet = get_clan_pet(clan["id"])
+            hourly = get_pet_hourly_income(pet["level"])
+            parts.append(f"🐾 душа клана: уровень {pet['level']} · {hourly:.0f} DC/ч в копилку")
     except Exception:
         pass
 
@@ -1185,7 +1117,7 @@ SHOP_KEYWORDS = [
     "реферал", "инвайт", "ставк", "рулетк", "блэкджек", "монетк",
     "хочу купить", "есть ли", "продаете", "продаёте", "цена", "стоит",
     "подскажи", "помоги с", "можешь", "сколько",
-    "питомец", "питомц", "пет", "зоопарк", "кот", "лиса", "сова",
+    "питомец", "питомц", "душа клана", "пет", "зоопарк", "кот", "лиса", "сова",
     "грифон", "дракон", "даймондик", "кормить", "покормить",
 ]
 
@@ -1212,7 +1144,7 @@ async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
                 "role": "user",
                 "parts": [{"text": (
                     "относится ли это сообщение к магазину diamond shop "
-                    "(товары, dc-валюта, роли, кейсы, казино, клан, тикеты, питомцы)? "
+                    "(товары, dc-валюта, роли, кейсы, казино, клан, тикеты, душа клана)? "
                     "ответь одним словом: да или нет.\n\n"
                     f"сообщение: {text[:300]}"
                 )}],
@@ -1636,17 +1568,17 @@ def build_auto_gift_reminder() -> Optional[str]:
 
 def build_auto_pets() -> Optional[str]:
     try:
-        from pet import core as pcore
-        total = cur.execute("SELECT COUNT(*) AS c FROM user_pets").fetchone()
-        if not total or total["c"] == 0:
+        from pet.core import get_clan_pet, get_pet_hourly_income
+        # Просто проверяем, есть ли питомец у 1-го клана (для примера)
+        pet = get_clan_pet(1)
+        if pet["level"] > 1:
             return (
-                "🐾 в магазине появились питомцы! "
-                "от кота за 300 DC до Даймондика за 5000. "
-                "они приносят DC пока ты спишь — загляни в раздел **Питомцы**."
+                "🐾 душа клана качается! не забудьте покормить питомца, "
+                "чтобы он приносил больше DC и бонусов в копилку."
             )
         return (
-            "🐾 у питомцев копится DC каждый час — "
-            "не забудь забрать накопленное в разделе **Питомцы**."
+            "🐾 питомец клана «Душа Клана» — кормите его всей семьёй (1 DC = 1 XP). "
+            "Он приносит пассивный доход и даёт бонус к выплате!"
         )
     except Exception:
         return None
@@ -1943,7 +1875,7 @@ async def _log_to_discord(title: str, description: str, color: int = 0x00ff00):
 # ============================================================
 @bot.event
 async def on_ready():
-    logger.info(f"diamond ai v3.2 запущен как {bot.user} (id={bot.user.id})")
+    logger.info(f"diamond ai v3.3 запущен как {bot.user} (id={bot.user.id})")
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -1964,9 +1896,9 @@ async def on_ready():
             task.start()
 
     await _log_to_discord(
-        "✅ Diamond AI v3.2 запущен",
+        "✅ Diamond AI v3.3 запущен",
         f"> **{bot.user}** онлайн.\n> Отвечаю в <#{ALLOWED_CHANNEL_ID}> и тикетах.\n"
-        f"> Знаю про питомцев 🐾",
+        f"> Знаю про Душу Клана 🐾",
         color=0x00ff00,
     )
 
