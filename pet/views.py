@@ -9,19 +9,28 @@ from clan.core import get_user_clan
 from pet import core as pcore
 from pet import render as prender
 
+# 1 пробел с каждой стороны
+P = "\u3164"
+
 E_FEED = PartialEmoji(name="drumstick", id=1539657202170859561)
 E_TOP = PartialEmoji(name="prize", id=1539657202170859561)
 E_ABOUT = PartialEmoji(name="info", id=1539657202170859561)
 
+def _pad(text: str) -> str:
+    return f"{P}{text}{P}"
+
+# ============================================================
+# ГЛАВНАЯ ПАНЕЛЬ
+# ============================================================
 class ClanPetMainView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label="Покормить", style=ButtonStyle.gray, custom_id="cp_main:feed", emoji=E_FEED, row=0)
+    @disnake.ui.button(label=_pad("Покормить"), style=ButtonStyle.gray, custom_id="cp_main:feed", emoji=E_FEED, row=0)
     async def feed(self, button, inter):
         await inter.response.send_modal(FeedPetModal())
 
-    @disnake.ui.button(label="Топ кормильцев", style=ButtonStyle.gray, custom_id="cp_main:top", emoji=E_TOP, row=0)
+    @disnake.ui.button(label=_pad("Топ кормильцев"), style=ButtonStyle.gray, custom_id="cp_main:top", emoji=E_TOP, row=0)
     async def top(self, button, inter):
         try: await inter.response.defer(ephemeral=True)
         except: pass
@@ -37,9 +46,10 @@ class ClanPetMainView(View):
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
         
-        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetTopView())
+        # Отправляем новое эфемерное сообщение
+        await inter.followup.send(embed=e, file=file, ephemeral=True)
 
-    @disnake.ui.button(label="О питомце", style=ButtonStyle.gray, custom_id="cp_main:about", emoji=E_ABOUT, row=0)
+    @disnake.ui.button(label=_pad("О питомце"), style=ButtonStyle.gray, custom_id="cp_main:about", emoji=E_ABOUT, row=0)
     async def about(self, button, inter):
         try: await inter.response.defer(ephemeral=True)
         except: pass
@@ -54,52 +64,12 @@ class ClanPetMainView(View):
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
         
-        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetAboutView())
+        # Отправляем новое эфемерное сообщение
+        await inter.followup.send(embed=e, file=file, ephemeral=True)
 
-class ClanPetTopView(View):
-    def __init__(self):
-        super().__init__(timeout=300)
-
-    @disnake.ui.button(label="Назад", style=ButtonStyle.gray, custom_id="cp_top:back", emoji=PartialEmoji(name="arrow_left", id=1539657202170859561), row=0)
-    async def back(self, button, inter):
-        try: await inter.response.defer(ephemeral=True)
-        except: pass
-        
-        clan = get_user_clan(inter.author.id)
-        if not clan: return await inter.followup.send("❌ Ты не в клане.", ephemeral=True)
-        
-        balance = get_dc_cache(inter.author.id).get("balance", 0)
-        buf = await asyncio.to_thread(prender.render_pet_main, inter.author.id, clan["name"], clan["id"], balance)
-        
-        fname = f"cp_main_{inter.author.id}.png"
-        file = disnake.File(buf, filename=fname)
-        e = disnake.Embed(color=6776679)
-        e.set_image(url=f"attachment://{fname}")
-        
-        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetMainView())
-
-class ClanPetAboutView(View):
-    def __init__(self):
-        super().__init__(timeout=300)
-
-    @disnake.ui.button(label="Назад", style=ButtonStyle.gray, custom_id="cp_about:back", emoji=PartialEmoji(name="arrow_left", id=1539657202170859561), row=0)
-    async def back(self, button, inter):
-        try: await inter.response.defer(ephemeral=True)
-        except: pass
-        
-        clan = get_user_clan(inter.author.id)
-        if not clan: return await inter.followup.send("❌ Ты не в клане.", ephemeral=True)
-        
-        balance = get_dc_cache(inter.author.id).get("balance", 0)
-        buf = await asyncio.to_thread(prender.render_pet_main, inter.author.id, clan["name"], clan["id"], balance)
-        
-        fname = f"cp_main_{inter.author.id}.png"
-        file = disnake.File(buf, filename=fname)
-        e = disnake.Embed(color=6776679)
-        e.set_image(url=f"attachment://{fname}")
-        
-        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetMainView())
-
+# ============================================================
+# МОДАЛКА КОРМЛЕНИЯ
+# ============================================================
 class FeedPetModal(Modal):
     def __init__(self):
         super().__init__(
@@ -132,8 +102,10 @@ class FeedPetModal(Modal):
         if result["leveled_up"]:
             msg += f"\n🎉 **Питомец повысил уровень до {result['new_level']}!**"
             
+        # Сначала текст об успехе
         await inter.followup.send(msg, ephemeral=True)
 
+        # Затем обновленная картинка (тоже эфемерно)
         clan = get_user_clan(inter.author.id)
         balance = get_dc_cache(inter.author.id).get("balance", 0)
         buf = await asyncio.to_thread(prender.render_pet_main, inter.author.id, clan["name"], clan["id"], balance)
@@ -143,4 +115,4 @@ class FeedPetModal(Modal):
         e = disnake.Embed(color=6776679)
         e.set_image(url=f"attachment://{fname}")
         
-        await inter.edit_original_response(embed=e, file=file, attachments=[], view=ClanPetMainView())
+        await inter.followup.send(embed=e, file=file, ephemeral=True)
