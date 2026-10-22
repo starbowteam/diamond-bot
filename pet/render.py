@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import io
 import os
+from datetime import datetime, timezone
 from PIL import Image, ImageDraw, ImageFont
 from core.utils import ADD_DIR
 from pet.core import (
     get_xp_progress, get_pet_name, get_pet_fa, get_pet_bonus, 
-    get_xp_for_next, MAX_LEVEL, get_clan_pet, BONUS_PER_LEVEL, get_pet_hourly_income
+    get_xp_for_next, MAX_LEVEL, get_clan_pet, BONUS_PER_LEVEL, 
+    get_pet_hourly_income, get_time_to_payout
 )
 
 FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
@@ -118,14 +120,22 @@ def render_pet_main(user_id, clan_name, clan_id, balance):
     d.text((c_glow[0], bar_y1+30), f"{xp} / {need} XP" if pet["level"] < MAX_LEVEL else "МАКС. УРОВЕНЬ", font=_font(14), fill=MUTED, anchor="mm")
 
     # Блок дохода
-    income_y = ly2 - 130
-    d.rounded_rectangle((lx1+30, income_y, lx2-30, income_y+100), radius=16, fill=INNER_BG+(255,), outline=GREEN+(150,), width=2)
+    income_y = ly2 - 140
+    d.rounded_rectangle((lx1+30, income_y, lx2-30, income_y+110), radius=16, fill=INNER_BG+(255,), outline=GREEN+(150,), width=2)
     
     hourly = get_pet_hourly_income(pet["level"])
-    d.text(((lx1+lx2)//2, income_y+25), f"ДОХОД: +{hourly:.0f} DC/ч", font=_font(16), fill=GREEN, anchor="mm")
+    d.text(((lx1+lx2)//2, income_y+25), f"ДОХОД В КОПИЛКУ: +{hourly:.0f} DC/ч", font=_font(16), fill=GREEN, anchor="mm")
     
-    pending = int(pet["pending_dc"])
-    d.text(((lx1+lx2)//2, income_y+55), f"Накоплено: {pending:,} DC".replace(",", " "), font=_font(24), fill=TEXT, anchor="mm")
+    time_left = get_time_to_payout(clan_id)
+    h_left = time_left // 3600
+    m_left = (time_left % 3600) // 60
+    
+    if time_left > 0:
+        d.text(((lx1+lx2)//2, income_y+60), f"До начисления: {h_left}ч {m_left}м", font=_font(20), fill=TEXT, anchor="mm")
+    else:
+        d.text(((lx1+lx2)//2, income_y+60), f"Начисление сейчас...", font=_font(20), fill=TEXT, anchor="mm")
+        
+    d.text(((lx1+lx2)//2, income_y+85), "Деньги падают напрямую в копилку клана", font=_font(12), fill=MUTED, anchor="mm")
 
     # Правая панель
     d.rounded_rectangle((rx1, ly1, rx2, ly2), radius=24, fill=STACK_BG + (255,), outline=STACK_BRD + (255,), width=2)
@@ -273,7 +283,6 @@ def render_pet_about(user_id, clan_name, clan_id):
 
     tl_y = ty + st_h + 30
     d.text((tx, tl_y), "ВЕХИ РАЗВИТИЯ", font=_font(20), fill=TEXT)
-    # Серебристая иконка графика
     _icon(d, tx + _tw(d, "ВЕХИ РАЗВИТИЯ", _font(20)) + 20, tl_y + 10, I_CHART, 20, SILVER)
     
     row_y = tl_y + 40
@@ -287,43 +296,28 @@ def render_pet_about(user_id, clan_name, clan_id):
         
     for m_lvl in milestones:
         m_bonus = get_pet_bonus(m_lvl)
-        rows.append({
-            "lvl": m_lvl,
-            "bonus": m_bonus,
-            "is_done": level > m_lvl,
-            "is_current": level == m_lvl,
-            "req_xp": get_xp_for_next(m_lvl) if m_lvl < MAX_LEVEL else 0
-        })
+        rows.append({"lvl": m_lvl, "bonus": m_bonus, "is_done": level > m_lvl, "is_current": level == m_lvl, "req_xp": get_xp_for_next(m_lvl) if m_lvl < MAX_LEVEL else 0})
 
     for r in rows:
-        if r["is_current"]:
-            bg_col, brd_col = (34, 29, 46, 255), PURPLE + (255,)
-        elif r["is_done"]:
-            bg_col, brd_col = (18, 26, 20, 255), GREEN + (255,)
-        else:
-            bg_col, brd_col = INNER_BG + (255,), INNER_BRD + (255,)
+        if r["is_current"]: bg_col, brd_col = (34, 29, 46, 255), PURPLE + (255,)
+        elif r["is_done"]: bg_col, brd_col = (18, 26, 20, 255), GREEN + (255,)
+        else: bg_col, brd_col = INNER_BG + (255,), INNER_BRD + (255,)
             
         d.rounded_rectangle((tx, row_y, rx_pad, row_y+row_h), radius=12, fill=bg_col, outline=brd_col, width=2)
-        lvl_str = f"Ур. {r['lvl']}"
-        d.text((tx+24, row_y+row_h//2), lvl_str, font=_font(20), fill=TEXT, anchor="lm")
+        d.text((tx+24, row_y+row_h//2), f"Ур. {r['lvl']}", font=_font(20), fill=TEXT, anchor="lm")
         d.text((tx+130, row_y+row_h//2), f"+{int(r['bonus']*100)}%", font=_font(22), fill=GREEN, anchor="lm")
         
         bar_x = tx + 260
         bar_w = 300
         d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+bar_w, row_y+row_h//2+6), radius=6, fill=BG+(255,))
-        if r["is_done"]:
-            d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+bar_w, row_y+row_h//2+6), radius=6, fill=GREEN+(255,))
+        if r["is_done"]: d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+bar_w, row_y+row_h//2+6), radius=6, fill=GREEN+(255,))
         elif r["is_current"]:
             fill_w = int(bar_w * (xp / max(r["req_xp"], 1)))
-            if fill_w > 0:
-                d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+fill_w, row_y+row_h//2+6), radius=6, fill=PURPLE+(255,))
+            if fill_w > 0: d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+fill_w, row_y+row_h//2+6), radius=6, fill=PURPLE+(255,))
         
-        if r["is_done"]:
-            right_str, col = "Достигнуто", GREEN
-        elif r["is_current"]:
-            right_str, col = "Текущий", PURPLE
-        else:
-            right_str, col = f"{r['req_xp']} XP", MUTED
+        if r["is_done"]: right_str, col = "Достигнуто", GREEN
+        elif r["is_current"]: right_str, col = "Текущий", PURPLE
+        else: right_str, col = f"{r['req_xp']} XP", MUTED
             
         d.text((rx_pad - 24 - _tw(d, right_str, _font(16)), row_y+row_h//2), right_str, font=_font(16), fill=col, anchor="lm")
         row_y += row_h + row_gap
