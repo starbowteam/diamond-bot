@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Ядро кланового питомца ("Душа клана").
-"""
 import os
 import time
 import asyncio
@@ -21,16 +18,17 @@ from clan.core import get_user_clan, get_clan, get_current_cycle
 # КОНСТАНТЫ
 # ============================================================
 MAX_LEVEL = 10
-FEED_COST = 1     # 👈 СНИЖЕНО ДЛЯ ТЕСТОВ (поставь 100 обратно)
-XP_PER_FEED = 1   # 👈 1 DC = 1 XP (для теста, потом верни 100)
+FEED_COST = 1     # 1 DC = 1 XP
+XP_PER_FEED = 1   
 FEED_COOLDOWN = 0 
 
 BONUS_PER_LEVEL = 0.03 
+BASE_INCOME = 30.0 # 30 DC/ч на 1 уровне
 
 CLAN_PETS = {
-    1: {"name": "Грифон", "fa": 0xf520},       # Мультяшности
-    2: {"name": "Ночная Сова", "fa": 0xf4ba},  # Сияние
-    3: {"name": "Кристальный Дракон", "fa": 0xf3a5} # Кристализация
+    1: {"name": "Грифон", "fa": 0xf520},
+    2: {"name": "Ночная Сова", "fa": 0xf4ba},
+    3: {"name": "Кристальный Дракон", "fa": 0xf3a5}
 }
 
 # ============================================================
@@ -42,7 +40,9 @@ def init_pet_tables():
         clan_id    INTEGER PRIMARY KEY,
         level      INTEGER DEFAULT 1,
         xp         INTEGER DEFAULT 0,
-        total_fed  INTEGER DEFAULT 0
+        total_fed  INTEGER DEFAULT 0,
+        pending_dc REAL DEFAULT 0,
+        last_tick  INTEGER DEFAULT 0
     );
     
     CREATE TABLE IF NOT EXISTS clan_pet_feedings (
@@ -56,87 +56,29 @@ def init_pet_tables():
     """)
     db.commit()
     
+    for col, ddl in [
+        ("pending_dc", "pending_dc REAL DEFAULT 0"),
+        ("last_tick", "last_tick INTEGER DEFAULT 0")
+    ]:
+        try:
+            cols = [r[1] for r in cur.execute("PRAGMA table_info(clan_pets)").fetchall()]
+            if col not in cols:
+                cur.execute(f"ALTER TABLE clan_pets ADD COLUMN {ddl}")
+                db.commit()
+        except Exception:
+            pass
+    
     for cid in CLAN_PETS.keys():
-        cur.execute("INSERT OR IGNORE INTO clan_pets (clan_id) VALUES (?)", (cid,))
+        cur.execute("INSERT OR IGNORE INTO clan_pets (clan_id, last_tick) VALUES (?, ?)", (cid, int(time.time())))
     db.commit()
 
-async def migrate_old_pets():
-    """Одноразовая миграция: выдача компенсации за старых питомцев и их удаление."""
-    try:
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_pets'")
-        if not cur.fetchone():
-            return
-            
-        rows = cur.execute("SELECT user_id, pet_key FROM user_pets").fetchall()
-        if not rows:
-            cur.execute("DROP TABLE user_pets")
-            db.commit()
-            return
-
-        PRICES = {
-            "cat_ginger": 300, "hamster": 450, "fox": 600, "raccoon": 750, "owl": 900, "penguin": 1050,
-            "griffin": 1200, "wolf": 1600, "dragon": 2000, "phoenix": 3000, "diamond_pet": 5000, "crystal_dragon": 7500
-        }
-        
-        user_pets_map = {}
-        for r in rows:
-            uid = r["user_id"]
-            if uid not in user_pets_map:
-                user_pets_map[uid] = []
-            user_pets_map[uid].append(r["pet_key"])
-            
-        logger.info(f"🐾 Начинаю миграцию питомцев: найдено {len(user_pets_map)} юзеров.")
-        
-        for uid, pets in user_pets_map.items():
-            hist = get_dc_cache(uid).get("history", [])
-            total_fed = sum(abs(h["amount"]) for h in hist if "Кормление" in h.get("reason", ""))
-            
-            total_comp = 0
-            for p_key in pets:
-                price = PRICES.get(p_key, 0)
-                total_comp += price + 50
-            
-            total_comp += total_fed
-            
-            if total_comp > 0:
-                await add_dc(
-                    uid, total_comp,
-                    "Компенсация за удаление личных питомцев",
-                    notify=True, log=False
-                )
-                
-                try:
-                    from core.bot import bot
-                    user = bot.get_user(uid) or await bot.fetch_user(uid)
-                    if user:
-                        await user.send(
-                            f"🐾 **Твои личные питомцы были удалены.**\n"
-                            f"В связи с переходом на новую систему «Душа Клана», "
-                            f"тебе начислена компенсация: **+{total_comp} DC**.\n"
-                            f"> Формула: цена питомцев + затраты на кормление + 50 DC за удаление."
-                        )
-                except Exception as e:
-                    logger.debug(f"migrate DM: {e}")
-                    
-            await asyncio.sleep(0.2)
-
-        cur.execute("DROP TABLE user_pets")
-        cur.execute("DROP TABLE IF EXISTS pet_xp_log")
-        cur.execute("DROP TABLE IF EXISTS pet_purchases")
-        cur.execute("DROP TABLE IF EXISTS pet_active_cooldown")
-        db.commit()
-        logger.info("🐾 Миграция личных питомцев успешно завершена.")
-        
-    except Exception as e:
-        logger.exception(f"migrate_old_pets: {e}")
-
 # ============================================================
-# ЛОГИКА КЛАНОВОГО ПИТОМЦА
+# ЛОГИКА ПИТОМЦА
 # ============================================================
 def get_clan_pet(clan_id: int) -> dict:
     row = cur.execute("SELECT * FROM clan_pets WHERE clan_id=?", (clan_id,)).fetchone()
     if not row:
-        cur.execute("INSERT OR IGNORE INTO clan_pets (clan_id) VALUES (?)", (clan_id,))
+        cur.execute("INSERT OR IGNORE INTO clan_pets (clan_id, last_tick) VALUES (?, ?)", (clan_id, int(time.time())))
         db.commit()
         row = cur.execute("SELECT * FROM clan_pets WHERE clan_id=?", (clan_id,)).fetchone()
     return dict(row)
@@ -148,50 +90,80 @@ def get_pet_fa(clan_id: int) -> int:
     return CLAN_PETS.get(clan_id, {}).get("fa", 0xf3a5)
 
 def get_pet_bonus(level: int) -> float:
-    if level <= 1:
-        return 0.0
+    if level <= 1: return 0.0
     return (level - 1) * BONUS_PER_LEVEL
 
+def get_pet_hourly_income(level: int) -> float:
+    return BASE_INCOME * (1.5 ** (level - 1))
+
 def get_xp_for_next(level: int) -> int:
-    if level >= MAX_LEVEL:
-        return 0
-    return level * 5000
+    if level >= MAX_LEVEL: return 0
+    # 300, 500, 700, 900... (+200)
+    return 300 + (level - 1) * 200
 
 def get_xp_progress(xp: int, level: int) -> tuple:
-    if level >= MAX_LEVEL:
-        return (100, 100, 100)
+    if level >= MAX_LEVEL: return (100, 100, 100)
     need = get_xp_for_next(level)
     percent = min(int((xp / need) * 100), 100)
     return (xp, need, percent)
 
+@tasks.loop(minutes=5)
+async def pet_income_task(bot):
+    """Каждые 5 минут начисляет накопления всем кланам."""
+    await bot.wait_until_ready()
+    now = int(time.time())
+    try:
+        rows = cur.execute("SELECT * FROM clan_pets").fetchall()
+        for r in rows:
+            last = r["last_tick"] or now
+            elapsed = now - last
+            if elapsed <= 0: continue
+            
+            capped_elapsed = min(elapsed, 86400) # кап 24ч
+            hourly = get_pet_hourly_income(r["level"])
+            earned = hourly * (capped_elapsed / 3600.0)
+            
+            if earned >= 0.1:
+                cur.execute("UPDATE clan_pets SET pending_dc = pending_dc + ?, last_tick = ? WHERE clan_id = ?", (earned, now, r["clan_id"]))
+            else:
+                cur.execute("UPDATE clan_pets SET last_tick = ? WHERE clan_id = ?", (now, r["clan_id"]))
+        db.commit()
+    except Exception as e:
+        logger.exception(f"pet_income_task: {e}")
+
+async def claim_pet_income(clan_id: int) -> int:
+    """Забирает накопленные DC питомца в копилку клана."""
+    pet = get_clan_pet(clan_id)
+    amount = int(pet["pending_dc"])
+    if amount <= 0: return 0
+        
+    cur.execute("UPDATE clan_pets SET pending_dc = 0 WHERE clan_id=?", (clan_id,))
+    
+    cycle = get_current_cycle()
+    if cycle:
+        cur.execute(
+            "INSERT INTO clan_contributions (cycle_id, clan_id, user_id, amount, reason, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (cycle["id"], clan_id, 0, amount, "Доход питомца клана", int(time.time()))
+        )
+    db.commit()
+    return amount
+
 async def feed_clan_pet(user_id: int, amount_dc: int) -> dict:
     clan = get_user_clan(user_id)
-    if not clan:
-        return {"ok": False, "error": "Ты не в клане."}
-        
-    if amount_dc < FEED_COST:
-        return {"ok": False, "error": f"Минимум {FEED_COST} DC."}
+    if not clan: return {"ok": False, "error": "Ты не в клане."}
+    if amount_dc < FEED_COST: return {"ok": False, "error": f"Минимум {FEED_COST} DC."}
 
     balance = get_dc_cache(user_id).get("balance", 0)
-    if balance < amount_dc:
-        return {"ok": False, "error": f"Не хватает DC. У тебя {balance}."}
+    if balance < amount_dc: return {"ok": False, "error": f"Не хватает DC. У тебя {balance}."}
         
     ok = await remove_dc(user_id, amount_dc, f"Кормление питомца клана {clan['name']}")
-    if not ok:
-        return {"ok": False, "error": "Ошибка списания."}
+    if not ok: return {"ok": False, "error": "Ошибка списания."}
 
     xp_to_add = int((amount_dc / FEED_COST) * XP_PER_FEED)
     
-    cur.execute("""
-        UPDATE clan_pets 
-        SET xp = xp + ?, total_fed = total_fed + ? 
-        WHERE clan_id = ?
-    """, (xp_to_add, amount_dc, clan["id"]))
-    
-    cur.execute("""
-        INSERT INTO clan_pet_feedings (clan_id, user_id, amount, ts)
-        VALUES (?, ?, ?, ?)
-    """, (clan["id"], user_id, amount_dc, int(time.time())))
+    cur.execute("UPDATE clan_pets SET xp = xp + ?, total_fed = total_fed + ? WHERE clan_id = ?", (xp_to_add, amount_dc, clan["id"]))
+    cur.execute("INSERT INTO clan_pet_feedings (clan_id, user_id, amount, ts) VALUES (?, ?, ?, ?)", (clan["id"], user_id, amount_dc, int(time.time())))
     db.commit()
 
     pet = get_clan_pet(clan["id"])
@@ -201,13 +173,6 @@ async def feed_clan_pet(user_id: int, amount_dc: int) -> dict:
         db.commit()
         pet = get_clan_pet(clan["id"])
         leveled_up = True
-
-    await log_discord(
-        title="🍖 Кормление питомца",
-        description=f"> **Юзер:** <@{user_id}>\n> **Клан:** {clan['name']}\n> **Сумма:** `{amount_dc} DC`\n> **XP:** `+{xp_to_add}`",
-        color=0xffaa00,
-        channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
-    )
 
     return {"ok": True, "xp_added": xp_to_add, "leveled_up": leveled_up, "new_level": pet["level"]}
 
@@ -231,10 +196,9 @@ def get_clan_pet_top(clan_id: int) -> List[dict]:
         if guild:
             m = guild.get_member(uid)
             if m: name = m.display_name
-            
-        result.append({
-            "user_id": uid,
-            "username": name,
-            "total": r["total"]
-        })
+        result.append({"user_id": uid, "username": name, "total": r["total"]})
     return result
+
+def start_pet_tasks(bot):
+    if not pet_income_task.is_running():
+        pet_income_task.start(bot)
