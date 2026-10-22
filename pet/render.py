@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw, ImageFont
 from core.utils import ADD_DIR
 from pet.core import (
     get_xp_progress, get_pet_name, get_pet_fa, get_pet_bonus, 
-    get_xp_for_next, MAX_LEVEL, get_clan_pet, BONUS_PER_LEVEL
+    get_xp_for_next, MAX_LEVEL, get_clan_pet, BONUS_PER_LEVEL, get_pet_hourly_income
 )
 
 FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
@@ -27,51 +27,37 @@ def _fa(sz):
         except: pass
     _FA[sz] = f; return f
 
-# ============================================================
-# ПАЛИТРА (ПЛОСКИЕ ЦВЕТА, БЕЗ ГРАДИЕНТОВ)
-# ============================================================
-BG        = (10, 10, 12)       # #0a0a0c
-CARD_TOP  = (16, 16, 20)       # #101014
-STACK_BG  = (21, 21, 26)       # #15151a
-STACK_BRD = (58, 58, 64)       # #3a3a40
-INNER_BG  = (18, 18, 23)       # #121217
-INNER_BRD = (40, 40, 47)       # #28282f
-
+BG        = (10, 10, 12)
+CARD_TOP  = (16, 16, 20)
+STACK_BG  = (21, 21, 26)
+STACK_BRD = (58, 58, 64)
+INNER_BG  = (18, 18, 23)
+INNER_BRD = (40, 40, 47)
 TEXT      = (255, 255, 255)
 TEXT_SOFT = (232, 232, 236)
 MUTED     = (136, 136, 136)
 DIM       = (102, 102, 102)
 
-SILVER    = (198, 208, 224)    # #c6d0e0
-GREEN     = (46, 204, 113)     # #2ecc71
-PURPLE    = (179, 157, 219)    # #b39ddb
-GOLD      = (247, 201, 145)    # #f7c991
-
-CARD_BRD  = (74, 74, 79)       # #4a4a4f
+SILVER    = (198, 208, 224)
+GREEN     = (46, 204, 113)
+GOLD      = (247, 201, 145)
+PURPLE    = (179, 157, 219)
+CARD_BRD  = (74, 74, 79)
 
 W, H = 1800, 1000
 PAD_X, PAD_Y = 56, 44
 BODY_Y = 138
 BODY_H = H - PAD_Y - BODY_Y
 
-# Иконки
 I_GEM = 0xf3a5
 I_USER = 0xf007
 I_MEDAL = 0xf5a2
 I_STAR = 0xf005
 I_INFO = 0xf05a
 I_CHART = 0xf201
-I_LOCK = 0xf023
-I_USERS = 0xf0c0
-I_COINS = 0xf51e
 
 def _tw(d, t, f):
     b = d.textbbox((0, 0), t, font=f); return b[2] - b[0]
-
-def _el(d, t, f, w):
-    if _tw(d, t, f) <= w: return t
-    while t and _tw(d, t + "…", f) > w: t = t[:-1]
-    return t + "…"
 
 def _icon(d, cx, cy, code, sz, color):
     f = _fa(sz)
@@ -102,9 +88,6 @@ def _canvas(title, user_id, clan_name):
     d.line((PAD_X, sy, W - PAD_X, sy), fill=(36, 36, 42) + (255,), width=2)
     return img, d
 
-# ============================================================
-# СОСТОЯНИЕ 1: ГЛАВНАЯ
-# ============================================================
 def render_pet_main(user_id, clan_name, clan_id, balance):
     img, d = _canvas("Главная", user_id, clan_name)
     
@@ -118,26 +101,33 @@ def render_pet_main(user_id, clan_name, clan_id, balance):
     pet_name = get_pet_name(clan_id)
     pet = get_clan_pet(clan_id)
     
-    c_glow = (lx1 + (lx2-lx1)//2, ly1 + 160)
-    for i in range(3):
-        r = 130 - i*20
-        d.ellipse((c_glow[0]-r, c_glow[1]-r, c_glow[0]+r, c_glow[1]+r), fill=(179, 157, 219, 10 + i*10))
-
+    c_glow = (lx1 + (lx2-lx1)//2, ly1 + 140)
     d.ellipse((c_glow[0]-80, c_glow[1]-80, c_glow[0]+80, c_glow[1]+80), fill=(26,26,34,255), outline=PURPLE+(255,), width=4)
     _icon(d, c_glow[0], c_glow[1]+2, pet_fa, 60, PURPLE)
 
-    d.text((c_glow[0], c_glow[1]+120), pet_name, font=_font(36), fill=TEXT, anchor="mm")
-    d.text((c_glow[0], c_glow[1]+170), f"Уровень {pet['level']}", font=_font(22), fill=PURPLE, anchor="mm")
+    d.text((c_glow[0], c_glow[1]+110), pet_name, font=_font(34), fill=TEXT, anchor="mm")
+    d.text((c_glow[0], c_glow[1]+150), f"Уровень {pet['level']}", font=_font(20), fill=PURPLE, anchor="mm")
     
     xp, need, pct = get_xp_progress(pet["xp"], pet["level"])
-    bar_w = 350
+    bar_w = 360
     bar_x1 = c_glow[0] - bar_w//2
-    bar_y1 = c_glow[1] + 220
-    d.rounded_rectangle((bar_x1, bar_y1, bar_x1+bar_w, bar_y1+18), radius=9, fill=INNER_BG+(255,), outline=STACK_BRD+(255,), width=2)
+    bar_y1 = c_glow[1] + 180
+    d.rounded_rectangle((bar_x1, bar_y1, bar_x1+bar_w, bar_y1+16), radius=8, fill=INNER_BG+(255,), outline=STACK_BRD+(255,), width=2)
     if pct > 0:
-        d.rounded_rectangle((bar_x1, bar_y1, bar_x1 + int(bar_w*pct/100), bar_y1+18), radius=9, fill=SILVER+(255,))
-    d.text((c_glow[0], bar_y1+35), f"{xp} / {need} XP" if pet["level"] < MAX_LEVEL else "МАКС. УРОВЕНЬ", font=_font(16), fill=MUTED, anchor="mm")
+        d.rounded_rectangle((bar_x1, bar_y1, bar_x1 + int(bar_w*pct/100), bar_y1+16), radius=8, fill=SILVER+(255,))
+    d.text((c_glow[0], bar_y1+30), f"{xp} / {need} XP" if pet["level"] < MAX_LEVEL else "МАКС. УРОВЕНЬ", font=_font(14), fill=MUTED, anchor="mm")
 
+    # Блок дохода
+    income_y = ly2 - 130
+    d.rounded_rectangle((lx1+30, income_y, lx2-30, income_y+100), radius=16, fill=INNER_BG+(255,), outline=GREEN+(150,), width=2)
+    
+    hourly = get_pet_hourly_income(pet["level"])
+    d.text(((lx1+lx2)//2, income_y+25), f"ДОХОД: +{hourly:.0f} DC/ч", font=_font(16), fill=GREEN, anchor="mm")
+    
+    pending = int(pet["pending_dc"])
+    d.text(((lx1+lx2)//2, income_y+55), f"Накоплено: {pending:,} DC".replace(",", " "), font=_font(24), fill=TEXT, anchor="mm")
+
+    # Правая панель
     d.rounded_rectangle((rx1, ly1, rx2, ly2), radius=24, fill=STACK_BG + (255,), outline=STACK_BRD + (255,), width=2)
     
     rpad = 40
@@ -190,15 +180,10 @@ def render_pet_main(user_id, clan_name, clan_id, balance):
     buf.seek(0)
     return buf
 
-# ============================================================
-# СОСТОЯНИЕ 2: ТОП
-# ============================================================
 def render_pet_top(user_id, clan_name, clan_id, top_list):
     img, d = _canvas("Топ", user_id, clan_name)
-    
     cx = W // 2
     d.text((cx, 150), "ТОП КОРМИЛЬЦЕВ", font=_font(52), fill=SILVER, anchor="mm")
-    
     list_y = 240
     row_h = 80
     gap = 15
@@ -211,9 +196,7 @@ def render_pet_top(user_id, clan_name, clan_id, top_list):
         for i, entry in enumerate(top_list):
             ry = list_y + i * (row_h + gap)
             medal_color = GOLD if i==0 else SILVER if i==1 else (209,146,96) if i==2 else DIM
-            
             d.rounded_rectangle((start_x, ry, start_x + col_w, ry + row_h), radius=16, fill=INNER_BG+(255,), outline=medal_color+(150,), width=2)
-            
             _icon(d, start_x + 40, ry + row_h//2, I_MEDAL, 28, medal_color)
             d.text((start_x + 80, ry + row_h//2), f"#{i+1}", font=_font(24), fill=medal_color, anchor="lm")
             d.text((start_x + 150, ry + row_h//2), entry['username'], font=_font(24), fill=TEXT, anchor="lm")
@@ -224,12 +207,8 @@ def render_pet_top(user_id, clan_name, clan_id, top_list):
     buf.seek(0)
     return buf
 
-# ============================================================
-# СОСТОЯНИЕ 3: О ПИТОМЦЕ (ДАШБОРД БЕЗ ГРАДИЕНТОВ)
-# ============================================================
 def render_pet_about(user_id, clan_name, clan_id):
     img, d = _canvas("О питомце", user_id, clan_name)
-    
     lx1, lx2 = PAD_X, PAD_X + 460
     rx1, rx2 = lx2 + 36, W - PAD_X
     ly1, ly2 = BODY_Y, BODY_Y + BODY_H
@@ -242,90 +221,65 @@ def render_pet_about(user_id, clan_name, clan_id):
     total_fed = pet["total_fed"]
     bonus = get_pet_bonus(level)
     
-    # --------------------------------------------------------
-    # ЛЕВАЯ ПАНЕЛЬ
-    # --------------------------------------------------------
     d.rounded_rectangle((lx1, ly1, lx2, ly2), radius=24, fill=STACK_BG + (255,), outline=STACK_BRD + (255,), width=2)
-    
-    # Иконка питомца
     c_glow = (lx1 + (lx2-lx1)//2, ly1 + 130)
     d.ellipse((c_glow[0]-90, c_glow[1]-90, c_glow[0]+90, c_glow[1]+90), fill=(26,26,34,255), outline=PURPLE+(255,), width=4)
     _icon(d, c_glow[0], c_glow[1]+2, pet_fa, 70, PURPLE)
-    
-    # Имя и уровень
     d.text((c_glow[0], c_glow[1]+120), pet_name, font=_font(36), fill=TEXT, anchor="mm")
     d.text((c_glow[0], c_glow[1]+165), f"Уровень {level}", font=_font(22), fill=PURPLE, anchor="mm")
 
-    # Прогресс-бар
     xp_pct = get_xp_progress(xp, level)[2]
     bar_w = 340
     bar_x1 = c_glow[0] - bar_w//2
     bar_y1 = c_glow[1] + 210
-    
     d.text((bar_x1, bar_y1 - 25), "ПРОГРЕСС", font=_font(12), fill=MUTED)
     need_xp = get_xp_for_next(level) if level < MAX_LEVEL else 100
     d.text((bar_x1 + bar_w - _tw(d, f"{xp} / {need_xp} XP", _font(12)), bar_y1 - 25), f"{xp} / {need_xp} XP", font=_font(12), fill=MUTED)
-    
     d.rounded_rectangle((bar_x1, bar_y1, bar_x1+bar_w, bar_y1+16), radius=8, fill=INNER_BG+(255,), outline=STACK_BRD+(255,), width=2)
     if xp_pct > 0:
         d.rounded_rectangle((bar_x1, bar_y1, bar_x1 + int(bar_w*xp_pct/100), bar_y1+16), radius=8, fill=(106, 155, 209)+(255,))
 
-    # Блок прогноза выплаты
     payout_y = ly2 - 200
     d.rounded_rectangle((lx1 + 30, payout_y, lx2 - 30, payout_y + 160), radius=16, fill=INNER_BG+(255,), outline=GREEN+(150,), width=2)
-    
     d.text(((lx1+lx2)//2, payout_y + 25), "ДАСТ В КОНЦЕ СЕЗОНА", font=_font(15), fill=GREEN, anchor="mm")
-    
-    # Предполагаемый банк 10 000 DC
     example_bank = 10000
     payout = int(example_bank * bonus)
-    
     d.text(((lx1+lx2)//2, payout_y + 75), f"+{payout:,} DC".replace(",", " "), font=_font(48), fill=TEXT, anchor="mm")
     d.text(((lx1+lx2)//2, payout_y + 120), f"При банке клана {example_bank:,} DC".replace(",", " "), font=_font(14), fill=MUTED, anchor="mm")
 
-    # --------------------------------------------------------
-    # ПРАВАЯ ПАНЕЛЬ
-    # --------------------------------------------------------
     d.rounded_rectangle((rx1, ly1, rx2, ly2), radius=24, fill=STACK_BG + (255,), outline=STACK_BRD + (255,), width=2)
-    
     tx = rx1 + 36
     rx_pad = rx2 - 36
     ty = ly1 + 30
     
-    # Верхние статы
     st_w = 300
     st_h = 100
     gap = 20
     
-    # Стат 1 (Скормлено)
     d.rounded_rectangle((tx, ty, tx+st_w, ty+st_h), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
     d.rounded_rectangle((tx, ty, tx+6, ty+st_h), radius=3, fill=SILVER+(255,))
     d.text((tx+24, ty+20), "ВСЕГО СКОРМЛЕНО", font=_font(14), fill=MUTED)
     d.text((tx+24, ty+48), f"{total_fed:,} DC".replace(",", " "), font=_font(32), fill=SILVER)
 
-    # Стат 2 (Бонус)
     d.rounded_rectangle((tx+st_w+gap, ty, tx+st_w*2+gap, ty+st_h), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
     d.rounded_rectangle((tx+st_w+gap, ty, tx+st_w+gap+6, ty+st_h), radius=3, fill=GREEN+(255,))
     d.text((tx+st_w+gap+24, ty+20), "ТЕКУЩИЙ БОНУС", font=_font(14), fill=MUTED)
     d.text((tx+st_w+gap+24, ty+48), f"+{int(bonus*100)}%", font=_font(32), fill=GREEN)
 
-    # Стат 3 (Макс бонус)
     d.rounded_rectangle((tx+st_w*2+gap*2, ty, tx+st_w*3+gap*2, ty+st_h), radius=16, fill=INNER_BG+(255,), outline=INNER_BRD+(255,), width=2)
     d.rounded_rectangle((tx+st_w*2+gap*2, ty, tx+st_w*2+gap*2+6, ty+st_h), radius=3, fill=PURPLE+(255,))
     d.text((tx+st_w*2+gap*2+24, ty+20), "МАКС. БОНУС", font=_font(14), fill=MUTED)
     d.text((tx+st_w*2+gap*2+24, ty+48), f"+{int(get_pet_bonus(MAX_LEVEL)*100)}%", font=_font(32), fill=PURPLE)
 
-    # Таймлайн
     tl_y = ty + st_h + 30
     d.text((tx, tl_y), "ВЕХИ РАЗВИТИЯ", font=_font(20), fill=TEXT)
-    _icon(d, tx + _tw(d, "ВЕХИ РАЗВИТИЯ", _font(20)) + 20, tl_y + 10, I_CHART, 20, GOLD)
+    # Серебристая иконка графика
+    _icon(d, tx + _tw(d, "ВЕХИ РАЗВИТИЯ", _font(20)) + 20, tl_y + 10, I_CHART, 20, SILVER)
     
     row_y = tl_y + 40
     row_h = 60
     row_gap = 12
     rows = []
-    
-    # Формируем список вех
     milestones = [1, 5, 10]
     if level not in milestones:
         milestones.append(level)
@@ -333,43 +287,30 @@ def render_pet_about(user_id, clan_name, clan_id):
         
     for m_lvl in milestones:
         m_bonus = get_pet_bonus(m_lvl)
-        is_done = level > m_lvl
-        is_current = level == m_lvl
-        
         rows.append({
             "lvl": m_lvl,
             "bonus": m_bonus,
-            "is_done": is_done,
-            "is_current": is_current,
+            "is_done": level > m_lvl,
+            "is_current": level == m_lvl,
             "req_xp": get_xp_for_next(m_lvl) if m_lvl < MAX_LEVEL else 0
         })
 
     for r in rows:
-        # Фон строки
         if r["is_current"]:
-            bg_col = (34, 29, 46, 255)
-            brd_col = PURPLE + (255,)
+            bg_col, brd_col = (34, 29, 46, 255), PURPLE + (255,)
         elif r["is_done"]:
-            bg_col = (18, 26, 20, 255)
-            brd_col = GREEN + (255,)
+            bg_col, brd_col = (18, 26, 20, 255), GREEN + (255,)
         else:
-            bg_col = INNER_BG + (255,)
-            brd_col = INNER_BRD + (255,)
+            bg_col, brd_col = INNER_BG + (255,), INNER_BRD + (255,)
             
         d.rounded_rectangle((tx, row_y, rx_pad, row_y+row_h), radius=12, fill=bg_col, outline=brd_col, width=2)
-        
-        # Уровень
         lvl_str = f"Ур. {r['lvl']}"
         d.text((tx+24, row_y+row_h//2), lvl_str, font=_font(20), fill=TEXT, anchor="lm")
-        
-        # Бонус
         d.text((tx+130, row_y+row_h//2), f"+{int(r['bonus']*100)}%", font=_font(22), fill=GREEN, anchor="lm")
         
-        # Прогресс-бар (если это текущая веха)
         bar_x = tx + 260
         bar_w = 300
         d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+bar_w, row_y+row_h//2+6), radius=6, fill=BG+(255,))
-        
         if r["is_done"]:
             d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+bar_w, row_y+row_h//2+6), radius=6, fill=GREEN+(255,))
         elif r["is_current"]:
@@ -377,19 +318,14 @@ def render_pet_about(user_id, clan_name, clan_id):
             if fill_w > 0:
                 d.rounded_rectangle((bar_x, row_y+row_h//2-6, bar_x+fill_w, row_y+row_h//2+6), radius=6, fill=PURPLE+(255,))
         
-        # Текст справа
         if r["is_done"]:
-            right_str = "Достигнуто"
-            col = GREEN
+            right_str, col = "Достигнуто", GREEN
         elif r["is_current"]:
-            right_str = "Текущий"
-            col = PURPLE
+            right_str, col = "Текущий", PURPLE
         else:
-            right_str = f"{r['req_xp']} XP"
-            col = MUTED
+            right_str, col = f"{r['req_xp']} XP", MUTED
             
         d.text((rx_pad - 24 - _tw(d, right_str, _font(16)), row_y+row_h//2), right_str, font=_font(16), fill=col, anchor="lm")
-        
         row_y += row_h + row_gap
 
     buf = io.BytesIO()
