@@ -45,7 +45,20 @@ GIVEAWAY_TEMPLATES = {
     "4000": {"prize": "4000 DC", "amount": 4000, "winners": 20, "description": "👑 Огромный розыгрыш 4000 Diamond Coins на 20 победителей!"},
 }
 
+def _ensure_col(table: str, column: str, ddl: str):
+    """Добавляет колонку, если её нет. Идемпотентно."""
+    try:
+        cols = [r[1] for r in cur.execute(f'PRAGMA table_info("{table}")').fetchall()]
+        if column not in cols:
+            cur.execute(f'ALTER TABLE "{table}" ADD COLUMN {ddl}')
+            db.commit()
+            logger.info(f"[giveaways] миграция: {table}.{column} добавлена")
+    except Exception as e:
+        logger.warning(f"[giveaways] миграция {table}.{column}: {e}")
+
+
 def _init_tables():
+    # ── 1. giveaways ──
     cur.executescript("""
     CREATE TABLE IF NOT EXISTS giveaways (
         giveaway_id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,9 +80,11 @@ def _init_tables():
         auto_payout        INTEGER DEFAULT 0,
         payout_done        INTEGER DEFAULT 0
     );
-    CREATE INDEX IF NOT EXISTS idx_giveaways_message ON giveaways(message_id);
-    CREATE INDEX IF NOT EXISTS idx_giveaways_status  ON giveaways(status);
+    """)
+    db.commit()
 
+    # ── 2. giveaway_pending_payouts ──
+    cur.executescript("""
     CREATE TABLE IF NOT EXISTS giveaway_pending_payouts (
         id             INTEGER PRIMARY KEY AUTOINCREMENT,
         giveaway_id    INTEGER,
@@ -79,20 +94,31 @@ def _init_tables():
         created_at     INTEGER,
         paid_at        INTEGER DEFAULT 0
     );
-    CREATE INDEX IF NOT EXISTS idx_gpp_user ON giveaway_pending_payouts (user_id, paid_at);
-    CREATE INDEX IF NOT EXISTS idx_gpp_giveaway ON giveaway_pending_payouts (giveaway_id, paid_at);
     """)
     db.commit()
 
-    for _sql in (
-        "ALTER TABLE giveaways ADD COLUMN auto_payout INTEGER DEFAULT 0",
-        "ALTER TABLE giveaways ADD COLUMN payout_done INTEGER DEFAULT 0",
-    ):
-        try:
-            cur.execute(_sql)
-            db.commit()
-        except Exception:
-            pass
+    # ── 3. Миграции: добиваем недостающие колонки ──
+    _ensure_col("giveaway_pending_payouts", "giveaway_id",   "giveaway_id INTEGER")
+    _ensure_col("giveaway_pending_payouts", "user_id",       "user_id INTEGER")
+    _ensure_col("giveaway_pending_payouts", "amount",        "amount INTEGER DEFAULT 0")
+    _ensure_col("giveaway_pending_payouts", "dm_message_id", "dm_message_id INTEGER DEFAULT 0")
+    _ensure_col("giveaway_pending_payouts", "created_at",    "created_at INTEGER DEFAULT 0")
+    _ensure_col("giveaway_pending_payouts", "paid_at",       "paid_at INTEGER DEFAULT 0")
+
+    _ensure_col("giveaways", "auto_payout", "auto_payout INTEGER DEFAULT 0")
+    _ensure_col("giveaways", "payout_done", "payout_done INTEGER DEFAULT 0")
+
+    # ── 4. Индексы (уже безопасно) ──
+    try:
+        cur.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_giveaways_message ON giveaways(message_id);
+        CREATE INDEX IF NOT EXISTS idx_giveaways_status  ON giveaways(status);
+        CREATE INDEX IF NOT EXISTS idx_gpp_user          ON giveaway_pending_payouts (user_id, paid_at);
+        CREATE INDEX IF NOT EXISTS idx_gpp_giveaway      ON giveaway_pending_payouts (giveaway_id, paid_at);
+        """)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"[giveaways] idx create: {e}")
 
 _bot = None
 _setup_done = False
@@ -389,7 +415,6 @@ async def process_pending_payouts(bot, user_id: int) -> int:
             db.commit()
             total_paid += amount
 
-            # Редактируем ЛС или шлём новое
             try:
                 user = bot.get_user(user_id) or await bot.fetch_user(user_id)
                 dm_channel = user.dm_channel or await user.create_dm()
@@ -472,7 +497,6 @@ async def finish_giveaway(gid: int):
 
                 sent = await member.send(embeds=dm)
 
-                # 👇 Сохраняем DM message_id, чтобы отредактировать его после отзыва
                 if is_auto and uid in winner_ids and sent:
                     try:
                         cur.execute(
@@ -495,7 +519,6 @@ def _build_manual_winner_dm(gid: int, prize: str) -> list:
     return [e1, e2]
 
 def _build_template_winner_dm(gid: int, prize: str, share: int) -> list:
-    """DM победителю шаблонного розыгрыша — до отзыва."""
     e1 = disnake.Embed(color=0xffaa00)
     e1.set_image(url=IMG_STRIPE)
     e2 = disnake.Embed(
@@ -515,7 +538,6 @@ def _build_template_winner_dm(gid: int, prize: str, share: int) -> list:
     return [e1, e2]
 
 def _build_paid_winner_dm(gid: int, amount: int) -> list:
-    """DM после зачисления приза."""
     e1 = disnake.Embed(color=0x00ff88)
     e1.set_image(url=IMG_STRIPE)
     e2 = disnake.Embed(
@@ -616,21 +638,18 @@ async def reroll_giveaway(inter, gid: int):
     is_auto = bool(row["auto_payout"])
     share = 0
 
-    # Уже есть реальные выплаты — не пересчитываем
     paid_exists = cur.execute(
         "SELECT 1 FROM giveaway_pending_payouts WHERE giveaway_id=? AND paid_at>0 LIMIT 1",
         (gid,),
     ).fetchone()
 
     if is_auto and not paid_exists:
-        # Сброс старых pending, выставляем заново для новых победителей
         cur.execute("DELETE FROM giveaway_pending_payouts WHERE giveaway_id=? AND paid_at=0", (gid,))
         cur.execute("UPDATE giveaways SET payout_done=0 WHERE giveaway_id=?", (gid,))
         db.commit()
         row = cur.execute("SELECT * FROM giveaways WHERE giveaway_id=?", (gid,)).fetchone()
         share = await _queue_pending_payouts(gid, row, new_winners)
 
-        # Переотправляем DM новым победителям
         prize_name = row["prize"]
         for uid in new_winners:
             member = guild.get_member(uid)
