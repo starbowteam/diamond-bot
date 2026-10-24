@@ -1154,8 +1154,10 @@ async def on_message(message: disnake.Message):
             paid = await process_pending_payouts(bot, user_id)
             if paid > 0:
                 logger.info(f"💰 Призы за розыгрыши выплачены: {user_id} → {paid} DC")
+            else:
+                logger.debug(f"giveaway payout: no pending for {user_id}")
         except Exception as e:
-            logger.warning(f"giveaway payout after review: {e}")
+            logger.exception(f"giveaway payout after review: {e}")
 
         try:
             reward_line = f"> **Начислено:** `+{reward} DC`"
