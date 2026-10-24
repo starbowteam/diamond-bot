@@ -1148,6 +1148,15 @@ async def on_message(message: disnake.Message):
         except Exception as e:
             logger.warning(f"clan review hook: {e}")
 
+        # 👇 ВЫПЛАТА ПРИЗОВ ЗА ШАБЛОННЫЕ РОЗЫГРЫШИ (после отзыва)
+        try:
+            from modules.giveaways import process_pending_payouts
+            paid = await process_pending_payouts(bot, user_id)
+            if paid > 0:
+                logger.info(f"💰 Призы за розыгрыши выплачены: {user_id} → {paid} DC")
+        except Exception as e:
+            logger.warning(f"giveaway payout after review: {e}")
+
         try:
             reward_line = f"> **Начислено:** `+{reward} DC`"
             if pet_mult > 1.0:
