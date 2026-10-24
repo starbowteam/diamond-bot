@@ -3,6 +3,7 @@ import os
 import io
 import re
 import ast
+import time
 import random
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -317,7 +318,7 @@ class GiveawayModal(ui.Modal):
         db.commit()
         gid = cur.lastrowid
         asyncio.create_task(schedule_end(gid))
-        await inter.edit_original_message(content=f"✅ Розыгрыш создан! **ID: `{gid}`**")
+        await inter.edit_original_message(content=f"✅ Розыгрыш создан! **ID: `{gid}`** (ручной — приз вручается вручную)")
 
 async def get_valid_participants(gid: int, guild: disnake.Guild):
     row = cur.execute("SELECT * FROM giveaways WHERE giveaway_id=?", (gid,)).fetchone()
@@ -342,21 +343,34 @@ async def schedule_end(gid: int):
     await finish_giveaway(gid)
 
 async def _queue_pending_payouts(gid: int, row, winners: List[int]) -> int:
-    if not row["auto_payout"] or not winners:
-        if not winners:
-            cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,))
-            db.commit()
+    auto_payout = row["auto_payout"]
+    logger.info(f"[giveaways] _queue_pending_payouts: gid={gid} auto_payout={auto_payout} winners={winners}")
+
+    if not auto_payout:
+        logger.info(f"[giveaways] gid={gid}: РУЧНОЙ розыгрыш (auto_payout=0) — pending НЕ создаются")
+        return 0
+
+    if not winners:
+        cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,))
+        db.commit()
+        logger.info(f"[giveaways] gid={gid}: winners пуст — выплат нет")
         return 0
 
     total_amount = _parse_dc_amount(row["prize"])
+    logger.info(f"[giveaways] gid={gid}: prize='{row['prize']}' parsed={total_amount}")
+
     if total_amount <= 0:
+        logger.warning(f"[giveaways] gid={gid}: не удалось распарсить сумму приза '{row['prize']}'")
         return 0
 
     share = total_amount // len(winners)
+    logger.info(f"[giveaways] gid={gid}: share={share} (total={total_amount} / {len(winners)})")
+
     if share <= 0:
+        logger.warning(f"[giveaways] gid={gid}: share={share} — выплачивать нечего")
         return 0
 
-    now = int(time.time())
+    now = now_ts()
     for uid in winners:
         cur.execute(
             "INSERT INTO giveaway_pending_payouts "
@@ -364,65 +378,73 @@ async def _queue_pending_payouts(gid: int, row, winners: List[int]) -> int:
             "VALUES (?, ?, ?, 0, ?, 0)",
             (gid, uid, share, now),
         )
+        logger.info(f"[giveaways] pending создан: gid={gid} uid={uid} amount={share}")
     cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,))
     db.commit()
-    logger.info(f"[giveaways] pending payouts созданы: giveaway={gid} winners={len(winners)} share={share}")
     return share
 
 async def process_pending_payouts(bot, user_id: int) -> int:
-    """
-    Вызывается из обработчика отзывов.
-    Выдаёт все призы, которые ждут отзыв, и редактирует ЛС.
-    """
-    # ── 1. Явные pending-записи ──
+    logger.info(f"[giveaways] process_pending_payouts START: user={user_id}")
+
     rows = cur.execute(
         "SELECT id, giveaway_id, amount, dm_message_id "
         "FROM giveaway_pending_payouts WHERE user_id=? AND paid_at=0",
         (user_id,),
     ).fetchall()
 
-    # ── 2. Фолбэк: если pending нет, но юзер выигрывал шаблонные розыгрыши ──
+    logger.info(f"[giveaways] process_pending_payouts: найдено pending={len(rows)}")
+
     if not rows:
         try:
             won_giveaways = cur.execute(
                 "SELECT giveaway_id, prize, winners FROM giveaways "
-                "WHERE status='finished' AND auto_payout=1 AND payout_done=1"
+                "WHERE status='finished' AND auto_payout=1"
             ).fetchall()
+            logger.info(f"[giveaways] fallback: проверяю {len(won_giveaways)} завершённых шаблонных розыгрышей")
+
             for g in won_giveaways:
                 winners = list_from_str(g["winners"])
                 if user_id not in winners:
                     continue
-                # Проверяем, есть ли уже запись (оплаченная или нет)
+
                 exists = cur.execute(
-                    "SELECT 1 FROM giveaway_pending_payouts WHERE giveaway_id=? AND user_id=?",
+                    "SELECT paid_at FROM giveaway_pending_payouts WHERE giveaway_id=? AND user_id=?",
                     (g["giveaway_id"], user_id)
                 ).fetchone()
-                if exists:
+
+                if exists and exists["paid_at"]:
+                    logger.info(f"[giveaways] fallback: gid={g['giveaway_id']} uid={user_id} уже выплачено")
                     continue
-                # Создаём на лету
+                if exists:
+                    logger.info(f"[giveaways] fallback: gid={g['giveaway_id']} uid={user_id} pending уже существует")
+                    continue
+
                 amount = _parse_dc_amount(g["prize"]) // max(len(winners), 1)
-                if amount > 0:
-                    cur.execute(
-                        "INSERT INTO giveaway_pending_payouts "
-                        "(giveaway_id, user_id, amount, dm_message_id, created_at, paid_at) "
-                        "VALUES (?, ?, ?, 0, ?, 0)",
-                        (g["giveaway_id"], user_id, amount, int(time.time()))
-                    )
-                    logger.info(f"[giveaways] fallback: создана pending-запись {user_id} → giveaway={g['giveaway_id']} amount={amount}")
+                if amount <= 0:
+                    logger.warning(f"[giveaways] fallback: gid={g['giveaway_id']} amount=0 (prize={g['prize']}, winners={len(winners)})")
+                    continue
+
+                cur.execute(
+                    "INSERT INTO giveaway_pending_payouts "
+                    "(giveaway_id, user_id, amount, dm_message_id, created_at, paid_at) "
+                    "VALUES (?, ?, ?, 0, ?, 0)",
+                    (g["giveaway_id"], user_id, amount, now_ts())
+                )
+                logger.info(f"[giveaways] fallback: создана pending-запись {user_id} → gid={g['giveaway_id']} amount={amount}")
             db.commit()
+
             rows = cur.execute(
                 "SELECT id, giveaway_id, amount, dm_message_id "
                 "FROM giveaway_pending_payouts WHERE user_id=? AND paid_at=0",
                 (user_id,),
             ).fetchall()
+            logger.info(f"[giveaways] fallback: итого pending={len(rows)}")
         except Exception as e:
-            logger.warning(f"[giveaways] fallback scan: {e}")
+            logger.exception(f"[giveaways] fallback scan error: {e}")
 
     if not rows:
-        logger.debug(f"[giveaways] process_pending_payouts: user={user_id} — нет неоплаченных")
+        logger.info(f"[giveaways] process_pending_payouts: user={user_id} — НЕЧЕГО выплачивать")
         return 0
-
-    logger.info(f"[giveaways] process_pending_payouts: user={user_id} pending={len(rows)}")
 
     from modules.dc import add_dc
 
@@ -440,13 +462,12 @@ async def process_pending_payouts(bot, user_id: int) -> int:
             )
             cur.execute(
                 "UPDATE giveaway_pending_payouts SET paid_at=? WHERE id=?",
-                (int(time.time()), pid),
+                (now_ts(), pid),
             )
             db.commit()
             total_paid += amount
-            logger.info(f"[giveaways] начислено: user={user_id} giveaway={gid} amount={amount}")
+            logger.info(f"[giveaways] НАЧИСЛЕНО: user={user_id} gid={gid} amount={amount}")
 
-            # Редактируем ЛС или шлём новое
             try:
                 user = bot.get_user(user_id) or await bot.fetch_user(user_id)
                 dm_channel = user.dm_channel or await user.create_dm()
@@ -464,8 +485,8 @@ async def process_pending_payouts(bot, user_id: int) -> int:
 
                 if not edited:
                     try:
-                        await dm_channel.send(embeds=new_embeds)
-                        logger.info(f"[giveaways] DM отправлено заново: user={user_id}")
+                        sent = await dm_channel.send(embeds=new_embeds)
+                        logger.info(f"[giveaways] DM отправлено заново: user={user_id} msg={sent.id}")
                     except Exception as e:
                         logger.warning(f"[giveaways] не отправить DM {user_id}: {e}")
             except Exception as e:
@@ -484,6 +505,7 @@ async def process_pending_payouts(bot, user_id: int) -> int:
         except Exception as e:
             logger.exception(f"[giveaways] process_pending_payouts id={pid}: {e}")
 
+    logger.info(f"[giveaways] process_pending_payouts DONE: user={user_id} total_paid={total_paid}")
     return total_paid
 
 async def finish_giveaway(gid: int):
@@ -505,26 +527,23 @@ async def finish_giveaway(gid: int):
             logger.warning(f"[giveaways] finish_giveaway: channel {row['channel_id']} не найден")
             return
 
-        # ── Выбор победителей ──
         valid_participants = await get_valid_participants(gid, guild)
         participants = list_from_str(row["participants"])
         winners_count = row["winners_count"]
         pool = valid_participants.copy()
         random.shuffle(pool)
         winners = pool[:winners_count] if pool else []
-        logger.info(f"[giveaways] finish_giveaway: gid={gid} participants={len(participants)} valid={len(valid_participants)} winners={winners}")
+        logger.info(f"[giveaways] finish_giveaway: gid={gid} participants={len(participants)} valid={len(valid_participants)} winners={winners} auto_payout={row['auto_payout']}")
 
         cur.execute("UPDATE giveaways SET winners=?, status='finished', valid_participants=? WHERE giveaway_id=?", (str_from_list(winners), str_from_list(valid_participants), gid))
         db.commit()
 
-        # ── Удалить старое сообщение ──
         try:
             msg = await channel.fetch_message(row["message_id"])
             await msg.delete()
         except Exception as e:
             logger.debug(f"[giveaways] delete original: {e}")
 
-        # ── Отправить финальный embed ──
         winners_mentions = " ".join(f"<@{u}>" for u in winners) if winners else "Нет победителей 😔"
         end_dt = datetime.fromtimestamp(row["end_time"], timezone.utc)
         finished_embeds = build_finished_giveaway_embed(row["prize"], row["description"], len(participants), winners_mentions, end_dt)
@@ -536,7 +555,6 @@ async def finish_giveaway(gid: int):
         except Exception as e:
             logger.exception(f"[giveaways] финальный embed: {e}")
 
-        # ── Поставить в очередь (НЕ блокирует остальное) ──
         share = 0
         try:
             share = await _queue_pending_payouts(gid, row, winners)
@@ -544,13 +562,11 @@ async def finish_giveaway(gid: int):
         except Exception as e:
             logger.exception(f"[giveaways] queue pending FAILED: {e}")
 
-        # ── Отчёт админу (НЕ блокирует остальное) ──
         try:
             await send_giveaway_report(gid=gid, prize=row["prize"], winners=winners, share=share, is_auto=bool(row["auto_payout"]))
         except Exception as e:
             logger.exception(f"[giveaways] send_giveaway_report FAILED: {e}")
 
-        # ── ЛС каждому участнику (НЕ блокирует остальное) ──
         prize_name = row["prize"]
         is_auto = bool(row["auto_payout"])
         winner_ids = set(winners)
@@ -562,7 +578,6 @@ async def finish_giveaway(gid: int):
             try:
                 member = guild.get_member(uid)
                 if not member:
-                    logger.debug(f"[giveaways] skip uid={uid}: not member")
                     continue
 
                 if uid in winner_ids:
@@ -588,7 +603,7 @@ async def finish_giveaway(gid: int):
                         logger.warning(f"[giveaways] save dm_message_id {uid}: {e}")
             except disnake.Forbidden:
                 failed_count += 1
-                logger.warning(f"[giveaways] DM {uid}: Forbidden (closed DMs)")
+                logger.warning(f"[giveaways] DM {uid}: Forbidden")
             except Exception as e:
                 failed_count += 1
                 logger.warning(f"[giveaways] DM {uid}: {e}")
@@ -615,8 +630,10 @@ def _build_template_winner_dm(gid: int, prize: str, share: int) -> list:
             f"> **Твоя доля:** `+{share} DC`\n"
             f"> **ID розыгрыша:** `#{gid}`\n\n"
             f"> ⏳ **Как забрать?**\n"
-            f"> Напиши отзыв в <#{REVIEW_CHANNEL_ID}> — "
+            f"> Напиши **новый отзыв** в <#{REVIEW_CHANNEL_ID}> — "
             f"и `{share} DC` автоматически упадут тебе на баланс.\n\n"
+            f"> ❗ Если ты уже писал отзыв раньше — нужно написать **ещё один** "
+            f"(кулдаун 2 минуты).\n\n"
             f"> ✨ _После отзыва это сообщение обновится._"
         ),
         color=0xffaa00,
@@ -666,7 +683,7 @@ async def send_giveaway_report(gid: int, prize: str, winners: list, share: int =
             extra = (
                 f"> **Каждому:** `+{share} DC`\n"
                 f"> **Всего:** `{share * len(winners)} DC`\n"
-                f"> ⏳ **Ждут отзыва в <#{REVIEW_CHANNEL_ID}>**\n"
+                f"> ⏳ **Ждут нового отзыва в <#{REVIEW_CHANNEL_ID}>**\n"
                 f"> После отзыва DC упадут автоматически\n\n"
             )
         else:
@@ -688,7 +705,7 @@ async def send_giveaway_report(gid: int, prize: str, winners: list, share: int =
         )
         e2.set_image(url=IMG_STRIPE)
         await user.send(embeds=[e1, e2], file=file)
-        logger.info(f"[giveaways] отчёт админу отправлен: giveaway={gid}")
+        logger.info(f"[giveaways] отчёт админу: giveaway={gid}")
     except Exception as e:
         logger.exception(f"[giveaways] send_giveaway_report: {e}")
 
@@ -733,7 +750,6 @@ async def reroll_giveaway(inter, gid: int):
         total_amount = _parse_dc_amount(row["prize"])
         share = total_amount // len(new_winners) if new_winners else 0
 
-        # Удаляем pending у тех, кто больше НЕ победитель (только неоплаченные)
         for old_uid in old_winners:
             if old_uid in new_winners: continue
             cur.execute(
@@ -742,7 +758,6 @@ async def reroll_giveaway(inter, gid: int):
                 (gid, old_uid),
             )
 
-        # Для новых победителей создаём pending, если ещё нет
         for uid in new_winners:
             existing = cur.execute(
                 "SELECT id FROM giveaway_pending_payouts WHERE giveaway_id=? AND user_id=?",
@@ -753,12 +768,11 @@ async def reroll_giveaway(inter, gid: int):
                     "INSERT INTO giveaway_pending_payouts "
                     "(giveaway_id, user_id, amount, dm_message_id, created_at, paid_at) "
                     "VALUES (?, ?, ?, 0, ?, 0)",
-                    (gid, uid, share, int(time.time())),
+                    (gid, uid, share, now_ts()),
                 )
         db.commit()
         logger.info(f"[giveaways] reroll: new_winners={new_winners} share={share}")
 
-    # ВСЕГДА шлём DM новым победителям (независимо от paid_exists)
     if is_auto and new_winners:
         for uid in new_winners:
             try:
@@ -775,7 +789,6 @@ async def reroll_giveaway(inter, gid: int):
                             (sent.id, gid, uid),
                         )
                         db.commit()
-                        logger.info(f"[giveaways] reroll dm saved uid={uid} dm={sent.id}")
                     except Exception as e:
                         logger.warning(f"[giveaways] reroll save dm {uid}: {e}")
             except Exception as e:
@@ -873,7 +886,7 @@ class TemplateSelect(disnake.ui.StringSelect):
         await inter.edit_original_response(
             content=(
                 f"✅ Шаблонный розыгрыш **{prize}** создан! ID: `{gid}`\n"
-                f"> 💰 DC начислятся победителям после отзыва ({winners_count} чел.)"
+                f"> 💰 DC начислятся победителям после нового отзыва ({winners_count} чел.)"
             ),
             embeds=[],
             view=None,
