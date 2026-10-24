@@ -28,10 +28,6 @@ GIVEAWAY_FULL_ROLES = [
 
 MSK = timezone(timedelta(hours=3))
 
-# 🔒 Cutover: новая логика "сначала отзыв → потом участие" работает ТОЛЬКО
-# для розыгрышей, созданных после этой даты. Старые розыгрыши не затронуты.
-REVIEW_GATE_CUTOVER_TS = int(datetime(2026, 10, 22, 9, 57, tzinfo=MSK).timestamp())
-
 GIVEAWAY_TEMPLATES = {
     "150": {"prize": "150 DC", "amount": 150, "winners": 1, "description": "🎉 Стандартный розыгрыш 150 Diamond Coins на 1 победителя!"},
     "400": {"prize": "400 DC", "amount": 400, "winners": 2, "description": "🎉 Розыгрыш 400 Diamond Coins на 2 победителей!"},
@@ -89,19 +85,8 @@ def _init_tables():
         except Exception:
             pass
 
-    for _sql in (
-        "CREATE INDEX IF NOT EXISTS idx_gpp_user_status ON giveaway_pending_payouts (user_id, status)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_gpp_gid_user ON giveaway_pending_payouts (giveaway_id, user_id)",
-    ):
-        try:
-            cur.execute(_sql)
-            db.commit()
-        except Exception:
-            pass
-
 _bot = None
 _setup_done = False
-_finishing: set = set()
 
 def now_ts() -> int:
     return int(datetime.now(timezone.utc).timestamp())
@@ -118,7 +103,6 @@ def parse_duration(duration_str: str):
     match = re.fullmatch(r'(\d+)\s*([mhd])', duration_str.strip().lower())
     if not match: return None
     value, unit = int(match.group(1)), match.group(2)
-    if value <= 0: return None
     if unit == 'm': return timedelta(minutes=value)
     if unit == 'h': return timedelta(hours=value)
     if unit == 'd': return timedelta(days=value)
@@ -132,13 +116,6 @@ def _parse_dc_amount(prize: str) -> int:
     if not m: return 0
     try: return int(m.group(1))
     except Exception: return 0
-
-def _user_has_pending_payout(user_id: int) -> bool:
-    row = cur.execute(
-        "SELECT 1 FROM giveaway_pending_payouts WHERE user_id=? AND status='waiting_review' LIMIT 1",
-        (user_id,)
-    ).fetchone()
-    return row is not None
 
 async def log_discord(title: str, description: str, color: int = 0x00ff00, fields: list = None):
     if _bot is None: return
@@ -174,28 +151,18 @@ async def get_invite_stats(guild: disnake.Guild, user: disnake.Member, giveaway_
 IMG_STRIPE_GW  = "https://cdn.discordapp.com/attachments/1527006158282555412/1530795801268453447/pisk.png?ex=6a66e02f&is=6a658eaf&hm=79e41273327d2e1048ba42df62868cbb88f5b06b112ca864de2c7a02326523e9&"
 IMG_STRIPE     = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
-# 🛠 ФИКС 1: добавлен e1 (картинка-баннер) в основной эмбед розыгрыша
 def build_giveaway_embeds(prize, description, winners_count, participants_count, end_dt, required_invites=0):
     end_ts = int(end_dt.timestamp())
-    
-    e1 = disnake.Embed(color=6776679, description="\u200b")
-    e1.set_image(url=IMG_STRIPE_GW)
-    
     embed_main = disnake.Embed(title="🎉 Розыгрыш", description=f"> {description}\n\n> **Приз:** {prize}\n> **Время окончания:** <t:{end_ts}:R>\n> <t:{end_ts}:F> (МСК GMT+3)\n> **Участвуют:** {participants_count}\n> **Победителей:** {winners_count}", color=6776679)
     if required_invites: embed_main.description += f"\n> **Требуется инвайтов:** {required_invites}"
     embed_main.set_image(url=IMG_STRIPE_GW)
-    return [e1, embed_main]
+    return [embed_main]
 
-# 🛠 ФИКС 2: добавлен e1 в эмбед завершённого розыгрыша
 def build_finished_giveaway_embed(prize, description, participants_count, winners_mentions, end_dt):
     end_ts = int(end_dt.timestamp())
-    
-    e1 = disnake.Embed(color=6776679, description="\u200b")
-    e1.set_image(url=IMG_STRIPE_GW)
-    
     embed_main = disnake.Embed(title="🎉 Розыгрыш завершён!", description=f"> {description}\n\n> **Приз:** {prize}\n> **Участвовали:** {participants_count}\n> **Победители:** {winners_mentions}\n> **Закончено:** <t:{end_ts}:F>", color=6776679)
     embed_main.set_image(url=IMG_STRIPE_GW)
-    return [e1, embed_main]
+    return [embed_main]
 
 class JoinButton(disnake.ui.Button):
     def __init__(self):
@@ -206,18 +173,8 @@ class JoinButton(disnake.ui.Button):
             row = cur.execute("SELECT * FROM giveaways WHERE message_id=? AND status='active'", (inter.message.id,)).fetchone()
             if not row: return await inter.response.send_message("❌ Розыгрыш не найден или завершён.", ephemeral=True)
             gid = row["giveaway_id"]
-            user_id = inter.user.id
-
-            if row["created_at"] >= REVIEW_GATE_CUTOVER_TS and _user_has_pending_payout(user_id):
-                return await inter.response.send_message(
-                    "🚫 **Сначала забери предыдущий приз**\n\n"
-                    "Ты уже выигрывал в розыгрыше, но ещё не написал отзыв.\n"
-                    f"Напиши отзыв в <#{REVIEW_CHANNEL_ID}> — приз зачислится автоматически, "
-                    "и после этого сможешь участвовать снова.",
-                    ephemeral=True
-                )
-
             participants = list_from_str(row["participants"])
+            user_id = inter.user.id
             if user_id in participants: return await inter.response.send_message("🎊 Вы уже участвуете в розыгрыше!", ephemeral=True)
             participants.append(user_id)
             cur.execute("UPDATE giveaways SET participants=? WHERE giveaway_id=?", (str_from_list(participants), gid))
@@ -340,63 +297,56 @@ async def schedule_end(gid: int):
     if delay > 0: await asyncio.sleep(delay)
     await finish_giveaway(gid)
 
+# ============================================================
+# НОВАЯ ЛОГИКА: ОЧЕРЕДЬ НА ВЫПЛАТУ
+# ============================================================
 async def _auto_payout(gid: int, row, winners: List[int]) -> int:
-    if not row["auto_payout"] or not winners:
+    if not row["auto_payout"] or row["payout_done"] or not winners:
+        if not winners: cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,)); db.commit()
         return 0
+        
     total_amount = _parse_dc_amount(row["prize"])
     if total_amount <= 0: return 0
     share = total_amount // len(winners)
     if share <= 0: return 0
 
-    cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=? AND payout_done=0", (gid,))
-    if cur.rowcount == 0:
-        db.commit()
-        return share
-
+    # Кладем в очередь ожидания
     for uid in winners:
         cur.execute(
-            "INSERT OR IGNORE INTO giveaway_pending_payouts (giveaway_id, user_id, amount, status, ts) "
+            "INSERT INTO giveaway_pending_payouts (giveaway_id, user_id, amount, status, ts) "
             "VALUES (?, ?, ?, 'waiting_review', ?)",
             (gid, uid, share, int(time.time()))
         )
+    
+    cur.execute("UPDATE giveaways SET payout_done=1 WHERE giveaway_id=?", (gid,))
     db.commit()
     return share
 
 async def check_giveaway_payout_on_review(bot, member: disnake.Member):
+    """Вызывается, когда юзер пишет в канал отзывов."""
     rows = cur.execute(
         "SELECT id, amount FROM giveaway_pending_payouts WHERE user_id=? AND status='waiting_review'",
         (member.id,)
     ).fetchall()
-
+    
     if not rows: return
-
-    total_amount = sum(r["amount"] for r in rows)
-    if total_amount <= 0: return
-
-    from modules.dc import add_dc
-    try:
-        await add_dc(member.id, total_amount, "Приз за розыгрыш (после отзыва)", notify=False, log=False)
-    except Exception as e:
-        logger.exception(f"[giveaways] payout add_dc failed for {member.id}: {e}")
-        return
-
-    paid_ids = []
+    
+    total_amount = 0
     for r in rows:
-        cur.execute("UPDATE giveaway_pending_payouts SET status='paid' WHERE id=? AND status='waiting_review'", (r["id"],))
-        if cur.rowcount:
-            paid_ids.append(r["id"])
+        total_amount += r["amount"]
+        cur.execute("UPDATE giveaway_pending_payouts SET status='paid' WHERE id=?", (r["id"],))
     db.commit()
 
-    try:
-        await member.send(f"✅ **Спасибо за отзыв!**\n> Твой приз за розыгрыш в размере **{total_amount} DC** зачислен на баланс.")
-    except Exception:
-        pass
-    logger.info(f"💰 Выплачен отложенный приз за розыгрыш юзеру {member.id}: {total_amount} DC (rows: {paid_ids})")
+    if total_amount > 0:
+        from modules.dc import add_dc
+        await add_dc(member.id, total_amount, "Приз за розыгрыш (после отзыва)")
+        try:
+            await member.send(f"✅ **Спасибо за отзыв!**\n> Твой приз за розыгрыш в размере **{total_amount} DC** зачислен на баланс.")
+        except Exception:
+            pass
+        logger.info(f"💰 Выплачен отложенный приз за розыгрыш юзеру {member.id}: {total_amount} DC")
 
 async def finish_giveaway(gid: int):
-    if gid in _finishing:
-        return
-    _finishing.add(gid)
     try:
         row = cur.execute("SELECT * FROM giveaways WHERE giveaway_id=?", (gid,)).fetchone()
         if not row or row["status"] != "active": return
@@ -422,9 +372,9 @@ async def finish_giveaway(gid: int):
         embed_msg = await channel.send(embeds=finished_embeds)
         cur.execute("UPDATE giveaways SET final_embed_id=? WHERE giveaway_id=?", (embed_msg.id, gid))
         db.commit()
-
+        
         share = await _auto_payout(gid, row, winners)
-
+        
         await send_giveaway_report(gid=gid, prize=row["prize"], winners=winners, share=share, is_auto=bool(row["auto_payout"]))
         prize_name = row["prize"]
         is_auto = bool(row["auto_payout"])
@@ -434,29 +384,26 @@ async def finish_giveaway(gid: int):
             if not member: continue
             try:
                 if uid in winner_ids:
-                    if is_auto:
+                    if is_auto: 
                         dm = _build_template_winner_dm_wait_review(gid=gid, prize=prize_name, share=share)
-                    else:
+                    else: 
                         dm = _build_manual_winner_dm(gid=gid, prize=prize_name)
-                else:
+                else: 
                     dm = _build_loser_dm(gid=gid, prize=prize_name)
                 await member.send(embeds=dm)
-            except Exception as e: 
-                logger.warning(f"[giveaways] Не удалось отправить ЛС юзеру {uid}: {e}")
+            except Exception: pass
     except Exception as e:
         logger.exception(f"[giveaways] finish_giveaway: {e}")
-    finally:
-        _finishing.discard(gid)
 
 def _build_manual_winner_dm(gid: int, prize: str) -> list:
-    e1 = disnake.Embed(color=0xffaa00, description="\u200b")
+    e1 = disnake.Embed(color=0xffaa00)
     e1.set_image(url=IMG_STRIPE)
     e2 = disnake.Embed(title="🏆 Ты победил в розыгрыше!", description=f"> **Приз:** {prize}\n> **ID розыгрыша:** `#{gid}`\n\n> 📩 **Что делать:**\n> Отпиши в ЛС <@{REPORT_DM_USER_ID}> в течение **24 часов**,\n> иначе приз уйдёт следующему участнику.", color=0xffaa00)
     e2.set_image(url=IMG_STRIPE)
     return [e1, e2]
 
 def _build_template_winner_dm_wait_review(gid: int, prize: str, share: int) -> list:
-    e1 = disnake.Embed(color=0x00ff88, description="\u200b")
+    e1 = disnake.Embed(color=0x00ff88)
     e1.set_image(url=IMG_STRIPE)
     e2 = disnake.Embed(
         title="🏆 Ты победил в розыгрыше!",
@@ -465,8 +412,7 @@ def _build_template_winner_dm_wait_review(gid: int, prize: str, share: int) -> l
             f"> **Твоя доля:** `{share} DC`\n"
             f"> **ID розыгрыша:** `#{gid}`\n\n"
             f"> ⚠️ **Чтобы получить приз, напиши отзыв** в канале <#{REVIEW_CHANNEL_ID}>.\n"
-            f"> Как только напишешь — бот сразу начислит {share} DC на баланс.\n"
-            f"> 📌 Пока отзыв не написан — участвовать в новых розыгрышах нельзя."
+            f"> Как только напишешь — бот сразу начислит {share} DC на баланс."
         ),
         color=0x00ff88
     )
@@ -474,7 +420,7 @@ def _build_template_winner_dm_wait_review(gid: int, prize: str, share: int) -> l
     return [e1, e2]
 
 def _build_loser_dm(gid: int, prize: str) -> list:
-    e1 = disnake.Embed(color=0x808080, description="\u200b")
+    e1 = disnake.Embed(color=0x808080)
     e1.set_image(url=IMG_STRIPE)
     e2 = disnake.Embed(title="🎲 Розыгрыш завершён", description=f"> **Приз:** {prize}\n> **ID розыгрыша:** `#{gid}`\n\n> **Результат:**\n> Ты не занял призовое место. Постарайся в следующий раз! 🍀", color=0x808080)
     e2.set_image(url=IMG_STRIPE)
@@ -489,7 +435,7 @@ async def send_giveaway_report(gid: int, prize: str, winners: list, share: int =
         file = disnake.File(file_data, filename=f"winners_{gid}.txt")
         winners_mentions = " ".join(f"<@{u}>" for u in winners)
         type_label = "💎 Шаблонный (ожидание отзыва)" if is_auto else "📩 Ручной"
-        e1 = disnake.Embed(color=6776679, description="\u200b")
+        e1 = disnake.Embed(color=6776679)
         e1.set_image(url=IMG_STRIPE)
         extra = f"> **Каждому:** `{share} DC` (после отзыва)\n\n" if is_auto and share > 0 else "> ⏳ **Ждём отписи в ЛС** от каждого победителя\n\n"
         e2 = disnake.Embed(title=f"📊 Победители розыгрыша #{gid}", description=f"> **Приз:** {prize}\n> **Тип:** {type_label}\n> **Победителей:** `{len(winners)}`\n\n{extra}> 🏆 **Список победителей:**\n> {winners_mentions}", color=6776679)
@@ -497,72 +443,37 @@ async def send_giveaway_report(gid: int, prize: str, winners: list, share: int =
         await user.send(embeds=[e1, e2], file=file)
     except Exception as e: logger.warning(f"[giveaways] send_giveaway_report: {e}")
 
-# 🛠 ФИКС 3: Отправка ЛС при перевыборе (reroll) + проверки на None
 async def reroll_giveaway(inter, gid: int):
     row = cur.execute("SELECT * FROM giveaways WHERE giveaway_id=?", (gid,)).fetchone()
     if not row: return await inter.edit_original_message(content="❌ Розыгрыш не найден.")
     if row["status"] == "active": return await inter.edit_original_message(content="❌ Розыгрыш ещё не завершён.")
-    
     guild = _bot.get_guild(row["guild_id"])
-    if not guild: return await inter.edit_original_message(content="❌ Сервер не найден.")
     channel = guild.get_channel(row["channel_id"]) or _bot.get_channel(row["channel_id"])
-    if not channel: return await inter.edit_original_message(content="❌ Канал не найден.")
-    
     valid_participants = await get_valid_participants(gid, guild)
     if not valid_participants: return await inter.edit_original_message(content="❌ Нет валидных участников для перевыбора.")
-    
     old_winners = list_from_str(row["winners"])
     pool = [u for u in valid_participants if u not in old_winners]
     if not pool: return await inter.edit_original_message(content="❌ Нет участников для перевыбора.")
-    
     winners_count = row["winners_count"]
     random.shuffle(pool)
     new_winners = pool[:winners_count] if pool else []
     cur.execute("UPDATE giveaways SET winners=? WHERE giveaway_id=?", (str_from_list(new_winners), gid))
     db.commit()
-    
     try:
         if row["final_embed_id"]:
             msg = await channel.fetch_message(row["final_embed_id"])
             await msg.delete()
     except Exception: pass
-    
     winners_mentions = " ".join(f"<@{u}>" for u in new_winners) if new_winners else "Нет победителей 😔"
     end_dt = datetime.fromtimestamp(row["end_time"], timezone.utc)
     finished_embeds = build_finished_giveaway_embed(row["prize"], row["description"] or "", len(list_from_str(row["participants"])), winners_mentions, end_dt)
     embed_msg = await channel.send(embeds=finished_embeds)
     cur.execute("UPDATE giveaways SET final_embed_id=? WHERE giveaway_id=?", (embed_msg.id, gid))
     db.commit()
-    
     is_auto = bool(row["auto_payout"])
     share = 0
-    if is_auto and not row["payout_done"]: 
-        share = await _auto_payout(gid, row, new_winners)
-        
+    if is_auto and not row["payout_done"]: share = await _auto_payout(gid, row, new_winners)
     await send_giveaway_report(gid=gid, prize=row["prize"], winners=new_winners, share=share, is_auto=is_auto)
-    
-    # 💌 Отправка уведомлений при перевыборе (новые победители + старые победители)
-    new_winner_ids = set(new_winners)
-    old_winner_ids = set(old_winners)
-    affected_users = new_winner_ids | old_winner_ids
-    
-    for uid in affected_users:
-        member = guild.get_member(uid)
-        if not member: continue
-        try:
-            if uid in new_winner_ids:
-                if is_auto:
-                    dm = _build_template_winner_dm_wait_review(gid=gid, prize=row["prize"], share=share)
-                else:
-                    dm = _build_manual_winner_dm(gid=gid, prize=row["prize"])
-            elif uid in old_winner_ids:
-                dm = _build_loser_dm(gid=gid, prize=row["prize"])
-            else:
-                continue
-            await member.send(embeds=dm)
-        except Exception as e:
-            logger.warning(f"[giveaways] Ошибка ЛС при reroll юзеру {uid}: {e}")
-
     await inter.edit_original_message(content=f"✅ Перевыбор выполнен для розыгрыша #{gid}")
 
 class EndGiveawayModal(ui.Modal):
