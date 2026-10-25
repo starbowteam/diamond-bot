@@ -21,15 +21,6 @@
       "logo":   {"name": "Логотип",               "price": 405, "description": "Логотип для бренда"}
     }
   },
-  "ads": {
-    "label": "📢 Реклама",
-    "description": "Продвижение в соцсетях и сервере",
-    "items": {
-      "ad_post": {"name": "Пост в канале",         "price": 210, "description": "Рекламный пост в канале"},
-      "ad_pin":  {"name": "Закреп на 24ч",         "price": 270, "description": "Закреп сообщения на 24 часа"},
-      "ad_news": {"name": "Упоминание в новостях", "price": 330, "description": "Упоминание в новостной ленте"}
-    }
-  },
   "roles": {
     "label": "🎭 Особые роли",
     "description": "Временные и постоянные роли",
@@ -71,17 +62,6 @@
       "casino_boost_x2":      {"name": "x2 к следующему выигрышу","price": 600, "description": "Удвоение любой выплаты в 1 партии",            "boost_type": "next_mult",      "value": 2.0, "uses": 1},
       "casino_lucky_hour":    {"name": "Удачный час (60 мин)",    "price": 675, "description": "Все множители +20% на час",                    "boost_type": "lucky_hour",     "value": 1.2, "duration_hours": 1},
       "casino_jackpot_ticket":{"name": "Билет в мега-джекпот",    "price": 840, "description": "Участвует в розыгрыше общего банка казино",    "boost_type": "jackpot_ticket", "value": 0,   "uses": 1}
-    }
-  },
-  "gifts": {
-    "label": "🎁 Подарки",
-    "description": "Подарить Diamond Coins другому участнику",
-    "items": {
-      "gift_100":  {"name": "Подарить 100 DC",  "price": 150,  "description": "Отправка 100 DC другому юзеру (комиссия 33%)",  "gift_amount": 100},
-      "gift_500":  {"name": "Подарить 500 DC",  "price": 750,  "description": "Отправка 500 DC другому юзеру (комиссия 33%)",  "gift_amount": 500},
-      "gift_1000": {"name": "Подарить 1000 DC", "price": 1500, "description": "Отправка 1000 DC другому юзеру (комиссия 33%)", "gift_amount": 1000},
-      "gift_2500": {"name": "Подарить 2500 DC", "price": 3750, "description": "Отправка 2500 DC другому юзеру (комиссия 33%)", "gift_amount": 2500},
-      "gift_5000": {"name": "Подарить 5000 DC", "price": 7500, "description": "Отправка 5000 DC другому юзеру (комиссия 33%)", "gift_amount": 5000}
     }
   }
 }
