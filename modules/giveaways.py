@@ -29,21 +29,37 @@ GIVEAWAY_FULL_ROLES = [
 
 MSK = timezone(timedelta(hours=3))
 
+EMOJI_LOVE = disnake.PartialEmoji(name="love", id=1540362793918926868)
+
 GIVEAWAY_TEMPLATES = {
-    "100":  {"prize": "100 DC", "amount": 100, "winners": 1, "description": "🎉 Быстрый розыгрыш 100 Diamond Coins!"},
-    "150":  {"prize": "150 DC", "amount": 150, "winners": 1, "description": "🎉 Стандартный розыгрыш 150 Diamond Coins на 1 победителя!"},
-    "350":  {"prize": "350 DC", "amount": 350, "winners": 1, "description": "🎉 Розыгрыш 350 Diamond Coins на 1 победителя!"},
-    "400":  {"prize": "400 DC", "amount": 400, "winners": 2, "description": "🎉 Розыгрыш 400 Diamond Coins на 2 победителей!"},
-    "450":  {"prize": "450 DC", "amount": 450, "winners": 2, "description": "🎉 Розыгрыш 450 Diamond Coins на 2 победителей!"},
-    "600":  {"prize": "600 DC", "amount": 600, "winners": 3, "description": "🎉 Розыгрыш 600 Diamond Coins на 3 победителей!"},
-    "700":  {"prize": "700 DC", "amount": 700, "winners": 3, "description": "🎉 Розыгрыш 700 Diamond Coins на 3 победителей!"},
-    "1000": {"prize": "1000 DC", "amount": 1000, "winners": 5, "description": "👑 Большой розыгрыш 1000 Diamond Coins на 5 победителей!"},
-    "1400": {"prize": "1400 DC", "amount": 1400, "winners": 7, "description": "🔥 Розыгрыш 1400 Diamond Coins на 7 победителей!"},
-    "1800": {"prize": "1800 DC", "amount": 1800, "winners": 9, "description": "🔥 Розыгрыш 1800 Diamond Coins на 9 победителей!"},
-    "2400": {"prize": "2400 DC", "amount": 2400, "winners": 12, "description": "💎 Розыгрыш 2400 Diamond Coins на 12 победителей!"},
-    "3000": {"prize": "3000 DC", "amount": 3000, "winners": 15, "description": "💎 Розыгрыш 3000 Diamond Coins на 15 победителей!"},
-    "3600": {"prize": "3600 DC", "amount": 3600, "winners": 18, "description": "👑 Огромный розыгрыш 3600 Diamond Coins на 18 победителей!"},
-    "4000": {"prize": "4000 DC", "amount": 4000, "winners": 20, "description": "👑 Огромный розыгрыш 4000 Diamond Coins на 20 победителей!"},
+    "100":  {"prize": "100 DC",  "amount": 100,  "winners": 1,
+             "description": "🎉 Быстрый розыгрыш 100 Diamond Coins! Небольшой приз — хороший шанс испытать удачу. Жми участвовать!"},
+    "150":  {"prize": "150 DC",  "amount": 150,  "winners": 1,
+             "description": "🎉 Стандартный розыгрыш 150 DC для всех! Отличный стартовый приз на любые нужды магазина. Заходи и участвуй!"},
+    "350":  {"prize": "350 DC",  "amount": 350,  "winners": 1,
+             "description": "🎉 Розыгрыш 350 DC — средний куш для настоящих ценителей! Хорошая сумма для любых покупок. Не упусти свой шанс!"},
+    "400":  {"prize": "400 DC",  "amount": 400,  "winners": 2,
+             "description": "🎉 Розыгрыш 400 DC на двоих победителей! Двойной шанс сорвать куш. Участвуй — удача может улыбнуться именно тебе!"},
+    "450":  {"prize": "450 DC",  "amount": 450,  "winners": 2,
+             "description": "🎉 Розыгрыш 450 DC на двоих победителей! Щедрый приз для любителей адреналина. Жми участвовать и не упусти свой шанс!"},
+    "600":  {"prize": "600 DC",  "amount": 600,  "winners": 3,
+             "description": "🎉 Розыгрыш 600 DC на троих победителей! Тройной шанс на хороший куш. Собирайся с мыслями — и вперёд!"},
+    "700":  {"prize": "700 DC",  "amount": 700,  "winners": 3,
+             "description": "🎉 Розыгрыш 700 DC на троих победителей! Большие призы для активных ребят. Удача любит смелых!"},
+    "1000": {"prize": "1000 DC", "amount": 1000, "winners": 5,
+             "description": "👑 Большой розыгрыш 1000 DC на пятерых победителей! Крупный куш для настоящих везунчиков. Испытай судьбу — она может быть на твоей стороне!"},
+    "1400": {"prize": "1400 DC", "amount": 1400, "winners": 7,
+             "description": "🔥 Розыгрыш 1400 DC на семерых победителей! Огромная сумма — и множество шансов. Не упусти свой момент!"},
+    "1800": {"prize": "1800 DC", "amount": 1800, "winners": 9,
+             "description": "🔥 Розыгрыш 1800 DC на девятерых победителей! Щедрый куш для многих участников. Присоединяйся к борьбе за приз!"},
+    "2400": {"prize": "2400 DC", "amount": 2400, "winners": 12,
+             "description": "💎 Розыгрыш 2400 DC на двенадцать победителей! Массовый праздник щедрости для всех. Присоединяйся — весело и прибыльно!"},
+    "3000": {"prize": "3000 DC", "amount": 3000, "winners": 15,
+             "description": "💎 Розыгрыш 3000 DC на пятнадцать победителей! Большой призовой фонд для всех. Участвуй — и забери своё!"},
+    "3600": {"prize": "3600 DC", "amount": 3600, "winners": 18,
+             "description": "👑 Огромный розыгрыш 3600 DC на восемнадцать победителей! Максимум призов и возможностей. Докажи, что ты достоин!"},
+    "4000": {"prize": "4000 DC", "amount": 4000, "winners": 20,
+             "description": "👑 Мега-розыгрыш 4000 DC на двадцать победителей! Королевский куш и море победителей. Сражайся за свой шанс прямо сейчас!"},
 }
 
 
@@ -167,106 +183,104 @@ IMG_STRIPE_GW  = "https://cdn.discordapp.com/attachments/1527006158282555412/153
 IMG_BANNER_FIN = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735391875203082/image.png?backend=b2&ex=6ac53e50&is=6ac3ecd0&hm=b331ed1665f81621e08ee916aaabaf5bb78430e86de1d7a51c0ce7072ec175f9&"
 IMG_STRIPE     = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
-# Цвета
-COLOR_ACTIVE = 0x5865f2   # фиолетовый/синий
-COLOR_FINISH = 0xfaa61a   # золотой
+COLOR_GW = 6776679
 
 
 def build_giveaway_embeds(prize, description, winners_count, participants_count, end_dt):
     """
-    Шаблон активного розыгрыша.
-    3 embed'а:
+    Активный розыгрыш — 2 embed'а:
       [0] — баннер
-      [1] — заголовок + описание + время окончания + полоска
-      [2] — поля: участники + победители
+      [1] — заголовок + описание + время окончания + inline-поля
     """
     end_ts = int(end_dt.timestamp())
 
     desc_text = (description or "").strip()
     if not desc_text:
-        desc_text = "Проводим розыгрыш, стоит нажать на кнопку участвовать — больше условий нет!"
+        desc_text = "Проводим розыгрыш — стоит нажать на кнопку участвовать, и больше условий нет!"
 
     # [0] Баннер
-    embed_banner = disnake.Embed(color=COLOR_ACTIVE)
+    embed_banner = disnake.Embed(color=COLOR_GW)
     embed_banner.set_image(url=IMG_BANNER_GW)
 
     # [1] Основной
     embed_main = disnake.Embed(
-        title="> Розыгрыш в Diamond Shop",
+        title=f"Розыгрыш на {prize} ! 🎁",
         description=(
-            f"> 🎁 Розыгрыш на **{prize}**!\n\n"
-            f"> Описание:\n"
-            f"{desc_text}\n\n"
-            f"> **Время окончания:** <t:{end_ts}:R>"
+            f"> {desc_text}\n\n"
+            f"Время окончания: <t:{end_ts}:R>"
         ),
-        color=COLOR_ACTIVE,
+        color=COLOR_GW,
     )
-    embed_main.set_image(url=IMG_STRIPE_GW)
-
-    # [2] Поля
-    embed_fields = disnake.Embed(color=COLOR_ACTIVE)
-    embed_fields.add_field(
+    embed_main.add_field(
         name="> **Участвуют:**",
         value=f"```{participants_count}```",
         inline=True,
     )
-    embed_fields.add_field(
+    embed_main.add_field(
         name="> **Победителей:**",
         value=f"```{winners_count}```",
         inline=True,
     )
 
-    return [embed_banner, embed_main, embed_fields]
+    return [embed_banner, embed_main]
 
 
 def build_finished_giveaway_embed(prize, description, participants_count, winners_mentions, end_dt):
     """
-    Шаблон завершённого розыгрыша.
-    3 embed'а:
-      [0] — баннер финала
-      [1] — заголовок + приз + поля (участвовали, дата)
-      [2] — победитель(и)
+    Завершённый розыгрыш — 3 embed'а:
+      [0] — баннер
+      [1] — заголовок + описание + поля (участвовали, завершён)
+      [2] — победитель
     """
     end_ts = int(end_dt.timestamp())
 
+    desc_text = (description or "").strip()
+    if not desc_text:
+        desc_text = "Розыгрыш завершён, победитель определён!"
+
     # [0] Баннер
-    embed_banner = disnake.Embed(color=COLOR_FINISH)
+    embed_banner = disnake.Embed(color=COLOR_GW)
     embed_banner.set_image(url=IMG_BANNER_FIN)
 
     # [1] Основной
     embed_main = disnake.Embed(
-        title="🏆 Розыгрыш завершён",
+        title=f"Розыгрыш на {prize} завершён! 🏆",
         description=(
-            f"> Приз: **{prize}**\n\n"
+            f"> {desc_text}\n\n"
             f"> Победитель определён! Спасибо всем за участие."
         ),
-        color=COLOR_FINISH,
+        color=COLOR_GW,
     )
     embed_main.add_field(
-        name="👥 Участвовали",
+        name="> **Участвовали:**",
         value=f"```{participants_count}```",
         inline=True,
     )
     embed_main.add_field(
-        name="⏰ Завершён",
+        name="> **Завершён:**",
         value=f"<t:{end_ts}:d>",
         inline=True,
     )
 
     # [2] Победитель
-    embed_winners = disnake.Embed(color=COLOR_FINISH)
-    embed_winners.add_field(
-        name="🏆 Победитель",
-        value=winners_mentions,
+    embed_winner = disnake.Embed(color=COLOR_GW)
+    embed_winner.add_field(
+        name="> 🏆 **Победитель:**",
+        value=f">>> {winners_mentions}",
         inline=False,
     )
 
-    return [embed_banner, embed_main, embed_winners]
+    return [embed_banner, embed_main, embed_winner]
 
 
 class JoinButton(disnake.ui.Button):
     def __init__(self):
-        super().__init__(label="ㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤ🎉 Участвоватьㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤ", style=disnake.ButtonStyle.secondary, custom_id="giveaway_join")
+        super().__init__(
+            label="Участвовать",
+            style=disnake.ButtonStyle.secondary,
+            custom_id="giveaway_join",
+            emoji=EMOJI_LOVE,
+        )
 
     async def callback(self, inter: disnake.MessageInteraction):
         try:
