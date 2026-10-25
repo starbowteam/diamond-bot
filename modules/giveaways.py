@@ -167,29 +167,102 @@ IMG_STRIPE_GW  = "https://cdn.discordapp.com/attachments/1527006158282555412/153
 IMG_BANNER_FIN = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735391875203082/image.png?backend=b2&ex=6ac53e50&is=6ac3ecd0&hm=b331ed1665f81621e08ee916aaabaf5bb78430e86de1d7a51c0ce7072ec175f9&"
 IMG_STRIPE     = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
+# Цвета
+COLOR_ACTIVE = 0x5865f2   # фиолетовый/синий
+COLOR_FINISH = 0xfaa61a   # золотой
+
+
 def build_giveaway_embeds(prize, description, winners_count, participants_count, end_dt):
+    """
+    Шаблон активного розыгрыша.
+    3 embed'а:
+      [0] — баннер
+      [1] — заголовок + описание + время окончания + полоска
+      [2] — поля: участники + победители
+    """
     end_ts = int(end_dt.timestamp())
-    embed_banner = disnake.Embed(color=6776679)
+
+    desc_text = (description or "").strip()
+    if not desc_text:
+        desc_text = "Проводим розыгрыш, стоит нажать на кнопку участвовать — больше условий нет!"
+
+    # [0] Баннер
+    embed_banner = disnake.Embed(color=COLOR_ACTIVE)
     embed_banner.set_image(url=IMG_BANNER_GW)
+
+    # [1] Основной
     embed_main = disnake.Embed(
-        title="🎉 Розыгрыш",
-        description=f"> {description}\n\n> **Приз:** {prize}\n> **Время окончания:** <t:{end_ts}:R>\n> <t:{end_ts}:F> (МСК GMT+3)\n> **Участвуют:** {participants_count}\n> **Победителей:** {winners_count}",
-        color=6776679
+        title="> Розыгрыш в Diamond Shop",
+        description=(
+            f"> 🎁 Розыгрыш на **{prize}**!\n\n"
+            f"> Описание:\n"
+            f"{desc_text}\n\n"
+            f"> **Время окончания:** <t:{end_ts}:R>"
+        ),
+        color=COLOR_ACTIVE,
     )
     embed_main.set_image(url=IMG_STRIPE_GW)
-    return [embed_banner, embed_main]
+
+    # [2] Поля
+    embed_fields = disnake.Embed(color=COLOR_ACTIVE)
+    embed_fields.add_field(
+        name="> **Участвуют:**",
+        value=f"```{participants_count}```",
+        inline=True,
+    )
+    embed_fields.add_field(
+        name="> **Победителей:**",
+        value=f"```{winners_count}```",
+        inline=True,
+    )
+
+    return [embed_banner, embed_main, embed_fields]
+
 
 def build_finished_giveaway_embed(prize, description, participants_count, winners_mentions, end_dt):
+    """
+    Шаблон завершённого розыгрыша.
+    3 embed'а:
+      [0] — баннер финала
+      [1] — заголовок + приз + поля (участвовали, дата)
+      [2] — победитель(и)
+    """
     end_ts = int(end_dt.timestamp())
-    embed_banner = disnake.Embed(color=6776679)
+
+    # [0] Баннер
+    embed_banner = disnake.Embed(color=COLOR_FINISH)
     embed_banner.set_image(url=IMG_BANNER_FIN)
+
+    # [1] Основной
     embed_main = disnake.Embed(
-        title="🎉 Розыгрыш завершён!",
-        description=f"> {description}\n\n> **Приз:** {prize}\n> **Участвовали:** {participants_count}\n> **Победители:** {winners_mentions}\n> **Закончено:** <t:{end_ts}:F>",
-        color=6776679
+        title="🏆 Розыгрыш завершён",
+        description=(
+            f"> Приз: **{prize}**\n\n"
+            f"> Победитель определён! Спасибо всем за участие."
+        ),
+        color=COLOR_FINISH,
     )
-    embed_main.set_image(url=IMG_STRIPE_GW)
-    return [embed_banner, embed_main]
+    embed_main.add_field(
+        name="👥 Участвовали",
+        value=f"```{participants_count}```",
+        inline=True,
+    )
+    embed_main.add_field(
+        name="⏰ Завершён",
+        value=f"<t:{end_ts}:d>",
+        inline=True,
+    )
+
+    # [2] Победитель
+    embed_winners = disnake.Embed(color=COLOR_FINISH)
+    embed_winners.add_field(
+        name="🏆 Победитель",
+        value=winners_mentions,
+        inline=False,
+    )
+
+    return [embed_banner, embed_main, embed_winners]
+
 
 class JoinButton(disnake.ui.Button):
     def __init__(self):
@@ -941,4 +1014,4 @@ def setup_giveaways(bot_instance):
 
     try: bot_instance.loop.create_task(_delayed_init_and_panel())
     except Exception as e: logger.warning(f"[giveaways] не удалось запустить init task: {e}")
-    logger.info("[giveaways] ✅ модуль розыгрышей подключён (без проверки инвайтов)")
+    logger.info("[giveaways] ✅ модуль розыгрышей подключён")
