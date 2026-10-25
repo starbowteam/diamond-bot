@@ -162,30 +162,12 @@ async def log_discord(title: str, description: str, color: int = 0x00ff00, field
     except Exception as e:
         logger.warning(f"[giveaways.log] {e}")
 
-async def get_invite_stats(guild: disnake.Guild, user: disnake.Member, giveaway_id: int = None):
-    if giveaway_id is not None:
-        g_row = cur.execute("SELECT created_at, end_time FROM giveaways WHERE giveaway_id=? AND guild_id=?", (giveaway_id, guild.id)).fetchone()
-        if not g_row: return None
-        end_time = min(g_row["end_time"], now_ts())
-        rows = cur.execute("SELECT is_bot, left_at, is_fake, member_id FROM invites WHERE guild_id=? AND inviter_id=? AND joined_at BETWEEN ? AND ?", (guild.id, user.id, g_row["created_at"], end_time)).fetchall()
-        total = len(rows)
-        remaining = sum(1 for r in rows if r["left_at"] is None and r["member_id"] != 0)
-        left = sum(1 for r in rows if r["left_at"] is not None)
-        bots = sum(1 for r in rows if r["is_bot"] == 1)
-        return {"total": total, "remaining": remaining, "left": left, "bots": bots}
-    else:
-        try:
-            invites = await guild.invites()
-            total_uses = sum(inv.uses for inv in invites if inv.inviter and inv.inviter.id == user.id)
-            return {"total": total_uses, "remaining": total_uses, "left": 0, "bots": 0}
-        except Exception: return None
-
 IMG_BANNER_GW  = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735389618798632/image.png?backend=b2&ex=6ac53e4f&is=6ac3eccf&hm=ed4085879047dc6da3c00fc5a55edf0fe24d334f55f7086339380e0364a0ee09&"
 IMG_STRIPE_GW  = "https://cdn.discordapp.com/attachments/1527006158282555412/1530795801268453447/pisk.png?ex=6a66e02f&is=6a658eaf&hm=79e41273327d2e1048ba42df62868cbb88f5b06b112ca864de2c7a02326523e9&"
 IMG_BANNER_FIN = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735391875203082/image.png?backend=b2&ex=6ac53e50&is=6ac3ecd0&hm=b331ed1665f81621e08ee916aaabaf5bb78430e86de1d7a51c0ce7072ec175f9&"
 IMG_STRIPE     = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 
-def build_giveaway_embeds(prize, description, winners_count, participants_count, end_dt, required_invites=0):
+def build_giveaway_embeds(prize, description, winners_count, participants_count, end_dt):
     end_ts = int(end_dt.timestamp())
     embed_banner = disnake.Embed(color=6776679)
     embed_banner.set_image(url=IMG_BANNER_GW)
@@ -194,8 +176,6 @@ def build_giveaway_embeds(prize, description, winners_count, participants_count,
         description=f"> {description}\n\n> **Приз:** {prize}\n> **Время окончания:** <t:{end_ts}:R>\n> <t:{end_ts}:F> (МСК GMT+3)\n> **Участвуют:** {participants_count}\n> **Победителей:** {winners_count}",
         color=6776679
     )
-    if required_invites:
-        embed_main.description += f"\n> **Требуется инвайтов:** {required_invites}"
     embed_main.set_image(url=IMG_STRIPE_GW)
     return [embed_banner, embed_main]
 
@@ -227,7 +207,7 @@ class JoinButton(disnake.ui.Button):
             cur.execute("UPDATE giveaways SET participants=? WHERE giveaway_id=?", (str_from_list(participants), gid))
             db.commit()
             end_dt = datetime.fromtimestamp(row["end_time"], timezone.utc)
-            embeds = build_giveaway_embeds(row["prize"], row["description"], row["winners_count"], len(participants), end_dt, row["required_invites"])
+            embeds = build_giveaway_embeds(row["prize"], row["description"], row["winners_count"], len(participants), end_dt)
             try: await inter.message.edit(embeds=embeds)
             except Exception: pass
             await inter.response.send_message("✅ Ты успешно присоединился к розыгрышу!", ephemeral=True)
@@ -282,7 +262,6 @@ class GiveawayModal(ui.Modal):
             ui.TextInput(label="Описание", custom_id="description", style=disnake.TextInputStyle.paragraph, max_length=1024),
             ui.TextInput(label="Победителей (число)", custom_id="winners", max_length=3),
             ui.TextInput(label="Длительность (10m, 2h, 1d)", custom_id="duration", max_length=10, placeholder="Например: 30m, 2h, 7d"),
-            ui.TextInput(label="Мин. инвайтов (0 или пусто = без ограничений)", custom_id="invites", required=False, max_length=10, placeholder="0"),
         ]
         super().__init__(title="Создание розыгрыша", components=components)
 
@@ -296,25 +275,18 @@ class GiveawayModal(ui.Modal):
         except ValueError: return await inter.response.send_message("❌ Поле 'Победителей' должно быть целым числом ≥ 1.", ephemeral=True)
         duration_td = parse_duration(inter.text_values["duration"])
         if duration_td is None: return await inter.response.send_message("❌ Неверный формат длительности. Примеры: `30m`, `2h`, `7d`", ephemeral=True)
-        invites_input = inter.text_values["invites"].strip().lower()
-        if invites_input in ("0", "none", ""): required_invites = 0
-        else:
-            try:
-                required_invites = int(invites_input)
-                if required_invites < 0: raise ValueError
-            except ValueError: return await inter.response.send_message("❌ Поле 'Мин. инвайтов' должно быть числом ≥ 0.", ephemeral=True)
 
         end_dt = datetime.now(MSK) + duration_td
         end_dt_utc = end_dt.astimezone(timezone.utc)
         end_time = int(end_dt_utc.timestamp())
         created_at = now_ts()
-        embeds = build_giveaway_embeds(prize, description, winners_count, 0, end_dt_utc, required_invites)
+        embeds = build_giveaway_embeds(prize, description, winners_count, 0, end_dt_utc)
 
         await inter.response.send_message("⏳ Создаю розыгрыш...", ephemeral=True)
         channel = _bot.get_channel(GIVEAWAY_CHANNEL_ID)
         if not channel: return await inter.edit_original_message(content="❌ Канал для розыгрышей не найден.")
         msg = await channel.send(content="|| @everyone ||", embeds=embeds, view=GiveawayView())
-        cur.execute("""INSERT INTO giveaways (guild_id, channel_id, message_id, host_id, prize, description, winners_count, end_time, created_at, required_invites, participants, winners, status, auto_payout, payout_done) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (inter.guild.id, channel.id, msg.id, inter.author.id, prize, description, winners_count, end_time, created_at, required_invites, "[]", "[]", "active", 0, 0))
+        cur.execute("""INSERT INTO giveaways (guild_id, channel_id, message_id, host_id, prize, description, winners_count, end_time, created_at, required_invites, participants, winners, status, auto_payout, payout_done) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (inter.guild.id, channel.id, msg.id, inter.author.id, prize, description, winners_count, end_time, created_at, 0, "[]", "[]", "active", 0, 0))
         db.commit()
         gid = cur.lastrowid
         asyncio.create_task(schedule_end(gid))
@@ -324,14 +296,10 @@ async def get_valid_participants(gid: int, guild: disnake.Guild):
     row = cur.execute("SELECT * FROM giveaways WHERE giveaway_id=?", (gid,)).fetchone()
     if not row: return []
     participants = list_from_str(row["participants"])
-    required_invites = row["required_invites"]
     valid = []
     for uid in participants:
         member = guild.get_member(uid)
         if not member or member.bot: continue
-        if required_invites > 0:
-            stats = await get_invite_stats(guild, member, giveaway_id=gid)
-            if stats is None or stats["total"] < required_invites: continue
         valid.append(uid)
     return list(set(valid))
 
@@ -833,7 +801,6 @@ async def show_templates_panel(inter: disnake.MessageInteraction):
             "> Выберите тип ниже — розыгрыш стартует сразу.\n\n"
             "> ⏱ **Длительность:** 1 день\n"
             f"> 💰 **Выдача:** после отзыва в <#{REVIEW_CHANNEL_ID}>\n"
-            "> 🚫 **Инвайты:** не требуются\n"
             "> ⭐ **Бонус:** за отзыв ещё начислят DC\n\n"
             "**Доступные шаблоны:** от **100** до **4000 DC**"
         ),
@@ -877,7 +844,7 @@ class TemplateSelect(disnake.ui.StringSelect):
         created_at = now_ts()
         channel = _bot.get_channel(GIVEAWAY_CHANNEL_ID)
         if not channel: return await inter.edit_original_response(content="❌ Канал не найден.")
-        embeds = build_giveaway_embeds(prize, description, winners_count, 0, end_dt_utc, 0)
+        embeds = build_giveaway_embeds(prize, description, winners_count, 0, end_dt_utc)
         msg = await channel.send(content="|| @everyone ||", embeds=embeds, view=GiveawayView())
         cur.execute("""INSERT INTO giveaways (guild_id, channel_id, message_id, host_id, prize, description, winners_count, end_time, created_at, required_invites, participants, winners, status, auto_payout, payout_done) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (inter.guild.id, channel.id, msg.id, inter.author.id, prize, description, winners_count, end_time, created_at, 0, "[]", "[]", "active", 1, 0))
         db.commit()
@@ -972,25 +939,6 @@ def setup_giveaways(bot_instance):
     bot_instance.add_view(GiveawayView())
     bot_instance.add_view(GiveawayPanelView())
 
-    @bot_instance.slash_command(name="invites", description="Статистика инвайтов пользователя")
-    async def invites_cmd(inter: disnake.ApplicationCommandInteraction, user: disnake.Member = None, giveaway_id: int = None):
-        target = user or inter.author
-        stats = await get_invite_stats(inter.guild, target, giveaway_id)
-        if stats is None: return await inter.send("❌ Не удалось получить статистику.", ephemeral=True)
-        if giveaway_id is not None:
-            g_row = cur.execute("SELECT created_at, end_time FROM giveaways WHERE giveaway_id=? AND guild_id=?", (giveaway_id, inter.guild.id)).fetchone()
-            if not g_row: return await inter.send("❌ Розыгрыш не найден.", ephemeral=True)
-            title = f"📨 Инвайты в розыгрыше #{giveaway_id} — {target.display_name}"
-            footer = f"Период: <t:{g_row['created_at']}:d> – <t:{g_row['end_time']}:d>"
-            embed = disnake.Embed(title=title, color=6776679, description=f"> **Приглашено:** {stats['total']}\n> **На сервере:** {stats['remaining']}\n> **Ушло:** {stats['left']}\n> **Ботов:** {stats['bots']}")
-        else:
-            title = f"📨 Инвайты — {target.display_name}"
-            footer = "Глобальная статистика (Discord API)"
-            embed = disnake.Embed(title=title, color=6776679, description=f"> **Всего использований инвайтов:** {stats['total']}")
-        embed.set_thumbnail(url=target.display_avatar.url)
-        embed.set_footer(text=footer)
-        await inter.send(embed=embed, ephemeral=True)
-
     try: bot_instance.loop.create_task(_delayed_init_and_panel())
     except Exception as e: logger.warning(f"[giveaways] не удалось запустить init task: {e}")
-    logger.info("[giveaways] ✅ модуль розыгрышей подключён (выдача после отзыва)")
+    logger.info("[giveaways] ✅ модуль розыгрышей подключён (без проверки инвайтов)")
