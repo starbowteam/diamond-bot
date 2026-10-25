@@ -491,34 +491,6 @@ async def show_daily_gift(inter):
 # ============================================================
 # МОДАЛКИ
 # ============================================================
-class DiscountModal(Modal):
-    def __init__(self):
-        components = [
-            TextInput(label="Исходная цена", placeholder="Сумма",
-                      custom_id="price", min_length=1, max_length=20),
-            TextInput(label="Скидка (%)", placeholder="%",
-                      custom_id="discount_percent", min_length=1, max_length=10),
-        ]
-        super().__init__(title="Расчёт скидки", components=components)
-
-    async def callback(self, inter):
-        try:
-            price = float(inter.text_values["price"].replace(",", ".").strip())
-            discount = float(inter.text_values["discount_percent"].replace(",", ".").strip())
-        except ValueError:
-            return await inter.response.send_message("❌ Введите числа.", ephemeral=True)
-        if discount < 0 or discount > 100:
-            return await inter.response.send_message("❌ Скидка 0-100%.", ephemeral=True)
-        final_price = price * (1 - discount / 100)
-        savings = price - final_price
-        embed = disnake.Embed(title="🧾 Результат расчёта", color=0x2ecc71)
-        embed.add_field(name="Исходная", value=f"`{price:.2f} ₽`", inline=True)
-        embed.add_field(name="Скидка", value=f"`{discount:.0f}%`", inline=True)
-        embed.add_field(name="Экономия", value=f"`{savings:.2f} ₽`", inline=True)
-        embed.add_field(name="✅ Итого", value=f"**`{final_price:.2f} ₽`**", inline=False)
-        await inter.response.send_message(embed=embed, ephemeral=True)
-
-
 class OtherProfileModal(Modal):
     def __init__(self):
         components = [
@@ -577,10 +549,6 @@ class ProfilePanelSelect(disnake.ui.StringSelect):
                          description="Забери свой подарок в DC и возвращайся каждый день.",
                          emoji="<:S21:1552381035092648026>",
                          value="daily_gift"),
-            SelectOption(label="・Расчёт скидки",
-                         description="Посчитать итоговую цену со скидкой",
-                         emoji="<:ckidsk:1538551877665427557>",
-                         value="discount"),
         ]
         super().__init__(
             placeholder="Выберите действие...",
@@ -598,8 +566,6 @@ class ProfilePanelSelect(disnake.ui.StringSelect):
             await inter.response.send_modal(OtherProfileModal())
         elif value == "daily_gift":
             await show_daily_gift(inter)
-        elif value == "discount":
-            await inter.response.send_modal(DiscountModal())
 
 
 class ProfilePanelView(View):
@@ -631,7 +597,7 @@ async def send_profile_panel():
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735380877746368/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=2f257e6fbd905bcfc836b4cecef7048e3608a14cb0af356a7e8868ca1c6ed110&")
     embed2 = disnake.Embed(
         title="Твой профиль на сервере Diamond Shop",
-        description="> Здесь можно увидеть свой профиль, чужой профиль, забрать ежедневный подарок, посмотреть инвентарь, кастомные роли и рассчитать скидку.",
+        description="> Здесь можно увидеть свой профиль, чужой профиль, забрать ежедневный подарок, посмотреть инвентарь, кастомные роли.",
         color=6776679,
     )
     embed2.set_image(url=_IMG_STRIPE)
