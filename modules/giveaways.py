@@ -30,6 +30,7 @@ GIVEAWAY_FULL_ROLES = [
 MSK = timezone(timedelta(hours=3))
 
 EMOJI_LOVE = disnake.PartialEmoji(name="love", id=1540362793918926868)
+P = "\u3164"  # Невидимый пробел для кнопки
 
 GIVEAWAY_TEMPLATES = {
     "100":  {"prize": "100 DC",  "amount": 100,  "winners": 1,
@@ -211,6 +212,9 @@ def build_giveaway_embeds(prize, description, winners_count, participants_count,
         ),
         color=COLOR_GW,
     )
+    # 👇 ВОЗВРАЩАЕМ ПОЛОСКУ
+    embed_main.set_image(url=IMG_STRIPE_GW)
+    
     embed_main.add_field(
         name="> **Участвуют:**",
         value=f"```{participants_count}```",
@@ -251,14 +255,17 @@ def build_finished_giveaway_embed(prize, description, participants_count, winner
         ),
         color=COLOR_GW,
     )
+    # 👇 ВОЗВРАЩАЕМ ПОЛОСКУ
+    embed_main.set_image(url=IMG_STRIPE_GW)
+
     embed_main.add_field(
         name="> **Участвовали:**",
-        value=f"```{participants_count}```",
+        value=f"```{participants_count}```",  # В ``` как просил
         inline=True,
     )
     embed_main.add_field(
         name="> **Завершён:**",
-        value=f"<t:{end_ts}:d>",
+        value=f"```<t:{end_ts}:d>```",       # В ``` как просил
         inline=True,
     )
 
@@ -266,7 +273,7 @@ def build_finished_giveaway_embed(prize, description, participants_count, winner
     embed_winner = disnake.Embed(color=COLOR_GW)
     embed_winner.add_field(
         name="> 🏆 **Победитель:**",
-        value=f">>> {winners_mentions}",
+        value=f"```{winners_mentions}```",    # В ``` как просил
         inline=False,
     )
 
@@ -275,8 +282,9 @@ def build_finished_giveaway_embed(prize, description, participants_count, winner
 
 class JoinButton(disnake.ui.Button):
     def __init__(self):
+        # 👇 Возвращаем невидимые пробелы для широкой кнопки
         super().__init__(
-            label="Участвовать",
+            label=f"{P*13}Участвовать{P*13}", 
             style=disnake.ButtonStyle.secondary,
             custom_id="giveaway_join",
             emoji=EMOJI_LOVE,
