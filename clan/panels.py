@@ -172,6 +172,55 @@ def _build_games_embeds() -> List[disnake.Embed]:
         embeds = [disnake.Embed(color=6776679)]
     return embeds
 
+async def send_detailed_report_dm(bot, user_id, clan_id, inter_guild):
+    clan = get_clan(clan_id)
+    if not clan: return
+
+    bank = get_clan_bank(clan_id)
+    members = get_clan_members_count(clan_id)
+    top = get_clan_top(clan_id, limit=10)
+    
+    active_members = sum(1 for t in top if t["total"] > 0)
+    zero_contrib = max(0, members - active_members)
+    
+    pros = []
+    cons = []
+    
+    if bank > 10000: pros.append("Очень высокий банк клана")
+    if active_members > 5: pros.append("Много активных участников")
+    if top and top[0]["total"] > 5000: pros.append("Есть явный лидер по вкладу")
+    
+    if zero_contrib > members / 2: cons.append(f"Больше половины участников ({zero_contrib}) не внесли вклад")
+    if bank < 1000: cons.append("Низкий общий банк клана")
+    if not top: cons.append("Нет вкладов вообще")
+    
+    e1 = disnake.Embed(title=f"📊 Отчёт по клану {clan['emoji']} {clan['name']}", color=clan["color"])
+    e1.add_field(name="Банк клана", value=f"`{bank} DC`", inline=True)
+    e1.add_field(name="Участников", value=f"`{members} чел.`", inline=True)
+    e1.add_field(name="Активных", value=f"`{active_members} чел.`", inline=True)
+    e1.add_field(name="Средний вклад", value=f"`{bank // max(members, 1)} DC`", inline=True)
+    
+    e2 = disnake.Embed(title="🏆 Топ участников", color=clan["color"])
+    if top:
+        lines = []
+        for i, t in enumerate(top[:10], 1):
+            m = inter_guild.get_member(t["user_id"])
+            name = m.display_name if m else str(t["user_id"])
+            lines.append(f"`#{i}` {name} — **{t['total']} DC**")
+        e2.description = "\n".join(lines)
+    else:
+        e2.description = "Нет вкладов."
+        
+    e3 = disnake.Embed(title="📋 Оценка сезона", color=clan["color"])
+    e3.add_field(name="✅ Плюсы", value="\n".join(f"• {p}" for p in pros) or "• Пока нет", inline=False)
+    e3.add_field(name="⚠️ Минусы", value="\n".join(f"• {c}" for c in cons) or "• Пока нет", inline=False)
+    
+    try:
+        user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+        await user.send(embeds=[e1, e2, e3])
+    except Exception as e:
+        logger.warning(f"Не удалось отправить отчёт в ЛС {user_id}: {e}")
+
 class ClanPoolView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -286,6 +335,21 @@ class ClanPoolView(View):
             logger.exception(f"render_clan_howto: {e}")
             return await inter.response.send_message(f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
         await _send_clan_screen(inter, buf, f"clan_howto_{inter.author.id}.png")
+
+    @disnake.ui.button(
+        label=f"{P}Отчёт в ЛС{P}",
+        style=ButtonStyle.gray,
+        custom_id="clan_pool:report",
+        emoji="📊"
+    )
+    async def report_btn(self, button, inter: disnake.MessageInteraction):
+        user_clan = get_user_clan(inter.author.id)
+        if not user_clan:
+            return await inter.response.send_message("❌ Ты не в клане.", ephemeral=True)
+        
+        await inter.response.defer(ephemeral=True)
+        await send_detailed_report_dm(inter.bot, inter.author.id, user_clan["id"], inter.guild)
+        await inter.followup.send("✅ Отчёт отправлен в ЛС!", ephemeral=True)
 
 class ClanSeasonView(View):
     def __init__(self):
@@ -430,7 +494,7 @@ class ClanGamesView(View):
             title="Игровые автоматы",
             description=(
                 "> Выбери игру, чтобы сыграть.\n"
-                "> Все выигрыши — до 100 DC вся сумма в копилку, больше — 40%."
+                "> Все выигрыши — 100% суммы в копилку клана."
             ),
             color=6776679
         )
