@@ -327,13 +327,8 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     )
 
     select_embed = disnake.Embed(
-        title="🎟️ Действия с тикетом",
-        description=(
-            "> Выбери нужное действие с помощью кнопок ниже.\n\n"
-            "> • **Счёт на оплату** — выставить счёт (только для менеджеров)\n"
-            "> • **Политика** — правила и условия магазина\n"
-            "> • **Изменить название** — доступно только в оплаченных тикетах"
-        ),
+        title="Действия с тикетом:",
+        description="> Выберите нужное действие с помощью кнопок ниже.",
         color=6776679
     )
     select_embed.set_image(url=_IMG_STRIPE)
