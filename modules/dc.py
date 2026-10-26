@@ -26,10 +26,8 @@ from core.utils import (
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735382689947688/image.png?backend=b2&ex=6ac53e4d&is=6ac3eccd&hm=ec03756f0f5f5c1b18fe17468fe0aee06a8fa872ce79caa150ec2a817dec85f9&"
 
-# 👇 Правило копилки клана живёт в clan/core.py (функция clan_cut):
-#    до 100 DC — 100% в копилку, больше 100 DC — 40%.
-#    Пользователь при этом ВСЕГДА получает 100% начисления.
-CLAN_SHARE = 0.40  # оставлено для совместимости со старым кодом
+
+CLAN_SHARE = 1.0
 
 # ============================================================
 # 👇 ЕЖЕДНЕВНЫЙ КЛУБНЫЙ БОНУС
