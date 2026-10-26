@@ -894,7 +894,7 @@ def render_policy(user_id: int) -> io.BytesIO:
         top_icon=I_RECEIPT, top_label="Документ", top_value="Политика",
         blocks=[
             {"color": BLUE,  "icon": I_CLOCK,   "label": "Срок обработки", "value": "до 2 дней"},
-            {"color": RED,   "icon": I_ROTATE,  "label": "Возврат",        "value": "75% от суммы"},
+            {"color": RED,   "icon": I_ROTATE,  "label": "Возврат",        "value": "60% от суммы"},
             {"color": GREEN, "icon": I_SHIELD,  "label": "Гарантия",       "value": "100% выдача"},
         ],
     )
@@ -918,7 +918,7 @@ def render_policy(user_id: int) -> io.BytesIO:
                  "В большинстве случаев товар выдаётся в течение 3 часов. "
                  "Часовой пояс продавца — МСК+5 (UTC+8)."},
         {"color": RED,   "icon": I_ROTATE, "title": "Возврат средств",
-         "text": "Если вы отказываетесь после оплаты — возврат 75% от суммы. "
+         "text": "Если вы отказываетесь после оплаты — возврат 60% от суммы. "
                  "25% удерживаются для покрытия комиссий платёжных систем и обработки."},
         {"color": GOLD,  "icon": I_BAN,    "title": "Стоп-лист",
          "text": "Массовые пинги персонала, продавца или менеджеров, "
