@@ -9,7 +9,7 @@ from typing import Optional, List, Dict
 
 import disnake
 from disnake import ButtonStyle, SelectOption, PartialEmoji
-from disnake.ui import Button, Select, View
+from disnake.ui import Button, Select, View, Modal, TextInput
 from disnake.ext import tasks
 
 from core.utils import (
@@ -335,21 +335,6 @@ class ClanPoolView(View):
             logger.exception(f"render_clan_howto: {e}")
             return await inter.response.send_message(f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
         await _send_clan_screen(inter, buf, f"clan_howto_{inter.author.id}.png")
-
-    @disnake.ui.button(
-        label=f"{P}Отчёт в ЛС{P}",
-        style=ButtonStyle.gray,
-        custom_id="clan_pool:report",
-        emoji="📊"
-    )
-    async def report_btn(self, button, inter: disnake.MessageInteraction):
-        user_clan = get_user_clan(inter.author.id)
-        if not user_clan:
-            return await inter.response.send_message("❌ Ты не в клане.", ephemeral=True)
-        
-        await inter.response.defer(ephemeral=True)
-        await send_detailed_report_dm(inter.bot, inter.author.id, user_clan["id"], inter.guild)
-        await inter.followup.send("✅ Отчёт отправлен в ЛС!", ephemeral=True)
 
 class ClanSeasonView(View):
     def __init__(self):
@@ -718,6 +703,56 @@ async def post_news_weekly(bot):
         desc = f"Общий пул кланов: {total_bank} DC. Успей поддержать свой клан."
     await _post_clan_news(bot, "Итоги недели в клубной лиге", news, desc)
 
+
+# ============================================================
+# МОДАЛКА ОТЧЁТА (стафф-панель)
+# ============================================================
+class ClanReportModal(Modal):
+    def __init__(self):
+        super().__init__(
+            title="📊 Отчёт по клану в ЛС",
+            components=[
+                TextInput(
+                    label="ID юзера (пусто = свой клан)",
+                    placeholder="Например: 796293832751972352",
+                    custom_id="target_id",
+                    required=False,
+                    max_length=30,
+                ),
+            ],
+            custom_id="clan_report_modal",
+        )
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        if not _is_admin(inter):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+
+        await inter.response.defer(ephemeral=True)
+
+        raw = (inter.text_values.get("target_id") or "").strip()
+        check_uid = inter.author.id
+        if raw:
+            if not raw.isdigit():
+                return await inter.edit_original_response(content="❌ ID должен быть числом.")
+            check_uid = int(raw)
+
+        clan = get_user_clan(check_uid)
+        if not clan:
+            return await inter.edit_original_response(
+                content=f"❌ У юзера `{check_uid}` нет клана."
+            )
+
+        try:
+            await send_detailed_report_dm(inter.bot, inter.author.id, clan["id"], inter.guild)
+        except Exception as e:
+            logger.exception(f"send_detailed_report_dm: {e}")
+            return await inter.edit_original_response(content=f"❌ Ошибка отправки: `{str(e)[:200]}`")
+
+        await inter.edit_original_response(
+            content=f"✅ Отчёт по клану {clan['emoji']} **{clan['name']}** отправлен в ЛС!"
+        )
+
+
 class ClanAdminSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -725,13 +760,21 @@ class ClanAdminSelect(disnake.ui.StringSelect):
             SelectOption(label="・Пересобрать кланы", description="Снять всех и раскидать заново", emoji="🎲", value="rebuild_clans"),
             SelectOption(label="・Пересчитать достижения", description="Выдать всем недостающие ачивки", emoji="🏆", value="recalc_ach"),
             SelectOption(label="・Бонус всем кланам", description="+100 DC в копилку и питомца", emoji="🎁", value="give_bonus"),
+            SelectOption(label="・Отчёт по клану в ЛС", description="Полная статистика + плюсы и минусы", emoji="📊", value="report"),
             SelectOption(label="・Обновить панели", description="Пересобрать эмбеды", emoji="🖼", value="refresh"),
         ]
         super().__init__(placeholder="Выберите действие...", min_values=1, max_values=1, options=options, custom_id="clan_admin_select")
 
     async def callback(self, inter: disnake.MessageInteraction):
-        if not _is_admin(inter): return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        if not _is_admin(inter):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         value = inter.data.values[0]
+
+        # Отчёт — открывает модалку, defer не нужен
+        if value == "report":
+            await inter.response.send_modal(ClanReportModal())
+            return
+
         await inter.response.defer(with_message=True, ephemeral=True)
 
         if value == "update_clans": await self._update_clans(inter)
@@ -929,7 +972,8 @@ async def send_clan_admin_panel(bot):
         description=(
             "> Обновление кланов, пересборка случайно, пересчёт достижений, обновление панелей.\n"
             "> Сезон идёт автоматически: старт и выплата 28-го числа в 20:00 МСК.\n"
-            "> Условие нахождения в клане: баланс ≥ 45 DC, роль покупателя, активность за 30 дней."
+            "> Условие нахождения в клане: баланс ≥ 45 DC, роль покупателя, активность за 30 дней.\n"
+            "> **📊 Отчёт по клану** — выгружает полную статистику в ЛС с плюсами и минусами."
         ),
         color=0x676767
     )
