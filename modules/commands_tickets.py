@@ -38,7 +38,7 @@ from modules.tickets import (
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
-IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
+IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1564315441784955022/image.png?ex=6ae0d1c8&is=6adf8048&hm=4c7130aae2147b4c389a7602582dd6a9a899f7ed293c6a0e51025bc68fc2ee27&"
 
 HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
 PAY_CONFIRM_DELAY_SECONDS = 60
