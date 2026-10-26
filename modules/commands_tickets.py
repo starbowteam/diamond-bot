@@ -327,8 +327,13 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     )
 
     select_embed = disnake.Embed(
-        title="Что именно нужно посмотреть?",
-        description="Ниже, выбор - политика, счет, имя, варны.  \n\nВыберите нужный пункт.",
+        title="🎟️ Действия с тикетом",
+        description=(
+            "> Выбери нужное действие с помощью кнопок ниже.\n\n"
+            "> • **Счёт на оплату** — выставить счёт (только для менеджеров)\n"
+            "> • **Политика** — правила и условия магазина\n"
+            "> • **Изменить название** — доступно только в оплаченных тикетах"
+        ),
         color=6776679
     )
     select_embed.set_image(url=_IMG_STRIPE)
@@ -441,7 +446,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         try:
             await inter.followup.send(
                 content=(
-                    f"> {user.mention}   ᶻ 𝘇 𐰁, тикет на DC — создан.\n"
+                    f"> {user.mention}   ᶻ 𝔃 𐰁, тикет на DC — создан.\n"
                     f"> Перейти: {ticket_channel.mention}"
                 ),
                 ephemeral=True
@@ -807,60 +812,51 @@ class RenameTicketModal(Modal):
         )
 
 # ============================================================
-# СЕЛЕКТ-МЕНЮ ДЛЯ ТИКЕТОВ
+# ДЕЙСТВИЯ В ТИКЕТЕ — 3 КНОПКИ
 # ============================================================
-class TicketActionSelect(disnake.ui.StringSelect):
-    def __init__(self):
-        super().__init__(
-            placeholder="Выберите действие...",
-            min_values=1,
-            max_values=1,
-            options=[
-                disnake.SelectOption(
-                    label="Счет на оплату",
-                    description="Сгенерировать счёт на оплату",
-                    emoji="<:Rekvi:1539656975091105892>",
-                    value="requisites"
-                ),
-                disnake.SelectOption(
-                    label="Политика",
-                    description="Правила и условия магазина",
-                    emoji="<:Politic:1539657020695650384>",
-                    value="policy"
-                ),
-                disnake.SelectOption(
-                    label="Изменить название тикета",
-                    description="Изменения для удобства выполнения.",
-                    emoji="<:image:1550869363266027641>",
-                    value="rename"
-                ),
-            ],
-            custom_id="ticket_action_select"
-        )
-
-    async def callback(self, inter: disnake.MessageInteraction):
-        value = inter.data.values[0]
-        if value == "requisites":
-            if not any(r.id == 1154757071330365490 for r in inter.author.roles):
-                return await inter.response.send_message(
-                    "⛔ Кнопка доступна только менеджерам.", ephemeral=True
-                )
-            await inter.response.send_modal(InvoiceModal())
-        elif value == "policy":
-            await show_policy(inter)
-        elif value == "rename":
-            if not _is_paid_ticket(inter.channel):
-                return await inter.response.send_message(
-                    "⛔ **Кнопка доступна только для оплаченных тикетов.**\n"
-                    "> Дождитесь подтверждения оплаты менеджером.",
-                    ephemeral=True
-                )
-            await inter.response.send_modal(RenameTicketModal())
-
-class SelectView(disnake.ui.View):
+class SelectView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(TicketActionSelect())
+
+    @disnake.ui.button(
+        label="Счёт на оплату",
+        style=ButtonStyle.gray,
+        custom_id="ticket_action:requisites",
+        emoji=PartialEmoji(name="Rekvi", id=1539656975091105892),
+        row=0,
+    )
+    async def requisites_btn(self, button: Button, inter: disnake.MessageInteraction):
+        if not any(r.id == 1154757071330365490 for r in inter.author.roles):
+            return await inter.response.send_message(
+                "⛔ Кнопка доступна только менеджерам.", ephemeral=True
+            )
+        await inter.response.send_modal(InvoiceModal())
+
+    @disnake.ui.button(
+        label="Политика",
+        style=ButtonStyle.gray,
+        custom_id="ticket_action:policy",
+        emoji=PartialEmoji(name="Politic", id=1539657020695650384),
+        row=0,
+    )
+    async def policy_btn(self, button: Button, inter: disnake.MessageInteraction):
+        await show_policy(inter)
+
+    @disnake.ui.button(
+        label="Изменить название",
+        style=ButtonStyle.gray,
+        custom_id="ticket_action:rename",
+        emoji=PartialEmoji(name="image", id=1550869363266027641),
+        row=0,
+    )
+    async def rename_btn(self, button: Button, inter: disnake.MessageInteraction):
+        if not _is_paid_ticket(inter.channel):
+            return await inter.response.send_message(
+                "⛔ **Кнопка доступна только для оплаченных тикетов.**\n"
+                "> Дождитесь подтверждения оплаты менеджером.",
+                ephemeral=True
+            )
+        await inter.response.send_modal(RenameTicketModal())
 
 # ============================================================
 # МОДАЛКА СОЗДАНИЯ СЧЁТА
