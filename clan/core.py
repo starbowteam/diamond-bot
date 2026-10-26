@@ -38,15 +38,14 @@ PAYOUT_MINUTE   = 0
 
 CLAN_POOL_THRESHOLD = 100
 CLAN_POOL_SMALL     = 1.00
-CLAN_POOL_BIG       = 0.40
+CLAN_POOL_BIG       = 1.00
 
+CREATOR_ID = 796293832751972352
 
 def clan_cut(amount: int) -> int:
     if amount <= 0:
         return 0
-    if amount <= CLAN_POOL_THRESHOLD:
-        return int(amount * CLAN_POOL_SMALL)
-    return int(amount * CLAN_POOL_BIG)
+    return int(amount * 1.00)
 
 # 👇 НОВЫЕ МНОЖИТЕЛИ (Топ-1 = 7, Топ-2 = 5, Топ-3 = 3)
 TOP_BONUSES = [7.00, 5.00, 3.00]
@@ -146,13 +145,13 @@ def init_clan_core():
     cleanup_excluded_users()
     ensure_active_cycle()
     
-    # Принудительно даем создателю 1-й клан, если его нет
+    # Принудительно даем создателю 1-й клан, если его нет или он вылетел
     try:
         from core.utils import get_dc_cache
-        if not get_user_clan(796293832751972352):
+        if not get_user_clan(CREATOR_ID):
             cur.execute(
-                "INSERT OR IGNORE INTO clan_members (user_id, clan_id, joined_at, left_at) VALUES (?, ?, ?, NULL)", 
-                (796293832751972352, 1, int(time.time()))
+                "INSERT OR REPLACE INTO clan_members (user_id, clan_id, joined_at, left_at, cycle_joined) VALUES (?, ?, ?, NULL, ?)", 
+                (CREATOR_ID, 1, int(time.time()), 0)
             )
             db.commit()
             logger.info("👑 Создатель принудительно добавлен в клан Мультяшности.")
@@ -698,6 +697,8 @@ INACTIVE_DAYS_LIMIT = 30
 
 
 def clan_block_reason(guild: disnake.Guild, user_id: int) -> Optional[str]:
+    if user_id == CREATOR_ID:
+        return None
     if is_hard_excluded(user_id):
         return "жёсткое исключение"
 
@@ -743,6 +744,8 @@ async def prune_ineligible_clan_members(guild: disnake.Guild) -> dict:
 
         for r in rows:
             uid = r["user_id"]
+            if uid == CREATOR_ID:
+                continue
             if is_hard_excluded(uid):
                 continue
 
@@ -1205,7 +1208,7 @@ async def send_welcome_dm(member: disnake.Member, clan: dict):
             description=(
                 f"> Ты теперь часть команды, {member.mention}!\n\n"
                 f"**Как играть:**\n"
-                f"> • Зарабатывай DC — до 100 DC вся сумма в копилку, больше — 40%\n"
+                f"> • Зарабатывай DC — **100%** от заработка идёт в копилку клана\n"
                 f"> • Выполняй квесты в <#1552700973753827509> — **100%** в копилку\n"
                 f"> • Топ-1 по вкладу получит бонус ×7.00\n"
                 f"> • Топ-2 по вкладу получит бонус ×5.00\n"
