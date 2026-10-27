@@ -258,26 +258,43 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
         logger.error(f"Ошибка закрытия тикета: {e}")
 
 # ============================================================
-# КОМБИНИРОВАННЫЙ VIEW (Components V2)
+# ОБЪЕДИНЕННЫЙ VIEW СО ВСЕМИ КНОПКАМИ
 # ============================================================
-class TicketCombinedView(View):
+class TicketView(View):
     def __init__(self):
         super().__init__(timeout=None)
         
-        self.btn_close = Button(label="Закрыть", style=ButtonStyle.danger, custom_id="ticket:close")
-        self.btn_pay = Button(label="Оплатить", style=ButtonStyle.success, custom_id="ticket:pay")
-        self.btn_disc = Button(label="Скидки", style=ButtonStyle.secondary, custom_id="ticket:discounts")
-        
-        self.btn_req = Button(label="Счёт на оплату", style=ButtonStyle.secondary, custom_id="ticket:req")
-        self.btn_pol = Button(label="Политика", style=ButtonStyle.secondary, custom_id="ticket:policy")
-        self.btn_ren = Button(label="Изменить название", style=ButtonStyle.secondary, custom_id="ticket:rename", disabled=True)
+        # --- РЯД 1 ---
+        btn_close = Button(label="ㅤЗакрытьㅤ", style=ButtonStyle.danger, custom_id="ticket:close",
+                           emoji=PartialEmoji(name="OffTicket", id=1539657125716824185), row=0)
+        btn_close.callback = self.close_callback
+        self.add_item(btn_close)
 
-        self.btn_close.callback = self.close_callback
-        self.btn_pay.callback = self.pay_callback
-        self.btn_disc.callback = self.discounts_callback
-        self.btn_req.callback = self.req_callback
-        self.btn_pol.callback = self.policy_callback
-        self.btn_ren.callback = self.rename_callback
+        btn_pay = Button(label="ㅤОплатитьㅤ", style=ButtonStyle.success, custom_id="ticket:pay",
+                         emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496), row=0)
+        btn_pay.callback = self.pay_callback
+        self.add_item(btn_pay)
+
+        btn_disc = Button(label="ㅤㅤСкидкиㅤㅤ", style=ButtonStyle.gray, custom_id="ticket:discounts",
+                          emoji=PartialEmoji(name="skidka", id=1540819242625146961), row=0)
+        btn_disc.callback = self.discounts_callback
+        self.add_item(btn_disc)
+
+        # --- РЯД 2 ---
+        btn_req = Button(label="ㅤСчёт на оплатуㅤ", style=ButtonStyle.gray, custom_id="ticket:req",
+                         emoji=PartialEmoji(name="Rekvi", id=1539656975091105892), row=1)
+        btn_req.callback = self.req_callback
+        self.add_item(btn_req)
+
+        btn_pol = Button(label="ㅤПолитикаㅤ", style=ButtonStyle.gray, custom_id="ticket:policy",
+                         emoji=PartialEmoji(name="Politic", id=1539657020695650384), row=1)
+        btn_pol.callback = self.policy_callback
+        self.add_item(btn_pol)
+
+        btn_ren = Button(label="ㅤИзменить названиеㅤ", style=ButtonStyle.gray, custom_id="ticket:rename",
+                         emoji=PartialEmoji(name="image", id=1550869363266027641), row=1, disabled=True)
+        btn_ren.callback = self.rename_callback
+        self.add_item(btn_ren)
 
     async def close_callback(self, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
@@ -303,29 +320,37 @@ class TicketCombinedView(View):
                 ephemeral=True
             )
 
-        try:
-            old_text = inter.message.components[0].children[0].content
-        except Exception:
-            old_text = "## Заказ в Diamond Shop\nСтатус - Оформляется\n> Ожидайте подтверждения."
-
-        new_text = old_text.replace("Оформляется", "Заказ оплачен").replace("Ожидайте подтверждения.", f"Подтверждено: {inter.author.mention}")
+        msg = inter.message
+        if not msg.embeds or len(msg.embeds) < 2:
+            async for m in channel.history(limit=50):
+                if m.author == inter.bot.user and m.embeds and len(m.embeds) >= 2:
+                    msg = m
+                    break
+        if not msg.embeds or len(msg.embeds) < 2:
+            return await inter.response.send_message("❌ Сообщение с заказом не найдено.", ephemeral=True)
         
-        new_td = ui.TextDisplay(new_text)
+        desc = msg.embeds[1].description or ""
+        if "Статус - Заказ оплачен" in desc:
+            return await inter.response.send_message("Заказ уже оплачен.", ephemeral=True)
         
-        new_view = TicketCombinedView()
-        new_view.btn_pay.disabled = True
-        new_view.btn_disc.disabled = True
-        new_view.btn_ren.disabled = False
+        order_embed = msg.embeds[1]
+        ed = order_embed.to_dict()
+        ed["color"] = 0x676767
+        ed["description"] = (
+            "Статус - Заказ оплачен\n"
+            f"> Подтверждено: {inter.author.mention}\n"
+            f"> Время: <t:{int(_time.time())}:f>"
+        )
         
-        row1 = ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc)
-        comps = [ui.Container(new_td, row1, accent_colour=Colour(0x2ecc71))]
+        # Создаём копию View, чтобы отключить кнопки
+        paid_view = TicketView()
+        for child in paid_view.children:
+            if child.custom_id == "ticket:pay": child.disabled = True
+            if child.custom_id == "ticket:discounts": child.disabled = True
+            if child.custom_id == "ticket:rename": child.disabled = False
+            
+        await msg.edit(embeds=[msg.embeds[0], disnake.Embed.from_dict(ed)], view=paid_view)
         
-        if len(inter.message.components) > 1:
-            row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
-            comps.append(row2)
-
-        await inter.message.edit(content=None, components=comps)
-
         paid_category = inter.guild.get_channel(CONFIG["PAID_CATEGORY_ID"])
         if paid_category:
             await channel.edit(category=paid_category)
@@ -358,13 +383,15 @@ class TicketCombinedView(View):
             return await inter.response.send_message("⛔ Только создатель тикета.", ephemeral=True)
         
         discount_applied = False
-        try:
-            old_text = inter.message.components[0].children[0].content
-            if "Не активирована" not in old_text:
-                discount_applied = True
-        except Exception:
-            pass
-
+        async for msg in channel.history(limit=50):
+            if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
+                for field in msg.embeds[1].fields:
+                    if "скидка" in field.name.lower():
+                        val = field.value.strip("`\n ")
+                        if val not in ["Не активирована", "Не введён", "Не активирован"]:
+                            discount_applied = True
+                        break
+                break
         if discount_applied:
             return await inter.response.send_message("❌ Скидка уже применена.", ephemeral=True)
             
@@ -416,13 +443,15 @@ class TicketCombinedView(View):
                 
             channel = inter.channel
             discount_applied = False
-            try:
-                old_text = inter.message.components[0].children[0].content
-                if "Не активирована" not in old_text:
-                    discount_applied = True
-            except Exception:
-                pass
-                
+            async for msg in channel.history(limit=50):
+                if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
+                    for field in msg.embeds[1].fields:
+                        if "скидка" in field.name.lower():
+                            val = field.value.strip("`\n ")
+                            if val not in ["Не активирована", "Не введён", "Не активирован"]:
+                                discount_applied = True
+                            break
+                    break
             if discount_applied:
                 return await inter.response.send_message("❌ Скидка уже применена.", ephemeral=True)
                 
@@ -441,32 +470,23 @@ class TicketCombinedView(View):
             if not success:
                 return await inter.response.send_message("❌ Ошибка применения скидки.", ephemeral=True)
                 
+            async for msg in channel.history(limit=50):
+                if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
+                    embed_dict = msg.embeds[1].to_dict()
+                    for field in embed_dict.get("fields", []):
+                        if "скидка" in field.get("name", "").lower():
+                            field["value"] = f"```{item_value}```"
+                            break
+                    new_embed = disnake.Embed.from_dict(embed_dict)
+                    embeds = list(msg.embeds)
+                    embeds[1] = new_embed
+                    await msg.edit(embeds=embeds)
+                    break
             try:
-                old_text = inter.message.components[0].children[0].content
-                new_text = old_text.replace("Не активирована", item_value)
-                
-                new_td = ui.TextDisplay(new_text)
-                new_view = TicketCombinedView()
-                
-                if _is_paid_ticket(channel):
-                    new_view.btn_pay.disabled = True
-                    new_view.btn_disc.disabled = True
-                    new_view.btn_ren.disabled = False
-                    accent = Colour(0x2ecc71)
-                else:
-                    accent = Colour(0x7c3131)
-
-                row1 = ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc)
-                comps = [ui.Container(new_td, row1, accent_colour=accent)]
-                
-                if len(inter.message.components) > 1:
-                    row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
-                    comps.append(row2)
-                    
-                await inter.message.edit(content=None, components=comps)
-            except Exception as e:
-                logger.warning(f"Ошибка обновления V2 скидки: {e}")
-
+                if inter.message and inter.message.components:
+                    await inter.message.edit(view=View())
+            except Exception:
+                pass
             await inter.response.send_message(f"✅ Скидка **{item_value}** применена к заказу!", ephemeral=True)
             await log_discord(
                 title="🛒 Применена скидка в тикете",
@@ -490,7 +510,7 @@ class TicketCombinedView(View):
         await inter.response.send_modal(RenameTicketModal())
 
 # ============================================================
-# СОЗДАНИЕ ТИКЕТА — РЕАЛЬНЫЕ ДЕНЬГИ (V2)
+# СОЗДАНИЕ ТИКЕТА — РЕАЛЬНЫЕ ДЕНЬГИ
 # ============================================================
 async def create_real_ticket(inter: disnake.MessageInteraction):
     user = inter.author
@@ -517,30 +537,31 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         logger.error(f"Не удалось создать тикет: {e}")
         return await inter.edit_original_response(content=f"❌ Ошибка создания: {e}")
 
+    try:
+        with open(CONFIG["INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds_list = [disnake.Embed.from_dict(e) for e in data.get("embeds", [])]
+    except Exception as e:
+        logger.error(f"Ошибка загрузки шаблона: {e}")
+        embeds_list = [disnake.Embed(color=6776679), disnake.Embed(title="Информация о заказе", color=6776679)]
+
+    embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=0x7c3131)
+    embed_order_info.clear_fields()
+    embed_order_info.add_field(name="> Заказчик", value=f"```{user.display_name}```", inline=True)
+    embed_order_info.add_field(name="> Скидка на товар", value="```Не активирована```", inline=True)
+
     current_time = int(_time.time())
-    view = TicketCombinedView()
-    
-    # Перенесли приветствие ВНУТРЬ TextDisplay
-    container = ui.Container(
-        ui.TextDisplay(
-            f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
-            f"> После уточнения заказа - менеджер создаст вам счёт.\n\n"
-            f"## Заказ в Diamond Shop\n"
-            f"Статус - Оформляется\n"
-            f"> Ожидайте подтверждения.\n"
-            f"> Время заказа: <t:{current_time}:f>\n\n"
-            f"**Заказчик:**\n```{user.display_name}```\n\n"
-            f"**Скидка на товар:**\n```Не активирована```"
-        ),
-        ui.ActionRow(view.btn_close, view.btn_pay, view.btn_disc),
-        accent_colour=Colour(0x7c3131)
+    embed_order_info.description = (
+        f"Статус - Оформляется\n"
+        f"> Ожидайте подтверждения.\n"
+        f"> Время заказа: <t:{current_time}:f>"
     )
-    
-    actions_row = ui.ActionRow(view.btn_req, view.btn_pol, view.btn_ren)
 
     await ticket_channel.send(
-        content=None, # Убрали content
-        components=[container, actions_row]
+        f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
+        f"> После уточнения заказа - менеджер создаст вам счёт.",
+        embeds=[embeds_list[0], embed_order_info],
+        view=TicketView()
     )
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
@@ -568,7 +589,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         ))
 
 # ============================================================
-# СОЗДАНИЕ ТИКЕТА — DC (V2)
+# СОЗДАНИЕ ТИКЕТА — DC
 # ============================================================
 async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict, purchase_index: int):
     user = inter.author
@@ -602,33 +623,40 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     except Exception as e:
         logger.warning(f"Не удалось удалить покупку #{purchase_index} у {user.id}: {e}")
 
-    current_time = int(_time.time())
-    view = TicketCombinedView()
-    
-    view.btn_pay.disabled = True
-    view.btn_disc.disabled = True
-    view.btn_req.disabled = True
-    view.btn_ren.disabled = True
+    try:
+        with open(CONFIG["COINS_INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
+            data = json.load(f)
+        embeds_list = [disnake.Embed.from_dict(e) for e in data.get("embeds", [])]
+    except Exception as e:
+        logger.error(f"Ошибка загрузки шаблона: {e}")
+        embeds_list = [disnake.Embed(color=6776679), disnake.Embed(title="Информация о заказе", color=6776679)]
 
-    container = ui.Container(
-        ui.TextDisplay(
-            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
-            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем.\n\n"
-            f"## Заказ за Diamond Coins\n"
-            f"Статус - Оформляется\n"
-            f"> Ожидайте подтверждения.\n"
-            f"> Время заказа: <t:{current_time}:f>\n\n"
-            f"**Нужный товар:**\n```{item_name}```"
-        ),
-        ui.ActionRow(view.btn_close),
-        accent_colour=Colour(0x7c3131)
+    embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=0x7c3131)
+    embed_order_info.clear_fields()
+    embed_order_info.add_field(name="> Нужный товар", value=f"```{item_name}```", inline=False)
+
+    current_time = int(_time.time())
+    embed_order_info.description = (
+        f"Статус - Оформляется\n"
+        f"> Ожидайте подтверждения.\n"
+        f"> Время: <t:{current_time}:f>"
     )
-    
-    actions_row = ui.ActionRow(view.btn_pol)
+
+    # Для DC тикета делаем View, но отключаем лишние кнопки
+    dc_view = TicketView()
+    for child in dc_view.children:
+        if child.custom_id == "ticket:pay": child.disabled = True
+        if child.custom_id == "ticket:discounts": child.disabled = True
+        if child.custom_id == "ticket:req": child.disabled = True
+        if child.custom_id == "ticket:rename": child.disabled = True
 
     await ticket_channel.send(
-        content=None, # Убрали content
-        components=[container, actions_row]
+        content=(
+            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
+            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем"
+        ),
+        embeds=[embeds_list[0], embed_order_info],
+        view=dc_view
     )
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
@@ -1125,36 +1153,6 @@ class QuestionTicketView(View):
             color=0xff6600,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
-
-# ============================================================
-# КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC (Остались для совместимости)
-# ============================================================
-class CoinsTicketButtons(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @disnake.ui.button(
-        label="ㅤПолитика выполнения заказаㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="coins_ticket:policy",
-        emoji=PartialEmoji(name="Politic", id=1539657020695650384),
-        row=0
-    )
-    async def policy(self, button, inter: disnake.MessageInteraction):
-        await show_policy(inter)
-
-    @disnake.ui.button(
-        label="ㅤㅤЗакрытьㅤㅤ",
-        style=disnake.ButtonStyle.gray,
-        custom_id="coins_ticket:close",
-        emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
-        row=0
-    )
-    async def close(self, button, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        
-        await _do_close_ticket(inter, check_reviews=False)
 
 # ============================================================
 # ВЫБОР ТИПА КАТАЛОГА
