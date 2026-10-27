@@ -37,13 +37,11 @@ from modules.tickets import (
 )
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
-
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1564315441784955022/image.png?ex=6ae0d1c8&is=6adf8048&hm=4c7130aae2147b4c389a7602582dd6a9a899f7ed293c6a0e51025bc68fc2ee27&"
 
 HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
 PAY_CONFIRM_DELAY_SECONDS = 60
 QUESTIONS_CATEGORY_ID = 1544363672128987196
-
 REVIEW_CHANNEL_ID = 1462074763437543435
 
 # ============================================================
@@ -146,11 +144,6 @@ def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
     if not channel.category:
         return False
     return channel.category.id == CONFIG["PAID_CATEGORY_ID"]
-
-def _is_coins_ticket(channel: disnake.TextChannel) -> bool:
-    if not channel.category:
-        return False
-    return channel.category.id == CONFIG["COINS_CATEGORY_ID"]
 
 def _get_auto_role_names() -> set:
     try:
@@ -310,7 +303,6 @@ class TicketCombinedView(View):
                 ephemeral=True
             )
 
-        # Достаем старый текст из V2 (первый TextDisplay в Container)
         try:
             old_text = inter.message.components[0].children[0].content
         except Exception:
@@ -318,13 +310,12 @@ class TicketCombinedView(View):
 
         new_text = old_text.replace("Оформляется", "Заказ оплачен").replace("Ожидайте подтверждения.", f"Подтверждено: {inter.author.mention}")
         
-        # Формируем новый контейнер (блокируем кнопки)
         new_td = ui.TextDisplay(new_text)
         
         new_view = TicketCombinedView()
         new_view.btn_pay.disabled = True
         new_view.btn_disc.disabled = True
-        new_view.btn_ren.disabled = False # Разрешаем переименование
+        new_view.btn_ren.disabled = False
         
         row1 = ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc)
         comps = [ui.Container(new_td, row1, accent_colour=Colour(0x2ecc71))]
@@ -333,7 +324,7 @@ class TicketCombinedView(View):
             row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
             comps.append(row2)
 
-        await inter.message.edit(content=inter.message.content, components=comps)
+        await inter.message.edit(content=None, components=comps)
 
         paid_category = inter.guild.get_channel(CONFIG["PAID_CATEGORY_ID"])
         if paid_category:
@@ -450,12 +441,10 @@ class TicketCombinedView(View):
             if not success:
                 return await inter.response.send_message("❌ Ошибка применения скидки.", ephemeral=True)
                 
-            # Обновляем текст в V2
             try:
                 old_text = inter.message.components[0].children[0].content
                 new_text = old_text.replace("Не активирована", item_value)
                 
-                # Пересобираем компоненты
                 new_td = ui.TextDisplay(new_text)
                 new_view = TicketCombinedView()
                 
@@ -474,7 +463,7 @@ class TicketCombinedView(View):
                     row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
                     comps.append(row2)
                     
-                await inter.message.edit(content=inter.message.content, components=comps)
+                await inter.message.edit(content=None, components=comps)
             except Exception as e:
                 logger.warning(f"Ошибка обновления V2 скидки: {e}")
 
@@ -531,8 +520,11 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     current_time = int(_time.time())
     view = TicketCombinedView()
     
+    # Перенесли приветствие ВНУТРЬ TextDisplay
     container = ui.Container(
         ui.TextDisplay(
+            f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
+            f"> После уточнения заказа - менеджер создаст вам счёт.\n\n"
             f"## Заказ в Diamond Shop\n"
             f"Статус - Оформляется\n"
             f"> Ожидайте подтверждения.\n"
@@ -547,7 +539,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     actions_row = ui.ActionRow(view.btn_req, view.btn_pol, view.btn_ren)
 
     await ticket_channel.send(
-        content=f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n> После уточнения заказа - менеджер создаст вам счёт.",
+        content=None, # Убрали content
         components=[container, actions_row]
     )
 
@@ -620,6 +612,8 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     container = ui.Container(
         ui.TextDisplay(
+            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
+            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем.\n\n"
             f"## Заказ за Diamond Coins\n"
             f"Статус - Оформляется\n"
             f"> Ожидайте подтверждения.\n"
@@ -633,7 +627,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     actions_row = ui.ActionRow(view.btn_pol)
 
     await ticket_channel.send(
-        content=f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем",
+        content=None, # Убрали content
         components=[container, actions_row]
     )
 
