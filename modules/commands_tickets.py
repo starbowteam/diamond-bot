@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 import disnake
-from disnake import ButtonStyle, PartialEmoji, SelectOption, ui
+from disnake import ButtonStyle, PartialEmoji, SelectOption, ui, Colour
 from disnake.ui import Button, Modal, Select, TextInput, View
 
 from core.utils import (
@@ -285,8 +285,6 @@ class TicketCombinedView(View):
         self.btn_req.callback = self.req_callback
         self.btn_pol.callback = self.policy_callback
         self.btn_ren.callback = self.rename_callback
-        
-        # Мы НЕ используем self.add_item(), так как верстаем V2 вручную
 
     async def close_callback(self, inter: disnake.MessageInteraction):
         if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
@@ -329,7 +327,7 @@ class TicketCombinedView(View):
         new_view.btn_ren.disabled = False # Разрешаем переименование
         
         row1 = ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc)
-        comps = [ui.Container(new_td, row1, accent_colour=0x2ecc71)]
+        comps = [ui.Container(new_td, row1, accent_colour=Colour(0x2ecc71))]
         
         if len(inter.message.components) > 1:
             row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
@@ -465,9 +463,9 @@ class TicketCombinedView(View):
                     new_view.btn_pay.disabled = True
                     new_view.btn_disc.disabled = True
                     new_view.btn_ren.disabled = False
-                    accent = 0x2ecc71
+                    accent = Colour(0x2ecc71)
                 else:
-                    accent = 0x7c3131
+                    accent = Colour(0x7c3131)
 
                 row1 = ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc)
                 comps = [ui.Container(new_td, row1, accent_colour=accent)]
@@ -543,7 +541,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
             f"**Скидка на товар:**\n```Не активирована```"
         ),
         ui.ActionRow(view.btn_close, view.btn_pay, view.btn_disc),
-        accent_colour=0x7c3131
+        accent_colour=Colour(0x7c3131)
     )
     
     actions_row = ui.ActionRow(view.btn_req, view.btn_pol, view.btn_ren)
@@ -629,7 +627,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
             f"**Нужный товар:**\n```{item_name}```"
         ),
         ui.ActionRow(view.btn_close),
-        accent_colour=0x7c3131
+        accent_colour=Colour(0x7c3131)
     )
     
     actions_row = ui.ActionRow(view.btn_pol)
@@ -1135,7 +1133,7 @@ class QuestionTicketView(View):
         )
 
 # ============================================================
-# КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC (DC-тикеты теперь на V2, но если нужны старые, этот класс остается)
+# КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC (Остались для совместимости)
 # ============================================================
 class CoinsTicketButtons(View):
     def __init__(self):
