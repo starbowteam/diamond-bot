@@ -271,7 +271,6 @@ class TicketView(View):
         super().__init__(timeout=None)
         
         # --- РЯД 1 (ВНУТРИ КОНТЕЙНЕРА) ---
-        # Все кнопки серые (secondary)
         self.btn_close = Button(label="Закрыть", style=ButtonStyle.secondary, custom_id="ticket:close",
                                 emoji=PartialEmoji(name="OffTicket", id=1539657125716824185))
         self.btn_close.callback = self.close_callback
@@ -526,7 +525,8 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     current_time = int(_time.time())
     view = TicketView()
     
-    banner = ui.MediaGallery(items=[MediaGalleryItem(media=IMG_BANNER)])
+    # ИСПРАВЛЕНО: передаем элемент позиционно, без items=
+    banner = ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER))
     
     container = ui.Container(
         ui.TextDisplay(
@@ -625,7 +625,8 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     view.btn_req.disabled = True
     view.btn_ren.disabled = True
 
-    banner = ui.MediaGallery(items=[MediaGalleryItem(media=IMG_BANNER)])
+    # ИСПРАВЛЕНО: передаем элемент позиционно, без items=
+    banner = ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER))
     
     container = ui.Container(
         ui.TextDisplay(
