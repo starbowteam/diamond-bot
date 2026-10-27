@@ -65,7 +65,7 @@ WELCOME_BONUS_DC = 50
 MSK = timezone(timedelta(hours=3))
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
+IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1564315441784955022/image.png?ex=6ae0d1c8&is=6adf8048&hm=4c7130aae2147b4c389a7602582dd6a9a899f7ed293c6a0e51025bc68fc2ee27&"
 IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
 IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1556733201970626732/image.png?backend=b2&ex=6ac5e506&is=6ac49386&hm=574cd55b0658621f44bee53d8ed386f3b7e7372997e73326c327efef482daca5&"
 
@@ -504,7 +504,7 @@ async def on_ready():
         )
 
         bot.add_view(TicketPanelView())
-        bot.add_view(TicketView())  # <-- Наш объединенный View
+        bot.add_view(TicketView())
         bot.add_view(CoinsTicketButtons())
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
