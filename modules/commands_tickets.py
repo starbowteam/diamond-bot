@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 import disnake
-from disnake import ButtonStyle, PartialEmoji, SelectOption, ui, Colour
+from disnake import ButtonStyle, PartialEmoji, SelectOption
 from disnake.ui import Button, Modal, Select, TextInput, View
 
 from core.utils import (
@@ -144,6 +144,11 @@ def _is_paid_ticket(channel: disnake.TextChannel) -> bool:
     if not channel.category:
         return False
     return channel.category.id == CONFIG["PAID_CATEGORY_ID"]
+
+def _is_coins_ticket(channel: disnake.TextChannel) -> bool:
+    if not channel.category:
+        return False
+    return channel.category.id == CONFIG["COINS_CATEGORY_ID"]
 
 def _get_auto_role_names() -> set:
     try:
@@ -1153,6 +1158,36 @@ class QuestionTicketView(View):
             color=0xff6600,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
+
+# ============================================================
+# КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC (Остались для совместимости)
+# ============================================================
+class CoinsTicketButtons(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(
+        label="ㅤПолитика выполнения заказаㅤ",
+        style=disnake.ButtonStyle.gray,
+        custom_id="coins_ticket:policy",
+        emoji=PartialEmoji(name="Politic", id=1539657020695650384),
+        row=0
+    )
+    async def policy(self, button, inter: disnake.MessageInteraction):
+        await show_policy(inter)
+
+    @disnake.ui.button(
+        label="ㅤㅤЗакрытьㅤㅤ",
+        style=disnake.ButtonStyle.gray,
+        custom_id="coins_ticket:close",
+        emoji=PartialEmoji(name="OffTicket", id=1539657125716824185),
+        row=0
+    )
+    async def close(self, button, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        
+        await _do_close_ticket(inter, check_reviews=False)
 
 # ============================================================
 # ВЫБОР ТИПА КАТАЛОГА
