@@ -489,7 +489,7 @@ async def on_ready():
             logger.exception(f"giveaways init err: {e}")
 
         from modules.commands_tickets import (
-            TicketPanelView, TicketCombinedView, CoinsTicketButtons,
+            TicketPanelView, TicketView, CoinsTicketButtons,
             CatalogTypeView, CatalogView, QuestionTicketView,
         )
         from modules.tickets import ReceiptView
@@ -504,7 +504,7 @@ async def on_ready():
         )
 
         bot.add_view(TicketPanelView())
-        bot.add_view(TicketCombinedView()) # Новый V2 View
+        bot.add_view(TicketView())  # <-- Наш объединенный View
         bot.add_view(CoinsTicketButtons())
         bot.add_view(CatalogTypeView())
         bot.add_view(CatalogView())
