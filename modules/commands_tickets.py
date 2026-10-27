@@ -38,7 +38,9 @@ from modules.tickets import (
 
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1564315441784955022/image.png?ex=6ae0d1c8&is=6adf8048&hm=4c7130aae2147b4c389a7602582dd6a9a899f7ed293c6a0e51025bc68fc2ee27&"
-IMG_BANNER = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735388092203191/image.png?backend=b2&ex=6ac53e4f&is=6ac3eccf&hm=990684ba1d817e183ea64f7483e8ef0b3476bd86ff3f8645cab1b129fa492580&"
+
+# ПРАВИЛЬНАЯ КАРТИНКА "ЗАКАЗ" (из info-o-zakaze.json)
+IMG_BANNER_ZAKAZ = "https://cdn.discordapp.com/attachments/1527006158282555412/1556735386175279164/image.png?backend=b2&ex=6ac53e4e&is=6ac3ecce&hm=64ef829be608d6789daa7b60db84b4798ebbe5f49509c6b6d331d77ed294c478&"
 
 HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
 PAY_CONFIRM_DELAY_SECONDS = 60
@@ -326,10 +328,12 @@ class TicketView(View):
         new_view.btn_disc.disabled = True
         new_view.btn_ren.disabled = False
         
-        old_text = inter.message.components[1].children[0].content
+        old_text = inter.message.components[1].children[1].content
         new_text = old_text.replace("Оформляется", "Заказ оплачен").replace("Ожидайте подтверждения.", f"Подтверждено: {inter.author.mention}")
         
+        # Собираем новый контейнер
         container = ui.Container(
+            ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER_ZAKAZ)),
             ui.TextDisplay(new_text),
             ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc),
             accent_colour=Colour(0x2ecc71) # Зеленая полоска при оплате
@@ -337,7 +341,7 @@ class TicketView(View):
         row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
         
         # Обновляем сообщение
-        await inter.message.edit(components=[inter.message.components[0], container, row2])
+        await inter.message.edit(components=[container, row2])
 
         paid_category = inter.guild.get_channel(CONFIG["PAID_CATEGORY_ID"])
         if paid_category:
@@ -371,7 +375,7 @@ class TicketView(View):
             return await inter.response.send_message("⛔ Только создатель тикета.", ephemeral=True)
         
         discount_applied = False
-        old_text = inter.message.components[1].children[0].content
+        old_text = inter.message.components[1].children[1].content
         if "Не активирована" not in old_text:
             discount_applied = True
                 
@@ -441,7 +445,7 @@ class TicketView(View):
                 return await inter.response.send_message("❌ Ошибка применения скидки.", ephemeral=True)
                 
             # Обновляем текст в V2 контейнере
-            old_text = inter.message.components[1].children[0].content
+            old_text = inter.message.components[1].children[1].content
             new_text = old_text.replace("Не активирована", item_value)
             
             new_view = TicketView()
@@ -451,16 +455,17 @@ class TicketView(View):
                 new_view.btn_ren.disabled = False
                 accent = Colour(0x2ecc71)
             else:
-                accent = Colour(0x5865F2)
+                accent = Colour(0x676767)
 
             container = ui.Container(
+                ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER_ZAKAZ)),
                 ui.TextDisplay(new_text),
                 ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc),
                 accent_colour=accent
             )
             row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
             
-            await inter.message.edit(components=[inter.message.components[0], container, row2])
+            await inter.message.edit(components=[container, row2])
 
             await inter.response.send_message(f"✅ Скидка **{item_value}** применена к заказу!", ephemeral=True)
             await log_discord(
@@ -525,10 +530,9 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     current_time = int(_time.time())
     view = TicketView()
     
-    # ИСПРАВЛЕНО: передаем элемент позиционно, без items=
-    banner = ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER))
-    
+    # Теперь картинка ВНУТРИ контейнера, цвет 0x676767
     container = ui.Container(
+        ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER_ZAKAZ)),
         ui.TextDisplay(
             f"## Информация о заказе по данному тикету:\n"
             f"Статус - Оформляется\n"
@@ -538,13 +542,13 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
             f"**Скидка на товар:**\n```Не активирована```"
         ),
         ui.ActionRow(view.btn_close, view.btn_pay, view.btn_disc),
-        accent_colour=Colour(0x5865F2)
+        accent_colour=Colour(0x676767)
     )
     
     row2 = ui.ActionRow(view.btn_req, view.btn_pol, view.btn_ren)
 
     try:
-        await ticket_channel.send(components=[banner, container, row2])
+        await ticket_channel.send(components=[container, row2])
     except Exception as e:
         logger.error(f"Ошибка отправки V2: {e}")
 
@@ -625,10 +629,8 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     view.btn_req.disabled = True
     view.btn_ren.disabled = True
 
-    # ИСПРАВЛЕНО: передаем элемент позиционно, без items=
-    banner = ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER))
-    
     container = ui.Container(
+        ui.MediaGallery(MediaGalleryItem(media=IMG_BANNER_ZAKAZ)),
         ui.TextDisplay(
             f"## Информация о заказе по данному тикету:\n"
             f"Статус - Оформляется\n"
@@ -637,13 +639,13 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
             f"**Нужный товар:**\n```{item_name}```"
         ),
         ui.ActionRow(view.btn_close),
-        accent_colour=Colour(0x5865F2)
+        accent_colour=Colour(0x676767)
     )
     
     row2 = ui.ActionRow(view.btn_pol)
 
     try:
-        await ticket_channel.send(components=[banner, container, row2])
+        await ticket_channel.send(components=[container, row2])
     except Exception as e:
         logger.error(f"Ошибка отправки V2: {e}")
 
