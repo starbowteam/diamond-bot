@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 import disnake
-from disnake import ButtonStyle, PartialEmoji, SelectOption, ui, Colour
+from disnake import ButtonStyle, PartialEmoji, SelectOption, ui, Colour, MediaGalleryItem
 from disnake.ui import Button, Modal, Select, TextInput, View
 
 from core.utils import (
@@ -271,11 +271,12 @@ class TicketView(View):
         super().__init__(timeout=None)
         
         # --- РЯД 1 (ВНУТРИ КОНТЕЙНЕРА) ---
-        self.btn_close = Button(label="Закрыть", style=ButtonStyle.danger, custom_id="ticket:close",
+        # Все кнопки серые (secondary)
+        self.btn_close = Button(label="Закрыть", style=ButtonStyle.secondary, custom_id="ticket:close",
                                 emoji=PartialEmoji(name="OffTicket", id=1539657125716824185))
         self.btn_close.callback = self.close_callback
 
-        self.btn_pay = Button(label="Оплатить", style=ButtonStyle.success, custom_id="ticket:pay",
+        self.btn_pay = Button(label="Оплатить", style=ButtonStyle.secondary, custom_id="ticket:pay",
                               emoji=PartialEmoji(name="Oplacheno", id=1539657164778512496))
         self.btn_pay.callback = self.pay_callback
 
@@ -332,11 +333,11 @@ class TicketView(View):
         container = ui.Container(
             ui.TextDisplay(new_text),
             ui.ActionRow(new_view.btn_close, new_view.btn_pay, new_view.btn_disc),
-            accent_colour=Colour(0x2ecc71)
+            accent_colour=Colour(0x2ecc71) # Зеленая полоска при оплате
         )
         row2 = ui.ActionRow(new_view.btn_req, new_view.btn_pol, new_view.btn_ren)
         
-        # Обновляем сообщение (убираем старые эмбеды, ставим V2)
+        # Обновляем сообщение
         await inter.message.edit(components=[inter.message.components[0], container, row2])
 
         paid_category = inter.guild.get_channel(CONFIG["PAID_CATEGORY_ID"])
@@ -512,17 +513,23 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         logger.error(f"Не удалось создать тикет: {e}")
         return await inter.edit_original_response(content=f"❌ Ошибка создания: {e}")
 
+    # 1. Отправляем приветствие ОБЫЧНЫМ сообщением
+    try:
+        await ticket_channel.send(
+            f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
+            f"> После уточнения заказа - менеджер создаст вам счёт."
+        )
+    except Exception as e:
+        logger.error(f"Ошибка отправки приветствия: {e}")
+
+    # 2. Отправляем V2-компоненты
     current_time = int(_time.time())
     view = TicketView()
     
-    # 1. Баннер (MediaGallery)
-    banner = ui.MediaGallery(ui.MediaGalleryItem(url=IMG_BANNER))
+    banner = ui.MediaGallery(items=[MediaGalleryItem(media=IMG_BANNER)])
     
-    # 2. Контейнер с инфой и первым рядом кнопок
     container = ui.Container(
         ui.TextDisplay(
-            f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
-            f"> После уточнения заказа - менеджер создаст вам счёт.\n\n"
             f"## Информация о заказе по данному тикету:\n"
             f"Статус - Оформляется\n"
             f"> Ожидайте подтверждения.\n"
@@ -534,12 +541,12 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         accent_colour=Colour(0x5865F2)
     )
     
-    # 3. Отдельный ряд кнопок под контейнером
     row2 = ui.ActionRow(view.btn_req, view.btn_pol, view.btn_ren)
 
-    await ticket_channel.send(
-        components=[banner, container, row2]
-    )
+    try:
+        await ticket_channel.send(components=[banner, container, row2])
+    except Exception as e:
+        logger.error(f"Ошибка отправки V2: {e}")
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
@@ -600,6 +607,16 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     except Exception as e:
         logger.warning(f"Не удалось удалить покупку #{purchase_index} у {user.id}: {e}")
 
+    # 1. Отправляем приветствие ОБЫЧНЫМ сообщением
+    try:
+        await ticket_channel.send(
+            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
+            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем."
+        )
+    except Exception as e:
+        logger.error(f"Ошибка отправки приветствия: {e}")
+
+    # 2. Отправляем V2-компоненты
     current_time = int(_time.time())
     view = TicketView()
     
@@ -608,12 +625,10 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     view.btn_req.disabled = True
     view.btn_ren.disabled = True
 
-    banner = ui.MediaGallery(ui.MediaGalleryItem(url=IMG_BANNER))
+    banner = ui.MediaGallery(items=[MediaGalleryItem(media=IMG_BANNER)])
     
     container = ui.Container(
         ui.TextDisplay(
-            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
-            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем.\n\n"
             f"## Информация о заказе по данному тикету:\n"
             f"Статус - Оформляется\n"
             f"> Ожидайте подтверждения.\n"
@@ -626,9 +641,10 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     
     row2 = ui.ActionRow(view.btn_pol)
 
-    await ticket_channel.send(
-        components=[banner, container, row2]
-    )
+    try:
+        await ticket_channel.send(components=[banner, container, row2])
+    except Exception as e:
+        logger.error(f"Ошибка отправки V2: {e}")
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
