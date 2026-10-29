@@ -1363,18 +1363,23 @@ class TicketPanelView(View):
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @disnake.ui.button(
-        label="ㅤПромокодыㅤ",
+        label="ㅤАвтозаказㅤ",
         style=disnake.ButtonStyle.gray,
-        custom_id="panel:promo",
-        emoji=PartialEmoji(name="prom1", id=1539646792139014234)
+        custom_id="panel:autoorder",
+        emoji=PartialEmoji(name="avtio1", id=1565386600219676702)
     )
-    async def promo(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        text = "Промокоды публикуются в <#1462070136856117258> — следи за новостями и забирай свою скидку."
+    async def autoorder(self, button: disnake.Button, inter: disnake.MessageInteraction):
+        text = (
+            "⚡ **Автозаказ — скоро!**\n"
+            "> Идёт усиленная разработка новой системы.\n"
+            "> Совсем скоро ты сможешь оформлять заказы самостоятельно, без ожидания менеджера.\n\n"
+            "> Ожидайте анонса в новостном канале."
+        )
         await inter.response.send_message(text, ephemeral=True)
         await log_discord(
-            title="🎟️ Просмотр промокодов",
+            title="⚡ Автозаказ (в разработке)",
             description=f"> **Пользователь:** {inter.author.mention}",
-            color=0x00ff00,
+            color=0xffaa00,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
