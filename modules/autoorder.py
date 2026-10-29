@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Автозаказ — новая система покупок.
-Один файл: Pillow-панель + полный флоу (категория → товары → корзина → оплата → чек → тикет).
+Автозаказ — полная система с Pillow-рендером на каждом шаге.
+Один файл. Всё внутри.
 """
 import io
 import os
@@ -27,11 +27,10 @@ from core.utils import (
 AUTOORDER_CHANNEL_ID = 1565412940281024512
 AUTOORDER_TICKET_CATEGORY = 1470779295650549885
 LOG_CHANNEL_ID = 1530453871581855744
-SESSION_TIMEOUT = 300  # 5 минут
+SESSION_TIMEOUT = 300
 
-COLOR_GREY = 0x676767
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
-
+COLOR_GREY = 0x676767
 P = "\u3164"
 
 # ============================================================
@@ -48,10 +47,13 @@ TEXT      = (255, 255, 255)
 TEXT_SOFT = (232, 232, 236)
 MUTED     = (136, 136, 136)
 DIM       = (102, 102, 102)
-GREY      = (103, 103, 103)       # #676767
+GREY      = (103, 103, 103)
 GREY_DARK = (74, 74, 82)
 GREY_LIGHT = (150, 150, 158)
 SILVER    = (212, 218, 230)
+GREEN     = (46, 204, 113)
+RED       = (255, 107, 107)
+GOLD      = (247, 201, 145)
 
 FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
 FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
@@ -73,6 +75,11 @@ def _fa(sz):
 
 def _tw(d, t, f):
     b = d.textbbox((0, 0), t, font=f); return b[2] - b[0]
+
+def _el(d, t, f, w):
+    if _tw(d, t, f) <= w: return t
+    while t and _tw(d, t + "…", f) > w: t = t[:-1]
+    return t + "…"
 
 def _icon(d, cx, cy, code, sz, color):
     f = _fa(sz)
@@ -112,6 +119,10 @@ def _grad(img, box, c1, c2, alpha=30, radius=0):
         layer.putalpha(a)
     img.paste(layer, (x1, y1), layer)
 
+def _stripe(d, x1, y1, x2, color=SILVER):
+    """Декоративная серая полоса"""
+    d.rounded_rectangle((x1, y1, x2, y1+2), radius=1, fill=color + (200,))
+
 # FA icons
 I_GEM       = 0xf3a5
 I_BOLT      = 0xf0e7
@@ -124,90 +135,92 @@ I_STAR      = 0xf005
 I_INFO      = 0xf05a
 I_BOX       = 0xf466
 I_CLOCK     = 0xf017
+I_ARROW     = 0xf061
+I_TIMES     = 0xf00d
+I_PLUS      = 0xf067
 
 # ============================================================
-# PILLOW: ПАНЕЛЬ
+# PILLOW-РЕНДЕРЫ
 # ============================================================
-def render_autoorder_panel() -> io.BytesIO:
-    W, H = 1800, 1000
-    PAD_X, PAD_Y = 56, 44
+CANVAS_W, CANVAS_H = 1800, 1000
+M = 14
+PAD_X, PAD_Y = 40, 40
 
-    img = Image.new("RGBA", (W, H), BG + (255,))
+def _canvas(title_subtitle: str = "автозаказ"):
+    img = Image.new("RGBA", (CANVAS_W, CANVAS_H), BG + (255,))
     d = ImageDraw.Draw(img)
-
-    # Внешняя карточка
-    d.rounded_rectangle((0, 0, W - 1, H - 1), radius=30,
-                        fill=CARD_TOP + (255,),
+    d.rounded_rectangle((M, M, CANVAS_W-1-M, CANVAS_H-1-M),
+                        radius=28, fill=CARD_TOP + (255,),
                         outline=STACK_BRD + (255,), width=3)
 
-    # ── Header ──
     hx, hy = PAD_X, PAD_Y
     logo_size = 54
-    d.rounded_rectangle((hx, hy, hx + logo_size, hy + logo_size),
-                        radius=14, fill=(58, 58, 64, 255))
-    _icon(d, hx + logo_size // 2, hy + logo_size // 2 + 1, I_BOLT, 26, SILVER)
+    d.rounded_rectangle((hx, hy, hx+logo_size, hy+logo_size), radius=14,
+                        fill=(58, 58, 64, 255))
+    _icon(d, hx+logo_size//2, hy+logo_size//2+1, I_BOLT, 26, SILVER)
 
     bx = hx + logo_size + 18
-    d.text((bx, hy + 4), "DIAMOND", font=_font(26), fill=TEXT)
-    d.text((bx + 2, hy + 38), "AUTOORDER SYSTEM", font=_font(11), fill=MUTED)
+    d.text((bx, hy+4), "DIAMOND", font=_font(26), fill=TEXT)
+    d.text((bx+2, hy+38), "AUTOORDER SYSTEM", font=_font(11), fill=MUTED)
 
-    meta_r = W - PAD_X
-    lbl = "АВТОЗАКАЗ"
-    w1 = _tw(d, lbl, _font(11))
-    d.text((meta_r - w1, hy + 12), lbl, font=_font(11), fill=GREY_LIGHT)
+    meta_r = CANVAS_W - M - PAD_X
+    w1 = _tw(d, title_subtitle.upper(), _font(14))
+    d.text((meta_r-w1, hy+20), title_subtitle.upper(), font=_font(14), fill=GREY_LIGHT)
 
-    ver = "v1.0 · BETA"
-    w2 = _tw(d, ver, _font(14))
-    d.text((meta_r - w2, hy + 32), ver, font=_font(14), fill=GREY)
+    sep_y = hy + logo_size + 20
+    d.line((PAD_X, sep_y, CANVAS_W-M-PAD_X, sep_y), fill=STACK_HDR + (255,), width=2)
+    return img, d
 
-    sep_y = hy + logo_size + 16
-    d.line((PAD_X, sep_y, W - PAD_X, sep_y), fill=STACK_HDR + (255,), width=2)
+def _footer(d, left_text: str, right_text: str = "v1.0"):
+    y = CANVAS_H - M - PAD_Y + 6
+    d.line((PAD_X, y-10, CANVAS_W-M-PAD_X, y-10), fill=STACK_HDR + (255,), width=2)
+    _icon(d, PAD_X+12, y+10, I_INFO, 16, DIM)
+    d.text((PAD_X+38, y), left_text, font=_font(15), fill=DIM)
+    rw = _tw(d, right_text, _font(15))
+    d.text((CANVAS_W-M-PAD_X-rw, y), right_text, font=_font(15), fill=GREY_LIGHT)
 
-    # ── Body ──
-    body_y = sep_y + 30
-    body_h = H - PAD_Y - body_y
 
-    # LEFT — заголовок + описание + шаги
+def render_panel() -> io.BytesIO:
+    img, d = _canvas("панель")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    # LEFT — заголовок
     left_x1 = PAD_X
     left_x2 = PAD_X + 920
 
-    # Плашка «АВТОЗАКАЗ»
     title_y = body_y + 20
-    _grad(img, (left_x1, title_y, left_x1 + 720, title_y + 130),
+    _grad(img, (left_x1, title_y, left_x1+720, title_y+130),
           GREY_LIGHT, GREY_DARK, alpha=200, radius=24)
-    d.text((left_x1 + 40, title_y + 20), "АВТОЗАКАЗ",
+    d.text((left_x1+40, title_y+20), "АВТОЗАКАЗ",
            font=_font(88), fill=(20, 20, 24))
-    d.text((left_x1 + 42, title_y + 128), "AUTO · SHOP · SYSTEM",
+    d.text((left_x1+42, title_y+128), "AUTO · SHOP · SYSTEM",
            font=_font(13), fill=(20, 20, 24))
 
-    # Подзаголовок
-    sub_y = title_y + 150
+    _stripe(d, left_x1, title_y+160, left_x1+720, SILVER)
+
+    sub_y = title_y + 180
     d.text((left_x1, sub_y),
            "Новая система покупок Diamond Shop",
            font=_font(22), fill=SILVER)
 
-    # Описание
     desc_y = sub_y + 44
-    desc_lines = [
+    for i, line in enumerate([
         "Забудь про ожидание менеджера. Собирай корзину, применяй",
         "скидки и оплачивай заказ в один клик. Менеджер подключится",
         "только к подтверждению оплаты.",
-    ]
-    for i, line in enumerate(desc_lines):
-        d.text((left_x1, desc_y + i * 26), line,
-               font=_font(16), fill=TEXT_SOFT)
+    ]):
+        d.text((left_x1, desc_y + i*26), line, font=_font(16), fill=TEXT_SOFT)
 
-    # ── Шаги (5 блоков) ──
     steps_y = desc_y + 110
     steps = [
         ("1", "Категория", "7 разделов"),
         ("2", "Корзина", "С количеством"),
-        ("3", "Скидки", "Промо или 10%"),
+        ("3", "Скидки", "Промо / 10%"),
         ("4", "Оплата", "Т-Банк · СБП · Озон"),
         ("5", "Чек", "Фото или PDF"),
     ]
     step_w, step_h, step_gap = 172, 108, 12
-
     for i, (num, title, sub) in enumerate(steps):
         sx1 = left_x1 + i * (step_w + step_gap)
         sx2 = sx1 + step_w
@@ -217,62 +230,355 @@ def render_autoorder_panel() -> io.BytesIO:
         _grad(img, (sx1, sy1, sx2, sy2), GREY, GREY_DARK, alpha=25, radius=14)
         d.rounded_rectangle((sx1, sy1, sx2, sy2), radius=14,
                             outline=GREY + (180,), width=2)
-
-        d.text((sx1 + 20, sy1 + 12), num, font=_font(30), fill=GREY_LIGHT)
-        d.text((sx1 + 20, sy1 + 54), title, font=_font(15), fill=TEXT)
-        d.text((sx1 + 20, sy1 + 78), sub, font=_font(11), fill=MUTED)
+        d.text((sx1+20, sy1+12), num, font=_font(30), fill=GREY_LIGHT)
+        d.text((sx1+20, sy1+54), title, font=_font(15), fill=TEXT)
+        d.text((sx1+20, sy1+78), sub, font=_font(11), fill=MUTED)
 
     # RIGHT — фичи
     right_x1 = left_x2 + 40
-    right_x2 = W - PAD_X
+    right_x2 = CANVAS_W - M - PAD_X
     feats_y = body_y + 20
     feat_h = 200
     feat_gap = 16
-
     features = [
-        (I_BOLT,   "Быстро",   "Оформление за 2 минуты",        "Без ожидания менеджера в тикете"),
-        (I_SHIELD, "Безопасно","Скрытые тикеты",                "Юзер видит канал только после оплаты"),
-        (I_STAR,   "Удобно",   "Всё в одном окне",              "Категории, корзина, скидки, чек"),
+        (I_BOLT,   "Быстро",    "Оформление за 2 минуты",  "Без ожидания менеджера"),
+        (I_SHIELD, "Безопасно", "Скрытые тикеты",          "Юзер видит канал после оплаты"),
+        (I_STAR,   "Удобно",    "Всё в одном окне",        "Категории, корзина, скидки, чек"),
     ]
-
     for i, (icon, title, sub, desc) in enumerate(features):
         fy1 = feats_y + i * (feat_h + feat_gap)
         fy2 = fy1 + feat_h
-
-        _grad(img, (right_x1, fy1, right_x2, fy2),
-              GREY, GREY_DARK, alpha=30, radius=20)
+        _grad(img, (right_x1, fy1, right_x2, fy2), GREY, GREY_DARK, alpha=30, radius=20)
         d.rounded_rectangle((right_x1, fy1, right_x2, fy2), radius=20,
                             outline=GREY + (180,), width=2)
-
         icon_size = 72
         ib_x = right_x1 + 24
-        ib_y = fy1 + (feat_h - icon_size) // 2
-        _alpha(img, (ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
-               GREY, alpha=60, radius=18)
-        d.rounded_rectangle((ib_x, ib_y, ib_x + icon_size, ib_y + icon_size),
+        ib_y = fy1 + (feat_h - icon_size)//2
+        _alpha(img, (ib_x, ib_y, ib_x+icon_size, ib_y+icon_size), GREY, alpha=60, radius=18)
+        d.rounded_rectangle((ib_x, ib_y, ib_x+icon_size, ib_y+icon_size),
                             radius=18, outline=SILVER + (150,), width=2)
-        _icon(d, ib_x + icon_size // 2, ib_y + icon_size // 2 + 1, icon, 32, SILVER)
-
+        _icon(d, ib_x+icon_size//2, ib_y+icon_size//2+1, icon, 32, SILVER)
         tx = ib_x + icon_size + 24
         ty = fy1 + 42
         d.text((tx, ty), title, font=_font(28), fill=SILVER)
-        d.text((tx, ty + 40), sub, font=_font(14), fill=TEXT_SOFT)
-        d.text((tx, ty + 66), desc, font=_font(12), fill=MUTED)
+        d.text((tx, ty+40), sub, font=_font(14), fill=TEXT_SOFT)
+        d.text((tx, ty+66), desc, font=_font(12), fill=MUTED)
 
-    # ── Footer ──
-    foot_y = H - PAD_Y - 30
-    d.line((PAD_X, foot_y, W - PAD_X, foot_y),
-           fill=STACK_HDR + (255,), width=2)
-    _icon(d, PAD_X + 12, foot_y + 20, I_INFO, 16, DIM)
-    d.text((PAD_X + 38, foot_y + 10),
-           "Нажми «Открыть Автозаказ» ниже — чтобы начать",
-           font=_font(15), fill=DIM)
+    _footer(d, "Нажми «Открыть Автозаказ» — чтобы начать")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
 
-    right_txt = "READY TO USE · v1.0"
-    rw = _tw(d, right_txt, _font(14))
-    d.text((W - PAD_X - rw, foot_y + 10), right_txt,
-           font=_font(14), fill=GREY_LIGHT)
 
+def render_categories() -> io.BytesIO:
+    img, d = _canvas("категории")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    d.text((PAD_X, body_y), "Выберите категорию", font=_font(44), fill=TEXT)
+    d.text((PAD_X, body_y+56), "7 разделов · товары за реальные деньги", font=_font(16), fill=MUTED)
+    _stripe(d, PAD_X, body_y+90, CANVAS_W-M-PAD_X, SILVER)
+
+    cats = [
+        ("Discord", "Нитро, Бусты, Гифты", I_GEM),
+        ("Telegram", "Звёзды, Аккаунты, Прокси", I_BOLT),
+        ("Steam", "Пополнение, Смена региона", I_CARD),
+        ("Roblox", "Robux, Plus, Подарочные", I_BOX),
+        ("Spotify", "Индивидуальная подписка", I_STAR),
+        ("Боты и Дизайн", "Разработка, оформление", I_TAG),
+        ("Украшения", "Профили, Бейджи, Наборы", I_SHIELD),
+    ]
+
+    grid_y = body_y + 120
+    grid_bottom = CANVAS_H - M - PAD_Y - 26
+    gap = 16
+    cols = 3
+    cell_w = (CANVAS_W - 2*PAD_X - gap*(cols-1)) // cols
+    rows = math.ceil(len(cats)/cols)
+    cell_h = (grid_bottom - grid_y - gap*(rows-1)) // rows
+    cell_h = min(cell_h, 180)
+
+    for i, (title, sub, icon) in enumerate(cats):
+        r, c = divmod(i, cols)
+        cx1 = PAD_X + c*(cell_w+gap)
+        cy1 = grid_y + r*(cell_h+gap)
+        cx2 = cx1 + cell_w
+        cy2 = cy1 + cell_h
+
+        _grad(img, (cx1, cy1, cx2, cy2), GREY, GREY_DARK, alpha=20, radius=18)
+        d.rounded_rectangle((cx1, cy1, cx2, cy2), radius=18,
+                            outline=GREY + (180,), width=2)
+
+        icon_size = 64
+        ib_x = cx1 + 24
+        ib_y = cy1 + (cell_h-icon_size)//2
+        _alpha(img, (ib_x, ib_y, ib_x+icon_size, ib_y+icon_size), GREY, alpha=55, radius=16)
+        d.rounded_rectangle((ib_x, ib_y, ib_x+icon_size, ib_y+icon_size),
+                            radius=16, outline=SILVER + (180,), width=2)
+        _icon(d, ib_x+icon_size//2, ib_y+icon_size//2+1, icon, 28, SILVER)
+
+        tx = ib_x + icon_size + 18
+        d.text((tx, cy1+24), title, font=_font(22), fill=TEXT)
+        d.text((tx, cy1+56), sub, font=_font(13), fill=MUTED)
+
+    _footer(d, "Нажмите на селект ниже — чтобы выбрать категорию")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+def render_products(cat_title: str, items: list, page: int, total_pages: int) -> io.BytesIO:
+    img, d = _canvas("товары")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    d.text((PAD_X, body_y), cat_title, font=_font(40), fill=TEXT)
+    d.text((PAD_X, body_y+52), f"Страница {page} из {total_pages}", font=_font(16), fill=MUTED)
+    _stripe(d, PAD_X, body_y+84, CANVAS_W-M-PAD_X, SILVER)
+
+    list_y = body_y + 110
+    list_bottom = CANVAS_H - M - PAD_Y - 26
+    n = max(len(items), 1)
+    row_h = min(110, (list_bottom - list_y - (n-1)*12) // n)
+    gap = 12
+
+    for i, item in enumerate(items):
+        ry1 = list_y + i*(row_h+gap)
+        ry2 = ry1 + row_h
+        _grad(img, (PAD_X, ry1, CANVAS_W-M-PAD_X, ry2), GREY, GREY_DARK, alpha=15, radius=14)
+        d.rounded_rectangle((PAD_X, ry1, CANVAS_W-M-PAD_X, ry2), radius=14,
+                            outline=GREY + (150,), width=2)
+
+        d.rounded_rectangle((PAD_X+8, ry1+12, PAD_X+12, ry2-12), radius=2, fill=GREY)
+
+        tx = PAD_X + 36
+        d.text((tx, ry1+20), item["name"], font=_font(24), fill=TEXT)
+        d.text((tx, ry1+54), item["desc"], font=_font(14), fill=MUTED)
+
+        price = item["price"]
+        unit = item.get("unit", "шт")
+        price_str = f"{price} ₽" + ("" if item["fixed"] else f" / {unit}")
+        pf = _font(28)
+        pw = _tw(d, price_str, pf)
+        d.text((CANVAS_W-M-PAD_X-36-pw, ry1+row_h//2-16), price_str, font=pf, fill=SILVER)
+
+        if not item["fixed"]:
+            d.text((CANVAS_W-M-PAD_X-36-pw, ry1+row_h//2+20), "количество — через модалку",
+                   font=_font(11), fill=GREY_LIGHT)
+
+    _footer(d, "Выберите товар в селекте ниже")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+def render_cart(cart: dict) -> io.BytesIO:
+    img, d = _canvas("корзина")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    d.text((PAD_X, body_y), "Корзина", font=_font(44), fill=TEXT)
+    d.text((PAD_X, body_y+56), "Товары для оформления", font=_font(16), fill=MUTED)
+    _stripe(d, PAD_X, body_y+90, CANVAS_W-M-PAD_X, SILVER)
+
+    list_y = body_y + 110
+    list_bottom = CANVAS_H - M - PAD_Y - 120
+
+    items = cart["items"]
+    if not items:
+        d.text((CANVAS_W//2, (list_y+list_bottom)//2), "Корзина пуста",
+               font=_font(32), fill=DIM, anchor="mm")
+    else:
+        n = min(len(items), 5)
+        row_h = min(90, (list_bottom - list_y - (n-1)*10)//n)
+        for i, it in enumerate(items[:5]):
+            ry1 = list_y + i*(row_h+10)
+            ry2 = ry1 + row_h
+            _grad(img, (PAD_X, ry1, CANVAS_W-M-PAD_X, ry2), GREY, GREY_DARK, alpha=15, radius=12)
+            d.rounded_rectangle((PAD_X, ry1, CANVAS_W-M-PAD_X, ry2), radius=12,
+                                outline=GREY + (150,), width=2)
+
+            d.text((PAD_X+24, ry1+row_h//2-14), it["name"], font=_font(20), fill=TEXT)
+            d.text((PAD_X+24, ry1+row_h//2+12), f"× {it['qty']} {it.get('unit','шт')}",
+                   font=_font(13), fill=GREY_LIGHT)
+
+            total = math.ceil(it["price"]*it["qty"])
+            tf = _font(24)
+            tw = _tw(d, f"{total} ₽", tf)
+            d.text((CANVAS_W-M-PAD_X-24-tw, ry1+row_h//2-12),
+                   f"{total} ₽", font=tf, fill=SILVER)
+
+    # Итог
+    total = math.ceil(sum(i["price"]*i["qty"] for i in items))
+    sum_y = list_bottom + 20
+    _grad(img, (PAD_X, sum_y, CANVAS_W-M-PAD_X, sum_y+80), GREY, GREY_DARK, alpha=25, radius=14)
+    d.rounded_rectangle((PAD_X, sum_y, CANVAS_W-M-PAD_X, sum_y+80), radius=14,
+                        outline=SILVER + (200,), width=2)
+    d.text((PAD_X+24, sum_y+26), "ИТОГО:", font=_font(20), fill=SILVER)
+    tf = _font(40)
+    total_str = f"{total} ₽"
+    tw = _tw(d, total_str, tf)
+    d.text((CANVAS_W-M-PAD_X-24-tw, sum_y+18), total_str, font=tf, fill=SILVER)
+
+    _footer(d, "Проверьте товары и нажмите «Оформить»")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+def render_checkout(cart: dict) -> io.BytesIO:
+    img, d = _canvas("оплата")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    d.text((PAD_X, body_y), "Оплата заказа", font=_font(44), fill=TEXT)
+    d.text((PAD_X, body_y+56), "Реквизиты и итоговая сумма", font=_font(16), fill=MUTED)
+    _stripe(d, PAD_X, body_y+90, CANVAS_W-M-PAD_X, SILVER)
+
+    total = math.ceil(sum(i["price"]*i["qty"] for i in cart["items"]))
+    final = math.ceil(total - math.floor(total*cart["discount"]/100))
+
+    # Сумма
+    sum_y = body_y + 120
+    _grad(img, (PAD_X, sum_y, CANVAS_W-M-PAD_X, sum_y+160), GREY, GREY_DARK, alpha=30, radius=20)
+    d.rounded_rectangle((PAD_X, sum_y, CANVAS_W-M-PAD_X, sum_y+160), radius=20,
+                        outline=SILVER + (200,), width=3)
+    d.text((CANVAS_W//2, sum_y+30), "ИТОГО К ОПЛАТЕ", font=_font(16), fill=SILVER, anchor="mm")
+    tf = _font(80)
+    tw = _tw(d, f"{final} ₽", tf)
+    d.text(((CANVAS_W-tw)//2, sum_y+60), f"{final} ₽", font=tf, fill=TEXT)
+
+    if cart["discount"] > 0:
+        d.text((CANVAS_W//2, sum_y+140), f"Скидка {cart['discount']}% применена",
+               font=_font(16), fill=GREEN, anchor="mm")
+
+    # Реквизиты
+    req_y = sum_y + 200
+    d.text((PAD_X, req_y), "РЕКВИЗИТЫ", font=_font(18), fill=GREY_LIGHT)
+    _stripe(d, PAD_X, req_y+30, PAD_X+400, GREY_LIGHT)
+
+    banks = {
+        "tbank": ("Т-Банк", "+7 900 000-00-00", "Тимофей Д."),
+        "sbp": ("СБП", "+7 900 000-00-00", "Тимофей Д."),
+        "ozon": ("ОзонБанк", "2204 3204 4881 5151", "Тимофей Д."),
+    }
+    bank = banks[cart["bank"]]
+    rows = [
+        ("Банк", bank[0]),
+        ("Номер", bank[1]),
+        ("Получатель", bank[2]),
+    ]
+    for i, (k, v) in enumerate(rows):
+        ry = req_y + 50 + i*40
+        d.text((PAD_X, ry), k, font=_font(16), fill=MUTED)
+        d.text((PAD_X+250, ry), v, font=_font(20), fill=TEXT)
+
+    _footer(d, "Переведите сумму → нажмите «Я оплатил»")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+def render_receipt() -> io.BytesIO:
+    img, d = _canvas("чек")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    d.text((PAD_X, body_y), "Пришлите чек", font=_font(44), fill=TEXT)
+    d.text((PAD_X, body_y+56), "Фото или PDF — следующим сообщением", font=_font(16), fill=MUTED)
+    _stripe(d, PAD_X, body_y+90, CANVAS_W-M-PAD_X, SILVER)
+
+    zone_y1 = body_y + 140
+    zone_y2 = zone_y1 + 400
+
+    # Рамка загрузки (пунктирная имитация)
+    d.rounded_rectangle((PAD_X+100, zone_y1, CANVAS_W-M-PAD_X-100, zone_y2),
+                        radius=24, outline=GREY_LIGHT + (200,), width=3)
+    _alpha(img, (PAD_X+100, zone_y1, CANVAS_W-M-PAD_X-100, zone_y2),
+           GREY, alpha=10, radius=24)
+
+    _icon(d, CANVAS_W//2, zone_y1+140, 0xf574, 80, SILVER)
+    d.text((CANVAS_W//2, zone_y1+240), "Отправьте файл в этот канал",
+           font=_font(32), fill=TEXT, anchor="mm")
+    d.text((CANVAS_W//2, zone_y1+290), "PNG · JPG · PDF · до 8 МБ",
+           font=_font(18), fill=GREY_LIGHT, anchor="mm")
+
+    d.text((CANVAS_W//2, zone_y2+40), "Бот сам поймает ваш файл и создаст тикет",
+           font=_font(16), fill=MUTED, anchor="mm")
+
+    _footer(d, "Просто киньте чек в канал ниже")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+def render_success() -> io.BytesIO:
+    img, d = _canvas("успех")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    cy = body_y + body_h//2 - 100
+
+    _alpha(img, (CANVAS_W//2-120, cy-120, CANVAS_W//2+120, cy+120),
+           GREEN, alpha=30, radius=200)
+    _icon(d, CANVAS_W//2, cy, I_CHECK, 120, GREEN)
+
+    d.text((CANVAS_W//2, cy+180), "Заказ оформлен!",
+           font=_font(52), fill=GREEN, anchor="mm")
+    d.text((CANVAS_W//2, cy+240), "Чек отправлен на проверку",
+           font=_font(22), fill=TEXT_SOFT, anchor="mm")
+    d.text((CANVAS_W//2, cy+280), "Менеджер подтвердит оплату — вы получите доступ к тикету",
+           font=_font(16), fill=MUTED, anchor="mm")
+
+    _footer(d, "Спасибо за покупку в Diamond Shop")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+def render_ticket(cart: dict, user_name: str, receipt_url: str) -> io.BytesIO:
+    img, d = _canvas("тикет")
+    body_y = 140
+    body_h = CANVAS_H - M - PAD_Y - body_y - 26
+
+    d.text((PAD_X, body_y), "🧾 Новый заказ", font=_font(44), fill=TEXT)
+    d.text((PAD_X, body_y+56), f"От: {user_name}", font=_font(16), fill=MUTED)
+    _stripe(d, PAD_X, body_y+90, CANVAS_W-M-PAD_X, SILVER)
+
+    # Товары
+    list_y = body_y + 120
+    for i, it in enumerate(cart["items"][:6]):
+        ry = list_y + i*50
+        d.text((PAD_X, ry), f"• {it['name']}", font=_font(22), fill=TEXT)
+        total = math.ceil(it["price"]*it["qty"])
+        d.text((PAD_X+700, ry), f"× {it['qty']} = {total} ₽",
+               font=_font(20), fill=SILVER)
+
+    # Итог
+    total = math.ceil(sum(i["price"]*i["qty"] for i in cart["items"]))
+    final = math.ceil(total - math.floor(total*cart["discount"]/100))
+
+    sum_y = list_y + 400
+    _grad(img, (PAD_X, sum_y, CANVAS_W-M-PAD_X, sum_y+120), GREY, GREY_DARK, alpha=30, radius=16)
+    d.rounded_rectangle((PAD_X, sum_y, CANVAS_W-M-PAD_X, sum_y+120), radius=16,
+                        outline=SILVER + (200,), width=2)
+    d.text((PAD_X+30, sum_y+30), "ИТОГО:", font=_font(24), fill=SILVER)
+    tf = _font(48)
+    final_str = f"{final} ₽"
+    tw = _tw(d, final_str, tf)
+    d.text((CANVAS_W-M-PAD_X-30-tw, sum_y+30), final_str, font=tf, fill=TEXT)
+    if cart["discount"] > 0:
+        d.text((PAD_X+30, sum_y+80), f"Скидка: {cart['discount']}%",
+               font=_font(16), fill=GREEN)
+
+    _footer(d, "Одобрите оплату кнопкой ниже")
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
     buf.seek(0)
@@ -282,86 +588,49 @@ def render_autoorder_panel() -> io.BytesIO:
 # КАТАЛОГ
 # ============================================================
 CATALOG = {
-    "discord": {
-        "title": "Discord",
-        "emoji": "<:Discord:1464831837300854936>",
-        "items": [
-            {"id": "d_n1",  "name": "Discord Nitro 1 Month",  "desc": "Полная подписка",     "price": 460,  "fixed": True},
-            {"id": "d_n12", "name": "Discord Nitro 12 Month", "desc": "Годовая подписка",    "price": 4410, "fixed": True},
-            {"id": "d_nb",  "name": "Nitro Basic",            "desc": "Базовый на месяц",    "price": 300,  "fixed": True},
-            {"id": "d_ng",  "name": "Nitro Gift",             "desc": "Подарочная подписка", "price": 790,  "fixed": True},
-            {"id": "d_b",   "name": "Boosts",                 "desc": "Улучшение сервера",   "price": 35,   "fixed": False, "unit": "шт"},
-        ],
-    },
-    "steam": {
-        "title": "Steam",
-        "emoji": "<:Steam:1464833200416100402>",
-        "items": [
-            {"id": "s_rub", "name": "Пополнение Steam", "desc": "Мин. 100 ₽",   "price": 1.1, "fixed": False, "unit": "₽"},
-            {"id": "s_reg", "name": "Смена региона",     "desc": "Любой регион", "price": 250, "fixed": True},
-        ],
-    },
-    "telegram": {
-        "title": "Telegram",
-        "emoji": "<:Telegram:1465720888677896314>",
-        "items": [
-            {"id": "t_star", "name": "Звёзды Telegram",       "desc": "Валюта",       "price": 1.58, "fixed": False, "unit": "шт"},
-            {"id": "t_acc",  "name": "Аккаунт Telegram",      "desc": "Без спама",    "price": 250,  "fixed": True},
-            {"id": "t_acc2", "name": "Аккаунт (спам-блок)",   "desc": "С огранич.",   "price": 190,  "fixed": True},
-            {"id": "t_prox", "name": "Прокси Telegram",       "desc": "Рабочие",      "price": 100,  "fixed": True},
-        ],
-    },
-    "roblox": {
-        "title": "Roblox",
-        "emoji": "<:Roblox:1465752155251150911>",
-        "items": [
-            {"id": "r_bux",  "name": "Robux",          "desc": "Валюта Roblox", "price": 0.82, "fixed": False, "unit": "шт"},
-            {"id": "r_plus", "name": "Roblox Plus",    "desc": "Подписка",      "price": 90,   "fixed": True},
-        ],
-    },
-    "spotify": {
-        "title": "Spotify",
-        "emoji": "<:Spotify:1465770796411785330>",
-        "items": [
-            {"id": "sp_1", "name": "Spotify Individual", "desc": "На месяц", "price": 270, "fixed": True},
-        ],
-    },
-    "bodesign": {
-        "title": "Боты и Дизайн",
-        "emoji": "<:Design:1465771436580012106>",
-        "items": [
-            {"id": "bd_bot",    "name": "Разработка бота", "desc": "Индивидуально",  "price": 500, "fixed": True},
-            {"id": "bd_design", "name": "Дизайн сервера",  "desc": "Под ключ",       "price": 150, "fixed": True},
-        ],
-    },
-    "decor": {
-        "title": "Украшения",
-        "emoji": "<:Decoration:1465729329290936403>",
-        "items": [
-            {"id": "dec_1", "name": "Украшение профиля", "desc": "Эффекты и рамки", "price": 200, "fixed": True},
-            {"id": "dec_2", "name": "Наборы Discord",    "desc": "Полный комплект", "price": 420, "fixed": True},
-        ],
-    },
+    "discord": {"title": "Discord", "emoji": "<:Discord:1464831837300854936>", "items": [
+        {"id": "d_n1", "name": "Discord Nitro 1 Month", "desc": "Полная подписка", "price": 460, "fixed": True},
+        {"id": "d_n12", "name": "Discord Nitro 12 Month", "desc": "Годовая подписка", "price": 4410, "fixed": True},
+        {"id": "d_nb", "name": "Nitro Basic", "desc": "Базовый на месяц", "price": 300, "fixed": True},
+        {"id": "d_ng", "name": "Nitro Gift", "desc": "Подарочная подписка", "price": 790, "fixed": True},
+        {"id": "d_b", "name": "Boosts", "desc": "Улучшение сервера", "price": 35, "fixed": False, "unit": "шт"},
+    ]},
+    "steam": {"title": "Steam", "emoji": "<:Steam:1464833200416100402>", "items": [
+        {"id": "s_rub", "name": "Пополнение Steam", "desc": "Мин. 100 ₽", "price": 1.1, "fixed": False, "unit": "₽"},
+        {"id": "s_reg", "name": "Смена региона", "desc": "Любой регион", "price": 250, "fixed": True},
+    ]},
+    "telegram": {"title": "Telegram", "emoji": "<:Telegram:1465720888677896314>", "items": [
+        {"id": "t_star", "name": "Звёзды Telegram", "desc": "Валюта", "price": 1.58, "fixed": False, "unit": "шт"},
+        {"id": "t_acc", "name": "Аккаунт Telegram", "desc": "Без спама", "price": 250, "fixed": True},
+        {"id": "t_acc2", "name": "Аккаунт (спам-блок)", "desc": "С огранич.", "price": 190, "fixed": True},
+        {"id": "t_prox", "name": "Прокси Telegram", "desc": "Рабочие", "price": 100, "fixed": True},
+    ]},
+    "roblox": {"title": "Roblox", "emoji": "<:Roblox:1465752155251150911>", "items": [
+        {"id": "r_bux", "name": "Robux", "desc": "Валюта Roblox", "price": 0.82, "fixed": False, "unit": "шт"},
+        {"id": "r_plus", "name": "Roblox Plus", "desc": "Подписка", "price": 90, "fixed": True},
+    ]},
+    "spotify": {"title": "Spotify", "emoji": "<:Spotify:1465770796411785330>", "items": [
+        {"id": "sp_1", "name": "Spotify Individual", "desc": "На месяц", "price": 270, "fixed": True},
+    ]},
+    "bodesign": {"title": "Боты и Дизайн", "emoji": "<:Design:1465771436580012106>", "items": [
+        {"id": "bd_bot", "name": "Разработка бота", "desc": "Индивидуально", "price": 500, "fixed": True},
+        {"id": "bd_design", "name": "Дизайн сервера", "desc": "Под ключ", "price": 150, "fixed": True},
+    ]},
+    "decor": {"title": "Украшения", "emoji": "<:Decoration:1465729329290936403>", "items": [
+        {"id": "dec_1", "name": "Украшение профиля", "desc": "Эффекты и рамки", "price": 200, "fixed": True},
+        {"id": "dec_2", "name": "Наборы Discord", "desc": "Полный комплект", "price": 420, "fixed": True},
+    ]},
 }
 
 PER_PAGE = 5
-
-# ============================================================
-# СТЕЙТ
-# ============================================================
 CARTS: Dict[int, dict] = {}
 
 def _get_cart(uid: int) -> dict:
     if uid not in CARTS:
         CARTS[uid] = {
-            "items": [],
-            "discount": 0,
-            "promo": "",
-            "bank": "tbank",
-            "category": None,
-            "page": 1,
-            "receipt": False,
-            "created_at": time.time(),
+            "items": [], "discount": 0, "promo": "", "bank": "tbank",
+            "category": None, "page": 1, "receipt": False,
+            "created_at": time.time(), "msg": None,
         }
     return CARTS[uid]
 
@@ -369,85 +638,14 @@ def _reset_cart(uid: int):
     CARTS.pop(uid, None)
 
 def _cart_total(cart: dict) -> int:
-    return math.ceil(sum(i["price"] * i["qty"] for i in cart["items"]))
+    return math.ceil(sum(i["price"]*i["qty"] for i in cart["items"]))
 
 def _cart_final(cart: dict) -> int:
     total = _cart_total(cart)
-    discount_amount = math.floor(total * cart["discount"] / 100)
-    return math.ceil(total - discount_amount)
+    return math.ceil(total - math.floor(total*cart["discount"]/100))
 
 # ============================================================
-# EMBED-ХЕЛПЕРЫ
-# ============================================================
-def _embed_categories():
-    return disnake.Embed(
-        title="Автозаказ — выбор категории",
-        description=(
-            "> Выберите категорию товаров из списка ниже.\n\n"
-            f"> **Доступно категорий:** `{len(CATALOG)}`\n"
-            "> **Таймер сессии:** `5 минут`"
-        ),
-        color=COLOR_GREY,
-    ).set_image(url=IMG_STRIPE)
-
-def _embed_products(cat_key: str, page: int):
-    cat = CATALOG[cat_key]
-    total = len(cat["items"])
-    total_pages = (total + PER_PAGE - 1) // PER_PAGE
-    return disnake.Embed(
-        title=f"{cat['title']} · Автозаказ",
-        description=(
-            f"> Выберите товар — он добавится в корзину.\n\n"
-            f"> **Страница:** `{page} / {total_pages}`\n"
-            f"> **Товаров в корзине:** `{0}`"
-        ),
-        color=COLOR_GREY,
-    ).set_image(url=IMG_STRIPE)
-
-def _embed_cart(cart: dict) -> disnake.Embed:
-    if not cart["items"]:
-        return disnake.Embed(
-            title="Корзина пуста",
-            description="> Добавьте товары из каталога.",
-            color=COLOR_GREY,
-        )
-    lines = []
-    for i in cart["items"]:
-        total = math.ceil(i["price"] * i["qty"])
-        unit = "" if i["qty"] == 1 else f" × {i['qty']}"
-        lines.append(f"> `{i['name']}`{unit} — **{total} ₽**")
-    total = _cart_total(cart)
-    e = disnake.Embed(
-        title="Корзина",
-        description="\n".join(lines) + f"\n\n> **Итого:** `{total} ₽`",
-        color=COLOR_GREY,
-    )
-    return e
-
-def _embed_checkout(cart: dict) -> disnake.Embed:
-    total = _cart_total(cart)
-    final = _cart_final(cart)
-    discount_line = ""
-    if cart["discount"] > 0:
-        discount_line = f"\n> **Скидка:** `{cart['discount']}%` (`-{total - final} ₽`)"
-    banks = {
-        "tbank": "Т-Банк  ·  `+7 900 000-00-00`",
-        "sbp":   "СБП      ·  `+7 900 000-00-00`",
-        "ozon":  "ОзонБанк ·  `2204 3204 4881 5151`",
-    }
-    return disnake.Embed(
-        title="Оплата заказа",
-        description=(
-            f"> **Сумма:** `{total} ₽`"
-            f"{discount_line}\n\n"
-            f"> **Итого к оплате:** **`{final} ₽`**\n\n"
-            f"> **Реквизиты:**\n> {banks[cart['bank']]}"
-        ),
-        color=COLOR_GREY,
-    )
-
-# ============================================================
-# VIEW: ГЛАВНАЯ КНОПКА
+# VIEWS
 # ============================================================
 class AutoOrderOpenView(View):
     def __init__(self):
@@ -461,76 +659,80 @@ class AutoOrderOpenView(View):
     )
     async def open_btn(self, button, inter):
         _reset_cart(inter.author.id)
-        cart = _get_cart(inter.author.id)
-        cart["created_at"] = time.time()
+        _get_cart(inter.author.id)
         try:
+            buf = await asyncio.to_thread(render_categories)
+            file = disnake.File(buf, filename="categories.png")
+            embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://categories.png")
             await inter.response.send_message(
-                embed=_embed_categories(),
-                view=CategoriesView(),
-                ephemeral=True,
+                embed=embed, file=file, view=CategoriesView(), ephemeral=True
             )
-        except disnake.InteractionResponded:
-            pass
+        except Exception as e:
+            logger.exception(f"open_btn: {e}")
+            await inter.response.send_message(f"❌ {e}", ephemeral=True)
 
-# ============================================================
-# VIEW: КАТЕГОРИИ
-# ============================================================
+
 class CategorySelect(Select):
     def __init__(self):
-        opts = []
-        for key, cat in CATALOG.items():
-            opts.append(SelectOption(
-                label=cat["title"],
-                value=key,
-                emoji=PartialEmoji.from_str(cat["emoji"]),
-            ))
-        super().__init__(
-            placeholder="Выберите категорию...",
-            min_values=1, max_values=1,
-            options=opts,
-            custom_id="autoorder:cat",
-        )
+        opts = [SelectOption(label=c["title"], value=k,
+                             emoji=PartialEmoji.from_str(c["emoji"]))
+                for k, c in CATALOG.items()]
+        super().__init__(placeholder="Выберите категорию...", min_values=1, max_values=1,
+                         options=opts, custom_id="autoorder:cat")
 
     async def callback(self, inter):
         cart = _get_cart(inter.author.id)
         cart["category"] = self.values[0]
         cart["page"] = 1
-        try:
-            await inter.response.edit_message(
-                embed=_embed_products(cart["category"], 1),
-                view=ProductsView(cart["category"], 1),
-            )
-        except Exception as e:
-            logger.warning(f"cat_select: {e}")
+        await _show_products(inter, self.values[0], 1)
+
 
 class CategoriesView(View):
     def __init__(self):
         super().__init__(timeout=SESSION_TIMEOUT)
         self.add_item(CategorySelect())
 
-# ============================================================
-# VIEW: ТОВАРЫ
-# ============================================================
-class ProductSelect(Select):
-    def __init__(self, cat_key: str, page: int):
-        cat = CATALOG[cat_key]
-        start = (page - 1) * PER_PAGE
-        end = start + PER_PAGE
-        items = cat["items"][start:end]
-        opts = []
-        for item in items:
-            price_str = f"{item['price']} ₽" + (f" / {item.get('unit','шт')}" if not item["fixed"] else "")
-            opts.append(SelectOption(
-                label=item["name"][:80],
-                description=f"{price_str} · {item['desc']}"[:100],
-                value=item["id"],
-            ))
-        super().__init__(
-            placeholder=f"Товары · стр. {page}",
-            min_values=1, max_values=1,
-            options=opts,
-            custom_id=f"autoorder:prod:{cat_key}:{page}",
+
+async def _show_products(inter, cat_key, page):
+    cat = CATALOG[cat_key]
+    total = len(cat["items"])
+    total_pages = (total + PER_PAGE - 1) // PER_PAGE
+    page = max(1, min(page, total_pages))
+    start = (page-1) * PER_PAGE
+    items = cat["items"][start:start+PER_PAGE]
+
+    buf = await asyncio.to_thread(render_products, cat["title"], items, page, total_pages)
+    file = disnake.File(buf, filename="products.png")
+    embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://products.png")
+
+    try:
+        await inter.response.edit_message(
+            embed=embed, file=file, attachments=[], view=ProductsView(cat_key, page)
         )
+    except disnake.InteractionResponded:
+        await inter.edit_original_response(
+            embed=embed, file=file, attachments=[], view=ProductsView(cat_key, page)
+        )
+
+
+class ProductSelect(Select):
+    def __init__(self, cat_key, page):
+        cat = CATALOG[cat_key]
+        start = (page-1) * PER_PAGE
+        items = cat["items"][start:start+PER_PAGE]
+        opts = []
+        for it in items:
+            price = it["price"]
+            unit = it.get("unit", "шт")
+            price_str = f"{price} ₽" + ("" if it["fixed"] else f" / {unit}")
+            opts.append(SelectOption(
+                label=it["name"][:80],
+                description=f"{price_str} · {it['desc']}"[:100],
+                value=it["id"],
+            ))
+        super().__init__(placeholder=f"Товары · стр. {page}",
+                         min_values=1, max_values=1, options=opts,
+                         custom_id=f"autoorder:prod:{cat_key}:{page}")
 
     async def callback(self, inter):
         parts = self.custom_id.split(":")
@@ -538,32 +740,25 @@ class ProductSelect(Select):
         item_id = self.values[0]
         item = next((i for i in CATALOG[cat_key]["items"] if i["id"] == item_id), None)
         if not item:
-            return await inter.response.send_message("❌ Товар не найден", ephemeral=True)
+            return await inter.response.send_message("❌ Не найден", ephemeral=True)
 
+        cart = _get_cart(inter.author.id)
         if item["fixed"]:
-            cart = _get_cart(inter.author.id)
             existing = next((i for i in cart["items"] if i["id"] == item_id), None)
             if existing:
                 existing["qty"] += 1
             else:
                 cart["items"].append({
-                    "id": item_id, "name": item["name"],
-                    "price": item["price"], "qty": 1,
-                    "unit": item.get("unit", "шт"),
+                    "id": item_id, "name": item["name"], "price": item["price"],
+                    "qty": 1, "unit": "шт",
                 })
-            await inter.response.edit_message(
-                embed=_embed_products(cat_key, cart["page"]),
-                view=ProductsView(cat_key, cart["page"]),
-            )
-            try:
-                await inter.followup.send(f"✅ `{item['name']}` добавлен в корзину", ephemeral=True)
-            except Exception:
-                pass
+            await inter.response.send_message(f"✅ `{item['name']}` в корзине", ephemeral=True)
         else:
             await inter.response.send_modal(QtyModal(cat_key, item))
 
+
 class QtyModal(Modal):
-    def __init__(self, cat_key: str, item: dict):
+    def __init__(self, cat_key, item):
         self.cat_key = cat_key
         self.item = item
         super().__init__(
@@ -571,8 +766,7 @@ class QtyModal(Modal):
             components=[TextInput(
                 label=f"Сколько {item.get('unit','шт')}?",
                 placeholder="Введите число",
-                custom_id="qty",
-                min_length=1, max_length=6,
+                custom_id="qty", min_length=1, max_length=6,
             )],
         )
 
@@ -581,7 +775,7 @@ class QtyModal(Modal):
             qty = int(self.text_values["qty"])
             if qty <= 0: raise ValueError
         except Exception:
-            return await inter.response.send_message("❌ Введите положительное число", ephemeral=True)
+            return await inter.response.send_message("❌ Число > 0", ephemeral=True)
 
         cart = _get_cart(inter.author.id)
         existing = next((i for i in cart["items"] if i["id"] == self.item["id"]), None)
@@ -593,142 +787,139 @@ class QtyModal(Modal):
                 "price": self.item["price"], "qty": qty,
                 "unit": self.item.get("unit", "шт"),
             })
-        await inter.response.edit_message(
-            embed=_embed_products(self.cat_key, cart["page"]),
-            view=ProductsView(self.cat_key, cart["page"]),
+        await inter.response.send_message(
+            f"✅ `{self.item['name']}` × {qty} добавлен", ephemeral=True
         )
-        try:
-            await inter.followup.send(
-                f"✅ `{self.item['name']}` × {qty} добавлен", ephemeral=True
-            )
-        except Exception:
-            pass
+
 
 class ProductsView(View):
-    def __init__(self, cat_key: str, page: int):
+    def __init__(self, cat_key, page):
         super().__init__(timeout=SESSION_TIMEOUT)
         self.cat_key = cat_key
         self.page = page
-
         self.add_item(ProductSelect(cat_key, page))
 
         total = len(CATALOG[cat_key]["items"])
         total_pages = (total + PER_PAGE - 1) // PER_PAGE
 
         if total_pages > 1:
-            prev = Button(label="← Назад", style=ButtonStyle.secondary, custom_id=f"autoorder:prev:{page}", disabled=(page <= 1))
-            prev.callback = self._prev
-            self.add_item(prev)
+            if page > 1:
+                prev = Button(label="← Назад", style=ButtonStyle.secondary,
+                              custom_id=f"autoorder:prev:{cat_key}:{page}")
+                prev.callback = self._prev
+                self.add_item(prev)
+            if page < total_pages:
+                nxt = Button(label="Далее →", style=ButtonStyle.secondary,
+                             custom_id=f"autoorder:next:{cat_key}:{page}")
+                nxt.callback = self._next
+                self.add_item(nxt)
 
-            nxt = Button(label="Далее →", style=ButtonStyle.secondary, custom_id=f"autoorder:next:{page}", disabled=(page >= total_pages))
-            nxt.callback = self._next
-            self.add_item(nxt)
-
-        back = Button(label="Категории", style=ButtonStyle.secondary, custom_id="autoorder:back_cat")
+        back = Button(label="Категории", style=ButtonStyle.secondary,
+                      custom_id="autoorder:back_cat")
         back.callback = self._back
         self.add_item(back)
 
-        to_cart = Button(label="Корзина", style=ButtonStyle.secondary, custom_id="autoorder:to_cart")
+        to_cart = Button(label="Корзина", style=ButtonStyle.secondary,
+                         custom_id="autoorder:to_cart")
         to_cart.callback = self._to_cart
         self.add_item(to_cart)
 
     async def _prev(self, inter):
-        cart = _get_cart(inter.author.id)
-        cart["page"] = max(1, self.page - 1)
-        await inter.response.edit_message(
-            embed=_embed_products(self.cat_key, cart["page"]),
-            view=ProductsView(self.cat_key, cart["page"]),
-        )
+        await _show_products(inter, self.cat_key, self.page-1)
 
     async def _next(self, inter):
-        cart = _get_cart(inter.author.id)
-        cart["page"] = self.page + 1
-        await inter.response.edit_message(
-            embed=_embed_products(self.cat_key, cart["page"]),
-            view=ProductsView(self.cat_key, cart["page"]),
-        )
+        await _show_products(inter, self.cat_key, self.page+1)
 
     async def _back(self, inter):
-        cart = _get_cart(inter.author.id)
-        cart["category"] = None
+        buf = await asyncio.to_thread(render_categories)
+        file = disnake.File(buf, filename="categories.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://categories.png")
         await inter.response.edit_message(
-            embed=_embed_categories(),
-            view=CategoriesView(),
+            embed=embed, file=file, attachments=[], view=CategoriesView()
         )
 
     async def _to_cart(self, inter):
         cart = _get_cart(inter.author.id)
         if not cart["items"]:
             return await inter.response.send_message("❌ Корзина пуста", ephemeral=True)
+        buf = await asyncio.to_thread(render_cart, cart)
+        file = disnake.File(buf, filename="cart.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://cart.png")
         await inter.response.edit_message(
-            embed=_embed_cart(cart),
-            view=CartView(),
+            embed=embed, file=file, attachments=[], view=CartView()
         )
 
-# ============================================================
-# VIEW: КОРЗИНА
-# ============================================================
+
 class CartView(View):
     def __init__(self):
         super().__init__(timeout=SESSION_TIMEOUT)
 
-        back = Button(label="Добавить ещё", style=ButtonStyle.secondary, custom_id="autoorder:add_more")
+        back = Button(label="Добавить ещё", style=ButtonStyle.secondary,
+                      custom_id="autoorder:add_more")
         back.callback = self._add_more
         self.add_item(back)
 
-        clear = Button(label="Очистить", style=ButtonStyle.secondary, custom_id="autoorder:clear")
+        clear = Button(label="Очистить", style=ButtonStyle.secondary,
+                       custom_id="autoorder:clear")
         clear.callback = self._clear
         self.add_item(clear)
 
-        checkout = Button(label="Оформить заказ", style=ButtonStyle.secondary, custom_id="autoorder:checkout")
+        checkout = Button(label="Оформить заказ", style=ButtonStyle.secondary,
+                          custom_id="autoorder:checkout")
         checkout.callback = self._checkout
         self.add_item(checkout)
 
     async def _add_more(self, inter):
-        cart = _get_cart(inter.author.id)
-        cart["category"] = None
+        buf = await asyncio.to_thread(render_categories)
+        file = disnake.File(buf, filename="categories.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://categories.png")
         await inter.response.edit_message(
-            embed=_embed_categories(),
-            view=CategoriesView(),
+            embed=embed, file=file, attachments=[], view=CategoriesView()
         )
 
     async def _clear(self, inter):
         _reset_cart(inter.author.id)
         _get_cart(inter.author.id)
+        buf = await asyncio.to_thread(render_categories)
+        file = disnake.File(buf, filename="categories.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://categories.png")
         await inter.response.edit_message(
-            embed=_embed_categories(),
-            view=CategoriesView(),
+            embed=embed, file=file, attachments=[], view=CategoriesView()
         )
 
     async def _checkout(self, inter):
         cart = _get_cart(inter.author.id)
         if not cart["items"]:
             return await inter.response.send_message("❌ Корзина пуста", ephemeral=True)
+        buf = await asyncio.to_thread(render_checkout, cart)
+        file = disnake.File(buf, filename="checkout.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://checkout.png")
         await inter.response.edit_message(
-            embed=_embed_checkout(cart),
-            view=CheckoutView(),
+            embed=embed, file=file, attachments=[], view=CheckoutView()
         )
 
-# ============================================================
-# VIEW: ОПЛАТА
-# ============================================================
+
 class CheckoutView(View):
     def __init__(self):
         super().__init__(timeout=SESSION_TIMEOUT)
 
-        promo = Button(label="Промокод", style=ButtonStyle.secondary, custom_id="autoorder:promo")
+        promo = Button(label="Промокод", style=ButtonStyle.secondary,
+                       custom_id="autoorder:promo")
         promo.callback = self._promo
         self.add_item(promo)
 
-        disc = Button(label="Скидка 10% из инвентаря", style=ButtonStyle.secondary, custom_id="autoorder:disc10")
+        disc = Button(label="Скидка 10% из инвентаря", style=ButtonStyle.secondary,
+                      custom_id="autoorder:disc10")
         disc.callback = self._disc10
         self.add_item(disc)
 
-        bank = Button(label="Сменить банк", style=ButtonStyle.secondary, custom_id="autoorder:bank")
+        bank = Button(label="Сменить банк", style=ButtonStyle.secondary,
+                      custom_id="autoorder:bank")
         bank.callback = self._bank
         self.add_item(bank)
 
-        paid = Button(label="Я оплатил", style=ButtonStyle.secondary, custom_id="autoorder:paid")
+        paid = Button(label="Я оплатил", style=ButtonStyle.secondary,
+                      custom_id="autoorder:paid")
         paid.callback = self._paid
         self.add_item(paid)
 
@@ -743,43 +934,40 @@ class CheckoutView(View):
         if cart["discount"] > 0:
             return await inter.response.send_message("❌ Скидка уже применена", ephemeral=True)
         cart["discount"] = 10
+        buf = await asyncio.to_thread(render_checkout, cart)
+        file = disnake.File(buf, filename="checkout.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://checkout.png")
         await inter.response.edit_message(
-            embed=_embed_checkout(cart),
-            view=CheckoutView(),
+            embed=embed, file=file, attachments=[], view=CheckoutView()
         )
 
     async def _bank(self, inter):
         cart = _get_cart(inter.author.id)
         banks = ["tbank", "sbp", "ozon"]
-        cart["bank"] = banks[(banks.index(cart["bank"]) + 1) % len(banks)]
+        cart["bank"] = banks[(banks.index(cart["bank"]) + 1) % 3]
+        buf = await asyncio.to_thread(render_checkout, cart)
+        file = disnake.File(buf, filename="checkout.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://checkout.png")
         await inter.response.edit_message(
-            embed=_embed_checkout(cart),
-            view=CheckoutView(),
+            embed=embed, file=file, attachments=[], view=CheckoutView()
         )
 
     async def _paid(self, inter):
-        cart = _get_cart(inter.author.id)
+        buf = await asyncio.to_thread(render_receipt)
+        file = disnake.File(buf, filename="receipt.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://receipt.png")
         await inter.response.edit_message(
-            embed=disnake.Embed(
-                title="Пришлите чек",
-                description=(
-                    "> Отправьте **фото или PDF** чек прямо в этот канал следующим сообщением.\n\n"
-                    "> Бот автоматически примет его и создаст тикет."
-                ),
-                color=COLOR_GREY,
-            ).set_image(url=IMG_STRIPE),
-            view=None,
+            embed=embed, file=file, attachments=[], view=None
         )
+
 
 class PromoModal(Modal):
     def __init__(self):
         super().__init__(
             title="Ввод промокода",
             components=[TextInput(
-                label="Промокод",
-                placeholder="Например: DIAMOND15",
-                custom_id="promo",
-                min_length=1, max_length=32,
+                label="Промокод", placeholder="Например: DIAMOND15",
+                custom_id="promo", min_length=1, max_length=32,
             )],
         )
 
@@ -789,24 +977,28 @@ class PromoModal(Modal):
         if code == "DIAMOND15":
             cart["discount"] = 15
             cart["promo"] = code
+            buf = await asyncio.to_thread(render_checkout, cart)
+            file = disnake.File(buf, filename="checkout.png")
+            embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://checkout.png")
             await inter.response.edit_message(
-                embed=_embed_checkout(cart),
-                view=CheckoutView(),
+                embed=embed, file=file, attachments=[], view=CheckoutView()
             )
         else:
             await inter.response.send_message("❌ Промокод не найден", ephemeral=True)
 
+
 # ============================================================
-# ФИНАЛИЗАЦИЯ (по чеку)
+# ФИНАЛИЗАЦИЯ ЗАКАЗА
 # ============================================================
-async def finalize_order(bot, user, cart, receipt_url: str):
+async def finalize_order(bot, user, cart, receipt_url):
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
+        logger.warning("[autoorder] гильдия не найдена")
         return
 
     cat = guild.get_channel(AUTOORDER_TICKET_CATEGORY)
     if not cat:
-        logger.warning(f"[autoorder] Категория {AUTOORDER_TICKET_CATEGORY} не найдена")
+        logger.warning(f"[autoorder] категория {AUTOORDER_TICKET_CATEGORY} не найдена")
         return
 
     raw = user.display_name.lower().replace(" ", "-")
@@ -814,7 +1006,7 @@ async def finalize_order(bot, user, cart, receipt_url: str):
 
     overwrites = {
         guild.default_role: disnake.PermissionOverwrite(view_channel=False),
-        user: disnake.PermissionOverwrite(view_channel=False),  # скрыт до одобрения
+        user: disnake.PermissionOverwrite(view_channel=False),
     }
     for rid in CONFIG.get("TICKET_MANAGE_ROLES", []):
         role = guild.get_role(rid)
@@ -825,56 +1017,49 @@ async def finalize_order(bot, user, cart, receipt_url: str):
 
     try:
         ticket = await cat.create_text_channel(name=raw, overwrites=overwrites)
+        logger.info(f"[autoorder] тикет создан: {ticket.name}")
     except Exception as e:
         logger.exception(f"[autoorder] create_ticket: {e}")
         return
 
-    lines = []
-    for i in cart["items"]:
-        total = math.ceil(i["price"] * i["qty"])
-        lines.append(f"> `{i['name']}` × {i['qty']} — **{total} ₽**")
-
-    total = _cart_total(cart)
-    final = _cart_final(cart)
-    discount = f"\n> **Скидка:** `{cart['discount']}%`" if cart["discount"] else ""
-
-    embed = disnake.Embed(
-        title="🧾 Автозаказ — новый заказ",
-        description=(
-            f"> **Юзер:** {user.mention}\n"
-            f"> **Банк:** `{cart['bank'].upper()}`"
-            f"{discount}\n\n"
-            + "\n".join(lines)
-            + f"\n\n> **Сумма:** `{total} ₽`\n> **К оплате:** **`{final} ₽`**"
-        ),
-        color=COLOR_GREY,
-    )
-    embed.set_image(url=receipt_url)
+    # Pillow-карточка заказа
+    try:
+        buf = await asyncio.to_thread(render_ticket, cart, user.display_name, receipt_url)
+        file = disnake.File(buf, filename="order.png")
+        embed = disnake.Embed(
+            title=f"🧾 Новый заказ — {user.mention}",
+            description=(
+                f"> **Пользователь:** {user.mention} (`{user.id}`)\n"
+                f"> **Банк:** `{cart['bank'].upper()}`\n"
+                f"> **Чек:** [открыть]({receipt_url})"
+            ),
+            color=COLOR_GREY,
+        ).set_image(url="attachment://order.png")
+    except Exception as e:
+        logger.exception(f"[autoorder] render_ticket: {e}")
+        file = None
+        embed = disnake.Embed(title="🧾 Новый заказ", color=COLOR_GREY)
 
     view = View(timeout=None)
-    approve = Button(label="Одобрить оплату", style=ButtonStyle.success, custom_id="autoorder:approve")
-    reject = Button(label="Отклонить", style=ButtonStyle.danger, custom_id="autoorder:reject")
+    approve = Button(label="✅ Одобрить оплату", style=ButtonStyle.success,
+                     custom_id="autoorder:approve")
+    reject = Button(label="❌ Отклонить", style=ButtonStyle.danger,
+                    custom_id="autoorder:reject")
 
     async def on_approve(inter2):
         await inter2.response.defer(ephemeral=True)
         try:
-            await ticket.set_permissions(user, view_channel=True, send_messages=True, read_message_history=True)
+            await ticket.set_permissions(user, view_channel=True, send_messages=True,
+                                          read_message_history=True)
             add_ticket_owner(ticket.id, user.id, cat.id)
         except Exception as e:
-            logger.warning(f"approve set_perms: {e}")
+            logger.warning(f"approve perms: {e}")
 
-        await ticket.send(
-            f"> ✅ {user.mention}, оплата подтверждена!\n"
-            f"> Менеджер приступит к выполнению заказа."
-        )
-        await inter2.followup.send("✅ Оплата одобрена, юзеру открыт доступ", ephemeral=True)
+        await ticket.send(f"> ✅ {user.mention}, оплата подтверждена! Менеджер приступит к заказу.")
+        await inter2.followup.send("✅ Оплата одобрена", ephemeral=True)
 
         try:
-            await user.send(
-                f"✅ **Оплата подтверждена**\n"
-                f"> Заказ на **{final} ₽** принят.\n"
-                f"> Тикет: {ticket.mention}"
-            )
+            await user.send(f"✅ **Оплата подтверждена**\n> Заказ на **{_cart_final(cart)} ₽** принят.\n> Тикет: {ticket.mention}")
         except Exception:
             pass
 
@@ -886,7 +1071,11 @@ async def finalize_order(bot, user, cart, receipt_url: str):
             pass
 
     async def on_reject(inter2):
-        await inter2.response.send_message("❌ Заказ отклонён", ephemeral=True)
+        await inter2.response.send_message("❌ Отклонено", ephemeral=True)
+        try:
+            await user.send("❌ **Заказ отклонён**\n> Чек не подтверждён. Свяжитесь с менеджером.")
+        except Exception:
+            pass
         try:
             await ticket.delete()
         except Exception:
@@ -897,13 +1086,16 @@ async def finalize_order(bot, user, cart, receipt_url: str):
     view.add_item(approve)
     view.add_item(reject)
 
-    await ticket.send(embed=embed, view=view)
+    kwargs = {"embed": embed, "view": view}
+    if file:
+        kwargs["file"] = file
+    await ticket.send(**kwargs)
 
     await log_discord(
-        title="🧾 Автозаказ — создан заказ",
+        title="🧾 Автозаказ — создан",
         description=(
             f"> **Юзер:** {user.mention}\n"
-            f"> **Сумма:** `{final} ₽`\n"
+            f"> **Сумма:** `{_cart_final(cart)} ₽`\n"
             f"> **Тикет:** {ticket.mention}"
         ),
         color=COLOR_GREY,
@@ -913,24 +1105,24 @@ async def finalize_order(bot, user, cart, receipt_url: str):
     try:
         await user.send(
             f"✅ **Заказ оформлен**\n"
-            f"> Сумма: **{final} ₽**\n"
-            f"> Менеджер проверит чек и подтвердит оплату."
+            f"> Сумма: **{_cart_final(cart)} ₽**\n"
+            f"> Ожидайте подтверждения оплаты."
         )
     except Exception:
         pass
 
+
 # ============================================================
-# ON_MESSAGE (ловит чек)
+# ЛОВИМ ЧЕК
 # ============================================================
-async def handle_receipt(bot, message):
+async def _handle_receipt(bot, message):
     if message.author.bot: return
     if message.channel.id != AUTOORDER_CHANNEL_ID: return
     if not message.attachments: return
 
     cart = CARTS.get(message.author.id)
-    if not cart: return
-    if not cart["items"]: return
-    if cart["receipt"]: return
+    if not cart or not cart["items"]: return
+    if cart.get("receipt"): return
 
     att = message.attachments[0]
     name_low = att.filename.lower()
@@ -938,6 +1130,7 @@ async def handle_receipt(bot, message):
         return
 
     cart["receipt"] = True
+    logger.info(f"[autoorder] получен чек от {message.author.id}")
 
     try:
         await finalize_order(bot, message.author, cart, att.url)
@@ -951,8 +1144,9 @@ async def handle_receipt(bot, message):
 
     _reset_cart(message.author.id)
 
+
 # ============================================================
-# SEND PANEL
+# ОТПРАВКА ПАНЕЛИ
 # ============================================================
 async def send_autoorder_panel(bot):
     await bot.wait_until_ready()
@@ -966,28 +1160,23 @@ async def send_autoorder_panel(bot):
             logger.warning(f"[autoorder] канал {AUTOORDER_CHANNEL_ID} не найден: {e}")
             return
 
-    # Удалить старые сообщения бота
     try:
         async for m in ch.history(limit=20):
             if m.author == bot.user:
-                try:
-                    await m.delete()
-                except Exception:
-                    pass
+                try: await m.delete()
+                except Exception: pass
     except Exception:
         pass
 
-    # Рендер + отправка
     try:
-        buf = await asyncio.to_thread(render_autoorder_panel)
-        fname = "autoorder_panel.png"
-        file = disnake.File(buf, filename=fname)
-        embed = disnake.Embed(color=COLOR_GREY)
-        embed.set_image(url=f"attachment://{fname}")
+        buf = await asyncio.to_thread(render_panel)
+        file = disnake.File(buf, filename="panel.png")
+        embed = disnake.Embed(color=COLOR_GREY).set_image(url="attachment://panel.png")
         await ch.send(embed=embed, file=file, view=AutoOrderOpenView())
-        logger.info("[autoorder] ✅ Панель Автозаказа отправлена")
+        logger.info("[autoorder] ✅ панель отправлена")
     except Exception as e:
         logger.exception(f"[autoorder] send_panel: {e}")
+
 
 # ============================================================
 # SETUP
@@ -996,6 +1185,11 @@ def setup_autoorder(bot):
     try:
         bot.add_view(AutoOrderOpenView())
         bot.loop.create_task(send_autoorder_panel(bot))
+
+        @bot.listen("on_message")
+        async def _on_message(message):
+            await _handle_receipt(bot, message)
+
         logger.info("[autoorder] ✅ модуль подключён")
     except Exception as e:
         logger.exception(f"[autoorder] setup: {e}")
