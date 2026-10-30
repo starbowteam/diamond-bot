@@ -74,7 +74,6 @@ if not ai_logger.handlers:
     ai_logger.addHandler(fh)
     ai_logger.addHandler(sh)
 
-
 # ============================================================
 # БД
 # ============================================================
@@ -92,13 +91,21 @@ def init_ai_manager_tables():
         started_at     INTEGER,
         escalated      INTEGER DEFAULT 0,
         receipt_url    TEXT,
-        created_at     INTEGER
+        created_at     INTEGER,
+        stub_sent      INTEGER DEFAULT 0
     );
     """)
     db.commit()
+    # Миграция: добавляем stub_sent если таблица уже была
+    try:
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(ai_manager_sessions)").fetchall()]
+        if "stub_sent" not in cols:
+            cur.execute("ALTER TABLE ai_manager_sessions ADD COLUMN stub_sent INTEGER DEFAULT 0")
+            db.commit()
+    except Exception:
+        pass
 
 init_ai_manager_tables()
-
 
 # ============================================================
 # SETTINGS
@@ -107,15 +114,12 @@ def get_setting(key: str, default: str = "") -> str:
     row = cur.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row else default
 
-
 def set_setting(key: str, value: str):
     cur.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
     db.commit()
 
-
 def is_ai_enabled() -> bool:
     return get_setting("ai_manager_enabled", "0") == "1"
-
 
 # ============================================================
 # СЕССИИ
@@ -126,16 +130,14 @@ def get_session(channel_id: int) -> Optional[dict]:
     ).fetchone()
     return dict(row) if row else None
 
-
 def create_session(channel_id: int, user_id: int):
     cur.execute(
         "INSERT OR REPLACE INTO ai_manager_sessions "
-        "(channel_id, user_id, message_count, fail_count, started_at, escalated, receipt_url, created_at) "
-        "VALUES (?, ?, 0, 0, ?, 0, '', ?)",
+        "(channel_id, user_id, message_count, fail_count, started_at, escalated, receipt_url, created_at, stub_sent) "
+        "VALUES (?, ?, 0, 0, ?, 0, '', ?, 0)",
         (channel_id, user_id, int(time.time()), int(time.time())),
     )
     db.commit()
-
 
 def update_session(channel_id: int, **kwargs):
     if not kwargs:
@@ -145,23 +147,18 @@ def update_session(channel_id: int, **kwargs):
     cur.execute(f"UPDATE ai_manager_sessions SET {fields} WHERE channel_id=?", values)
     db.commit()
 
-
 # ============================================================
 # ИСТОРИЯ / КУЛДАУН
 # ============================================================
 HISTORY: Dict[int, list] = {}
 COOLDOWN: Dict[int, float] = {}
 
-
 # ============================================================
-# ФИЛЬТРАЦИЯ КАТАЛОГА (ЗАЩИТА ОТ ГАЛЛЮЦИНАЦИЙ)
+# ФИЛЬТРАЦИЯ КАТАЛОГА
 # ============================================================
 def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[str, dict]:
-    """Отдает только те категории, которые юзер упомянул (или всё, если не понял)."""
     t = user_text.lower()
     result = {}
-    
-    # Ключевые слова для поиска
     keywords = {
         "discord": ["дискорд", "discord", "нитро", "nitro", "буст", "boost"],
         "telegram": ["телега", "телеграм", "telegram", "тг", "tg", "звезд", "звёзд", "stars"],
@@ -170,23 +167,17 @@ def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[
         "spotify": ["споти", "spotify"],
         "decoration": ["украшени", "декор", "бейдж", "профиль"]
     }
-    
     matched_cat = None
     for cat_key, words in keywords.items():
         if any(w in t for w in words):
             matched_cat = cat_key
             break
-            
     if matched_cat:
-        # Ищем категорию в БД (она может называться чуть иначе)
         for db_key, cat_data in full_catalog.items():
             if matched_cat in db_key.lower() or matched_cat in cat_data["label"].lower():
                 result[db_key] = cat_data
                 break
-                
-    # Если не нашли совпадений или нашли, возвращаем найденное (или всё, если пусто)
     return result if result else full_catalog
-
 
 # ============================================================
 # ХЕЛПЕРЫ
@@ -203,7 +194,6 @@ def _is_ai_ticket(channel) -> bool:
     except Exception:
         pass
     return False
-
 
 async def get_ticket_discount(channel) -> int:
     try:
@@ -222,17 +212,13 @@ async def get_ticket_discount(channel) -> int:
         pass
     return 0
 
-
 async def send_invoice(channel, item: dict, discount: int, user_name: str, quantity: int = 1) -> bool:
     try:
         from modules.tickets import generate_receipt_png, generate_receipt_id
-        
         base_price = float(item["price"])
         total_base = base_price * quantity
         amount = int(total_base) if total_base % 1 == 0 else math.ceil(total_base)
-        
         order_id = generate_receipt_id()
-        
         product_display = item["name"]
         if quantity > 1:
             product_display += f" × {quantity}"
@@ -248,7 +234,7 @@ async def send_invoice(channel, item: dict, discount: int, user_name: str, quant
         )
         file = disnake.File(buf, filename=f"receipt_{order_id}.png")
         total = amount - int(amount * discount / 100)
-        
+
         embed = disnake.Embed(
             title=f"Счёт для оплаты: к оплате {total} ₽",
             description=(
@@ -262,13 +248,11 @@ async def send_invoice(channel, item: dict, discount: int, user_name: str, quant
             color=COLOR_GREY,
         )
         embed.set_image(url=f"attachment://receipt_{order_id}.png")
-        
         await channel.send(embed=embed, file=file, view=ReceiptView())
         return True
     except Exception as e:
         ai_logger.exception(f"send_invoice: {e}")
         return False
-
 
 async def escalate(channel, reason: str):
     sess = get_session(channel.id)
@@ -278,7 +262,7 @@ async def escalate(channel, reason: str):
         update_session(channel.id, escalated=1)
 
     ping = f"<@{OWNER_ID}>" if "BuyALL" in reason or "не найден" in reason.lower() else f"<@&{SALES_MANAGER_ROLE}>"
-    
+
     embed = disnake.Embed(
         title="⚠️ Требуется помощь менеджера",
         description=(
@@ -289,10 +273,8 @@ async def escalate(channel, reason: str):
         color=COLOR_GREY
     )
     embed.set_image(url=IMG_STRIPE)
-    
     await channel.send(embed=embed)
     ai_logger.info(f"Эскалация: {channel.id} — {reason}")
-
 
 async def notify_managers_dm(message, file_url):
     guild = message.guild
@@ -319,7 +301,6 @@ async def notify_managers_dm(message, file_url):
             await member.send(embed=embed)
         except Exception:
             pass
-
 
 # ============================================================
 # LLM
@@ -355,15 +336,8 @@ TOOLS_OPENAI = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "item_id": {
-                        "type": "string",
-                        "description": "ID товара из каталога",
-                    },
-                    "quantity": {
-                        "type": "integer",
-                        "description": "Количество",
-                        "default": 1
-                    }
+                    "item_id": {"type": "string", "description": "ID товара из каталога"},
+                    "quantity": {"type": "integer", "description": "Количество", "default": 1}
                 },
                 "required": ["item_id"],
             },
@@ -377,10 +351,7 @@ TOOLS_OPENAI = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "Почему эскалируешь. Если товара нет в каталоге, напиши 'Товар не найден в каталоге, возможно BuyALL'.",
-                    },
+                    "reason": {"type": "string", "description": "Почему эскалируешь. Если товара нет в каталоге, напиши 'Товар не найден в каталоге, возможно BuyALL'."},
                 },
                 "required": ["reason"],
             },
@@ -388,22 +359,14 @@ TOOLS_OPENAI = [
     },
 ]
 
-
-async def call_llm(
-    system_prompt: str,
-    history: list,
-    user_msg: str,
-) -> Optional[dict]:
+async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional[dict]:
     if not AI_MANAGER_API_KEY:
         ai_logger.error("AI_MANAGER_API_KEY не задан")
         return None
 
     messages = [{"role": "system", "content": system_prompt}]
     for role, text in history[-8:]:
-        messages.append({
-            "role": "assistant" if role == "ai" else "user",
-            "content": text,
-        })
+        messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
     messages.append({"role": "user", "content": user_msg})
 
     payload = {
@@ -411,7 +374,7 @@ async def call_llm(
         "messages": messages,
         "tools": TOOLS_OPENAI,
         "tool_choice": "auto",
-        "temperature": 0.1, # МИНИМУМ КРЕАТИВА, ЧТОБЫ НЕ ВЫДУМЫВАЛ
+        "temperature": 0.1,
         "max_tokens": 800,
     }
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
@@ -419,24 +382,19 @@ async def call_llm(
         "Authorization": f"Bearer {AI_MANAGER_API_KEY}",
         "Content-Type": "application/json",
     }
-
     start = time.time()
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=payload, headers=headers,
-                timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT),
-            ) as resp:
+            async with session.post(url, json=payload, headers=headers,
+                                     timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT)) as resp:
                 elapsed = time.time() - start
                 if resp.status != 200:
                     return None
-
                 data = await resp.json()
                 choices = data.get("choices", [])
                 if not choices:
                     return None
-
                 msg = choices[0].get("message", {})
                 text = (msg.get("content") or "").strip()
                 tool_calls = msg.get("tool_calls") or []
@@ -453,10 +411,8 @@ async def call_llm(
                     funcs.append({"name": name, "args": args})
 
                 return {"text": text, "funcs": funcs}
-
-    except Exception as e:
+    except Exception:
         return None
-
 
 # ============================================================
 # БОТ
@@ -469,24 +425,20 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!am", intents=intents)
 
-
 @bot.event
 async def on_ready():
     count = auto_init()
     ai_logger.info(f"AI Manager запущен. Каталог: {count}")
 
-
 @bot.slash_command(name="am_status", description="AI Manager — диагностика")
 async def am_status(ctx: disnake.ApplicationCommandInteraction):
     catalog = load_catalog_from_db()
     total = sum(len(c["items"]) for c in catalog.values())
-    
     embed = disnake.Embed(title="🤖 AI Manager · Диагностика", color=COLOR_GREY)
     embed.add_field(name="⚙️ AI", value="✅ Да" if is_ai_enabled() else "❌ Нет", inline=True)
     embed.add_field(name="📦 Каталог", value=f"`{total}` товаров", inline=True)
     embed.add_field(name="🎯 Модель", value=f"`{AI_MANAGER_MODEL}`", inline=False)
     await ctx.send(embed=embed, ephemeral=True)
-
 
 @bot.slash_command(name="am_toggle", description="Включить/выключить AI")
 async def am_toggle(ctx: disnake.ApplicationCommandInteraction):
@@ -496,13 +448,11 @@ async def am_toggle(ctx: disnake.ApplicationCommandInteraction):
     set_setting("ai_manager_enabled", new_state)
     await ctx.send(f"✅ AI: **{'ВКЛ' if new_state == '1' else 'ВЫКЛ'}**", ephemeral=True)
 
-
 @bot.slash_command(name="am_reload", description="Перезагрузить каталог")
 async def am_reload(ctx: disnake.ApplicationCommandInteraction):
     if not has_admin_command_roles(ctx.author): return
     count = reload_catalog_from_json()
     await ctx.send(f"✅ Загружено **{count}** товаров.", ephemeral=True)
-
 
 @bot.event
 async def on_message(message: disnake.Message):
@@ -510,10 +460,31 @@ async def on_message(message: disnake.Message):
     if not isinstance(message.channel, disnake.TextChannel): return
     if message.content.startswith("!am"): return
     if not _is_ai_ticket(message.channel): return
-    if not is_ai_enabled(): return
 
     channel = message.channel
     user_id = message.author.id
+
+    # Проверяем состояние AI. Если выключен - отправляем заглушку ОДИН раз
+    if not is_ai_enabled():
+        sess = get_session(channel.id)
+        if not sess:
+            create_session(channel.id, user_id)
+            sess = get_session(channel.id)
+        
+        if not sess.get("stub_sent"):
+            update_session(channel.id, stub_sent=1)
+            embed = disnake.Embed(
+                title="🤖 AI-менеджер временно отключён",
+                description=(
+                    f"> Сейчас бот не может помочь с оформлением заказа.\n"
+                    f"> Пожалуйста, ожидайте ответа менеджера <@&{SALES_MANAGER_ROLE}>.\n\n"
+                    f"> _Все тикеты работают в обычном режиме._"
+                ),
+                color=0x676767
+            )
+            embed.set_image(url=IMG_STRIPE)
+            await channel.send(embed=embed)
+        return
 
     # === ЧЕК ===
     if message.attachments:
@@ -525,7 +496,6 @@ async def on_message(message: disnake.Message):
         low = att.filename.lower()
         if any(low.endswith(x) for x in (".png", ".jpg", ".jpeg", ".pdf")):
             update_session(channel.id, receipt_url=att.url, escalated=1)
-            
             embed = disnake.Embed(
                 title="✅ Чек получен",
                 description=(
@@ -537,7 +507,6 @@ async def on_message(message: disnake.Message):
             )
             embed.set_image(url=IMG_STRIPE)
             await channel.send(embed=embed)
-            
             asyncio.create_task(notify_managers_dm(message, att.url))
             return
 
@@ -566,7 +535,6 @@ async def on_message(message: disnake.Message):
         await channel.send("⚠️ Каталог пуст.")
         return
 
-    # ФИЛЬТРУЕМ КАТАЛОГ, ЧТОБЫ ИИ НЕ ВИДЕЛ ЛИШНЕГО
     filtered_catalog = get_filtered_catalog(message.content or "", full_catalog)
 
     lines = []
@@ -602,24 +570,20 @@ async def on_message(message: disnake.Message):
 
     if funcs:
         update_session(channel.id, fail_count=0)
-        fc = funcs[0] # Только первый вызов
+        fc = funcs[0]
         name = fc["name"]
         args = fc.get("args", {})
 
         if name == "create_invoice":
             item_id = args.get("item_id", "")
             quantity = int(args.get("quantity", 1))
-            
             row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
             if not row:
                 await escalate(channel, "Товар не найден в каталоге, возможно BuyALL")
                 return
-                
             item = dict(row)
             item["category"] = row["category"]
             
-            # === ЖЕСТКАЯ ПРОВЕРКА КАТЕГОРИИ ===
-            # Если юзер просит Спотифай, а ИИ вернул tg_stars, мы это блокируем
             user_low = message.content.lower()
             cat_low = item["category"].lower()
             if ("споти" in user_low or "spotify" in user_low) and "spotify" not in cat_low:
@@ -635,7 +599,6 @@ async def on_message(message: disnake.Message):
             await escalate(channel, args.get("reason", "Товар не найден в каталоге"))
 
     HISTORY[channel.id] = hist[-20:]
-
 
 def run_ai_manager():
     if not AI_MANAGER_TOKEN:
