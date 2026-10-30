@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI Manager v2.3 — умный менеджер тикетов Diamond Shop.
-Фикс: фильтрация по категориям (чтобы видел все варианты), сброс счета при 2 текстах.
+AI Manager v2.4 — умный менеджер тикетов Diamond Shop.
+Фикс: поддержка нескольких товаров в одном счёте, синонимы Full/Basic, уточнение активации.
 """
 import os
 import re
@@ -23,7 +23,7 @@ from core.utils import (
     get_ticket_owner,
 )
 from core.catalog import load_catalog_from_db, auto_init
-from modules.tickets import ReceiptView
+from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_id
 
 # ============================================================
 # КОНСТАНТЫ
@@ -63,64 +63,74 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 ABUSE_WORDS = [
     "хуй", "хуя", "хуе", "хуи", "пизд", "бляд", "блят", "ебан", "ебал", "ебат",
     "сука", "суки", "нахуй", "нахер", "заткнись", "тупой", "тупая", "идиот",
-    "дебил", "дебилы", "мразь", "гандон", "пидор", "педик", "долбоеб", "мудак",
+    "дебил", "дебилы", "мразь", "гандо", "пидо", "педик", "долбоеб", "мудак",
 ]
 
 # ============================================================
 # СИНОНИМЫ КАТАЛОГА
 # ============================================================
 CATALOG_SYNONYMS: Dict[str, List[str]] = {
+    # Дискорд Нитро
     "discord_nitro": [
         "нитро", "nitro", "нт", "дс нитро", "discord nitro", "дискорд нитро",
     ],
     "discord_nitro_basic": [
-        "нитро бейсик", "nitro basic", "бейсик", "basic", "нитро базовая",
-        "нитро прост", "базовое нитро",
+        "басик", "бейсик", "базовое", "basic", "нитро басик", "нитро бейсик",
+        "дешевое нитро", "нитро базовое", "базовая подписка"
     ],
     "discord_nitro_gift": [
-        "нитро гифт", "nitro gift", "гифт нитро", "подарочное нитро", "гифт",
+        "гифт", "gift", "подарочное", "подарок нитро", "нитро подарок"
     ],
     "discord_nitro_trial": [
-        "нитро триал", "nitro trial", "триал", "trial", "пробное нитро",
+        "триал", "trial", "пробное", "пробник", "триал нитро"
     ],
     "discord_nitro_activation": [
-        "активация нитро", "activation", "активация",
+        "активация", "activation", "актив", "активировать"
     ],
     "discord_boosts": [
-        "буст", "бусты", "boost", "boosts", "бустик", "буст сервер",
+        "буст", "бусты", "boost", "boosts", "бустик", "буст сервер", "буст канал"
     ],
+    
+    # Стим
     "steam_region": [
         "регион steam", "смена региона", "сменить регион", "регион стим",
-        "стим регион",
+        "стим регион", "перенос региона"
     ],
     "steam_rub": [
         "стим пополнение", "пополнение стим", "steam пополн", "пополнить стим",
-        "стим рубл", "рубли стим", "steam rub",
+        "стим рубл", "рубли стим", "steam rub", "баланс стим"
     ],
+
+    # ТГ
     "tg_stars": [
         "звезды тг", "звёзды тг", "тг старс", "tg stars", "stars", "telegram stars",
         "телеграм звезды", "телеграм звёзды", "звезды телеграм", "звёзды телеграм",
         "тг звезды", "тг звёзды", "телега звезды", "телега звёзды", "звезда",
-        "телега", "телеграм старс",
+        "телега", "телеграм старс", "звезды", "звёзды"
     ],
     "tg_acc": [
         "акк тг", "акк телеграм", "телеграм аккаунт", "тг аккаунт", "tg account",
-        "аккаунт телега",
+        "аккаунт телега", "акк телега"
     ],
+
+    # Роблокс
     "roblox_robux": [
-        "робукс", "robux", "рб робукс", "роблокс робукс", "robux", "робуксы",
-        "рб", "роблокс",
+        "робукс", "robux", "рб робукс", "роблокс робукс", "робуксы", "роблокс", "рб"
     ],
     "roblox_plus": [
-        "роблокс плюс", "roblox plus", "роблокс премиум", "рб плюс",
+        "роблокс плюс", "roblox plus", "роблокс премиум", "рб плюс", "плюс роблокс"
     ],
+
+    # Спотифай
     "spotify": [
         "споти", "спф", "spotify", "спотифай", "спот", "музыка споти",
-        "спотифай подписка",
+        "спотифай подписка", "подписка музыка"
     ],
+
+    # Подарки
     "gift_marker": [
-        "подарок", "подарочек", "подарить", "подари", "гифт", "другу",
-        "друг", "подруге", "подарок другу", "хочу подарить",
+        "подарок", "подарочек", "подарить", "подари", "другу",
+        "друг", "подруге", "подарок другу", "хочу подарить"
     ],
 }
 
@@ -518,17 +528,17 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
 
 
 # ============================================================
-# ФИЛЬТРАЦИЯ КАТАЛОГА (ВОЗВРАЩЕНО ИЗ V1)
+# ФИЛЬТРАЦИЯ КАТАЛОГА
 # ============================================================
 def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[str, dict]:
     t = user_text.lower()
     result = {}
     keywords = {
-        "discord":  ["дискорд", "discord", "нитро", "nitro", "буст", "boost"],
+        "discord":  ["дискорд", "discord", "нитро", "nitro", "буст", "boost", "гифт", "активация"],
         "telegram": ["телега", "телеграм", "telegram", "тг", "tg", "звезд", "звёзд", "stars"],
         "steam":    ["стим", "steam", "пополнени", "регион", "рубл"],
-        "roblox":   ["роблокс", "roblox", "робукс", "robux"],
-        "spotify":  ["споти", "spotify"],
+        "roblox":   ["роблокс", "roblox", "робукс", "robux", "плюс"],
+        "spotify":  ["споти", "spotify", "спф"],
         "decoration": ["украшени", "декор", "бейдж", "профиль"]
     }
     matched_cat = None
@@ -599,7 +609,7 @@ def build_catalog_block(user_text: str, filtered_catalog: Dict[str, dict]) -> st
     parts = []
     if relevant:
         parts.append("🎯 ВОЗМОЖНО РЕЛЕВАНТНО (клиент похоже хочет именно это):")
-        for rid in relevant[:15]:  # Увеличили лимит с 5 до 15, чтобы видел ВСЕ нитро
+        for rid in relevant[:15]:
             for cat in filtered_catalog.values():
                 for it in cat.get("items", []):
                     if it.get("id") == rid:
@@ -672,17 +682,10 @@ async def get_ticket_discount(channel) -> int:
     return 0
 
 
-async def send_invoice(channel, item: dict, discount: int, user_name: str, quantity: int = 1) -> bool:
+async def send_invoice(channel, product_display: str, amount: int, discount: int, user_name: str) -> bool:
     try:
-        from modules.tickets import generate_receipt_png, generate_receipt_id
-        base_price = float(item["price"])
-        total_base = base_price * quantity
-        amount = int(total_base) if total_base % 1 == 0 else int(math.ceil(total_base))
         order_id = generate_receipt_id()
-        product_display = item["name"]
-        if quantity > 1:
-            product_display += f" × {quantity}"
-
+        
         buf = await asyncio.to_thread(
             generate_receipt_png,
             manager_name="AI Manager",
@@ -698,9 +701,7 @@ async def send_invoice(channel, item: dict, discount: int, user_name: str, quant
         embed = disnake.Embed(
             title=f"Счёт для оплаты: к оплате {total} ₽",
             description=(
-                f"> **Категория:** {item.get('category', '—')}\n"
-                f"> **Товар:** {item['name']}\n"
-                f"> **Количество:** `{quantity} шт.`\n"
+                f"> **Товары:** {product_display}\n"
                 f"> **Сумма:** `{amount} ₽`"
                 + (f"\n> **Скидка:** `{discount}%`" if discount else "")
                 + "\n\n> Проверьте реквизиты и пришлите чек в этот канал."
@@ -782,17 +783,24 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 правила:
 - говори коротко и по делу, 1–3 предложения
 - используй ТОЛЬКО товары из каталога ниже. Если нужного товара нет в списке, ты ОБЯЗАН сказать клиенту об этом.
-- КРИТИЧЕСКОЕ ПРАВИЛО: Если клиент просит категорию (например, "нитро", "звёзды", "бусты") без уточнений — НЕ ЗАДАВАЙ ВОПРОСОВ. СРАЗУ выведи ПОЛНЫЙ список ВСЕХ доступных вариантов этой категории с ценами из каталога. 
-- НЕ СОКРАЩАЙ СПИСОК! Если в каталоге 9 видов нитро — выведи все 9. Если 5 видов звёзд — выведи все 5.
-- Пример правильного ответа: "У нас есть: 1. Nitro Trial 1 Month — 160₽, 2. Nitro 1 Month — 460₽, 3. Nitro Basic 1 Month — 300₽, 4. Nitro Gift — 590₽. Какой вариант выберем?"
-- Если клиент говорит "у меня не было нитро" или просит Trial — предложи именно Trial.
-- НИКОГДА не подсовывай товар из другой категории! Если просят Спотифай, не предлагай Звёзды Телеграм.
-- Если клиент просит "пополнение стим на 150 рублей", передай item_id="steam_rub" и quantity=150.
-- Если клиент просит "100 звезд", передай item_id="tg_stars" и quantity=100.
-- Если клиент просит "подарочек другу" — УТОЧНИ, какой именно товар он хочет подарить.
-- НЕ ВЫСТАВЛЯЙ БОЛЬШЕ ОДНОГО СЧЕТА ЗА РАЗ. (Если счёт уже выставлен и клиент пишет текст — уточни, нужно ли поменять заказ, или просто ответь).
-- Если товара нет в каталоге — вызови escalate_to_human с причиной "Товар не найден в каталоге, возможно BuyALL".
-- ВАЖНО: пометка "[счёт выставлен: ...]" в контексте означает, что предыдущий заказ УЖЕ оформлен. Новый запрос клиента — это НОВЫЙ заказ. Не смешивай товары из разных запросов.
+- КРИТИЧЕСКОЕ ПРАВИЛО: Если клиент просит категорию (например, "нитро", "звёзды") без уточнений — НЕ ЗАДАВАЙ ВОПРОСОВ. СРАЗУ выведи ПОЛНЫЙ список ВСЕХ доступных вариантов этой категории с ценами из каталога. НЕ СОКРАЩАЙ СПИСОК!
+- Если клиент просит НЕСКОЛЬКО товаров (например, "активацию и год фулла") — передай их все в массиве `items` функции create_invoice. В один счёт можно добавить сколько угодно товаров.
+
+💡 ПАМЯТКА ПО НИТРО (Full и Basic):
+1. Nitro Trial 1 Month — это **Full**.
+2. Nitro 1 Month — это **Full**.
+3. Nitro Basic 1 Month — это **Basic**.
+4. Nitro Gift Basic — это **Basic**.
+5. Nitro Gift Full — это **Full**.
+6. Nitro 12 Month — это **Full**.
+7. Nitro Basic 12 Month — это **Basic**.
+8. Nitro Activation — подходит **И к Full, И к Basic**. Если клиент просит только "активацию" без уточнения, спроси: "Для Full или для Basic?".
+9. Nitro Trial 3 Month — это **Full**.
+
+- Если клиент говорит "басик", "бейсик", "базовое" — предлагай позиции 3, 4, 7.
+- Если клиент говорит "фулл" — предлагай позиции 1, 2, 5, 6, 9.
+- НИКОГДА не подсовывай товар из другой категории!
+- Если товара нет в каталоге — вызови escalate_to_human.
 - не подтверждай оплату сам — это делает менеджер.
 
 каталог:
@@ -808,16 +816,26 @@ TOOLS_OPENAI = [
         "type": "function",
         "function": {
             "name": "create_invoice",
-            "description": "Выставить счёт клиенту. Вызывай только если товар ТОЧНО есть в каталоге и клиент подтвердил выбор.",
+            "description": "Выставить счёт клиенту. Можно передать ОДИН ИЛИ НЕСКОЛЬКО товаров в массиве items.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "item_id": {"type": "string", "description": "ID товара из каталога"},
-                    "quantity": {"type": "integer", "description": "Количество", "default": 1},
+                    "items": {
+                        "type": "array",
+                        "description": "Список товаров для счёта",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "item_id": {"type": "string", "description": "ID товара из каталога"},
+                                "quantity": {"type": "integer", "description": "Количество", "default": 1}
+                            },
+                            "required": ["item_id"]
+                        }
+                    }
                 },
-                "required": ["item_id"],
-            },
-        },
+                "required": ["items"]
+            }
+        }
     },
     {
         "type": "function",
@@ -922,7 +940,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2.3 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v2.4 запущен. Каталог: {count}")
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
         asyncio.create_task(_cleanup_loop())
@@ -1054,7 +1072,6 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         await channel.send("⚠️ Каталог пуст.")
         return
 
-    # ФИЛЬТРУЕМ КАТАЛОГ, ЧТОБЫ LLM НЕ ТУПИЛ
     filtered_catalog = get_filtered_catalog(user_text, full_catalog)
     catalog_text = build_catalog_block(user_text, filtered_catalog)
 
@@ -1101,34 +1118,49 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         args = fc.get("args", {})
 
         if name == "create_invoice":
-            item_id = args.get("item_id", "")
-            try:
-                quantity = max(1, int(args.get("quantity", 1)))
-            except (TypeError, ValueError):
-                quantity = 1
+            items_list = args.get("items", [])
+            
+            # Обратная совместимость, если нейронка вдруг выдаст старый формат
+            if not items_list and args.get("item_id"):
+                items_list = [{"item_id": args.get("item_id"), "quantity": args.get("quantity", 1)}]
 
-            row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
-            if not row:
-                await escalate(channel, "Товар не найден в каталоге, возможно BuyALL")
-                return
-            item = dict(row)
-            item["category"] = row["category"]
-
-            user_low = user_text.lower()
-            cat_low = item["category"].lower()
-            if ("споти" in user_low or "spotify" in user_low) and "spotify" not in cat_low:
-                await channel.send("❌ Извините, я не могу оформить этот товар.")
-                await escalate(channel, "Ошибка сопоставления: запрошен Spotify")
+            if not items_list:
+                await channel.send("⚠️ Не удалось распознать товар. Уточните, пожалуйста.")
                 return
 
-            ok = await send_invoice(channel, item, discount, author.display_name, quantity)
+            total_amount = 0
+            receipt_names = []
+
+            for itm in items_list:
+                item_id = itm.get("item_id")
+                try:
+                    quantity = max(1, int(itm.get("quantity", 1)))
+                except (TypeError, ValueError):
+                    quantity = 1
+
+                row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
+                if not row:
+                    await escalate(channel, f"Товар `{item_id}` не найден в каталоге, возможно BuyALL")
+                    return
+                
+                base_price = float(row["price"])
+                total_base = base_price * quantity
+                amount = int(total_base) if total_base % 1 == 0 else int(math.ceil(total_base))
+                total_amount += amount
+                
+                display_name = row["name"] if quantity == 1 else f"{row['name']} × {quantity}"
+                receipt_names.append(display_name)
+
+            product_display = ", ".join(receipt_names)
+
+            ok = await send_invoice(channel, product_display, total_amount, discount, author.display_name)
             if ok:
-                ai_logger.info(f"Счёт: {channel.id} → {item['name']} x{quantity}")
+                ai_logger.info(f"Счёт: {channel.id} → {product_display} на {total_amount}₽")
 
                 hist_clear(channel.id)
                 hist_append(
                     channel.id, "ai",
-                    f"[счёт выставлен: {item['name']} × {quantity}, ожидаем оплату]",
+                    f"[счёт выставлен: {product_display}, ожидаем оплату]",
                 )
                 update_session(
                     channel.id,
