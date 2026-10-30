@@ -36,6 +36,10 @@ from modules.dc import (
     get_dc_cache, save_dc_cache,
     sync_dc_to_json
 )
+from core.catalog import (
+    load_catalog_from_db,
+    reload_catalog_from_json,
+)
 from modules.commands_profile import load_embed_from_file
 from modules.tickets import (
     render_work_salary,
@@ -299,7 +303,6 @@ class AutoorderCatalogView(View):
         if not has_admin_command_roles(inter.author):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
 
-        from modules.ai_manager import reload_catalog_from_json, load_catalog_from_db
         count = reload_catalog_from_json()
         if count == 0:
             return await inter.response.send_message(
@@ -332,7 +335,6 @@ class AutoorderCatalogView(View):
 
     @disnake.ui.button(label="📊 Статистика", style=ButtonStyle.secondary, custom_id="aoc:stats")
     async def stats_btn(self, button, inter):
-        from modules.ai_manager import load_catalog_from_db
         catalog = load_catalog_from_db()
         total = sum(len(c["items"]) for c in catalog.values())
         lines = [f"> **{cat['label']}:** `{len(cat['items'])}` товаров" for cat in catalog.values()]
@@ -854,7 +856,6 @@ async def send_staff_panels():
             except Exception:
                 pass
 
-    # ЭКОНОМИКА
     dc_embed = disnake.Embed(
         title="Экономическая панель Diamond Coins",
         description=(
@@ -867,7 +868,6 @@ async def send_staff_panels():
     dc_embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=dc_embed, view=DCView())
 
-    # ПРОМОКОДЫ
     promo_embed = disnake.Embed(
         title="Управление промокодами",
         description=(
@@ -880,7 +880,6 @@ async def send_staff_panels():
     promo_embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=promo_embed, view=PromoView())
 
-    # АДМИН
     admin_embed = disnake.Embed(
         title="Панель управления сервером",
         description=(
@@ -893,7 +892,6 @@ async def send_staff_panels():
     admin_embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=admin_embed, view=AdminView())
 
-    # КЛАН-ЛИГА
     try:
         from clan.panels import send_clan_admin_panel
         await send_clan_admin_panel(bot)
