@@ -1,16 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI Manager v2 — умный менеджер тикетов Diamond Shop.
-
-Что нового:
-  · Персональная настройка AI (таблица ai_manager_user_prefs)
-  · Fallback через 5 минут, если менеджер не ответил
-  · Менеджер пишет → AI молчит, но возвращается при 5-мин тишине
-  · Умный abuse-check через LLM, реальное закрытие канала
-  · Чек принимается ТОЛЬКО после выставления счёта
-  · Несколько чеков → эскалация менеджеру
-  · Расширенные синонимы каталога
-  · Весь каталог в промпт + подсветка релевантного
+AI Manager v2.1 — умный менеджер тикетов Diamond Shop.
+Фикс: если владелец тикета имеет роль менеджера — AI не замолкает.
 """
 import os
 import re
@@ -79,7 +70,6 @@ ABUSE_WORDS = [
 # СИНОНИМЫ КАТАЛОГА
 # ============================================================
 CATALOG_SYNONYMS: Dict[str, List[str]] = {
-    # Discord Nitro
     "discord_nitro": [
         "нитро", "nitro", "нт", "дс нитро", "discord nitro", "дискорд нитро",
     ],
@@ -99,8 +89,6 @@ CATALOG_SYNONYMS: Dict[str, List[str]] = {
     "discord_boosts": [
         "буст", "бусты", "boost", "boosts", "бустик", "буст сервер",
     ],
-
-    # Steam
     "steam_region": [
         "регион steam", "смена региона", "сменить регион", "регион стим",
         "стим регион",
@@ -109,8 +97,6 @@ CATALOG_SYNONYMS: Dict[str, List[str]] = {
         "стим пополнение", "пополнение стим", "steam пополн", "пополнить стим",
         "стим рубл", "рубли стим", "steam rub",
     ],
-
-    # Telegram
     "tg_stars": [
         "звезды тг", "звёзды тг", "тг старс", "tg stars", "stars", "telegram stars",
         "телеграм звезды", "телеграм звёзды", "звезды телеграм", "звёзды телеграм",
@@ -121,8 +107,6 @@ CATALOG_SYNONYMS: Dict[str, List[str]] = {
         "акк тг", "акк телеграм", "телеграм аккаунт", "тг аккаунт", "tg account",
         "аккаунт телега",
     ],
-
-    # Roblox
     "roblox_robux": [
         "робукс", "robux", "рб робукс", "роблокс робукс", "robux", "робуксы",
         "рб", "роблокс",
@@ -130,14 +114,10 @@ CATALOG_SYNONYMS: Dict[str, List[str]] = {
     "roblox_plus": [
         "роблокс плюс", "roblox plus", "роблокс премиум", "рб плюс",
     ],
-
-    # Spotify
     "spotify": [
         "споти", "спф", "spotify", "спотифай", "спот", "музыка споти",
         "спотифай подписка",
     ],
-
-    # Подарки (общий триггер)
     "gift_marker": [
         "подарок", "подарочек", "подарить", "подари", "гифт", "другу",
         "друг", "подруге", "подарок другу", "хочу подарить",
@@ -213,7 +193,6 @@ def init_ai_manager_tables():
     """)
     db.commit()
 
-    # Миграции: добавляем недостающие колонки (если БД старая)
     _ensure_col("ai_manager_sessions", "stub_sent",           "stub_sent INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "invoice_sent",        "invoice_sent INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "last_client_msg_ts",  "last_client_msg_ts INTEGER DEFAULT 0")
@@ -238,7 +217,7 @@ init_ai_manager_tables()
 
 
 # ============================================================
-# НАСТРОЙКИ (глобальные через settings — оставил для совместимости)
+# НАСТРОЙКИ
 # ============================================================
 def get_setting(key: str, default: str = "") -> str:
     row = cur.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
@@ -254,7 +233,6 @@ def set_setting(key: str, value: str):
 # ПЕРСОНАЛЬНЫЕ ПРЕДПОЧТЕНИЯ AI
 # ============================================================
 def get_user_ai_pref(user_id: int) -> bool:
-    """True = AI включён у юзера. По умолчанию ВКЛ."""
     row = cur.execute(
         "SELECT enabled FROM ai_manager_user_prefs WHERE user_id=?",
         (user_id,)
@@ -301,7 +279,6 @@ def update_session(channel_id: int, **kwargs):
 
 
 def touch_client_msg(channel_id: int, user_id: int):
-    """Клиент написал — обновляем метку. Создаёт сессию если её нет."""
     sess = get_session(channel_id)
     if not sess:
         create_session(channel_id, user_id)
@@ -309,7 +286,6 @@ def touch_client_msg(channel_id: int, user_id: int):
 
 
 def touch_manager_msg(channel_id: int):
-    """Менеджер написал — AI замолкает на 5 мин."""
     sess = get_session(channel_id)
     if not sess:
         return
@@ -321,7 +297,6 @@ def touch_ai_response(channel_id: int):
 
 
 def is_ai_muted(channel_id: int) -> bool:
-    """AI молчит, если менеджер писал меньше 5 мин назад."""
     sess = get_session(channel_id)
     if not sess:
         return False
@@ -414,7 +389,6 @@ def is_potential_abuse(text: str) -> bool:
 
 
 async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
-    """Быстрый LLM-запрос: это абьюз/спам или нормальный клиент?"""
     if not AI_MANAGER_API_KEY:
         return False, ""
 
@@ -453,7 +427,6 @@ async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
                 if not choices:
                     return False, ""
                 text = (choices[0].get("message", {}).get("content") or "").strip().upper()
-                # Иногда модель добавляет точку или кавычки
                 text = re.sub(r"[^A-Z]", "", text)
                 if "ABUSE" in text:
                     return True, "abuse"
@@ -466,17 +439,12 @@ async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
 
 
 async def _check_and_close_abuse(channel, user_id: int) -> bool:
-    """
-    Проверяет недавние сообщения клиента на абьюз/спам.
-    Возвращает True, если тикет был закрыт.
-    """
     sess = get_session(channel.id)
     if not sess:
         return False
     if sess.get("abuse_closed"):
         return False
 
-    # Кулдаун проверки
     last_check = sess.get("last_abuse_check_ts") or 0
     now = int(time.time())
     if now - last_check < ABUSE_COOLDOWN_SEC:
@@ -501,14 +469,12 @@ async def _check_and_close_abuse(channel, user_id: int) -> bool:
     if not is_abuse:
         return False
 
-    # Закрываем тикет
     update_session(channel.id, abuse_closed=1)
     await close_ticket_abuse(channel, reason, user_id)
     return True
 
 
 async def close_ticket_abuse(channel, reason: str, user_id: int):
-    """AI закрывает тикет из-за абьюза/спама."""
     try:
         embed = disnake.Embed(
             title="🚫 Тикет закрыт автоматически",
@@ -525,7 +491,6 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
 
         ai_logger.warning(f"🤖 AI закрыл тикет {channel.id} по причине {reason}")
 
-        # Лог в Discord
         try:
             await log_discord(
                 title=f"🚫 AI закрыл тикет ({reason})",
@@ -540,7 +505,6 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
         except Exception:
             pass
 
-        # DM клиенту
         try:
             guild = channel.guild
             member = guild.get_member(user_id)
@@ -554,7 +518,6 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
             pass
 
     except disnake.Forbidden:
-        # Нет прав — эскалируем менеджеру
         ai_logger.warning(f"AI не может удалить канал {channel.id} — эскалирую")
         await escalate(channel, f"Обнаружен {reason}, но AI не имеет прав удалить канал")
     except Exception as e:
@@ -569,10 +532,6 @@ def _norm(text: str) -> str:
 
 
 def find_relevant_items(user_text: str, full_catalog: Dict[str, dict]) -> List[str]:
-    """
-    Возвращает список item_id, которые, вероятно, хочет клиент.
-    Работает через синонимы.
-    """
     t = _norm(user_text)
     result: List[str] = []
     seen = set()
@@ -580,12 +539,9 @@ def find_relevant_items(user_text: str, full_catalog: Dict[str, dict]) -> List[s
     for item_key, words in CATALOG_SYNONYMS.items():
         for w in words:
             if w in t:
-                # Точное совпадение по item_id
                 if item_key in ("gift_marker", "discord_nitro", "discord_nitro_basic",
                                 "discord_nitro_gift", "discord_nitro_trial"):
-                    # Обработаем ниже
                     pass
-                # Ищем item по ключу
                 found_ids = _find_item_ids_by_key(item_key, full_catalog)
                 for fid in found_ids:
                     if fid not in seen:
@@ -593,9 +549,7 @@ def find_relevant_items(user_text: str, full_catalog: Dict[str, dict]) -> List[s
                         result.append(fid)
                 break
 
-    # Спец-обработка "хочу подарочек"
     if "подар" in t or "другу" in t or "подарить" in t:
-        # Подарочное нитро + gift-скидки
         for key in ("discord_nitro_gift_basic", "discord_nitro_gift_full",
                     "discord_nitro_gift"):
             if key not in seen and _item_exists(key, full_catalog):
@@ -606,7 +560,6 @@ def find_relevant_items(user_text: str, full_catalog: Dict[str, dict]) -> List[s
 
 
 def _find_item_ids_by_key(item_key: str, catalog: Dict[str, dict]) -> List[str]:
-    """По префиксу синонима ('discord_nitro') находим все item_id."""
     result = []
     for cat in catalog.values():
         for it in cat.get("items", []):
@@ -625,10 +578,6 @@ def _item_exists(item_id: str, catalog: Dict[str, dict]) -> bool:
 
 
 def build_catalog_block(user_text: str, full_catalog: Dict[str, dict]) -> str:
-    """
-    Возвращает блок каталога для промпта:
-    сначала релевантные, потом весь.
-    """
     relevant = find_relevant_items(user_text, full_catalog)
 
     parts = []
@@ -954,7 +903,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v2.1 запущен. Каталог: {count}")
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
         asyncio.create_task(_cleanup_loop())
@@ -976,18 +925,10 @@ async def _cleanup_loop():
 
 
 # ============================================================
-# FALLBACK TASK — «AI включается через 5 минут»
+# FALLBACK TASK
 # ============================================================
 @tasks.loop(minutes=1)
 async def fallback_task():
-    """
-    Раз в минуту проверяем тикеты, где:
-      · клиент написал
-      · AI не ответил после его сообщения
-      · менеджер молчит ≥ 5 мин
-      · AI у юзера выключен, но прошло ≥ 5 мин с последнего сообщения клиента
-    И подрубаемся.
-    """
     await bot.wait_until_ready()
     now = int(time.time())
 
@@ -1007,19 +948,15 @@ async def fallback_task():
         last_ai = r["last_ai_response_ts"] or 0
         last_mgr = r["last_manager_msg_ts"] or 0
 
-        # AI уже ответил после последнего сообщения клиента
         if last_ai >= last_client:
             continue
 
-        # Менеджер писал < 5 мин назад — молчим
         if last_mgr and (now - last_mgr) < MANAGER_SILENCE_SEC:
             continue
 
-        # Клиент молчит слишком давно — не дёргаем
         if (now - last_client) > CLIENT_MAX_SILENCE_SEC:
             continue
 
-        # Если AI выключен у юзера — ждём 5 минут
         pref = get_user_ai_pref(r["user_id"])
         if not pref and (now - last_client) < FALLBACK_WAIT_SEC:
             continue
@@ -1030,19 +967,16 @@ async def fallback_task():
         if not _is_ai_ticket(channel):
             continue
 
-        # Abuse-check на всякий
         try:
             if await _check_and_close_abuse(channel, r["user_id"]):
                 continue
         except Exception as e:
             ai_logger.warning(f"fallback abuse check: {e}")
 
-        # Берём последнее сообщение клиента
         last_text = hist_last_client_msg(channel_id)
         if not last_text:
             continue
 
-        # Отправляем короткий ping
         try:
             await channel.send("⏳ Подключаюсь, секунду…")
         except Exception:
@@ -1073,14 +1007,12 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         create_session(channel.id, user_id)
         sess = get_session(channel.id)
 
-    # Abuse check перед всем
     try:
         if await _check_and_close_abuse(channel, user_id):
             return
     except Exception as e:
         ai_logger.warning(f"_check_and_close_abuse: {e}")
 
-    # Если менеджер писал < 5 мин — молчим
     if is_ai_muted(channel.id):
         return
 
@@ -1140,7 +1072,6 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
             pass
         hist_append(channel.id, "ai", text)
 
-    # Метка «AI ответил»
     touch_ai_response(channel.id)
 
     if funcs:
@@ -1162,7 +1093,6 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
             item = dict(row)
             item["category"] = row["category"]
 
-            # Защита от подмены категории
             user_low = user_text.lower()
             cat_low = item["category"].lower()
             if ("споти" in user_low or "spotify" in user_low) and "spotify" not in cat_low:
@@ -1170,7 +1100,6 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 await escalate(channel, "Ошибка сопоставления: запрошен Spotify")
                 return
 
-            # Защита от двойного счёта
             if sess.get("invoice_sent"):
                 try:
                     await channel.send("⚠️ Счёт уже выставлен. Если нужен ещё один заказ — уточните.")
@@ -1199,7 +1128,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
 
 # ============================================================
-# ON_MESSAGE
+# ON_MESSAGE (С ФИКСОМ)
 # ============================================================
 @bot.event
 async def on_message(message: disnake.Message):
@@ -1214,8 +1143,12 @@ async def on_message(message: disnake.Message):
     if _is_paid_category(channel):
         return
 
-    # 🛑 МЕНЕДЖЕР написал → AI замолкает на 5 мин
-    if isinstance(message.author, disnake.Member) and _is_manager(message.author):
+    # Получаем владельца тикета
+    owner_id = get_ticket_owner(channel.id)
+    is_ticket_owner = (owner_id is not None and message.author.id == owner_id)
+
+    # 🛑 МЕНЕДЖЕР написал → AI замолкает (только если это не сам клиент)
+    if isinstance(message.author, disnake.Member) and _is_manager(message.author) and not is_ticket_owner:
         if _is_ai_ticket(channel):
             sess = get_session(channel.id)
             if sess is None:
@@ -1229,18 +1162,17 @@ async def on_message(message: disnake.Message):
     if not _is_ai_ticket(channel):
         return
 
-    owner_id = get_ticket_owner(channel.id)
-    if owner_id and message.author.id != owner_id:
+    # Если пишет кто-то левый (не владелец тикета) — игнор
+    if owner_id and not is_ticket_owner:
         return
 
-    # Обновляем метку клиента (создаёт сессию если нет)
+    # Обновляем метку клиента
     touch_client_msg(channel.id, message.author.id)
 
     # === ФАЙЛ (только если ждём чек) ===
     if message.attachments:
         sess = get_session(channel.id)
         if not sess or not sess.get("invoice_sent"):
-            # Чек до счёта — просим сначала оформить заказ
             try:
                 await message.reply(
                     "📋 Сначала оформим заказ — расскажите, что хотите купить, "
@@ -1264,7 +1196,6 @@ async def on_message(message: disnake.Message):
                 pass
             return
 
-        # Защита от повторных чеков
         if sess.get("receipt_url"):
             try:
                 await message.reply(
@@ -1274,7 +1205,6 @@ async def on_message(message: disnake.Message):
                 )
             except Exception:
                 pass
-            # Эскалируем менеджеру
             await escalate(channel, "Клиент прислал второй чек — требуется проверка менеджером")
             update_session(channel.id, invoice_sent=0)
             return
