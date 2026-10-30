@@ -15,6 +15,7 @@ import subprocess
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
+# ─── Автозамена ссылок страйпа ───
 try:
     from modules.others import run_fix
     _stripe_stats = run_fix(verbose=False)
@@ -28,6 +29,9 @@ from core.utils import logger
 from modules.commands_staff import setup_commands_staff
 
 
+# ============================================================
+# SUBPROCESSES
+# ============================================================
 _ai_proc: subprocess.Popen = None
 _ai_manager_proc: subprocess.Popen = None
 
@@ -77,6 +81,9 @@ def _sigterm_handler(signum, frame):
     sys.exit(0)
 
 
+# ============================================================
+# RUN
+# ============================================================
 if __name__ == "__main__":
     setup_commands_staff(bot)
 
@@ -84,6 +91,14 @@ if __name__ == "__main__":
         logger.error("BOT_TOKEN не установлен")
         print("❌ Ошибка: не установлен BOT_TOKEN")
         sys.exit(1)
+
+    # ─── Автоинициализация каталога (создаст файл и загрузит в БД) ───
+    try:
+        from core.catalog import auto_init
+        _catalog_count = auto_init()
+        print(f"📦 Каталог Автозаказа: {_catalog_count} товаров")
+    except Exception as e:
+        logger.warning(f"auto_init catalog: {e}")
 
     _ai_proc = _start_subprocess("ai_main.py", "AI-консультант", "AI_TOKEN")
     _ai_manager_proc = _start_subprocess("ai_manager_main.py", "AI-менеджер", "AI_MANAGER_TOKEN")
