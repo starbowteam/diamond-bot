@@ -90,9 +90,6 @@ CONFIG = {
         "real_paid": 1539668675530072175,
         "coins_created": 1539669323185131570,
     },
-    # ============================================================
-    # Клановая лига
-    # ============================================================
     "CLAN_POOL_CHANNEL_ID": 1552700960474800128,
     "CLAN_SEASON_CHANNEL_ID": 1552700989465956403,
     "CLAN_GAMES_CHANNEL_ID": 1552700973753827509,
@@ -122,10 +119,9 @@ def is_supreme(user_id: int) -> bool:
     return user_id in SUPREME_USERS
 
 
-# Устаревшие роли (снимаются при пересчёте)
 DEPRECATED_ROLE_IDS = [
-    1208442450373513277,  # emerald
-    1208442449425334372,  # legendary
+    1208442450373513277,
+    1208442449425334372,
 ]
 
 # ============================================================
@@ -240,10 +236,6 @@ CREATE TABLE IF NOT EXISTS ticket_cooldowns (
     set_by    INTEGER,
     set_at    INTEGER
 );
-
--- ============================================================
--- КЛАНОВАЯ ЛИГА
--- ============================================================
 CREATE TABLE IF NOT EXISTS clans (
     id          INTEGER PRIMARY KEY,
     name        TEXT,
@@ -309,10 +301,6 @@ CREATE TABLE IF NOT EXISTS clan_payouts (
     final_amount INTEGER,
     paid_at      INTEGER
 );
-
--- ============================================================
--- ДОСТИЖЕНИЯ
--- ============================================================
 CREATE TABLE IF NOT EXISTS clan_achievements (
     user_id     INTEGER,
     ach_key     TEXT,
@@ -321,6 +309,33 @@ CREATE TABLE IF NOT EXISTS clan_achievements (
     PRIMARY KEY (user_id, ach_key)
 );
 CREATE INDEX IF NOT EXISTS idx_clan_ach_user ON clan_achievements (user_id);
+
+-- ============================================================
+-- AI MANAGER / AUTOORDER
+-- ============================================================
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS autoorder_catalog (
+    id        TEXT PRIMARY KEY,
+    category  TEXT,
+    name      TEXT,
+    price     REAL,
+    unit      TEXT,
+    min_qty   INTEGER DEFAULT 1,
+    max_qty   INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS ai_manager_sessions (
+    channel_id     INTEGER PRIMARY KEY,
+    user_id        INTEGER,
+    message_count  INTEGER DEFAULT 0,
+    fail_count     INTEGER DEFAULT 0,
+    started_at     INTEGER,
+    escalated      INTEGER DEFAULT 0,
+    receipt_url    TEXT,
+    created_at     INTEGER
+);
 """)
 db.commit()
 
@@ -329,7 +344,6 @@ db.commit()
 # МИГРАЦИИ СХЕМЫ (для уже существующих баз)
 # ============================================================
 def _ensure_column(table: str, column: str, ddl: str):
-    """Добавляет колонку, если её ещё нет (SQLite ALTER TABLE ADD COLUMN)."""
     try:
         cols = [r[1] for r in cur.execute(f'PRAGMA table_info("{table}")').fetchall()]
         if column not in cols:
@@ -340,11 +354,7 @@ def _ensure_column(table: str, column: str, ddl: str):
         logger.error(f"Миграция {table}.{column}: {e}")
 
 
-# Отметка последней активности — нужна для автоочистки клана
-# (АФК и те, кто не писал на сервере 3 недели)
 _ensure_column("dc_cache", "last_active_ts", "last_active_ts INTEGER DEFAULT 0")
-
-# Адвайтер-панель: привязка инвайтов к реферальным ссылкам и наградам
 _ensure_column("invites", "invite_code",   "invite_code TEXT DEFAULT NULL")
 _ensure_column("invites", "advertiser_id", "advertiser_id INTEGER DEFAULT NULL")
 _ensure_column("invites", "rewarded",      "rewarded INTEGER DEFAULT 0")
@@ -477,19 +487,13 @@ def log_command(func):
 # ============================================================
 # Система ролей по отзывам
 # ============================================================
-# 👇 ВАЖНО: «Клуб» — это обычная роль покупателя (базовая ступень).
-# Она выдаётся ТОЛЬКО за наличие отзыва. Никаких условий по балансу DC
-# здесь быть не должно — баланс влияет только на попадание в КЛАН
-# (см. clan/core.py :: MIN_BALANCE).
 def get_roles_for_count(count: int) -> list[int]:
     roles = []
     role_ids = CONFIG["ROLE_IDS"]
 
-    # Базовая роль «Клуб» — просто за первый отзыв
     if count >= 1:
         roles.append(role_ids["club"])
 
-    # Тир покупателя по количеству отзывов
     if 1 <= count <= 5:
         roles.append(role_ids["bronze"])
     elif 6 <= count <= 10:
@@ -797,7 +801,6 @@ def get_dc_cache(user_id: int) -> dict:
     }
 
 def save_dc_cache(user_id: int, data: dict):
-    # 👇 Если вызывающий код не знает про last_active_ts — не затираем его
     if "last_active_ts" not in data:
         row = db.execute(
             "SELECT last_active_ts FROM dc_cache WHERE user_id = ?", (user_id,)
