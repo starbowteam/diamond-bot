@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Служебные панели и админ-функции. Home-панель удалена.
+Служебные панели и админ-функции.
 """
 import os
 import json
@@ -64,12 +64,9 @@ def reload_promo_cache():
 class DCSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
-            disnake.SelectOption(label="・Начисление", description="Начисление валюты",
-                                 emoji="<:__:1538399607699021895>", value="give"),
-            disnake.SelectOption(label="・Списать", description="Снятие валюты",
-                                 emoji="<:minus:1538399627521429534>", value="take"),
-            disnake.SelectOption(label="・Покупки", description="Ручное управление покупками",
-                                 emoji="<:cart:1538399645238165624>", value="purchases"),
+            disnake.SelectOption(label="・Начисление", description="Начисление валюты", emoji="<:__:1538399607699021895>", value="give"),
+            disnake.SelectOption(label="・Списать", description="Снятие валюты", emoji="<:minus:1538399627521429534>", value="take"),
+            disnake.SelectOption(label="・Покупки", description="Ручное управление покупками", emoji="<:cart:1538399645238165624>", value="purchases"),
         ]
         super().__init__(placeholder="Выберите действие...", min_values=1, max_values=1,
                          options=options, custom_id="dc_select")
@@ -98,12 +95,9 @@ class DCView(disnake.ui.View):
 class GiveDcModal(Modal):
     def __init__(self):
         components = [
-            TextInput(label="ID пользователя или @упоминание", custom_id="user",
-                      placeholder="Введите ID или @username", min_length=2, max_length=50),
-            TextInput(label="Количество DC", custom_id="amount",
-                      placeholder="Число", min_length=1, max_length=10),
-            TextInput(label="Причина (необязательно)", custom_id="reason", required=False,
-                      placeholder="Причина начисления", max_length=200),
+            TextInput(label="ID пользователя или @упоминание", custom_id="user", placeholder="Введите ID или @username", min_length=2, max_length=50),
+            TextInput(label="Количество DC", custom_id="amount", placeholder="Число", min_length=1, max_length=10),
+            TextInput(label="Причина (необязательно)", custom_id="reason", required=False, placeholder="Причина начисления", max_length=200),
         ]
         super().__init__(title="Начислить DC", components=components)
 
@@ -132,12 +126,9 @@ class GiveDcModal(Modal):
 class TakeDcModal(Modal):
     def __init__(self):
         components = [
-            TextInput(label="ID пользователя или @упоминание", custom_id="user",
-                      placeholder="Введите ID или @username", min_length=2, max_length=50),
-            TextInput(label="Количество DC", custom_id="amount",
-                      placeholder="Число", min_length=1, max_length=10),
-            TextInput(label="Причина (необязательно)", custom_id="reason", required=False,
-                      placeholder="Причина списания", max_length=200),
+            TextInput(label="ID пользователя или @упоминание", custom_id="user", placeholder="Введите ID или @username", min_length=2, max_length=50),
+            TextInput(label="Количество DC", custom_id="amount", placeholder="Число", min_length=1, max_length=10),
+            TextInput(label="Причина (необязательно)", custom_id="reason", required=False, placeholder="Причина списания", max_length=200),
         ]
         super().__init__(title="Снять DC", components=components)
 
@@ -169,8 +160,7 @@ class TakeDcModal(Modal):
 class ManagePurchasesModal(Modal):
     def __init__(self):
         components = [
-            TextInput(label="ID пользователя", custom_id="user_id",
-                      placeholder="Введите числовой ID пользователя", min_length=1, max_length=30),
+            TextInput(label="ID пользователя", custom_id="user_id", placeholder="Введите числовой ID пользователя", min_length=1, max_length=30),
         ]
         super().__init__(title="Управление покупками", components=components)
 
@@ -203,9 +193,7 @@ class ManagePurchasesModal(Modal):
                 await inter2.response.send_message("❌ Ошибка удаления.", ephemeral=True)
 
         select.callback = select_callback
-        await inter.response.send_message(
-            f"Выберите покупку <@{user_id}> для удаления:", ephemeral=True, view=view
-        )
+        await inter.response.send_message(f"Выберите покупку <@{user_id}> для удаления:", ephemeral=True, view=view)
 
 
 # ============================================================
@@ -214,12 +202,9 @@ class ManagePurchasesModal(Modal):
 class PromoSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
-            disnake.SelectOption(label="・Создать промокод", description="Добавление",
-                                 emoji="<:__:1538399607699021895>", value="add"),
-            disnake.SelectOption(label="・Удалить промокод", description="Удаление",
-                                 emoji="<:minus:1538399627521429534>", value="remove"),
-            disnake.SelectOption(label="・Список промокодов", description="Все существующие промокоды",
-                                 emoji="<:list:1538400957803798588>", value="list"),
+            disnake.SelectOption(label="・Создать промокод", description="Добавление", emoji="<:__:1538399607699021895>", value="add"),
+            disnake.SelectOption(label="・Удалить промокод", description="Удаление", emoji="<:minus:1538399627521429534>", value="remove"),
+            disnake.SelectOption(label="・Список промокодов", description="Все существующие промокоды", emoji="<:list:1538400957803798588>", value="list"),
         ]
         super().__init__(placeholder="Выберите действие...", min_values=1, max_values=1,
                          options=options, custom_id="promo_select")
@@ -234,9 +219,7 @@ class PromoSelect(disnake.ui.StringSelect):
         if value == "add":
             await inter.response.send_modal(PromoAddModal())
         elif value == "remove":
-            await inter.response.send_message(
-                "Выберите промокод для удаления:", ephemeral=True, view=PromoRemoveSelectView()
-            )
+            await inter.response.send_message("Выберите промокод для удаления:", ephemeral=True, view=PromoRemoveSelectView())
         elif value == "list":
             reload_promo_cache()
             if not promo_codes:
@@ -255,10 +238,8 @@ class PromoView(disnake.ui.View):
 class PromoAddModal(Modal):
     def __init__(self):
         components = [
-            TextInput(label="Код промокода", custom_id="code",
-                      placeholder="Например VSEMPROMO25", min_length=2, max_length=50),
-            TextInput(label="Скидка (например 10%)", custom_id="value",
-                      placeholder="10%", min_length=1, max_length=20),
+            TextInput(label="Код промокода", custom_id="code", placeholder="Например VSEMPROMO25", min_length=2, max_length=50),
+            TextInput(label="Скидка (например 10%)", custom_id="value", placeholder="10%", min_length=1, max_length=20),
         ]
         super().__init__(title="Добавить промокод", components=components)
 
@@ -270,8 +251,7 @@ class PromoAddModal(Modal):
         add_promo_code(code, value)
         reload_promo_cache()
         await inter.response.send_message(f"✅ Промокод `{code}` добавлен → {value}", ephemeral=True)
-        await log_discord("➕ Промокод добавлен",
-                          f"Админ {inter.author.mention} добавил `{code}` → {value}", color=0x00ff00)
+        await log_discord("➕ Промокод добавлен", f"Админ {inter.author.mention} добавил `{code}` → {value}", color=0x00ff00)
 
 
 class PromoRemoveSelectView(View):
@@ -302,10 +282,65 @@ class PromoRemoveSelectView(View):
             remove_promo_code(code)
             reload_promo_cache()
             await inter.response.send_message(f"✅ Промокод `{code}` удалён.", ephemeral=True)
-            await log_discord("➖ Промокод удалён",
-                              f"Админ {inter.author.mention} удалил `{code}`", color=0xff6600)
+            await log_discord("➖ Промокод удалён", f"Админ {inter.author.mention} удалил `{code}`", color=0xff6600)
         else:
             await inter.response.send_message("❌ Промокод не найден.", ephemeral=True)
+
+
+# ============================================================
+# КАТАЛОГ АВТОЗАКАЗА
+# ============================================================
+class AutoorderCatalogView(View):
+    def __init__(self):
+        super().__init__(timeout=180)
+
+    @disnake.ui.button(label="🔄 Загрузить из файла", style=ButtonStyle.secondary, custom_id="aoc:reload")
+    async def reload_btn(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+
+        from modules.ai_manager import reload_catalog_from_json, load_catalog_from_db
+        count = reload_catalog_from_json()
+        if count == 0:
+            return await inter.response.send_message(
+                "❌ Не удалось загрузить каталог. Проверь `data/autoorder_catalog.json`.",
+                ephemeral=True,
+            )
+        catalog = load_catalog_from_db()
+        await inter.response.send_message(
+            f"✅ Загружено **{count}** товаров из **{len(catalog)}** категорий.",
+            ephemeral=True,
+        )
+        await log_discord(
+            title="📦 Каталог Автозаказа перезагружен",
+            description=f"> **Админ:** {inter.author.mention}\n> **Товаров:** `{count}`",
+            color=0x00ff00,
+        )
+
+    @disnake.ui.button(label="🗑️ Очистить БД", style=ButtonStyle.danger, custom_id="aoc:clear")
+    async def clear_btn(self, button, inter):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        cur.execute("DELETE FROM autoorder_catalog")
+        db.commit()
+        await inter.response.send_message("✅ БД каталога очищена.", ephemeral=True)
+        await log_discord(
+            title="📦 Каталог Автозаказа очищен",
+            description=f"> **Админ:** {inter.author.mention}",
+            color=0xff6600,
+        )
+
+    @disnake.ui.button(label="📊 Статистика", style=ButtonStyle.secondary, custom_id="aoc:stats")
+    async def stats_btn(self, button, inter):
+        from modules.ai_manager import load_catalog_from_db
+        catalog = load_catalog_from_db()
+        total = sum(len(c["items"]) for c in catalog.values())
+        lines = [f"> **{cat['label']}:** `{len(cat['items'])}` товаров" for cat in catalog.values()]
+        await inter.response.send_message(
+            f"📦 **Всего:** `{total}` товаров в `{len(catalog)}` категориях\n\n"
+            + "\n".join(lines),
+            ephemeral=True,
+        )
 
 
 # ============================================================
@@ -314,10 +349,8 @@ class PromoRemoveSelectView(View):
 class ClearModal(Modal):
     def __init__(self):
         components = [
-            TextInput(label="ID канала", placeholder="Введите числовой ID канала",
-                      custom_id="channel_id", min_length=1, max_length=30),
-            TextInput(label="Количество сообщений", placeholder="От 1 до 100",
-                      custom_id="amount", min_length=1, max_length=3),
+            TextInput(label="ID канала", placeholder="Введите числовой ID канала", custom_id="channel_id", min_length=1, max_length=30),
+            TextInput(label="Количество сообщений", placeholder="От 1 до 100", custom_id="amount", min_length=1, max_length=3),
         ]
         super().__init__(title="🧹 Очистка канала", components=components)
 
@@ -342,9 +375,7 @@ class ClearModal(Modal):
             return await inter.response.send_message("❌ Нет прав на удаление.", ephemeral=True)
         try:
             deleted = await channel.purge(limit=amount, bulk=True)
-            await inter.response.send_message(
-                f"✅ Удалено **{len(deleted)}** сообщений в {channel.mention}.", ephemeral=True
-            )
+            await inter.response.send_message(f"✅ Удалено **{len(deleted)}** сообщений в {channel.mention}.", ephemeral=True)
             await log_discord(
                 title="🧹 Очистка канала",
                 description=f"> **Админ:** {inter.author.mention}\n> **Канал:** {channel.mention}\n> **Удалено:** {len(deleted)}",
@@ -358,8 +389,7 @@ class ClearModal(Modal):
 class GetJsonModal(Modal):
     def __init__(self):
         components = [
-            TextInput(label="Ссылка на сообщение", custom_id="link",
-                      placeholder="https://discord.com/channels/.../...", min_length=10, max_length=200),
+            TextInput(label="Ссылка на сообщение", custom_id="link", placeholder="https://discord.com/channels/.../...", min_length=10, max_length=200),
         ]
         super().__init__(title="Получить JSON сообщения", components=components)
 
@@ -378,12 +408,10 @@ class GetJsonModal(Modal):
             msg = await channel.fetch_message(mid)
         except Exception as e:
             return await inter.response.send_message(f"Ошибка: {e}", ephemeral=True)
-        payload = {"content": msg.content or " ",
-                   "embeds": [clean_embed_for_discohook(e.to_dict()) for e in msg.embeds]}
+        payload = {"content": msg.content or " ", "embeds": [clean_embed_for_discohook(e.to_dict()) for e in msg.embeds]}
         buf = io.StringIO(json.dumps(payload, ensure_ascii=False, indent=2))
         await inter.response.send_message(file=disnake.File(fp=buf, filename="message.json"), ephemeral=True)
-        await log_discord("📥 Выгрузка JSON",
-                          f"Админ {inter.author.mention} выгрузил JSON из {channel.mention}", color=0x00ff00)
+        await log_discord("📥 Выгрузка JSON", f"Админ {inter.author.mention} выгрузил JSON из {channel.mention}", color=0x00ff00)
 
 
 class AdminSelect(disnake.ui.StringSelect):
@@ -397,6 +425,8 @@ class AdminSelect(disnake.ui.StringSelect):
                                  emoji="<:jsons:1538401299459080263>", value="json"),
             disnake.SelectOption(label="・Очистка", description="Удаление сообщений в чате",
                                  emoji="<:clear:1538561439491686410>", value="clear"),
+            disnake.SelectOption(label="・Каталог Автозаказа", description="Загрузка цен из файла, очистка БД",
+                                 emoji="📦", value="autoorder_catalog"),
         ]
         super().__init__(placeholder="Выберите действие...", min_values=1, max_values=1,
                          options=options, custom_id="admin_select")
@@ -410,21 +440,34 @@ class AdminSelect(disnake.ui.StringSelect):
         value = inter.data.values[0]
         if value == "spisat":
             if not has_admin_command_roles(inter.author):
-                return await inter.response.send_message(
-                    "⛔ Списать заказ может только администратор.", ephemeral=True
-                )
+                return await inter.response.send_message("⛔ Списать заказ может только администратор.", ephemeral=True)
             await inter.response.send_modal(SpisatZakazModal())
         elif value == "recalc_roles":
             if not has_admin_command_roles(inter.author):
-                return await inter.response.send_message(
-                    "⛔ Пересчёт доступен только администратору.", ephemeral=True
-                )
+                return await inter.response.send_message("⛔ Пересчёт доступен только администратору.", ephemeral=True)
             await inter.response.defer(ephemeral=True)
             await recalc_all_roles(inter)
         elif value == "json":
             await inter.response.send_modal(GetJsonModal())
         elif value == "clear":
             await inter.response.send_modal(ClearModal())
+        elif value == "autoorder_catalog":
+            if not has_admin_command_roles(inter.author):
+                return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+            await inter.response.send_message(
+                embed=disnake.Embed(
+                    title="📦 Каталог Автозаказа",
+                    description=(
+                        "> Управление товарами для AI-менеджера.\n\n"
+                        "> **🔄 Загрузить из файла** — синхронизирует БД с `data/autoorder_catalog.json`.\n"
+                        "> **🗑️ Очистить БД** — удалит все товары из БД.\n"
+                        "> **📊 Статистика** — сколько товаров и категорий."
+                    ),
+                    color=0x676767,
+                ),
+                view=AutoorderCatalogView(),
+                ephemeral=True,
+            )
 
 
 class AdminView(disnake.ui.View):
@@ -639,7 +682,7 @@ async def send_ticket_panel():
 
 
 # ============================================================
-# КОДЕКС МАГАЗИНА
+# КОДЕКС
 # ============================================================
 async def _send_work_screen(inter: disnake.MessageInteraction, buf, fname: str):
     try:
@@ -650,10 +693,7 @@ async def _send_work_screen(inter: disnake.MessageInteraction, buf, fname: str):
     except Exception as e:
         logger.exception(f"_send_work_screen: {e}")
         try:
-            await inter.followup.send(
-                content=f"❌ Ошибка рендера: `{str(e)[:200]}`",
-                ephemeral=True,
-            )
+            await inter.followup.send(content=f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
         except Exception:
             pass
 
@@ -671,7 +711,6 @@ class WorkSelect(disnake.ui.StringSelect):
 
     async def callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0]
-
         try:
             await inter.response.defer(ephemeral=True)
         except Exception:
@@ -679,10 +718,7 @@ class WorkSelect(disnake.ui.StringSelect):
 
         asyncio.create_task(log_discord(
             title="📂 Выбор в панели Кодекса",
-            description=(
-                f"> **Пользователь:** {inter.author.mention}\n"
-                f"> **Выбрано:** `{value}`"
-            ),
+            description=(f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{value}`"),
             color=0x00aaff
         ))
 
@@ -691,26 +727,15 @@ class WorkSelect(disnake.ui.StringSelect):
                 buf = render_work_salary(inter.author.id)
             except Exception as e:
                 logger.exception(f"render_work_salary: {e}")
-                return await inter.followup.send(
-                    f"❌ Ошибка рендера: `{str(e)[:200]}`",
-                    ephemeral=True,
-                )
-            await _send_work_screen(
-                inter, buf, f"work_salary_{inter.author.id}.png"
-            )
-
+                return await inter.followup.send(f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
+            await _send_work_screen(inter, buf, f"work_salary_{inter.author.id}.png")
         elif value == "tickets":
             try:
                 buf = render_work_tickets(inter.author.id)
             except Exception as e:
                 logger.exception(f"render_work_tickets: {e}")
-                return await inter.followup.send(
-                    f"❌ Ошибка рендера: `{str(e)[:200]}`",
-                    ephemeral=True,
-                )
-            await _send_work_screen(
-                inter, buf, f"work_tickets_{inter.author.id}.png"
-            )
+                return await inter.followup.send(f"❌ Ошибка рендера: `{str(e)[:200]}`", ephemeral=True)
+            await _send_work_screen(inter, buf, f"work_tickets_{inter.author.id}.png")
 
 
 class WorkView(disnake.ui.View):
@@ -805,7 +830,7 @@ class SpisatZakazModal(Modal):
 
 
 # ============================================================
-# СЛУЖЕБНЫЕ ПАНЕЛИ (без embed1, короткое описание)
+# СЛУЖЕБНЫЕ ПАНЕЛИ
 # ============================================================
 async def send_staff_panels():
     from core.bot import bot
@@ -822,7 +847,6 @@ async def send_staff_panels():
         logger.warning("Staff panel channel not found")
         return
 
-    # Чистим старые сообщения бота
     async for msg in channel.history(limit=100):
         if msg.author == bot.user:
             try:
@@ -830,7 +854,7 @@ async def send_staff_panels():
             except Exception:
                 pass
 
-    # ─── ЭКОНОМИКА DC ───
+    # ЭКОНОМИКА
     dc_embed = disnake.Embed(
         title="Экономическая панель Diamond Coins",
         description=(
@@ -843,7 +867,7 @@ async def send_staff_panels():
     dc_embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=dc_embed, view=DCView())
 
-    # ─── ПРОМОКОДЫ ───
+    # ПРОМОКОДЫ
     promo_embed = disnake.Embed(
         title="Управление промокодами",
         description=(
@@ -856,11 +880,11 @@ async def send_staff_panels():
     promo_embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=promo_embed, view=PromoView())
 
-    # ─── АДМИН ───
+    # АДМИН
     admin_embed = disnake.Embed(
         title="Панель управления сервером",
         description=(
-            "> Центральная панель: очистка сообщений, выгрузка JSON, пересчёт ролей, списание заказов.\n"
+            "> Центральная панель: очистка сообщений, выгрузка JSON, пересчёт ролей, списание заказов, каталог Автозаказа.\n"
             "> Заменила старые отдельные команды — всё в одном месте.\n"
             "> Требует прав администратора, используй с умом."
         ),
@@ -869,7 +893,7 @@ async def send_staff_panels():
     admin_embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=admin_embed, view=AdminView())
 
-    # ─── КЛАН-ЛИГА (админ-панель) ───
+    # КЛАН-ЛИГА
     try:
         from clan.panels import send_clan_admin_panel
         await send_clan_admin_panel(bot)
