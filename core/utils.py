@@ -336,6 +336,12 @@ CREATE TABLE IF NOT EXISTS ai_manager_sessions (
     receipt_url    TEXT,
     created_at     INTEGER
 );
+
+-- 👇 NEW: персональные предпочтения AI Manager
+CREATE TABLE IF NOT EXISTS ai_manager_user_prefs (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER DEFAULT 1
+);
 """)
 db.commit()
 
