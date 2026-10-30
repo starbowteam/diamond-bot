@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI Manager v2.2 — умный менеджер тикетов Diamond Shop.
-Фикс: выдача списка товаров сразу, сброс счета при 2 текстовых сообщениях после выставления.
+AI Manager v2.3 — умный менеджер тикетов Diamond Shop.
+Фикс: фильтрация по категориям (чтобы видел все варианты), сброс счета при 2 текстах.
 """
 import os
 import re
@@ -122,15 +122,6 @@ CATALOG_SYNONYMS: Dict[str, List[str]] = {
         "подарок", "подарочек", "подарить", "подари", "гифт", "другу",
         "друг", "подруге", "подарок другу", "хочу подарить",
     ],
-}
-
-CATEGORY_SYNONYMS: Dict[str, List[str]] = {
-    "discord":  ["дискорд", "discord", "дс", "дс нитро", "дис"],
-    "steam":    ["стим", "steam", "пар", "par"],
-    "telegram": ["телега", "телеграм", "тг", "tg", "telegram", "телеграмм"],
-    "roblox":   ["роблокс", "roblox", "рб", "робукс"],
-    "spotify":  ["споти", "спф", "spotify", "спотифай"],
-    "decoration": ["украш", "декор", "бейдж", "профиль"],
 }
 
 
@@ -527,8 +518,34 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
 
 
 # ============================================================
-# КАТАЛОГ — СИНОНИМЫ
+# ФИЛЬТРАЦИЯ КАТАЛОГА (ВОЗВРАЩЕНО ИЗ V1)
 # ============================================================
+def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[str, dict]:
+    t = user_text.lower()
+    result = {}
+    keywords = {
+        "discord":  ["дискорд", "discord", "нитро", "nitro", "буст", "boost"],
+        "telegram": ["телега", "телеграм", "telegram", "тг", "tg", "звезд", "звёзд", "stars"],
+        "steam":    ["стим", "steam", "пополнени", "регион", "рубл"],
+        "roblox":   ["роблокс", "roblox", "робукс", "robux"],
+        "spotify":  ["споти", "spotify"],
+        "decoration": ["украшени", "декор", "бейдж", "профиль"]
+    }
+    matched_cat = None
+    for cat_key, words in keywords.items():
+        if any(w in t for w in words):
+            matched_cat = cat_key
+            break
+            
+    if matched_cat:
+        for db_key, cat_data in full_catalog.items():
+            if matched_cat in db_key.lower() or matched_cat in cat_data["label"].lower():
+                result[db_key] = cat_data
+                break
+                
+    return result if result else full_catalog
+
+
 def _norm(text: str) -> str:
     return (text or "").lower().strip()
 
@@ -541,9 +558,6 @@ def find_relevant_items(user_text: str, full_catalog: Dict[str, dict]) -> List[s
     for item_key, words in CATALOG_SYNONYMS.items():
         for w in words:
             if w in t:
-                if item_key in ("gift_marker", "discord_nitro", "discord_nitro_basic",
-                                "discord_nitro_gift", "discord_nitro_trial"):
-                    pass
                 found_ids = _find_item_ids_by_key(item_key, full_catalog)
                 for fid in found_ids:
                     if fid not in seen:
@@ -579,14 +593,14 @@ def _item_exists(item_id: str, catalog: Dict[str, dict]) -> bool:
     return False
 
 
-def build_catalog_block(user_text: str, full_catalog: Dict[str, dict]) -> str:
-    relevant = find_relevant_items(user_text, full_catalog)
+def build_catalog_block(user_text: str, filtered_catalog: Dict[str, dict]) -> str:
+    relevant = find_relevant_items(user_text, filtered_catalog)
 
     parts = []
     if relevant:
         parts.append("🎯 ВОЗМОЖНО РЕЛЕВАНТНО (клиент похоже хочет именно это):")
-        for rid in relevant[:5]:
-            for cat in full_catalog.values():
+        for rid in relevant[:15]:  # Увеличили лимит с 5 до 15, чтобы видел ВСЕ нитро
+            for cat in filtered_catalog.values():
                 for it in cat.get("items", []):
                     if it.get("id") == rid:
                         unit = f" / {it['unit']}" if it.get("unit") else ""
@@ -594,8 +608,8 @@ def build_catalog_block(user_text: str, full_catalog: Dict[str, dict]) -> str:
                         break
         parts.append("")
 
-    parts.append("📦 ВЕСЬ КАТАЛОГ (выбирай строго отсюда):")
-    for cat_label, cat in full_catalog.items():
+    parts.append("📦 ДОСТУПНЫЕ ТОВАРЫ В ЭТОЙ КАТЕГОРИИ:")
+    for cat_label, cat in filtered_catalog.items():
         parts.append(f"\n[{cat_label}]")
         for it in cat.get("items", []):
             unit = f" / {it['unit']}" if it.get("unit") else ""
@@ -768,12 +782,14 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 правила:
 - говори коротко и по делу, 1–3 предложения
 - используй ТОЛЬКО товары из каталога ниже. Если нужного товара нет в списке, ты ОБЯЗАН сказать клиенту об этом.
-- КРИТИЧЕСКОЕ ПРАВИЛО: Если клиент просит категорию (например, "нитро", "звёзды", "бусты") без уточнений — НЕ ЗАДАВАЙ ВОПРОСОВ. СРАЗУ выведи список доступных вариантов с ценами из каталога. Пример: "У нас есть: 1. Nitro Trial — 160₽, 2. Nitro 1 Month — 460₽. Какой вариант выберем?"
+- КРИТИЧЕСКОЕ ПРАВИЛО: Если клиент просит категорию (например, "нитро", "звёзды", "бусты") без уточнений — НЕ ЗАДАВАЙ ВОПРОСОВ. СРАЗУ выведи ПОЛНЫЙ список ВСЕХ доступных вариантов этой категории с ценами из каталога. 
+- НЕ СОКРАЩАЙ СПИСОК! Если в каталоге 9 видов нитро — выведи все 9. Если 5 видов звёзд — выведи все 5.
+- Пример правильного ответа: "У нас есть: 1. Nitro Trial 1 Month — 160₽, 2. Nitro 1 Month — 460₽, 3. Nitro Basic 1 Month — 300₽, 4. Nitro Gift — 590₽. Какой вариант выберем?"
 - Если клиент говорит "у меня не было нитро" или просит Trial — предложи именно Trial.
 - НИКОГДА не подсовывай товар из другой категории! Если просят Спотифай, не предлагай Звёзды Телеграм.
 - Если клиент просит "пополнение стим на 150 рублей", передай item_id="steam_rub" и quantity=150.
 - Если клиент просит "100 звезд", передай item_id="tg_stars" и quantity=100.
-- Если клиент просит "подарочек другу" — УТОЧНИ, какой именно товар он хочет подарить. Например: "Конечно! Какой именно подарок? Nitro Gift, звёзды Телеграм, что-то ещё?"
+- Если клиент просит "подарочек другу" — УТОЧНИ, какой именно товар он хочет подарить.
 - НЕ ВЫСТАВЛЯЙ БОЛЬШЕ ОДНОГО СЧЕТА ЗА РАЗ. (Если счёт уже выставлен и клиент пишет текст — уточни, нужно ли поменять заказ, или просто ответь).
 - Если товара нет в каталоге — вызови escalate_to_human с причиной "Товар не найден в каталоге, возможно BuyALL".
 - ВАЖНО: пометка "[счёт выставлен: ...]" в контексте означает, что предыдущий заказ УЖЕ оформлен. Новый запрос клиента — это НОВЫЙ заказ. Не смешивай товары из разных запросов.
@@ -906,7 +922,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2.2 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v2.3 запущен. Каталог: {count}")
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
         asyncio.create_task(_cleanup_loop())
@@ -1038,7 +1054,9 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         await channel.send("⚠️ Каталог пуст.")
         return
 
-    catalog_text = build_catalog_block(user_text, full_catalog)
+    # ФИЛЬТРУЕМ КАТАЛОГ, ЧТОБЫ LLM НЕ ТУПИЛ
+    filtered_catalog = get_filtered_catalog(user_text, full_catalog)
+    catalog_text = build_catalog_block(user_text, filtered_catalog)
 
     system_prompt = SYSTEM_PROMPT.format(
         catalog=catalog_text,
@@ -1102,8 +1120,6 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 await channel.send("❌ Извините, я не могу оформить этот товар.")
                 await escalate(channel, "Ошибка сопоставления: запрошен Spotify")
                 return
-
-            # Убрали блок с проверкой invoice_sent, так как контекст очищается при 2 сообщениях
 
             ok = await send_invoice(channel, item, discount, author.display_name, quantity)
             if ok:
