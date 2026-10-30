@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 AI Manager — третий бот. Ведёт диалог в тикетах, создаёт счёты, ловит чеки.
-Тумблер ON/OFF живёт в основной БД (settings), читается на каждом сообщении.
 """
 import os
 import re
@@ -21,7 +20,12 @@ from disnake.ui import Button, View
 from core.utils import (
     CONFIG, DATA_DIR, logger, db, cur,
     load_json, save_json, now_ts, log_discord,
-    get_ticket_owner,
+    get_ticket_owner, has_admin_command_roles,
+)
+from core.catalog import (
+    load_catalog_from_db,
+    reload_catalog_from_json,
+    auto_init,
 )
 
 # ============================================================
@@ -29,8 +33,16 @@ from core.utils import (
 # ============================================================
 AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 GEMINI_API_KEY = os.getenv("MISTRAL_API_KEY")
-GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+GEMINI_MODELS_PRIORITY = ["gemini-flash-latest"]
+_env_model = os.getenv("GEMINI_MODEL")
+if _env_model:
+    GEMINI_MODELS_PRIORITY = [m.strip() for m in _env_model.split(",") if m.strip()]
+
+_AVAILABLE_MODELS: List[str] = []
+_AVAILABLE_MODELS_FETCHED_AT: float = 0.0
+_MODELS_CACHE_TTL = 3600
 
 SALES_MANAGER_ROLE = 1154757071330365490
 LOG_CHANNEL = 1530453871581855744
@@ -65,15 +77,6 @@ def init_ai_manager_tables():
         key   TEXT PRIMARY KEY,
         value TEXT
     );
-    CREATE TABLE IF NOT EXISTS autoorder_catalog (
-        id        TEXT PRIMARY KEY,
-        category  TEXT,
-        name      TEXT,
-        price     REAL,
-        unit      TEXT,
-        min_qty   INTEGER DEFAULT 1,
-        max_qty   INTEGER DEFAULT 1
-    );
     CREATE TABLE IF NOT EXISTS ai_manager_sessions (
         channel_id     INTEGER PRIMARY KEY,
         user_id        INTEGER,
@@ -105,54 +108,6 @@ def set_setting(key: str, value: str):
 
 def is_ai_enabled() -> bool:
     return get_setting("ai_manager_enabled", "0") == "1"
-
-
-# ============================================================
-# КАТАЛОГ
-# ============================================================
-def load_catalog_from_db() -> Dict[str, dict]:
-    rows = cur.execute(
-        "SELECT * FROM autoorder_catalog ORDER BY category, name"
-    ).fetchall()
-    result: Dict[str, dict] = {}
-    for r in rows:
-        cat = r["category"]
-        if cat not in result:
-            result[cat] = {"label": cat, "items": []}
-        result[cat]["items"].append({
-            "id": r["id"], "name": r["name"], "price": r["price"],
-            "unit": r["unit"], "min": r["min_qty"], "max": r["max_qty"],
-        })
-    return result
-
-
-def reload_catalog_from_json() -> int:
-    path = os.path.join(DATA_DIR, "autoorder_catalog.json")
-    if not os.path.exists(path):
-        ai_logger.warning(f"Каталог не найден: {path}")
-        return 0
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        ai_logger.exception(f"Ошибка чтения каталога: {e}")
-        return 0
-
-    cur.execute("DELETE FROM autoorder_catalog")
-    count = 0
-    for cat_key, cat in data.items():
-        label = cat.get("label", cat_key)
-        for item in cat.get("items", []):
-            cur.execute(
-                "INSERT INTO autoorder_catalog (id, category, name, price, unit, min_qty, max_qty) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (item["id"], label, item["name"], float(item["price"]),
-                 item.get("unit"), int(item.get("min", 1)), int(item.get("max", 1))),
-            )
-            count += 1
-    db.commit()
-    ai_logger.info(f"Каталог загружен: {count} товаров")
-    return count
 
 
 # ============================================================
@@ -273,17 +228,104 @@ async def escalate(channel, reason: str):
         f"> **Причина:** {reason}\n"
         f"> 🤖 Я постараюсь в будущем понять данные методики тикетов."
     )
-    await log_discord(
-        title="🤖 AI Manager · эскалация",
-        description=f"> **Канал:** {channel.mention}\n> **Причина:** {reason}",
-        color=0xffaa00,
-        channel_id=LOG_CHANNEL,
-    )
+    ai_logger.info(f"Эскалация: {channel.id} — {reason}")
 
 
 # ============================================================
-# GEMINI
+# GEMINI — fetch моделей как в ai.py
 # ============================================================
+async def _fetch_available_models(session: aiohttp.ClientSession) -> List[str]:
+    global _AVAILABLE_MODELS, _AVAILABLE_MODELS_FETCHED_AT
+    now = time.time()
+    if _AVAILABLE_MODELS and now - _AVAILABLE_MODELS_FETCHED_AT < _MODELS_CACHE_TTL:
+        return _AVAILABLE_MODELS
+
+    url = GEMINI_API_BASE
+    headers = {"X-goog-api-key": GEMINI_API_KEY}
+    try:
+        async with session.get(url, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                return _AVAILABLE_MODELS
+            data = await resp.json()
+            models = []
+            for m in data.get("models", []):
+                name = m.get("name", "")
+                if not name.startswith("models/"):
+                    continue
+                short = name[len("models/"):]
+                if "generateContent" not in m.get("supportedGenerationMethods", []):
+                    continue
+                n_low = short.lower()
+                if "flash" not in n_low:
+                    continue
+                if any(x in n_low for x in ("image", "tts", "omni")):
+                    continue
+                models.append(short)
+
+            def sort_key(n):
+                n_low = n.lower()
+                score = 0
+                if "latest" in n_low: score -= 1000
+                m = re.search(r"gemini-(\d+)\.(\d+)", n_low)
+                if m:
+                    score -= int(m.group(1)) * 100
+                    score -= int(m.group(2)) * 10
+                if "preview" in n_low or "exp" in n_low:
+                    score += 500
+                if "8b" in n_low:
+                    score += 100
+                return score
+
+            models.sort(key=sort_key)
+            _AVAILABLE_MODELS = models
+            _AVAILABLE_MODELS_FETCHED_AT = now
+            ai_logger.info(f"Доступные модели: {models[:5]}")
+            return models
+    except Exception as e:
+        ai_logger.warning(f"listModels: {e}")
+        return _AVAILABLE_MODELS
+
+
+async def _try_model(
+    session: aiohttp.ClientSession,
+    model: str,
+    payload: dict,
+) -> tuple:
+    url = f"{GEMINI_API_BASE}/{model}:generateContent"
+    headers = {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY}
+    try:
+        async with session.post(
+            url, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                cands = data.get("candidates", [])
+                if not cands:
+                    return False, {"error": "no candidates"}, 200
+                parts = cands[0].get("content", {}).get("parts", [])
+                text_parts, funcs = [], []
+                for p in parts:
+                    if "text" in p:
+                        text_parts.append(p["text"])
+                    if "functionCall" in p:
+                        fc = p["functionCall"]
+                        funcs.append({"name": fc.get("name"), "args": fc.get("args", {})})
+                return True, {"text": "".join(text_parts).strip(), "funcs": funcs}, 200
+            err = await resp.text()
+            ai_logger.warning(f"[{model}] {resp.status}: {err[:200]}")
+            if resp.status == 429:
+                return False, {"error": "rate_limit"}, 429
+            return False, {"error": f"http {resp.status}"}, resp.status
+    except asyncio.TimeoutError:
+        ai_logger.warning(f"[{model}] timeout 60s")
+        return False, {"error": "timeout"}, -1
+    except Exception as e:
+        ai_logger.warning(f"[{model}] {type(e).__name__}: {e}")
+        return False, {"error": str(e)}, -1
+
+
 SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете.
 твоя задача — помочь клиенту оформить заказ.
 
@@ -295,7 +337,6 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - если клиент выбрал конкретный — вызови create_invoice
 - если не понимаешь клиента 3 раза — вызови escalate_to_human
 - не подтверждай оплату сам — это делает менеджер
-- не спрашивай про скидки — они уже учтены в контексте
 
 каталог (только эти товары):
 {catalog}
@@ -308,7 +349,7 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 TOOLS = [
     {
         "name": "create_invoice",
-        "description": "Выставить счёт клиенту. Вызывай когда клиент явно выбрал конкретный товар.",
+        "description": "Выставить счёт. Вызывай когда клиент явно выбрал конкретный товар.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -331,8 +372,16 @@ TOOLS = [
 ]
 
 
+def _build_payload(system_prompt: str, contents: list) -> dict:
+    return {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+        "tools": [{"function_declarations": TOOLS}],
+        "generationConfig": {"temperature": 0.6, "maxOutputTokens": 800},
+    }
+
+
 async def call_gemini(
-    session: aiohttp.ClientSession,
     system_prompt: str,
     history: list,
     user_msg: str,
@@ -349,39 +398,38 @@ async def call_gemini(
         })
     contents.append({"role": "user", "parts": [{"text": user_msg}]})
 
-    payload = {
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "contents": contents,
-        "tools": [{"function_declarations": TOOLS}],
-        "generationConfig": {"temperature": 0.6, "maxOutputTokens": 800},
-    }
-    url = f"{GEMINI_API_BASE}/{GEMINI_MODEL}:generateContent"
-    headers = {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY}
+    payload = _build_payload(system_prompt, contents)
 
-    try:
-        async with session.post(
-            url, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=30),
-        ) as resp:
-            if resp.status != 200:
-                ai_logger.warning(f"Gemini HTTP {resp.status}")
-                return None
-            data = await resp.json()
-            cands = data.get("candidates", [])
-            if not cands:
-                return None
-            parts = cands[0].get("content", {}).get("parts", [])
-            text_parts, funcs = [], []
-            for p in parts:
-                if "text" in p:
-                    text_parts.append(p["text"])
-                if "functionCall" in p:
-                    fc = p["functionCall"]
-                    funcs.append({"name": fc.get("name"), "args": fc.get("args", {})})
-            return {"text": "".join(text_parts).strip(), "funcs": funcs}
-    except Exception as e:
-        ai_logger.exception(f"Gemini call: {e}")
-        return None
+    async with aiohttp.ClientSession() as session:
+        models_to_try = []
+        seen = set()
+        for m in GEMINI_MODELS_PRIORITY:
+            if m not in seen:
+                seen.add(m)
+                models_to_try.append(m)
+        for m in await _fetch_available_models(session):
+            if m not in seen:
+                seen.add(m)
+                models_to_try.append(m)
+        models_to_try = models_to_try[:5]
+
+        if not models_to_try:
+            ai_logger.error("Нет доступных моделей")
+            return None
+
+        ai_logger.info(f"Пробую модели: {models_to_try}")
+
+        for model in models_to_try:
+            ok, res, status = await _try_model(session, model, payload)
+            if ok:
+                ai_logger.info(f"✅ Ответ от {model}")
+                return res
+            if status == 429:
+                ai_logger.warning(f"Rate limit на {model}")
+                break
+            await asyncio.sleep(0.3)
+
+    return None
 
 
 # ============================================================
@@ -398,14 +446,139 @@ bot = commands.Bot(command_prefix="!am", intents=intents)
 
 @bot.event
 async def on_ready():
-    ai_logger.info(f"AI Manager: {bot.user}")
+    ai_logger.info(f"AI Manager: {bot.user} (ID: {bot.user.id})")
     await bot.change_presence(activity=disnake.Game("AI-менеджер · онлайн"))
-    reload_catalog_from_json()
-    await log_discord(
-        title="🤖 AI Manager запущен",
-        description=f"> **{bot.user}** готов к работе.",
+
+    # Автоинициализация каталога
+    count = auto_init()
+    ai_logger.info(f"Каталог на старте: {count} товаров")
+
+    # Прогрев моделей
+    try:
+        async with aiohttp.ClientSession() as s:
+            models = await _fetch_available_models(s)
+            if models:
+                ai_logger.info(f"Доступные модели: {models[:5]}")
+    except Exception as e:
+        ai_logger.warning(f"прогрев моделей: {e}")
+
+    # Лог в канал
+    try:
+        ch = bot.get_channel(LOG_CHANNEL)
+        if ch:
+            await ch.send(embed=disnake.Embed(
+                title="🤖 AI Manager запущен",
+                description=(
+                    f"> **Бот:** {bot.user.mention}\n"
+                    f"> **Каталог:** `{count}` товаров\n"
+                    f"> **AI включён:** {'✅' if is_ai_enabled() else '❌'}"
+                ),
+                color=COLOR_GREY,
+            ))
+    except Exception as e:
+        ai_logger.warning(f"log channel: {e}")
+
+
+@bot.slash_command(name="am_status", description="AI Manager — диагностика")
+async def am_status(ctx: disnake.ApplicationCommandInteraction):
+    catalog = load_catalog_from_db()
+    total = sum(len(c["items"]) for c in catalog.values())
+    cats = len(catalog)
+
+    embed = disnake.Embed(
+        title="🤖 AI Manager · Диагностика",
         color=COLOR_GREY,
-        channel_id=LOG_CHANNEL,
+    )
+    embed.add_field(name="🟢 Бот", value=f"{bot.user.mention if bot.user else '❌'}", inline=False)
+    embed.add_field(name="⚙️ AI включён", value="✅ Да" if is_ai_enabled() else "❌ Нет", inline=True)
+    embed.add_field(name="📦 Каталог", value=f"`{total}` в `{cats}` категориях", inline=True)
+    embed.add_field(name="🔑 Gemini API", value="✅" if GEMINI_API_KEY else "❌", inline=True)
+    embed.add_field(name="🎯 Модели", value=f"`{_AVAILABLE_MODELS[:2]}`" if _AVAILABLE_MODELS else "не загружены", inline=False)
+    await ctx.send(embed=embed, ephemeral=True)
+
+
+@bot.slash_command(name="am_test", description="Тест AI без тикета")
+async def am_test(
+    ctx: disnake.ApplicationCommandInteraction,
+    text: str = "Привет, сколько стоит Nitro 1 Month?",
+):
+    if not GEMINI_API_KEY:
+        return await ctx.send("❌ MISTRAL_API_KEY не установлен", ephemeral=True)
+
+    await ctx.response.defer(ephemeral=True)
+
+    catalog = load_catalog_from_db()
+    if not catalog:
+        return await ctx.edit_original_response(
+            content="❌ Каталог пуст. Используй `/am_reload`."
+        )
+
+    lines = []
+    for cat_label, cat in catalog.items():
+        lines.append(f"\n[{cat_label}]")
+        for item in cat["items"]:
+            unit = f" / {item['unit']}" if item.get("unit") else ""
+            lines.append(f"  - {item['id']}: {item['name']} — {item['price']}₽{unit}")
+    catalog_text = "\n".join(lines)
+
+    system_prompt = SYSTEM_PROMPT.format(
+        catalog=catalog_text,
+        user_name=ctx.author.display_name,
+        discount=0,
+    )
+
+    start = time.time()
+    result = await call_gemini(system_prompt, [], text)
+    elapsed = time.time() - start
+
+    if not result:
+        return await ctx.edit_original_response(
+            content=f"❌ Gemini не ответил за {elapsed:.1f}с. Смотри `ai_manager.log`."
+        )
+
+    resp = result.get("text") or "—"
+    funcs = result.get("funcs", [])
+
+    embed = disnake.Embed(
+        title=f"🤖 Тест AI · {elapsed:.1f}с",
+        description=f"**Ты:** {text}\n\n**AI:** {resp}",
+        color=COLOR_GREY,
+    )
+    if funcs:
+        embed.add_field(
+            name="🔧 Function calls",
+            value="\n".join(f"`{f['name']}({f['args']})`" for f in funcs),
+            inline=False,
+        )
+    await ctx.edit_original_response(embed=embed)
+
+
+@bot.slash_command(name="am_toggle", description="Включить/выключить AI-менеджер")
+async def am_toggle(ctx: disnake.ApplicationCommandInteraction):
+    if not has_admin_command_roles(ctx.author):
+        return await ctx.send("⛔ Нет прав.", ephemeral=True)
+
+    current = get_setting("ai_manager_enabled", "0")
+    new_state = "0" if current == "1" else "1"
+    set_setting("ai_manager_enabled", new_state)
+
+    await ctx.send(
+        f"✅ AI Manager: **{'ВКЛЮЧЁН' if new_state == '1' else 'ВЫКЛЮЧЕН'}**",
+        ephemeral=True,
+    )
+    ai_logger.info(f"Toggle от {ctx.author.id}: {new_state}")
+
+
+@bot.slash_command(name="am_reload", description="Перезагрузить каталог из файла")
+async def am_reload(ctx: disnake.ApplicationCommandInteraction):
+    if not has_admin_command_roles(ctx.author):
+        return await ctx.send("⛔ Нет прав.", ephemeral=True)
+
+    count = reload_catalog_from_json()
+    catalog = load_catalog_from_db()
+    await ctx.send(
+        f"✅ Загружено **{count}** товаров из **{len(catalog)}** категорий.",
+        ephemeral=True,
     )
 
 
@@ -414,6 +587,8 @@ async def on_message(message: disnake.Message):
     if message.author.bot:
         return
     if not isinstance(message.channel, disnake.TextChannel):
+        return
+    if message.content.startswith("!am"):
         return
     if not _is_ai_ticket(message.channel):
         return
@@ -436,6 +611,7 @@ async def on_message(message: disnake.Message):
     if sess["escalated"]:
         return
 
+    # ЧЕК
     if message.attachments:
         att = message.attachments[0]
         low = att.filename.lower()
@@ -446,16 +622,7 @@ async def on_message(message: disnake.Message):
                 f"> <@&{SALES_MANAGER_ROLE}> — заказ готов к проверке.\n"
                 f"> 🤖 Я постараюсь в будущем понять данные методики тикетов."
             )
-            await log_discord(
-                title="🤖 AI Manager · чек получен",
-                description=(
-                    f"> **Канал:** {channel.mention}\n"
-                    f"> **Юзер:** {message.author.mention}\n"
-                    f"> **Файл:** [открыть]({att.url})"
-                ),
-                color=0x2ecc71,
-                channel_id=LOG_CHANNEL,
-            )
+            ai_logger.info(f"Чек: {channel.id} от {user_id}")
             return
 
     if sess["message_count"] >= SESSION_MAX_MESSAGES:
@@ -468,6 +635,10 @@ async def on_message(message: disnake.Message):
     discount = await get_ticket_discount(channel)
 
     catalog = load_catalog_from_db()
+    if not catalog:
+        await channel.send("⚠️ Каталог пуст. Админ должен загрузить его.")
+        return
+
     lines = []
     for cat_label, cat in catalog.items():
         lines.append(f"\n[{cat_label}]")
@@ -482,13 +653,13 @@ async def on_message(message: disnake.Message):
         discount=discount,
     )
 
-    async with aiohttp.ClientSession() as http:
-        async with channel.typing():
-            result = await call_gemini(http, system_prompt, hist, message.content or "")
+    async with channel.typing():
+        result = await call_gemini(system_prompt, hist, message.content or "")
 
     if not result:
         new_fails = sess["fail_count"] + 1
         update_session(channel.id, fail_count=new_fails)
+        ai_logger.warning(f"AI fail #{new_fails} в {channel.id}")
         if new_fails >= SESSION_MAX_FAILS:
             await escalate(channel, "не могу получить ответ от AI")
         return
@@ -511,13 +682,14 @@ async def on_message(message: disnake.Message):
             item_id = args.get("item_id", "")
             row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
             if not row:
-                await channel.send(f"❌ Товар `{item_id}` не найден в каталоге.")
+                await channel.send(f"❌ Товар `{item_id}` не найден.")
                 continue
             item = dict(row)
             item["category"] = row["category"]
             ok = await send_invoice(channel, item, discount, message.author.display_name)
             if ok:
                 update_session(channel.id, fail_count=0)
+                ai_logger.info(f"Счёт: {channel.id} → {item['name']}")
 
         elif name == "escalate_to_human":
             await escalate(channel, args.get("reason", "нужна помощь"))
@@ -532,6 +704,7 @@ def run_ai_manager():
         raise SystemExit(1)
     if not GEMINI_API_KEY:
         print("⚠️ MISTRAL_API_KEY не задан — AI не сможет отвечать")
+    ai_logger.info(f"Запуск AI Manager (token len={len(AI_MANAGER_TOKEN)})")
     try:
         bot.run(AI_MANAGER_TOKEN)
     except Exception as e:
