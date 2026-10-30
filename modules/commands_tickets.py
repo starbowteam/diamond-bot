@@ -36,6 +36,15 @@ from modules.tickets import (
     ReceiptView,
 )
 
+# ============================================================
+# МИГРАЦИЯ ДЛЯ БОНУСА AI
+# ============================================================
+try:
+    cur.execute("ALTER TABLE ai_manager_user_prefs ADD COLUMN reward_claimed INTEGER DEFAULT 0")
+    db.commit()
+except Exception:
+    pass
+
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1564315441784955022/image.png?ex=6ae0d1c8&is=6adf8048&hm=4c7130aae2147b4c389a7602582dd6a9a899f7ed293c6a0e51025bc68fc2ee27&"
 
@@ -1181,7 +1190,7 @@ class CatalogView(disnake.ui.View):
 
 
 # ============================================================
-# AI MANAGER — ПЕРСОНАЛЬНЫЕ ПРЕДПОЧТЕНИЯ
+# AI MANAGER — ПЕРСОНАЛЬНЫЕ ПРЕДПОЧТЕНИЯ (JSON И БОНУС)
 # ============================================================
 def get_user_ai_pref(user_id: int) -> bool:
     row = cur.execute(
@@ -1199,34 +1208,60 @@ def set_user_ai_pref(user_id: int, enabled: bool):
     db.commit()
 
 
-def build_ai_pref_embed(enabled: bool) -> disnake.Embed:
-    if enabled:
-        status = "✅ **ВКЛЮЧЁН**"
-        color = 0x2ecc71
-        desc = (
-            "> AI-менеджер будет помогать с заказом в ваших тикетах **сразу**, "
-            "как только вы напишете.\n\n"
-            "> Если живой менеджер ответит — AI замолчит на 5 минут и вернётся, "
-            "если менеджер перестанет отвечать."
-        )
-    else:
-        status = "❌ **ВЫКЛЮЧЕН**"
-        color = 0x676767
-        desc = (
-            "> AI-менеджер **не будет** отвечать сразу — сначала ждём живого менеджера.\n\n"
-            "> Но если менеджер не ответит в течение **5 минут** — AI подключится "
-            "и поможет с заказом."
-        )
+AI_PREF_ON_JSON = """{
+  "content": "",
+  "tts": false,
+  "flags": 0,
+  "embeds": [
+    {
+      "description": "",
+      "color": 6776679,
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1565727195937378344/image.png?ex=6ae5f495&is=6ae4a315&hm=3605809f04325ca8ccbd386e4962bff10ad735ded3f0c5a01fe50e7160273e3f&=&format=webp&quality=lossless&width=1536&height=597"
+      },
+      "fields": []
+    },
+    {
+      "title": "ИИ-Менеджер в тикетах покупки",
+      "description": "> Нынешнее состояние: __**Включено **__\\n\\n> ИИ-Менеджер будет помогать с заказом в ваших тикетах сразу, как только вы напишете. Если живой менеджер ответит — AI замолчит на 5 минут и вернётся, если менеджер перестанет отвечать.\\n",
+      "color": 6664538,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1530453871581855744/1565726492069994577/image.png?ex=6ae5f3ed&is=6ae4a26d&hm=a116b22698dbe9e0cdc8514b53ea34947b0652dcdee9dd552c6ca269397b8e99&"
+      },
+      "fields": []
+    }
+  ]
+}"""
 
-    return disnake.Embed(
-        title="🤖 AI-менеджер в тикетах",
-        description=(
-            f"> **Ваше состояние:** {status}\n\n"
-            f"{desc}\n\n"
-            f"> Вы в любой момент можете изменить эту настройку."
-        ),
-        color=color,
-    )
+AI_PREF_OFF_JSON = """{
+  "content": "",
+  "tts": false,
+  "flags": 0,
+  "embeds": [
+    {
+      "description": "",
+      "color": 6776679,
+      "image": {
+        "url": "https://media.discordapp.net/attachments/1527006158282555412/1565727195937378344/image.png?ex=6ae5f495&is=6ae4a315&hm=3605809f04325ca8ccbd386e4962bff10ad735ded3f0c5a01fe50e7160273e3f&=&format=webp&quality=lossless&width=1536&height=597"
+      },
+      "fields": []
+    },
+    {
+      "title": "ИИ-Менеджер в тикетах покупки",
+      "description": "> Нынешнее состояние: __**Выключено **__\\n\\n> ИИ-Менеджер не будет отвечать сразу — сначала ждём живого менеджера. Но если менеджер не ответит в течение 5 минут — AI подключится и поможет с заказом.\\n",
+      "color": 12131613,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1530453871581855744/1565726339103985725/image.png?ex=6ae5f3c9&is=6ae4a249&hm=b0be245164e439c2fb3f8001cd89a85d5f661728113b00e4cbaea88291571f23&"
+      },
+      "fields": []
+    }
+  ]
+}"""
+
+
+def build_ai_pref_embeds(enabled: bool) -> List[disnake.Embed]:
+    data = json.loads(AI_PREF_ON_JSON if enabled else AI_PREF_OFF_JSON)
+    return [disnake.Embed.from_dict(e) for e in data.get("embeds", [])]
 
 
 class AIManagerPrefView(View):
@@ -1241,12 +1276,29 @@ class AIManagerPrefView(View):
         row=0,
     )
     async def toggle(self, button, inter: disnake.MessageInteraction):
+        await inter.response.defer()
         cur_pref = get_user_ai_pref(inter.author.id)
         new_pref = not cur_pref
         set_user_ai_pref(inter.author.id, new_pref)
 
-        await inter.response.edit_message(
-            embed=build_ai_pref_embed(new_pref),
+        embeds = build_ai_pref_embeds(new_pref)
+        
+        if new_pref:
+            # Проверяем, получал ли он бонус
+            row = cur.execute("SELECT reward_claimed FROM ai_manager_user_prefs WHERE user_id=?", (inter.author.id,)).fetchone()
+            reward_claimed = row["reward_claimed"] if row and "reward_claimed" in row.keys() else 0
+            
+            if not reward_claimed:
+                try:
+                    cur.execute("UPDATE ai_manager_user_prefs SET reward_claimed=1 WHERE user_id=?", (inter.author.id,))
+                    db.commit()
+                    await add_dc(inter.author.id, 50, "Бонус за включение AI-Менеджера", notify=False, log=False)
+                    await inter.followup.send("✅ AI-Менеджер включен. **+50 DC** на баланс!", ephemeral=True)
+                except Exception as e:
+                    logger.error(f"Ошибка выдачи бонуса за AI: {e}")
+
+        await inter.edit_original_response(
+            embeds=embeds,
             view=AIManagerPrefView(),
         )
 
@@ -1289,10 +1341,9 @@ class TicketPanelView(View):
     )
     async def autoorder(self, button: disnake.Button, inter: disnake.MessageInteraction):
         pref = get_user_ai_pref(inter.author.id)
-        embed = build_ai_pref_embed(pref)
-        embed.set_image(url=_IMG_STRIPE)
+        embeds = build_ai_pref_embeds(pref)
         await inter.response.send_message(
-            embed=embed,
+            embeds=embeds,
             view=AIManagerPrefView(),
             ephemeral=True,
         )
