@@ -47,9 +47,6 @@ QUESTIONS_CATEGORY_ID = 1544363672128987196
 
 REVIEW_CHANNEL_ID = 1462074763437543435
 
-# ============================================================
-# ЗАЩИТА ОТ БАГОЮЗА
-# ============================================================
 _BUY_LOCKS = {}
 _BUY_LOCK_TIMEOUT = 15
 
@@ -63,9 +60,6 @@ def _acquire_buy_lock(uid: int) -> bool:
 def _release_buy_lock(uid: int):
     _BUY_LOCKS.pop(uid, None)
 
-# ============================================================
-# ОТВЕТ НА ИНТЕРАКЦИЮ
-# ============================================================
 _BG_TASKS: set = set()
 
 def _spawn(coro) -> asyncio.Task:
@@ -119,9 +113,6 @@ async def _ephemeral_reply(inter, content: str) -> bool:
             logger.warning(f"_ephemeral_reply: {e}")
             return False
 
-# ============================================================
-# ХЕЛПЕРЫ
-# ============================================================
 def _load_slid_embeds() -> list:
     base_project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = [
@@ -240,9 +231,6 @@ async def _check_ticket_blocked(inter: disnake.MessageInteraction) -> bool:
         return True
     return False
 
-# ============================================================
-# ЗАКРЫТИЕ ТИКЕТА
-# ============================================================
 async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: bool = False):
     channel = inter.channel
 
@@ -265,9 +253,6 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
     except Exception as e:
         logger.error(f"Ошибка закрытия тикета: {e}")
 
-# ============================================================
-# СОЗДАНИЕ ТИКЕТА — РЕАЛЬНЫЕ ДЕНЬГИ
-# ============================================================
 async def create_real_ticket(inter: disnake.MessageInteraction):
     user = inter.author
     guild = inter.guild
@@ -352,9 +337,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
             color=0x00ff00
         ))
 
-# ============================================================
-# СОЗДАНИЕ ТИКЕТА — DC
-# ============================================================
 async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict, purchase_index: int):
     user = inter.author
     guild = inter.guild
@@ -450,9 +432,6 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
             color=0x00ff00
         ))
 
-# ============================================================
-# ВЫБОР СПОСОБА ОПЛАТЫ
-# ============================================================
 class BuySelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -518,9 +497,6 @@ class BuyTypeView(disnake.ui.View):
         super().__init__(timeout=None)
         self.add_item(BuySelect())
 
-# ============================================================
-# СЕЛЕКТ ТОВАРОВ ЗА DC
-# ============================================================
 class CoinsBuySelect(disnake.ui.StringSelect):
     def __init__(self, purchases: list):
         self.purchases = purchases
@@ -573,9 +549,6 @@ class CoinsBuyView(View):
         self.purchases = purchases
         self.add_item(CoinsBuySelect(purchases))
 
-# ============================================================
-# МОДАЛКА ВОПРОСА
-# ============================================================
 class QuestionModal(Modal):
     def __init__(self):
         components = [
@@ -639,9 +612,6 @@ class QuestionModal(Modal):
             color=0x00aaff, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-# ============================================================
-# VIEW ВОПРОСА
-# ============================================================
 class QuestionTicketView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -695,9 +665,6 @@ class QuestionTicketView(View):
             color=0xff6600, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-# ============================================================
-# МОДАЛКА ПЕРЕИМЕНОВАНИЯ
-# ============================================================
 class RenameTicketModal(Modal):
     def __init__(self):
         components = [
@@ -740,9 +707,6 @@ class RenameTicketModal(Modal):
             color=0x00aaff, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-# ============================================================
-# ДЕЙСТВИЯ В ТИКЕТЕ
-# ============================================================
 class SelectView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -778,9 +742,6 @@ class SelectView(View):
             )
         await inter.response.send_modal(RenameTicketModal())
 
-# ============================================================
-# МОДАЛКА СЧЁТА
-# ============================================================
 class InvoiceModal(Modal):
     def __init__(self):
         components = [
@@ -840,9 +801,6 @@ class InvoiceModal(Modal):
             color=0x00aaff, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-# ============================================================
-# МОДАЛКА ПРОМОКОДА
-# ============================================================
 class PromoCodeModal(Modal):
     def __init__(self, original_view: View):
         self.original_view = original_view
@@ -890,9 +848,6 @@ class PromoCodeModal(Modal):
             color=0x00ff00, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
         )
 
-# ============================================================
-# ОСНОВНОЙ VIEW (real-тикеты)
-# ============================================================
 class TicketView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1108,7 +1063,6 @@ class TicketView(View):
             )
         return callback
 
-
 class TicketPaidView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1130,9 +1084,6 @@ class TicketPaidView(View):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await _do_close_ticket(inter, check_reviews=False)
 
-# ============================================================
-# КНОПКИ ДЛЯ ТИКЕТОВ ЗА DC
-# ============================================================
 class CoinsTicketButtons(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1155,9 +1106,6 @@ class CoinsTicketButtons(View):
             return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await _do_close_ticket(inter, check_reviews=False)
 
-# ============================================================
-# ВЫБОР ТИПА КАТАЛОГА
-# ============================================================
 class CatalogTypeSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
@@ -1188,9 +1136,6 @@ class CatalogTypeView(disnake.ui.View):
         super().__init__(timeout=None)
         self.add_item(CatalogTypeSelect())
 
-# ============================================================
-# КАТАЛОГ ДЛЯ РЕАЛЬНЫХ ДЕНЕГ
-# ============================================================
 CATALOG_OPTIONS = [
     {"label": "・Discord", "description": "Покупка Nitro и Boosts ・Статус и величие", "emoji": "<:Discord:1464831837300854936>", "json_path": os.path.join(CATALOG_DIR, "menu_discord.json")},
     {"label": "・Steam", "description": "Пополнение и очки ・Свобода к играм", "emoji": "<:Steam:1464833200416100402>", "json_path": os.path.join(CATALOG_DIR, "menu_steam.json")},
@@ -1235,55 +1180,12 @@ class CatalogView(disnake.ui.View):
         self.add_item(CatalogSelect())
 
 # ============================================================
-# AI MANAGER PANEL
+# AI MANAGER STATUS (только просмотр, без кнопки)
 # ============================================================
-class AIManagerToggleView(View):
+class AIManagerStatusView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(
-        label="Изменить состояние",
-        style=ButtonStyle.secondary,
-        custom_id="ai_manager:toggle",
-    )
-    async def toggle_btn(self, button, inter):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ Только персонал может менять состояние.", ephemeral=True)
-
-        cur.execute("SELECT value FROM settings WHERE key='ai_manager_enabled'")
-        row = cur.fetchone()
-        current = row["value"] if row else "0"
-        new_state = "0" if current == "1" else "1"
-
-        cur.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_manager_enabled', ?)",
-            (new_state,)
-        )
-        db.commit()
-
-        is_on = new_state == "1"
-        embed = disnake.Embed(
-            title="🤖 AI-менеджер в тикетах",
-            description=(
-                f"> **Текущее состояние:** "
-                f"{'✅ **ВКЛЮЧЁН**' if is_on else '❌ **ВЫКЛЮЧЕН**'}\n\n"
-                f"> {'AI будет вести диалог в новых тикетах, помогать с выбором товара, создавать счёт и принимать чек. Менеджер только подтверждает оплату.' if is_on else 'Все тикеты работают в обычном режиме — менеджеры ведут диалог вручную.'}"
-            ),
-            color=COLOR_GREY if not is_on else 0x2ecc71,
-        )
-        embed.set_image(url=_IMG_STRIPE)
-
-        await inter.response.edit_message(embed=embed, view=AIManagerToggleView())
-        await log_discord(
-            title=f"🤖 AI Manager: {'ВКЛ' if is_on else 'ВЫКЛ'}",
-            description=f"> **Кто:** {inter.author.mention}",
-            color=COLOR_GREY, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"],
-        )
-
-
-# ============================================================
-# ПАНЕЛЬ ТИКЕТОВ
-# ============================================================
 class TicketPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1322,10 +1224,8 @@ class TicketPanelView(View):
             color=COLOR_GREY if not is_on else 0x2ecc71,
         )
         embed.set_image(url=_IMG_STRIPE)
-
-        await inter.response.send_message(
-            embed=embed, view=AIManagerToggleView(), ephemeral=True
-        )
+        # Только просмотр — без кнопки изменения
+        await inter.response.send_message(embed=embed, ephemeral=True)
 
     @disnake.ui.button(
         label="ㅤКаталогㅤ", style=disnake.ButtonStyle.gray,
@@ -1341,9 +1241,5 @@ class TicketPanelView(View):
         embed.set_image(url=_IMG_STRIPE)
         await inter.response.send_message(embed=embed, view=CatalogTypeView(), ephemeral=True)
 
-
-# ============================================================
-# ОБРАБОТЧИК ИНТЕРАКЦИЙ
-# ============================================================
 async def handle_interaction(inter: disnake.MessageInteraction):
     pass
