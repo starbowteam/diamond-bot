@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI Manager v2.6 — умный менеджер тикетов Diamond Shop.
-Что нового: авто-тест бесплатных моделей ZvenoAI, красивое форматирование (markdown).
+AI Manager v2.7 — умный менеджер тикетов Diamond Shop.
+Фикс: последовательный тест моделей с задержкой, фильтрация embedding/safety, правильный лог.
 """
 import os
 import re
@@ -31,7 +31,7 @@ from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_
 AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
-# Эта модель используется по умолчанию, если авто-тест не смог найти бесплатных
+# Дефолтная модель на случай, если все бесплатные откажут
 AI_MANAGER_MODEL = os.getenv("AI_MANAGER_MODEL", "qwen/qwen-2.5-72b-instruct")
 
 LLM_TIMEOUT = 30
@@ -439,11 +439,23 @@ async def notify_managers_dm(message, file_url):
             except Exception: pass
 
 # ============================================================
-# ЛУЧШАЯ МОДЕЛЬ (АВТО-ТЕСТ)
+# ЛУЧШАЯ МОДЕЛЬ (АВТО-ТЕСТ С ЗАДЕРЖКОЙ)
 # ============================================================
 BEST_MODEL: Optional[str] = None
 
-async def fetch_free_models() -> List[str]:
+def is_chat_model(model_id: str) -> bool:
+    mid = model_id.lower()
+    # Исключаем эмбеддинги, модерацию и прочий мусор
+    if any(x in mid for x in ["embed", "safety", "moderation", "guard"]):
+        return False
+    # Исключаем слишком маленькие (глупые) модели, если есть выбор
+    if "0.5b" in mid or "1b" in mid or "1.5b" in mid:
+        return False
+    return True
+
+async def select_fastest_model():
+    global BEST_MODEL
+    ai_logger.info("⏳ Начинаю тестирование бесплатных моделей ZvenoAI...")
     url = f"{AI_MANAGER_BASE_URL}/models"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}"}
     free_models = []
@@ -454,52 +466,46 @@ async def fetch_free_models() -> List[str]:
                     data = await resp.json()
                     for m in data.get("data", []):
                         mid = m.get("id", "")
-                        if ":free" in mid or "free" in m.get("name", "").lower():
+                        if (":free" in mid or "free" in m.get("name", "").lower()) and is_chat_model(mid):
                             free_models.append(mid)
                 else:
                     ai_logger.warning(f"Не удалось получить список моделей: HTTP {resp.status}")
     except Exception as e:
         ai_logger.warning(f"Ошибка при получении списка моделей: {e}")
-    
-    # Фоллбэк, если API не отдал список
-    if not free_models:
-        free_models = [
-            "cohere/north-mini-code:free",
-            "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-            "google/gemini-3-flash-preview:free",
-            "qwen/qwen3-next-80b-a3b-instruct:free"
-        ]
-    return free_models
 
-async def select_fastest_model():
-    global BEST_MODEL
-    ai_logger.info("⏳ Начинаю тестирование бесплатных моделей ZvenoAI...")
-    free_models = await fetch_free_models()
-    
     if not free_models:
-        ai_logger.warning("Не найдено бесплатных моделей, использую дефолтную.")
+        ai_logger.warning("Не найдено подходящих бесплатных моделей, использую дефолтную.")
         BEST_MODEL = AI_MANAGER_MODEL
         return
+
+    # Сортируем приоритетно, чтобы в первую очередь тестить самые мощные
+    priority_keywords = ["ultra", "gemma", "nemotron-3.5-super", "lagoon", "dots", "flint"]
+    free_models.sort(key=lambda m: any(kw in m.lower() for kw in priority_keywords), reverse=True)
 
     results = []
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
     
-    for model_id in free_models[:5]: # Тестируем первые 5 моделей, чтобы не спамить
-        payload = {"model": model_id, "messages": [{"role": "user", "content": "Привет"}], "max_tokens": 10, "temperature": 0}
+    # Тестируем первые 4 модели по очереди
+    for model_id in free_models[:4]:
+        payload = {"model": model_id, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5, "temperature": 0}
         start_time = time.time()
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status == 200:
-                        latency = (time.time() - start_time) * 1000 # в миллисекундах
+                        latency = (time.time() - start_time) * 1000
                         results.append((model_id, latency, "OK"))
                     else:
-                        results.append((model_id, -1, f"HTTP {resp.status}"))
+                        err_text = await resp.text()
+                        results.append((model_id, -1, f"HTTP {resp.status}: {err_text[:50]}"))
         except Exception as e:
-            results.append((model_id, -1, str(e)))
+            results.append((model_id, -1, str(e)[:50]))
+        
+        # ЖДЕМ 2 СЕКУНДЫ МЕЖДУ ТЕСТАМИ, ЧТОБЫ ИЗБЕЖАТЬ 429
+        await asyncio.sleep(2.0)
 
-    # Сортируем по скорости (сначала успешные и быстрые)
+    # Сортируем по скорости (сначала успешные)
     valid_results = [r for r in results if r[1] > 0]
     if valid_results:
         valid_results.sort(key=lambda x: x[1])
@@ -507,7 +513,7 @@ async def select_fastest_model():
         ai_logger.info(f"🏆 Выбрана самая быстрая модель: {BEST_MODEL} ({valid_results[0][1]:.0f} ms)")
     else:
         BEST_MODEL = AI_MANAGER_MODEL
-        ai_logger.warning(f"❌ Все бесплатные модели недоступны, использую дефолт: {BEST_MODEL}")
+        ai_logger.warning(f"❌ Все бесплатные модели недоступны (429/ошибка), использую дефолт: {BEST_MODEL}")
 
     # Красивый лог результатов
     log_msg = ["\n📊 Результаты тестирования моделей:"]
@@ -527,7 +533,6 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - ИСПОЛЬЗУЙ ТОЛЬКО нумерованные списки (1., 2., 3.) или эмодзи (🔹, 🔸).
 - Для группировки товаров используй **жирный шрифт** (например, **Full Nitro:**).
 - Для цитат и выделения блоков используй > (например, > **Цена:** 460₽).
-- Для подчеркивания можно использовать __текст__.
 - Если клиент просит категорию (например, "нитро", "звезды") без уточнений — СРАЗУ выведи красивый структурированный список ВСЕХ доступных вариантов с ценами.
 - Если просит несколько товаров из разных категорий (например, "нитро и 100 звезд") — передай их все в массиве `items` функции create_invoice.
 
@@ -649,9 +654,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2.6 запущен. Каталог: {count}")
-    
-    # Запускаем тестирование моделей при старте
+    ai_logger.info(f"AI Manager v2.7 запущен. Каталог: {count}")
     asyncio.create_task(select_fastest_model())
 
     if not _CLEANUP_STARTED:
