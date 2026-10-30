@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI Manager v2.1 — умный менеджер тикетов Diamond Shop.
-Фикс: если владелец тикета имеет роль менеджера — AI не замолкает.
+AI Manager v2.2 — умный менеджер тикетов Diamond Shop.
+Фикс: выдача списка товаров сразу, сброс счета при 2 текстовых сообщениях после выставления.
 """
 import os
 import re
@@ -159,21 +159,22 @@ def init_ai_manager_tables():
     );
 
     CREATE TABLE IF NOT EXISTS ai_manager_sessions (
-        channel_id          INTEGER PRIMARY KEY,
-        user_id             INTEGER,
-        message_count       INTEGER DEFAULT 0,
-        fail_count          INTEGER DEFAULT 0,
-        started_at          INTEGER,
-        escalated           INTEGER DEFAULT 0,
-        receipt_url         TEXT,
-        created_at          INTEGER,
-        stub_sent           INTEGER DEFAULT 0,
-        invoice_sent        INTEGER DEFAULT 0,
-        last_client_msg_ts  INTEGER DEFAULT 0,
-        last_manager_msg_ts INTEGER DEFAULT 0,
-        last_ai_response_ts INTEGER DEFAULT 0,
-        last_abuse_check_ts INTEGER DEFAULT 0,
-        abuse_closed        INTEGER DEFAULT 0
+        channel_id              INTEGER PRIMARY KEY,
+        user_id                 INTEGER,
+        message_count           INTEGER DEFAULT 0,
+        fail_count              INTEGER DEFAULT 0,
+        started_at              INTEGER,
+        escalated               INTEGER DEFAULT 0,
+        receipt_url             TEXT,
+        created_at              INTEGER,
+        stub_sent               INTEGER DEFAULT 0,
+        invoice_sent            INTEGER DEFAULT 0,
+        last_client_msg_ts      INTEGER DEFAULT 0,
+        last_manager_msg_ts     INTEGER DEFAULT 0,
+        last_ai_response_ts     INTEGER DEFAULT 0,
+        last_abuse_check_ts     INTEGER DEFAULT 0,
+        abuse_closed            INTEGER DEFAULT 0,
+        post_invoice_text_count INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS ai_manager_history (
@@ -193,13 +194,14 @@ def init_ai_manager_tables():
     """)
     db.commit()
 
-    _ensure_col("ai_manager_sessions", "stub_sent",           "stub_sent INTEGER DEFAULT 0")
-    _ensure_col("ai_manager_sessions", "invoice_sent",        "invoice_sent INTEGER DEFAULT 0")
-    _ensure_col("ai_manager_sessions", "last_client_msg_ts",  "last_client_msg_ts INTEGER DEFAULT 0")
-    _ensure_col("ai_manager_sessions", "last_manager_msg_ts", "last_manager_msg_ts INTEGER DEFAULT 0")
-    _ensure_col("ai_manager_sessions", "last_ai_response_ts", "last_ai_response_ts INTEGER DEFAULT 0")
-    _ensure_col("ai_manager_sessions", "last_abuse_check_ts", "last_abuse_check_ts INTEGER DEFAULT 0")
-    _ensure_col("ai_manager_sessions", "abuse_closed",        "abuse_closed INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "stub_sent",                "stub_sent INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "invoice_sent",             "invoice_sent INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "last_client_msg_ts",       "last_client_msg_ts INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "last_manager_msg_ts",      "last_manager_msg_ts INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "last_ai_response_ts",      "last_ai_response_ts INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "last_abuse_check_ts",      "last_abuse_check_ts INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "abuse_closed",             "abuse_closed INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "post_invoice_text_count",  "post_invoice_text_count INTEGER DEFAULT 0")
 
 
 def _ensure_col(table: str, column: str, ddl: str):
@@ -262,8 +264,8 @@ def create_session(channel_id: int, user_id: int):
         "INSERT OR IGNORE INTO ai_manager_sessions "
         "(channel_id, user_id, message_count, fail_count, started_at, escalated, "
         " receipt_url, created_at, stub_sent, invoice_sent, "
-        " last_client_msg_ts, last_manager_msg_ts, last_ai_response_ts) "
-        "VALUES (?, ?, 0, 0, ?, 0, '', ?, 0, 0, 0, 0, 0)",
+        " last_client_msg_ts, last_manager_msg_ts, last_ai_response_ts, post_invoice_text_count) "
+        "VALUES (?, ?, 0, 0, ?, 0, '', ?, 0, 0, 0, 0, 0, 0)",
         (channel_id, user_id, now, now),
     )
     db.commit()
@@ -766,12 +768,13 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 правила:
 - говори коротко и по делу, 1–3 предложения
 - используй ТОЛЬКО товары из каталога ниже. Если нужного товара нет в списке, ты ОБЯЗАН сказать клиенту об этом.
-- КРИТИЧЕСКОЕ ПРАВИЛО: если клиент просит товар, которого нет в каталоге (например, просит Спотифай на год, а есть только на месяц), предложи то, что есть, или скажи "У нас нет такого товара".
+- КРИТИЧЕСКОЕ ПРАВИЛО: Если клиент просит категорию (например, "нитро", "звёзды", "бусты") без уточнений — НЕ ЗАДАВАЙ ВОПРОСОВ. СРАЗУ выведи список доступных вариантов с ценами из каталога. Пример: "У нас есть: 1. Nitro Trial — 160₽, 2. Nitro 1 Month — 460₽. Какой вариант выберем?"
+- Если клиент говорит "у меня не было нитро" или просит Trial — предложи именно Trial.
 - НИКОГДА не подсовывай товар из другой категории! Если просят Спотифай, не предлагай Звёзды Телеграм.
 - Если клиент просит "пополнение стим на 150 рублей", передай item_id="steam_rub" и quantity=150.
 - Если клиент просит "100 звезд", передай item_id="tg_stars" и quantity=100.
 - Если клиент просит "подарочек другу" — УТОЧНИ, какой именно товар он хочет подарить. Например: "Конечно! Какой именно подарок? Nitro Gift, звёзды Телеграм, что-то ещё?"
-- НЕ ВЫСТАВЛЯЙ БОЛЬШЕ ОДНОГО СЧЕТА ЗА РАЗ.
+- НЕ ВЫСТАВЛЯЙ БОЛЬШЕ ОДНОГО СЧЕТА ЗА РАЗ. (Если счёт уже выставлен и клиент пишет текст — уточни, нужно ли поменять заказ, или просто ответь).
 - Если товара нет в каталоге — вызови escalate_to_human с причиной "Товар не найден в каталоге, возможно BuyALL".
 - ВАЖНО: пометка "[счёт выставлен: ...]" в контексте означает, что предыдущий заказ УЖЕ оформлен. Новый запрос клиента — это НОВЫЙ заказ. Не смешивай товары из разных запросов.
 - не подтверждай оплату сам — это делает менеджер.
@@ -903,7 +906,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2.1 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v2.2 запущен. Каталог: {count}")
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
         asyncio.create_task(_cleanup_loop())
@@ -1100,12 +1103,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 await escalate(channel, "Ошибка сопоставления: запрошен Spotify")
                 return
 
-            if sess.get("invoice_sent"):
-                try:
-                    await channel.send("⚠️ Счёт уже выставлен. Если нужен ещё один заказ — уточните.")
-                except Exception:
-                    pass
-                return
+            # Убрали блок с проверкой invoice_sent, так как контекст очищается при 2 сообщениях
 
             ok = await send_invoice(channel, item, discount, author.display_name, quantity)
             if ok:
@@ -1119,6 +1117,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 update_session(
                     channel.id,
                     invoice_sent=1,
+                    post_invoice_text_count=0,
                     message_count=0,
                     fail_count=0,
                 )
@@ -1128,7 +1127,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
 
 # ============================================================
-# ON_MESSAGE (С ФИКСОМ)
+# ON_MESSAGE
 # ============================================================
 @bot.event
 async def on_message(message: disnake.Message):
@@ -1228,6 +1227,21 @@ async def on_message(message: disnake.Message):
     text = (message.content or "").strip()
     if not text:
         return
+
+    # ЛОГИКА СБРОСА ПОСЛЕ СЧЕТА
+    sess = get_session(channel.id)
+    if sess and sess.get("invoice_sent"):
+        count = (sess.get("post_invoice_text_count") or 0) + 1
+        if count >= 2:
+            # Отменяем старый заказ, чистим историю
+            hist_clear(channel.id)
+            update_session(channel.id, invoice_sent=0, post_invoice_text_count=0, receipt_url="")
+            try:
+                await channel.send("🔄 Понял, старый счёт отменён. Слушаю заказ заново.")
+            except Exception:
+                pass
+        else:
+            update_session(channel.id, post_invoice_text_count=count)
 
     state = DEBOUNCE.setdefault(channel.id, {"messages": [], "gen": 0})
     state["messages"].append(text)
