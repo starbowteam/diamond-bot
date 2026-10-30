@@ -1179,13 +1179,91 @@ class CatalogView(disnake.ui.View):
         super().__init__(timeout=None)
         self.add_item(CatalogSelect())
 
+
 # ============================================================
-# AI MANAGER STATUS (только просмотр, без кнопки)
+# AI MANAGER — ПЕРСОНАЛЬНЫЕ ПРЕДПОЧТЕНИЯ
 # ============================================================
-class AIManagerStatusView(View):
+def get_user_ai_pref(user_id: int) -> bool:
+    row = cur.execute(
+        "SELECT enabled FROM ai_manager_user_prefs WHERE user_id=?",
+        (user_id,)
+    ).fetchone()
+    return bool(row["enabled"]) if row else True
+
+
+def set_user_ai_pref(user_id: int, enabled: bool):
+    cur.execute(
+        "INSERT OR REPLACE INTO ai_manager_user_prefs (user_id, enabled) VALUES (?, ?)",
+        (user_id, 1 if enabled else 0)
+    )
+    db.commit()
+
+
+def build_ai_pref_embed(enabled: bool) -> disnake.Embed:
+    if enabled:
+        status = "✅ **ВКЛЮЧЁН**"
+        color = 0x2ecc71
+        desc = (
+            "> AI-менеджер будет помогать с заказом в ваших тикетах **сразу**, "
+            "как только вы напишете.\n\n"
+            "> Если живой менеджер ответит — AI замолчит на 5 минут и вернётся, "
+            "если менеджер перестанет отвечать."
+        )
+    else:
+        status = "❌ **ВЫКЛЮЧЕН**"
+        color = 0x676767
+        desc = (
+            "> AI-менеджер **не будет** отвечать сразу — сначала ждём живого менеджера.\n\n"
+            "> Но если менеджер не ответит в течение **5 минут** — AI подключится "
+            "и поможет с заказом."
+        )
+
+    return disnake.Embed(
+        title="🤖 AI-менеджер в тикетах",
+        description=(
+            f"> **Ваше состояние:** {status}\n\n"
+            f"{desc}\n\n"
+            f"> Вы в любой момент можете изменить эту настройку."
+        ),
+        color=color,
+    )
+
+
+class AIManagerPrefView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
+    @disnake.ui.button(
+        label="Изменить состояние",
+        style=ButtonStyle.gray,
+        custom_id="ai_pref:toggle",
+        emoji="🔁",
+        row=0,
+    )
+    async def toggle(self, button, inter: disnake.MessageInteraction):
+        cur_pref = get_user_ai_pref(inter.author.id)
+        new_pref = not cur_pref
+        set_user_ai_pref(inter.author.id, new_pref)
+
+        await inter.response.edit_message(
+            embed=build_ai_pref_embed(new_pref),
+            view=AIManagerPrefView(),
+        )
+
+        await log_discord(
+            title="🤖 AI Manager: смена персонального состояния",
+            description=(
+                f"> **Пользователь:** {inter.author.mention} (`{inter.author.id}`)\n"
+                f"> **Новое состояние:** {'✅ ВКЛ' if new_pref else '❌ ВЫКЛ'}"
+            ),
+            color=0x00aaff,
+            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"],
+        )
+
+
+# ============================================================
+# ПАНЕЛЬ ТИКЕТОВ
+# ============================================================
 class TicketPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1210,22 +1288,14 @@ class TicketPanelView(View):
         emoji=PartialEmoji(name="avtio1", id=1565386600219676702)
     )
     async def autoorder(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        cur.execute("SELECT value FROM settings WHERE key='ai_manager_enabled'")
-        row = cur.fetchone()
-        is_on = (row["value"] == "1") if row else False
-
-        embed = disnake.Embed(
-            title="🤖 AI-менеджер в тикетах",
-            description=(
-                f"> **Текущее состояние:** "
-                f"{'✅ **ВКЛЮЧЁН**' if is_on else '❌ **ВЫКЛЮЧЕН**'}\n\n"
-                f"> {'AI будет вести диалог в новых тикетах, помогать с выбором товара, создавать счёт и принимать чек. Менеджер только подтверждает оплату.' if is_on else 'Все тикеты работают в обычном режиме — менеджеры ведут диалог вручную.'}"
-            ),
-            color=COLOR_GREY if not is_on else 0x2ecc71,
-        )
+        pref = get_user_ai_pref(inter.author.id)
+        embed = build_ai_pref_embed(pref)
         embed.set_image(url=_IMG_STRIPE)
-        # Только просмотр — без кнопки изменения
-        await inter.response.send_message(embed=embed, ephemeral=True)
+        await inter.response.send_message(
+            embed=embed,
+            view=AIManagerPrefView(),
+            ephemeral=True,
+        )
 
     @disnake.ui.button(
         label="ㅤКаталогㅤ", style=disnake.ButtonStyle.gray,
@@ -1240,6 +1310,7 @@ class TicketPanelView(View):
         )
         embed.set_image(url=_IMG_STRIPE)
         await inter.response.send_message(embed=embed, view=CatalogTypeView(), ephemeral=True)
+
 
 async def handle_interaction(inter: disnake.MessageInteraction):
     pass
