@@ -346,6 +346,50 @@ class AutoorderCatalogView(View):
 
 
 # ============================================================
+# AI MANAGER STATE PANEL
+# ============================================================
+class AIManagerStateSelect(disnake.ui.StringSelect):
+    def __init__(self):
+        options = [
+            disnake.SelectOption(label="Рабочая (AI включен)", value="1", emoji="✅"),
+            disnake.SelectOption(label="Заглушка (AI выключен)", value="0", emoji="❌"),
+        ]
+        super().__init__(placeholder="Выберите глобальное состояние...", min_values=1, max_values=1, options=options, custom_id="am_staff_state")
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        if not has_admin_command_roles(inter.author):
+            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+
+        state = self.values[0]
+        cur.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_manager_enabled', ?)", (state,))
+        db.commit()
+
+        text = "✅ AI включён (Рабочая)" if state == "1" else "❌ AI выключен (Заглушка)"
+        embed = disnake.Embed(
+            title="🤖 Управление AI-Менеджером",
+            description=(
+                f"> **Текущее состояние:** {text}\n\n"
+                f"> {'AI будет отвечать в тикетах и выставлять счета.' if state == '1' else 'AI молчит. Вся работа с тикетами ложится на менеджеров.'}\n\n"
+                f"> Выберите новое состояние:"
+            ),
+            color=0x676767,
+        )
+        await inter.response.edit_message(embed=embed, view=AIManagerStaffView())
+
+        await log_discord(
+            title="🤖 AI Manager: Смена состояния",
+            description=f"> **Админ:** {inter.author.mention}\n> **Новое состояние:** `{text}`",
+            color=0x00ff00
+        )
+
+
+class AIManagerStaffView(View):
+    def __init__(self):
+        super().__init__(timeout=180)
+        self.add_item(AIManagerStateSelect())
+
+
+# ============================================================
 # АДМИН-ПАНЕЛЬ
 # ============================================================
 class ClearModal(Modal):
@@ -429,6 +473,8 @@ class AdminSelect(disnake.ui.StringSelect):
                                  emoji="<:clear:1538561439491686410>", value="clear"),
             disnake.SelectOption(label="・Каталог Автозаказа", description="Загрузка цен из файла, очистка БД",
                                  emoji="📦", value="autoorder_catalog"),
+            disnake.SelectOption(label="・AI-Менеджер", description="Включить/выключить AI в тикетах",
+                                 emoji="🤖", value="ai_manager_toggle"),
         ]
         super().__init__(placeholder="Выберите действие...", min_values=1, max_values=1,
                          options=options, custom_id="admin_select")
@@ -468,6 +514,28 @@ class AdminSelect(disnake.ui.StringSelect):
                     color=0x676767,
                 ),
                 view=AutoorderCatalogView(),
+                ephemeral=True,
+            )
+        elif value == "ai_manager_toggle":
+            if not has_admin_command_roles(inter.author):
+                return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+            
+            # Получаем текущее состояние
+            cur.execute("SELECT value FROM settings WHERE key='ai_manager_enabled'")
+            row = cur.fetchone()
+            is_on = (row["value"] == "1") if row else False
+
+            embed = disnake.Embed(
+                title="🤖 Управление AI-Менеджером",
+                description=(
+                    f"> **Текущее состояние:** {'✅ AI включён (Рабочая)' if is_on else '❌ AI выключен (Заглушка)'}\n\n"
+                    f"> Выберите новое состояние:"
+                ),
+                color=0x676767,
+            )
+            await inter.response.send_message(
+                embed=embed,
+                view=AIManagerStaffView(),
                 ephemeral=True,
             )
 
@@ -883,7 +951,7 @@ async def send_staff_panels():
     admin_embed = disnake.Embed(
         title="Панель управления сервером",
         description=(
-            "> Центральная панель: очистка сообщений, выгрузка JSON, пересчёт ролей, списание заказов, каталог Автозаказа.\n"
+            "> Центральная панель: очистка сообщений, выгрузка JSON, пересчёт ролей, списание заказов, каталог Автозаказа, **AI-Менеджер**.\n"
             "> Заменила старые отдельные команды — всё в одном месте.\n"
             "> Требует прав администратора, используй с умом."
         ),
