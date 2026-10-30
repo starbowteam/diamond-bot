@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI Manager v2.4 — умный менеджер тикетов Diamond Shop.
-Фикс: поддержка нескольких товаров в одном счёте, синонимы Full/Basic, уточнение активации.
+AI Manager v2.5 — умный менеджер тикетов Diamond Shop.
+Глобальный фикс: сбор всех категорий, группировка товаров, запрет дублей текста.
 """
 import os
 import re
@@ -528,7 +528,7 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
 
 
 # ============================================================
-# ФИЛЬТРАЦИЯ КАТАЛОГА
+# ФИЛЬТРАЦИЯ КАТАЛОГА (СБОР ВСЕХ КАТЕГОРИЙ)
 # ============================================================
 def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[str, dict]:
     t = user_text.lower()
@@ -541,15 +541,21 @@ def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[
         "spotify":  ["споти", "spotify", "спф"],
         "decoration": ["украшени", "декор", "бейдж", "профиль"]
     }
-    matched_cat = None
+    
+    # Ищем ВСЕ совпадения категорий в сообщении
+    matched_cats = []
     for cat_key, words in keywords.items():
         if any(w in t for w in words):
-            matched_cat = cat_key
-            break
+            matched_cats.append(cat_key)
             
-    if matched_cat:
-        for db_key, cat_data in full_catalog.items():
-            if matched_cat in db_key.lower() or matched_cat in cat_data["label"].lower():
+    # Если ничего не нашли — отдаем весь каталог
+    if not matched_cats:
+        return full_catalog
+
+    # Собираем все найденные категории
+    for db_key, cat_data in full_catalog.items():
+        for mc in matched_cats:
+            if mc in db_key.lower() or mc in cat_data["label"].lower():
                 result[db_key] = cat_data
                 break
                 
@@ -783,8 +789,25 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 правила:
 - говори коротко и по делу, 1–3 предложения
 - используй ТОЛЬКО товары из каталога ниже. Если нужного товара нет в списке, ты ОБЯЗАН сказать клиенту об этом.
-- КРИТИЧЕСКОЕ ПРАВИЛО: Если клиент просит категорию (например, "нитро", "звёзды") без уточнений — НЕ ЗАДАВАЙ ВОПРОСОВ. СРАЗУ выведи ПОЛНЫЙ список ВСЕХ доступных вариантов этой категории с ценами из каталога. НЕ СОКРАЩАЙ СПИСОК!
-- Если клиент просит НЕСКОЛЬКО товаров (например, "активацию и год фулла") — передай их все в массиве `items` функции create_invoice. В один счёт можно добавить сколько угодно товаров.
+- КРИТИЧЕСКОЕ ПРАВИЛО: Если клиент просит категорию (например, "нитро", "звёзды") без уточнений — НЕ ЗАДАВАЙ ВОПРОСОВ. СРАЗУ выведи ПОЛНЫЙ список ВСЕХ доступных вариантов этой категории с ценами из каталога.
+- Если клиент просит НЕСКОЛЬКО товаров (например, "нитро на год фулл и 100 звезд") — найди их в каталоге (даже если они в разных категориях!) и передай все в массиве `items` функции create_invoice.
+
+ФОРМАТИРОВАНИЕ СПИСКА (ОЧЕНЬ ВАЖНО):
+- НИКАКИХ маркированных списков с точками (-) или звездочками (*)! Используй строго цифры (1., 2., 3.) или эмодзи (🔹, 🔸).
+- ОБЯЗАТЕЛЬНО группируй товары по смыслу:
+  - Nitro Full (1 Month, 12 Month, Trial, Gift)
+  - Nitro Basic (1 Month, 12 Month, Gift)
+  - Дополнительно (Активация)
+- Пример правильного ответа:
+  "У нас есть:
+  **Full Nitro:**
+  1. Nitro 1 Month — 460₽
+  2. Nitro 12 Month — 4410₽
+  **Basic Nitro:**
+  3. Nitro Basic 1 Month — 300₽
+  **Активация:**
+  4. Nitro Activation — 100₽
+  Какой вариант выберем?"
 
 💡 ПАМЯТКА ПО НИТРО (Full и Basic):
 1. Nitro Trial 1 Month — это **Full**.
@@ -799,7 +822,7 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 
 - Если клиент говорит "басик", "бейсик", "базовое" — предлагай позиции 3, 4, 7.
 - Если клиент говорит "фулл" — предлагай позиции 1, 2, 5, 6, 9.
-- НИКОГДА не подсовывай товар из другой категории!
+- НИКОГДА не подсовывай товар из другой категории! (Звезды — это ТГ, Бусты — это Дискорд).
 - Если товара нет в каталоге — вызови escalate_to_human.
 - не подтверждай оплату сам — это делает менеджер.
 
@@ -940,7 +963,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2.4 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v2.5 запущен. Каталог: {count}")
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
         asyncio.create_task(_cleanup_loop())
@@ -1072,6 +1095,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         await channel.send("⚠️ Каталог пуст.")
         return
 
+    # ФИЛЬТРУЕМ КАТАЛОГ (СБОР ВСЕХ УПОМЯНУТЫХ КАТЕГОРИЙ)
     filtered_catalog = get_filtered_catalog(user_text, full_catalog)
     catalog_text = build_catalog_block(user_text, filtered_catalog)
 
@@ -1103,7 +1127,8 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
     text = (result.get("text") or "").strip()
     funcs = result.get("funcs") or []
 
-    if text:
+    # Если вызывается инструмент, НЕ отправляем текст (чтобы не было дублей)
+    if text and not funcs:
         try:
             await channel.send(text)
         except Exception:
@@ -1120,7 +1145,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         if name == "create_invoice":
             items_list = args.get("items", [])
             
-            # Обратная совместимость, если нейронка вдруг выдаст старый формат
+            # Обратная совместимость
             if not items_list and args.get("item_id"):
                 items_list = [{"item_id": args.get("item_id"), "quantity": args.get("quantity", 1)}]
 
