@@ -43,11 +43,12 @@ AI_MANAGER_BASE_URL = os.getenv(
     "AI_MANAGER_BASE_URL",
     "https://api.zveno.ai/v1",
 ).rstrip("/")
+# Ставим быструю и умную 72B модель вместо 2.4T
 AI_MANAGER_MODEL = os.getenv(
     "AI_MANAGER_MODEL",
-    "qwen/qwen3.8-2.4t-a95b",
+    "qwen/qwen-2.5-72b-instruct",
 )
-LLM_TIMEOUT = 120  # Qwen 2.4T думает долго
+LLM_TIMEOUT = 60  # 72B отвечает быстро
 
 SALES_MANAGER_ROLE = 1154757071330365490
 LOG_CHANNEL = 1530453871581855744
@@ -186,27 +187,37 @@ async def get_ticket_discount(channel) -> int:
     return 0
 
 
-async def send_invoice(channel, item: dict, discount: int, user_name: str) -> bool:
+async def send_invoice(channel, item: dict, discount: int, user_name: str, quantity: int = 1) -> bool:
     try:
         from modules.tickets import generate_receipt_png, generate_receipt_id
-        amount = int(round(float(item["price"])))
+        # Умножаем цену на количество!
+        base_amount = int(round(float(item["price"])))
+        amount = base_amount * quantity
         order_id = generate_receipt_id()
+        
+        # В счете указываем количество
+        product_display = item["name"]
+        if quantity > 1:
+            product_display += f" × {quantity}"
+
         buf = await asyncio.to_thread(
             generate_receipt_png,
             manager_name="AI Manager",
             customer_name=user_name or "Клиент",
-            product_name=item["name"],
+            product_name=product_display,
             amount=amount,
             discount_percent=int(discount),
             order_id=order_id,
         )
         file = disnake.File(buf, filename=f"receipt_{order_id}.png")
         total = amount - int(amount * discount / 100)
+        
         embed = disnake.Embed(
             title=f"Счёт для оплаты: к оплате {total} ₽",
             description=(
                 f"> **Категория:** {item.get('category', '—')}\n"
                 f"> **Товар:** {item['name']}\n"
+                f"> **Количество:** `{quantity} шт.`\n"
                 f"> **Сумма:** `{amount} ₽`"
                 + (f"\n> **Скидка:** `{discount}%`" if discount else "")
                 + "\n\n> Проверьте реквизиты и пришлите чек в этот канал."
@@ -247,6 +258,7 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - используй только товары из каталога ниже, не выдумывай
 - если клиент называет товар — найди его
 - если вариантов несколько — предложи 2–3 с ценами
+- ВАЖНО: если клиент просит несколько штук (например "2 нитро" или "3 буста"), ОБЯЗАТЕЛЬНО передай параметр quantity в функцию create_invoice.
 - если клиент выбрал конкретный — вызови create_invoice
 - если не понимаешь клиента 3 раза — вызови escalate_to_human
 - не подтверждай оплату сам — это делает менеджер
@@ -265,7 +277,7 @@ TOOLS_OPENAI = [
         "type": "function",
         "function": {
             "name": "create_invoice",
-            "description": "Выставить счёт клиенту. Вызывай когда клиент явно выбрал конкретный товар.",
+            "description": "Выставить счёт клиенту. Вызывай когда клиент явно выбрал конкретный товар и указал количество (по умолчанию 1).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -273,6 +285,11 @@ TOOLS_OPENAI = [
                         "type": "string",
                         "description": "ID товара из каталога (например: discord_nitro_1m)",
                     },
+                    "quantity": {
+                        "type": "integer",
+                        "description": "Количество товара. Если клиент просит 2 штуки, ставь 2.",
+                        "default": 1
+                    }
                 },
                 "required": ["item_id"],
             },
@@ -320,7 +337,7 @@ async def call_llm(
         "messages": messages,
         "tools": TOOLS_OPENAI,
         "tool_choice": "auto",
-        "temperature": 0.6,
+        "temperature": 0.4,  # Чуть меньше креатива, больше точности для калькулятора
         "max_tokens": 800,
     }
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
@@ -622,16 +639,19 @@ async def on_message(message: disnake.Message):
 
         if name == "create_invoice":
             item_id = args.get("item_id", "")
+            quantity = int(args.get("quantity", 1))
+            
             row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
             if not row:
                 await channel.send(f"❌ Товар `{item_id}` не найден.")
                 continue
             item = dict(row)
             item["category"] = row["category"]
-            ok = await send_invoice(channel, item, discount, message.author.display_name)
+            
+            ok = await send_invoice(channel, item, discount, message.author.display_name, quantity)
             if ok:
                 update_session(channel.id, fail_count=0)
-                ai_logger.info(f"Счёт: {channel.id} → {item['name']}")
+                ai_logger.info(f"Счёт: {channel.id} → {item['name']} x{quantity}")
 
         elif name == "escalate_to_human":
             await escalate(channel, args.get("reason", "нужна помощь"))
