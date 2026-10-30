@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI Manager v2.7 — умный менеджер тикетов Diamond Shop.
-Фикс: последовательный тест моделей с задержкой, фильтрация embedding/safety, правильный лог.
+AI Manager v2.8 — умный менеджер тикетов Diamond Shop.
+Что нового: умный фоллбэк (Бесплатная -> Gemini -> Qwen) прямо в момент запроса.
 """
 import os
 import re
@@ -31,8 +31,10 @@ from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_
 AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
-# Дефолтная модель на случай, если все бесплатные откажут
-AI_MANAGER_MODEL = os.getenv("AI_MANAGER_MODEL", "qwen/qwen-2.5-72b-instruct")
+
+# Приоритетные модели для фоллбэка
+DIAMOND_AI_MODEL = "google/gemini-3-flash-preview" # Модель, которую использует основной бот (или ближайший аналог)
+LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"   # Последняя линия обороны
 
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
@@ -265,7 +267,7 @@ async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
     if not AI_MANAGER_API_KEY: return False, ""
     sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
     prompt = f"Проанализируй последние сообщения клиента:\n{sample}\n\nОтветь РОВНО ОДНИМ словом:\n- ABUSE — мат, оскорбления\n- SPAM — флуд\n- NORMAL — нормальный клиент\n"
-    payload = {"model": AI_MANAGER_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 10}
+    payload = {"model": DIAMOND_AI_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 10}
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
     try:
@@ -439,18 +441,14 @@ async def notify_managers_dm(message, file_url):
             except Exception: pass
 
 # ============================================================
-# ЛУЧШАЯ МОДЕЛЬ (АВТО-ТЕСТ С ЗАДЕРЖКОЙ)
+# ЛУЧШАЯ МОДЕЛЬ (АВТО-ТЕСТ)
 # ============================================================
 BEST_MODEL: Optional[str] = None
 
 def is_chat_model(model_id: str) -> bool:
     mid = model_id.lower()
-    # Исключаем эмбеддинги, модерацию и прочий мусор
-    if any(x in mid for x in ["embed", "safety", "moderation", "guard"]):
-        return False
-    # Исключаем слишком маленькие (глупые) модели, если есть выбор
-    if "0.5b" in mid or "1b" in mid or "1.5b" in mid:
-        return False
+    if any(x in mid for x in ["embed", "safety", "moderation", "guard"]): return False
+    if "0.5b" in mid or "1b" in mid or "1.5b" in mid: return False
     return True
 
 async def select_fastest_model():
@@ -468,17 +466,14 @@ async def select_fastest_model():
                         mid = m.get("id", "")
                         if (":free" in mid or "free" in m.get("name", "").lower()) and is_chat_model(mid):
                             free_models.append(mid)
-                else:
-                    ai_logger.warning(f"Не удалось получить список моделей: HTTP {resp.status}")
     except Exception as e:
         ai_logger.warning(f"Ошибка при получении списка моделей: {e}")
 
     if not free_models:
-        ai_logger.warning("Не найдено подходящих бесплатных моделей, использую дефолтную.")
-        BEST_MODEL = AI_MANAGER_MODEL
+        ai_logger.warning("Не найдено подходящих бесплатных моделей, использую фоллбэк.")
+        BEST_MODEL = None
         return
 
-    # Сортируем приоритетно, чтобы в первую очередь тестить самые мощные
     priority_keywords = ["ultra", "gemma", "nemotron-3.5-super", "lagoon", "dots", "flint"]
     free_models.sort(key=lambda m: any(kw in m.lower() for kw in priority_keywords), reverse=True)
 
@@ -486,8 +481,7 @@ async def select_fastest_model():
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
     
-    # Тестируем первые 4 модели по очереди
-    for model_id in free_models[:4]:
+    for model_id in free_models[:3]: # Тестируем максимум 3
         payload = {"model": model_id, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5, "temperature": 0}
         start_time = time.time()
         try:
@@ -498,24 +492,21 @@ async def select_fastest_model():
                         results.append((model_id, latency, "OK"))
                     else:
                         err_text = await resp.text()
-                        results.append((model_id, -1, f"HTTP {resp.status}: {err_text[:50]}"))
+                        results.append((model_id, -1, f"HTTP {resp.status}: {err_text[:40]}"))
         except Exception as e:
-            results.append((model_id, -1, str(e)[:50]))
+            results.append((model_id, -1, str(e)[:40]))
         
-        # ЖДЕМ 2 СЕКУНДЫ МЕЖДУ ТЕСТАМИ, ЧТОБЫ ИЗБЕЖАТЬ 429
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(1.5)
 
-    # Сортируем по скорости (сначала успешные)
     valid_results = [r for r in results if r[1] > 0]
     if valid_results:
         valid_results.sort(key=lambda x: x[1])
         BEST_MODEL = valid_results[0][0]
-        ai_logger.info(f"🏆 Выбрана самая быстрая модель: {BEST_MODEL} ({valid_results[0][1]:.0f} ms)")
+        ai_logger.info(f"🏆 Выбрана самая быстрая бесплатная модель: {BEST_MODEL} ({valid_results[0][1]:.0f} ms)")
     else:
-        BEST_MODEL = AI_MANAGER_MODEL
-        ai_logger.warning(f"❌ Все бесплатные модели недоступны (429/ошибка), использую дефолт: {BEST_MODEL}")
+        BEST_MODEL = None
+        ai_logger.warning("❌ Все бесплатные модели недоступны (429/ошибка). Будем использовать Gemini/Qwen.")
 
-    # Красивый лог результатов
     log_msg = ["\n📊 Результаты тестирования моделей:"]
     for m, lat, status in results:
         lat_str = f"{lat:.0f} ms" if lat > 0 else status
@@ -523,7 +514,7 @@ async def select_fastest_model():
     ai_logger.info("\n".join(log_msg))
 
 # ============================================================
-# LLM
+# LLM (С ФОЛЛБЭКОМ)
 # ============================================================
 SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете. задача — помочь клиенту оформить заказ.
 
@@ -601,22 +592,16 @@ TOOLS_OPENAI = [
     },
 ]
 
-async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional[dict]:
-    if not AI_MANAGER_API_KEY: return None
-    model = BEST_MODEL or AI_MANAGER_MODEL
-    messages = [{"role": "system", "content": system_prompt}]
-    for role, text in history[-HISTORY_MAX_MSG:]:
-        messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
-    messages.append({"role": "user", "content": user_msg})
-    payload = {"model": model, "messages": messages, "tools": TOOLS_OPENAI, "tool_choice": "auto", "temperature": 0.1, "max_tokens": 800}
+async def _call_single_model(model: str, system_prompt: str, messages: list) -> Optional[dict]:
+    payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}] + messages, "tools": TOOLS_OPENAI, "tool_choice": "auto", "temperature": 0.1, "max_tokens": 800}
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT)) as resp:
                 if resp.status != 200:
-                    ai_logger.warning(f"LLM HTTP {resp.status}")
-                    return None
+                    # Если 429, возвращаем специфичную ошибку, чтобы понять
+                    return {"error": f"HTTP {resp.status}"}
                 data = await resp.json()
                 choices = data.get("choices", [])
                 if not choices: return None
@@ -631,12 +616,45 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
                     except Exception: args = {}
                     funcs.append({"name": fn.get("name"), "args": args})
                 return {"text": text, "funcs": funcs}
-    except asyncio.TimeoutError:
-        ai_logger.warning("LLM timeout")
-        return None
     except Exception as e:
-        ai_logger.exception(f"LLM error: {e}")
-        return None
+        return {"error": str(e)}
+
+async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional[dict]:
+    global BEST_MODEL
+    if not AI_MANAGER_API_KEY: return None
+    
+    messages = []
+    for role, text in history[-HISTORY_MAX_MSG:]:
+        messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
+    messages.append({"role": "user", "content": user_msg})
+
+    # Собираем цепочку моделей
+    models_to_try = []
+    if BEST_MODEL: models_to_try.append(BEST_MODEL)
+    models_to_try.append(DIAMOND_AI_MODEL)
+    models_to_try.append(LAST_RESORT_MODEL)
+    
+    # Убираем дубликаты, сохраняя порядок
+    models_to_try = list(dict.fromkeys(models_to_try))
+
+    for model in models_to_try:
+        res = await _call_single_model(model, system_prompt, messages)
+        
+        if res and "error" not in res:
+            # Успех!
+            if model == DIAMOND_AI_MODEL and BEST_MODEL:
+                # Если бесплатная сдохла, а сработала Gemini — переключаем BEST_MODEL на Gemini, чтобы не тупить в будущем
+                ai_logger.info(f"🔄 Бесплатная модель исчерпана, переключаюсь на основную {DIAMOND_AI_MODEL}")
+                BEST_MODEL = DIAMOND_AI_MODEL
+            return res
+            
+        if res and "error" in res:
+            ai_logger.warning(f"Модель {model} выдала ошибку: {res['error']}")
+            if model == BEST_MODEL:
+                BEST_MODEL = None # Сбрасываем, чтобы не долбить мертвую модель
+
+    ai_logger.error("Все модели (включая запаску) не смогли ответить.")
+    return None
 
 # ============================================================
 # БОТ
@@ -654,7 +672,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2.7 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v2.8 запущен. Каталог: {count}")
     asyncio.create_task(select_fastest_model())
 
     if not _CLEANUP_STARTED:
@@ -733,7 +751,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
     if not result:
         new_fails = (sess["fail_count"] or 0) + 1
         update_session(channel.id, fail_count=new_fails)
-        if new_fails >= SESSION_MAX_FAILS: await escalate(channel, "сбой LLM")
+        if new_fails >= SESSION_MAX_FAILS: await escalate(channel, "сбой LLM (все модели упали)")
         else:
             try: await channel.send("⏳ Секунду, уточняю информацию…")
             except Exception: pass
