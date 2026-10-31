@@ -4,6 +4,7 @@ import json
 import asyncio
 import time as _time
 import re
+import colorsys
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -58,6 +59,10 @@ REVIEW_CHANNEL_ID = 1462074763437543435
 
 _BUY_LOCKS = {}
 _BUY_LOCK_TIMEOUT = 15
+
+# Временное хранилище выбранного цвета для кастомной роли
+# {user_id: {"color_hex": "#ff0000", "has_emoji": True}}
+_TEMP_CUSTOM_ROLE = {}
 
 def _acquire_buy_lock(uid: int) -> bool:
     now = _time.time()
@@ -401,15 +406,36 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         f"> Время: <t:{current_time}:f>"
     )
 
-    view = CoinsTicketButtons()
-    await ticket_channel.send(
-        content=(
-            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
-            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем"
-        ),
-        embeds=[embeds_list[0], embed_order_info],
-        view=view
-    )
+    # ============================================================
+    # ЛОГИКА КАСТОМНОЙ РОЛИ
+    # ============================================================
+    is_custom_role = "Кастомная роль" in item_name
+    has_emoji = "с эмодзи" in item_name.lower()
+
+    if is_custom_role:
+        embed = disnake.Embed(
+            title="🎨 Настройка кастомной роли",
+            description=(
+                "> Поздравляем с покупкой! Давайте создадим вашу уникальную роль.\n\n"
+                "> Нажмите кнопку ниже, чтобы выбрать цвет, а затем ввести название"
+                + (" и эмодзи." if has_emoji else ".")
+            ),
+            color=6776679
+        )
+        embed.set_image(url=_IMG_STRIPE)
+        
+        view = CustomRoleSetupView(has_emoji=has_emoji)
+        await ticket_channel.send(embed=embed, view=view)
+    else:
+        view = CoinsTicketButtons()
+        await ticket_channel.send(
+            content=(
+                f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
+                f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем"
+            ),
+            embeds=[embeds_list[0], embed_order_info],
+            view=view
+        )
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
@@ -440,6 +466,179 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
             timestamp=datetime.now(timezone.utc),
             color=0x00ff00
         ))
+
+
+# ============================================================
+# КАСТОМНЫЕ РОЛИ (UI И ЛОГИКА)
+# ============================================================
+
+def hex_to_rgb(hex_str: str) -> tuple:
+    hex_str = hex_str.lstrip('#')
+    return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+
+def generate_gradient(hex_color: str):
+    """Возвращает (primary_rgb, secondary_rgb) для градиента."""
+    r, g, b = hex_to_rgb(hex_color)
+    # Основной цвет (как есть)
+    primary = (r, g, b)
+    # Вторичный цвет (чуть темнее для градиента)
+    secondary = (max(0, int(r * 0.8)), max(0, int(g * 0.8)), max(0, int(b * 0.8)))
+    return primary, secondary
+
+class CustomRoleColorSelect(disnake.ui.StringSelect):
+    def __init__(self, has_emoji: bool):
+        self.has_emoji = has_emoji
+        options = [
+            SelectOption(label="Белый / Серебро", value="#d6d6d6", emoji="⚪"),
+            SelectOption(label="Красный", value="#ff3e3e", emoji="🔴"),
+            SelectOption(label="Оранжевый", value="#f77e3e", emoji="🟠"),
+            SelectOption(label="Золотой", value="#f7c991", emoji="🟡"),
+            SelectOption(label="Зелёный", value="#23a55a", emoji="🟢"),
+            SelectOption(label="Мятный", value="#3ba55d", emoji="🟩"),
+            SelectOption(label="Синий", value="#5865f2", emoji="🔵"),
+            SelectOption(label="Фиолетовый", value="#b39ddb", emoji="🟣"),
+            SelectOption(label="Розовый", value="#eb459e", emoji="🩷"),
+            SelectOption(label="Тёмный", value="#333333", emoji="⚫"),
+        ]
+        super().__init__(
+            placeholder="Выберите цвет для вашей роли...",
+            min_values=1, max_values=1, options=options
+        )
+
+    async def callback(self, inter: disnake.MessageInteraction):
+        color_hex = self.values[0]
+        _TEMP_CUSTOM_ROLE[inter.author.id] = {
+            "color": color_hex,
+            "has_emoji": self.has_emoji
+        }
+        await inter.response.send_modal(CustomRoleModal(has_emoji=self.has_emoji))
+
+class CustomRoleModal(Modal):
+    def __init__(self, has_emoji: bool):
+        self.has_emoji = has_emoji
+        components = [
+            TextInput(
+                label="Название роли (без префикса)",
+                placeholder="Например: МирНаичик",
+                custom_id="role_name",
+                min_length=1,
+                max_length=32,
+            )
+        ]
+        if has_emoji:
+            components.append(
+                TextInput(
+                    label="Эмодзи (стандартный)",
+                    placeholder="Например: 🚀",
+                    custom_id="role_emoji",
+                    min_length=1,
+                    max_length=5,
+                )
+            )
+        super().__init__(title="Настройка кастомной роли", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        await inter.response.defer(ephemeral=True)
+
+        data = _TEMP_CUSTOM_ROLE.pop(inter.author.id, None)
+        if not data:
+            return await inter.followup.send("❌ Сессия истекла. Попробуйте нажать кнопку цвета заново.", ephemeral=True)
+
+        name = inter.text_values["role_name"].strip()
+        emoji = inter.text_values.get("role_emoji", "").strip() or None
+        
+        role_name = f"・{name}"
+        hex_color = data["color"]
+
+        primary_rgb, secondary_rgb = generate_gradient(hex_color)
+        primary_color = disnake.Colour.from_rgb(*primary_rgb)
+        secondary_color = disnake.Colour.from_rgb(*secondary_rgb)
+
+        try:
+            # Создаем роль
+            role = await inter.guild.create_role(
+                name=role_name,
+                colour=primary_color,
+                unicode_emoji=emoji,
+                reason=f"Кастомная роль от {inter.author} ({inter.author.id})"
+            )
+            
+            # Пытаемся установить градиент (secondary_colour)
+            try:
+                await role.edit(secondary_colour=secondary_color)
+            except Exception as e:
+                logger.warning(f"Не удалось установить secondary_colour для роли: {e}")
+
+            # Выдаем роль пользователю
+            await inter.author.add_roles(role)
+
+            # Отправляем сообщение об успехе
+            embed = disnake.Embed(
+                title="✅ Роль успешно создана!",
+                description=(
+                    f"> Ваша роль **{role_name}** готова.\n\n"
+                    f"> Не забудьте оставить отзыв в <#{REVIEW_CHANNEL_ID}>. За каждый отзыв мы начисляем DC!"
+                ),
+                color=primary_color
+            )
+            embed.set_image(url=_IMG_STRIPE)
+
+            await inter.edit_original_response(content=None, embed=embed, view=CustomRoleSuccessView())
+
+            await log_discord(
+                title="🎨 Кастомная роль создана",
+                description=(
+                    f"> **Пользователь:** {inter.author.mention} (`{inter.author.id}`)\n"
+                    f"> **Название:** `{role_name}`\n"
+                    f"> **Цвет:** `{hex_color}`\n"
+                    f"> **Эмодзи:** {emoji or '—'}"
+                ),
+                color=primary_color.value,
+                channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            )
+
+        except Exception as e:
+            logger.exception(f"Ошибка создания кастомной роли: {e}")
+            await inter.edit_original_response(content=f"❌ Ошибка при создании роли: `{str(e)[:100]}`")
+
+
+class CustomRoleSetupView(View):
+    def __init__(self, has_emoji: bool):
+        super().__init__(timeout=None)
+        self.has_emoji = has_emoji
+
+    @disnake.ui.button(label="Выбрать цвет", style=ButtonStyle.gray, emoji="🎨", custom_id="custom_role:pick_color")
+    async def choose_color(self, button: Button, inter: disnake.MessageInteraction):
+        view = View()
+        view.add_item(CustomRoleColorSelect(has_emoji=self.has_emoji))
+        await inter.response.send_message("Выберите цвет из списка ниже:", view=view, ephemeral=True)
+
+
+class CustomRoleSuccessView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(label="Всё супер, закрыть тикет", style=ButtonStyle.gray, emoji="✅", custom_id="custom_role:close")
+    async def close_ticket(self, button: Button, inter: disnake.MessageInteraction):
+        if not await _ack(inter, ephemeral=True, with_message=True):
+            return
+        await _ephemeral_reply(inter, content="Тикет закроется через 5 секунд...")
+        await asyncio.sleep(5)
+        try:
+            clear_ticket_owner(inter.channel)
+            await inter.channel.delete()
+            await log_discord(
+                title="🗑️ Тикет закрыт (Кастомная роль)",
+                description=f"> **Пользователь:** {inter.author.mention}\n> **Канал:** {inter.channel.name}",
+                color=0xff6600, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
+            )
+        except Exception as e:
+            logger.error(f"Ошибка закрытия тикета: {e}")
+
+
+# ============================================================
+# ОСТАЛЬНЫЕ КЛАССЫ (БЕЗ ИЗМЕНЕНИЙ)
+# ============================================================
 
 class BuySelect(disnake.ui.StringSelect):
     def __init__(self):
@@ -1190,18 +1389,14 @@ class CatalogView(disnake.ui.View):
 
 
 # ============================================================
-# AI MANAGER — ПЕРСОНАЛЬНЫЕ ПРЕДПОЧТЕНИЯ (JSON И БОНУС)
+# AI MANAGER — ПЕРСОНАЛЬНЫЕ ПРЕДПОЧТЕНИЯ
 # ============================================================
 def get_user_ai_pref(user_id: int) -> bool:
-    row = cur.execute(
-        "SELECT enabled FROM ai_manager_user_prefs WHERE user_id=?",
-        (user_id,)
-    ).fetchone()
+    row = cur.execute("SELECT enabled FROM ai_manager_user_prefs WHERE user_id=?", (user_id,)).fetchone()
     return bool(row["enabled"]) if row else True
 
 
 def set_user_ai_pref(user_id: int, enabled: bool):
-    # ИСПРАВЛЕНО: используем ON CONFLICT вместо INSERT OR REPLACE, чтобы не сбрасывать reward_claimed
     cur.execute(
         "INSERT INTO ai_manager_user_prefs (user_id, enabled) VALUES (?, ?) "
         "ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled",
@@ -1286,7 +1481,6 @@ class AIManagerPrefView(View):
         embeds = build_ai_pref_embeds(new_pref)
         
         if new_pref:
-            # Проверяем, получал ли он бонус
             row = cur.execute("SELECT reward_claimed FROM ai_manager_user_prefs WHERE user_id=?", (inter.author.id,)).fetchone()
             reward_claimed = row["reward_claimed"] if row and "reward_claimed" in row.keys() else 0
             
@@ -1299,25 +1493,14 @@ class AIManagerPrefView(View):
                 except Exception as e:
                     logger.error(f"Ошибка выдачи бонуса за AI: {e}")
 
-        await inter.edit_original_response(
-            embeds=embeds,
-            view=AIManagerPrefView(),
-        )
-
+        await inter.edit_original_response(embeds=embeds, view=AIManagerPrefView())
         await log_discord(
             title="🤖 AI Manager: смена персонального состояния",
-            description=(
-                f"> **Пользователь:** {inter.author.mention} (`{inter.author.id}`)\n"
-                f"> **Новое состояние:** {'✅ ВКЛ' if new_pref else '❌ ВЫКЛ'}"
-            ),
-            color=0x00aaff,
-            channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"],
+            description=f"> **Пользователь:** {inter.author.mention} (`{inter.author.id}`)\n> **Новое состояние:** {'✅ ВКЛ' if new_pref else '❌ ВЫКЛ'}",
+            color=0x00aaff, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"],
         )
 
 
-# ============================================================
-# ПАНЕЛЬ ТИКЕТОВ
-# ============================================================
 class TicketPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1344,11 +1527,7 @@ class TicketPanelView(View):
     async def autoorder(self, button: disnake.Button, inter: disnake.MessageInteraction):
         pref = get_user_ai_pref(inter.author.id)
         embeds = build_ai_pref_embeds(pref)
-        await inter.response.send_message(
-            embeds=embeds,
-            view=AIManagerPrefView(),
-            ephemeral=True,
-        )
+        await inter.response.send_message(embeds=embeds, view=AIManagerPrefView(), ephemeral=True)
 
     @disnake.ui.button(
         label="ㅤКаталогㅤ", style=disnake.ButtonStyle.gray,
