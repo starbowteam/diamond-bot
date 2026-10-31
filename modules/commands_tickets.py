@@ -1201,8 +1201,10 @@ def get_user_ai_pref(user_id: int) -> bool:
 
 
 def set_user_ai_pref(user_id: int, enabled: bool):
+    # ИСПРАВЛЕНО: используем ON CONFLICT вместо INSERT OR REPLACE, чтобы не сбрасывать reward_claimed
     cur.execute(
-        "INSERT OR REPLACE INTO ai_manager_user_prefs (user_id, enabled) VALUES (?, ?)",
+        "INSERT INTO ai_manager_user_prefs (user_id, enabled) VALUES (?, ?) "
+        "ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled",
         (user_id, 1 if enabled else 0)
     )
     db.commit()
@@ -1292,8 +1294,8 @@ class AIManagerPrefView(View):
                 try:
                     cur.execute("UPDATE ai_manager_user_prefs SET reward_claimed=1 WHERE user_id=?", (inter.author.id,))
                     db.commit()
-                    await add_dc(inter.author.id, 50, "Бонус за включение AI-Менеджера", notify=False, log=False)
-                    await inter.followup.send("✅ AI-Менеджер включен. **+50 DC** на баланс!", ephemeral=True)
+                    await add_dc(inter.author.id, 400, "Бонус за включение AI-Менеджера", notify=False, log=False)
+                    await inter.followup.send("✅ AI-Менеджер включен. **+400 DC** на баланс!", ephemeral=True)
                 except Exception as e:
                     logger.error(f"Ошибка выдачи бонуса за AI: {e}")
 
