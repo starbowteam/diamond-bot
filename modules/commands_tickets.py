@@ -4,7 +4,6 @@ import json
 import asyncio
 import time as _time
 import re
-import colorsys
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -60,8 +59,6 @@ REVIEW_CHANNEL_ID = 1462074763437543435
 _BUY_LOCKS = {}
 _BUY_LOCK_TIMEOUT = 15
 
-# Временное хранилище выбранного цвета для кастомной роли
-# {user_id: {"color_hex": "#ff0000", "has_emoji": True}}
 _TEMP_CUSTOM_ROLE = {}
 
 def _acquire_buy_lock(uid: int) -> bool:
@@ -406,9 +403,18 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         f"> Время: <t:{current_time}:f>"
     )
 
-    # ============================================================
-    # ЛОГИКА КАСТОМНОЙ РОЛИ
-    # ============================================================
+    # 1. ВСЕГДА отправляем стандартные кнопки (Политика, Закрыть)
+    view = CoinsTicketButtons()
+    await ticket_channel.send(
+        content=(
+            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
+            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем"
+        ),
+        embeds=[embeds_list[0], embed_order_info],
+        view=view
+    )
+
+    # 2. Если это кастомная роль — ДОПОЛНИТЕЛЬНО отправляем меню настройки
     is_custom_role = "Кастомная роль" in item_name
     has_emoji = "с эмодзи" in item_name.lower()
 
@@ -426,16 +432,6 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         
         view = CustomRoleSetupView(has_emoji=has_emoji)
         await ticket_channel.send(embed=embed, view=view)
-    else:
-        view = CoinsTicketButtons()
-        await ticket_channel.send(
-            content=(
-                f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
-                f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем"
-            ),
-            embeds=[embeds_list[0], embed_order_info],
-            view=view
-        )
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
@@ -477,11 +473,8 @@ def hex_to_rgb(hex_str: str) -> tuple:
     return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
 
 def generate_gradient(hex_color: str):
-    """Возвращает (primary_rgb, secondary_rgb) для градиента."""
     r, g, b = hex_to_rgb(hex_color)
-    # Основной цвет (как есть)
     primary = (r, g, b)
-    # Вторичный цвет (чуть темнее для градиента)
     secondary = (max(0, int(r * 0.8)), max(0, int(g * 0.8)), max(0, int(b * 0.8)))
     return primary, secondary
 
@@ -528,7 +521,7 @@ class CustomRoleModal(Modal):
         if has_emoji:
             components.append(
                 TextInput(
-                    label="Эмодзи (стандартный)",
+                    label="Эмодзи (вставьте с клавиатуры)",
                     placeholder="Например: 🚀",
                     custom_id="role_emoji",
                     min_length=1,
@@ -542,7 +535,7 @@ class CustomRoleModal(Modal):
 
         data = _TEMP_CUSTOM_ROLE.pop(inter.author.id, None)
         if not data:
-            return await inter.followup.send("❌ Сессия истекла. Попробуйте нажать кнопку цвета заново.", ephemeral=True)
+            return await inter.followup.send("❌ Сессия истекла. Нажмите кнопку цвета заново.", ephemeral=True)
 
         name = inter.text_values["role_name"].strip()
         emoji = inter.text_values.get("role_emoji", "").strip() or None
@@ -555,24 +548,31 @@ class CustomRoleModal(Modal):
         secondary_color = disnake.Colour.from_rgb(*secondary_rgb)
 
         try:
-            # Создаем роль
+            # 1. Создаем роль БЕЗ эмодзи
             role = await inter.guild.create_role(
                 name=role_name,
                 colour=primary_color,
-                unicode_emoji=emoji,
                 reason=f"Кастомная роль от {inter.author} ({inter.author.id})"
             )
             
-            # Пытаемся установить градиент (secondary_colour)
+            # 2. Пытаемся установить градиент
             try:
                 await role.edit(secondary_colour=secondary_color)
             except Exception as e:
-                logger.warning(f"Не удалось установить secondary_colour для роли: {e}")
+                logger.warning(f"Не удалось установить secondary_colour: {e}")
 
-            # Выдаем роль пользователю
+            # 3. Устанавливаем эмодзи (если введен)
+            if emoji:
+                try:
+                    await role.edit(display_icon=emoji)
+                except Exception as e:
+                    logger.warning(f"Не удалось установить эмодзи для роли: {e}")
+                    await inter.followup.send("⚠️ Внимание: эмодзи не установилось (возможно, нет 2 уровня бустов на сервере).", ephemeral=True)
+
+            # 4. Выдаем роль
             await inter.author.add_roles(role)
 
-            # Отправляем сообщение об успехе
+            # 5. Отправляем сообщение об успехе
             embed = disnake.Embed(
                 title="✅ Роль успешно создана!",
                 description=(
