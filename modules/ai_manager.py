@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-AI Manager v2.8 — умный менеджер тикетов Diamond Shop.
-Что нового: умный фоллбэк (Бесплатная -> Gemini -> Qwen) прямо в момент запроса.
-"""
 import os
 import re
 import json
@@ -24,6 +20,9 @@ from core.utils import (
 )
 from core.catalog import load_catalog_from_db, auto_init
 from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_id
+from modules.commands_tickets import (
+    CustomRoleSetupView, get_user_purchases, remove_purchase
+)
 
 # ============================================================
 # КОНСТАНТЫ
@@ -32,9 +31,8 @@ AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
 
-# Приоритетные модели для фоллбэка
-DIAMOND_AI_MODEL = "google/gemini-3-flash-preview" # Модель, которую использует основной бот (или ближайший аналог)
-LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"   # Последняя линия обороны
+DIAMOND_AI_MODEL = "google/gemini-3-flash-preview"
+LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"
 
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
@@ -384,6 +382,9 @@ def build_catalog_block(user_text: str, filtered_catalog: Dict[str, dict]) -> st
 def _is_paid_category(channel) -> bool:
     return channel.category and channel.category.id == CONFIG.get("PAID_CATEGORY_ID")
 
+def _is_coins_category(channel) -> bool:
+    return channel.category and channel.category.id == CONFIG.get("COINS_CATEGORY_ID")
+
 def _is_ai_ticket(channel) -> bool:
     if _is_paid_category(channel): return False
     return bool(get_ticket_owner(channel.id)) or (channel.category and channel.category.id == CONFIG.get("TICKET_CATEGORY_ID"))
@@ -481,7 +482,7 @@ async def select_fastest_model():
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
     
-    for model_id in free_models[:3]: # Тестируем максимум 3
+    for model_id in free_models[:3]:
         payload = {"model": model_id, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5, "temperature": 0}
         start_time = time.time()
         try:
@@ -514,7 +515,7 @@ async def select_fastest_model():
     ai_logger.info("\n".join(log_msg))
 
 # ============================================================
-# LLM (С ФОЛЛБЭКОМ)
+# LLM
 # ============================================================
 SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете. задача — помочь клиенту оформить заказ.
 
@@ -600,7 +601,6 @@ async def _call_single_model(model: str, system_prompt: str, messages: list) -> 
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT)) as resp:
                 if resp.status != 200:
-                    # Если 429, возвращаем специфичную ошибку, чтобы понять
                     return {"error": f"HTTP {resp.status}"}
                 data = await resp.json()
                 choices = data.get("choices", [])
@@ -628,30 +628,23 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
         messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
     messages.append({"role": "user", "content": user_msg})
 
-    # Собираем цепочку моделей
     models_to_try = []
     if BEST_MODEL: models_to_try.append(BEST_MODEL)
     models_to_try.append(DIAMOND_AI_MODEL)
     models_to_try.append(LAST_RESORT_MODEL)
     
-    # Убираем дубликаты, сохраняя порядок
     models_to_try = list(dict.fromkeys(models_to_try))
 
     for model in models_to_try:
         res = await _call_single_model(model, system_prompt, messages)
-        
         if res and "error" not in res:
-            # Успех!
             if model == DIAMOND_AI_MODEL and BEST_MODEL:
-                # Если бесплатная сдохла, а сработала Gemini — переключаем BEST_MODEL на Gemini, чтобы не тупить в будущем
                 ai_logger.info(f"🔄 Бесплатная модель исчерпана, переключаюсь на основную {DIAMOND_AI_MODEL}")
                 BEST_MODEL = DIAMOND_AI_MODEL
             return res
-            
         if res and "error" in res:
             ai_logger.warning(f"Модель {model} выдала ошибку: {res['error']}")
-            if model == BEST_MODEL:
-                BEST_MODEL = None # Сбрасываем, чтобы не долбить мертвую модель
+            if model == BEST_MODEL: BEST_MODEL = None
 
     ai_logger.error("Все модели (включая запаску) не смогли ответить.")
     return None
@@ -672,7 +665,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v2.8 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v3.0 запущен. Каталог: {count}")
     asyncio.create_task(select_fastest_model())
 
     if not _CLEANUP_STARTED:
@@ -680,6 +673,46 @@ async def on_ready():
         asyncio.create_task(_cleanup_loop())
         if not fallback_task.is_running():
             fallback_task.start()
+
+@bot.event
+async def on_guild_channel_create(channel):
+    """Ловим создание канала. Если это DC-тикет — проверяем кастомную роль."""
+    await bot.wait_until_ready()
+    if not _is_coins_category(channel):
+        return
+
+    await asyncio.sleep(2) # Ждем, пока основной бот отправит свои эмбеды
+
+    owner_id = get_ticket_owner(channel.id)
+    if not owner_id: return
+
+    try:
+        purchases = await get_user_purchases(owner_id, only_unused=True)
+        for p in purchases:
+            if "Кастомная роль" in p["value"]:
+                has_emoji = "с эмодзи" in p["value"].lower()
+                embed = disnake.Embed(
+                    title="🎨 Настройка кастомной роли",
+                    description=(
+                        "> Поздравляем с покупкой! Давайте создадим вашу уникальную роль.\n\n"
+                        "> Нажмите кнопку ниже, чтобы выбрать цвет, а затем ввести название"
+                        + (" и эмодзи." if has_emoji else ".")
+                    ),
+                    color=6776679
+                )
+                embed.set_image(url=IMG_STRIPE)
+                view = CustomRoleSetupView(has_emoji=has_emoji)
+                await channel.send(embed=embed, view=view)
+                
+                # Удаляем товар из инвентаря
+                full_purchases = await get_user_purchases(owner_id, only_unused=False)
+                for i, fp in enumerate(full_purchases):
+                    if fp["value"] == p["value"] and not fp.get("used"):
+                        await remove_purchase(owner_id, i)
+                        break
+                break
+    except Exception as e:
+        ai_logger.warning(f"Ошибка при проверке кастомной роли в on_guild_channel_create: {e}")
 
 async def _cleanup_loop():
     while True:
@@ -713,6 +746,23 @@ async def fallback_task():
         try:
             if await _check_and_close_abuse(channel, r["user_id"]): continue
         except Exception: pass
+        
+        # Проверка на кастомную роль перед тем как писать текстом
+        try:
+            purchases = await get_user_purchases(r["user_id"], only_unused=True)
+            custom_p = next((p for p in purchases if "Кастомная роль" in p["value"]), None)
+            if custom_p:
+                has_emoji = "с эмодзи" in custom_p["value"].lower()
+                embed = disnake.Embed(title="🎨 Настройка кастомной роли", description="> Пожалуйста, настройте вашу роль.", color=6776679)
+                embed.set_image(url=IMG_STRIPE)
+                await channel.send(embed=embed, view=CustomRoleSetupView(has_emoji=has_emoji))
+                full_purchases = await get_user_purchases(r["user_id"], only_unused=False)
+                for i, fp in enumerate(full_purchases):
+                    if fp["value"] == custom_p["value"] and not fp.get("used"):
+                        await remove_purchase(r["user_id"], i); break
+                continue
+        except Exception: pass
+
         last_text = hist_last_client_msg(channel_id)
         if not last_text: continue
         try: await channel.send("⏳ Подключаюсь, секунду…")
@@ -751,7 +801,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
     if not result:
         new_fails = (sess["fail_count"] or 0) + 1
         update_session(channel.id, fail_count=new_fails)
-        if new_fails >= SESSION_MAX_FAILS: await escalate(channel, "сбой LLM (все модели упали)")
+        if new_fails >= SESSION_MAX_FAILS: await escalate(channel, "сбой LLM")
         else:
             try: await channel.send("⏳ Секунду, уточняю информацию…")
             except Exception: pass
