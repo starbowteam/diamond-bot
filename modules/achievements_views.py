@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw
 from core.utils import logger, load_json, FILES, get_dc_cache
 from core.render import *
 from clan.achievements import ACHIEVEMENTS, CATEGORIES, CATEGORY_KEYS, CATEGORY_ORDER, get_category_progress, get_overall_progress, get_user_unlocked_set, check_and_unlock
-from core.ui_utils import btn_labels_total
+from core.render import btn_labels_total
 
 BTN_LABEL_TOTAL = 29
 _L_BACK, _L_FWD = btn_labels_total(["Назад", "Вперёд"], BTN_LABEL_TOTAL)
