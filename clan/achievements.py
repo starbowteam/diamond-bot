@@ -20,9 +20,9 @@ from core.render import (
     BG, CARD_TOP, STACK_BG, STACK_BRD, STACK_HDR, INNER_BG, INNER_BRD, TEXT, TEXT_SOFT, MUTED, DIM, DARK, SILVER, SILVER_HI, GREEN, RED, BLUE, GOLD, PURPLE, BRONZE, CARD_BRD, CANVAS_W, CANVAS_H, PAD_X, PAD_Y,
     I_GEM, I_STAR, I_CROWN, I_TROPHY, I_MEDAL, I_AWARD, I_COINS, I_SACK, I_MONEY, I_MONEY2, I_BAG, I_BRIEF, I_CHART, I_BANK, I_USERS, I_USER, I_USER_SEC, I_USER_TIE, I_HAND, I_HANDD, I_CLOCK, I_CALENDAR, I_CALC, I_LIST, I_LISTC, I_INFO, I_CHECK, I_XMARK, I_PERCENT, I_HISTORY, I_FIRE, I_GIFT, I_DICE, I_DICE5, I_DICE6, I_MESSAGE, I_COMMENT, I_COMMENTS, I_MIC, I_HEADPH, I_SCROLL, I_PEN, I_PEN_NIB, I_PENF, I_SEARCH, I_GAMEPAD, I_CUBE, I_GAUGE, I_SHIELD, I_BOLT, I_LOCK, I_SPADE, I_HEART, I_DIAMOND, I_CLUB, I_QUESTION, I_ROTATE, I_ROTATE_L, I_ARROW_L, I_ARROW_D, I_ELL, I_CIRCLE_M, I_PLUS, I_TRASH, I_EYE, I_IMAGE, I_PALETTE, I_MASKS, I_BULLHORN, I_TICKET, I_RECEIPT, I_BUILDING, I_MOBILE, I_CREDIT, I_BAN, I_HEAD, I_MOUSE, I_CART, I_BOX, I_CHECK_C, I_XMARK_C, I_HANDSHAKE, I_CROW, I_SEEDLING, I_GAVEL, I_BOOK, I_LAYERS, I_BEZIER, I_SMILE, base_canvas, draw_footer
 )
-from modules.cases import CASES, CASES_BY_NUM, get_case_stats, get_case_history, open_case
+from modules.actions import CASES, CASES_BY_NUM, get_case_stats, get_case_history, open_case
 from modules.dc import get_user_balance
-from core.ui_utils import btn_pad, btn_labels_total
+from core.render import btn_pad, btn_labels_total
 
 CREATOR_USER_ID = 796293832751972352
 
@@ -238,8 +238,7 @@ def render_cases(user_id, username, balance, stats):
     tb_data = [("ТВОЙ БАЛАНС", f"{_fmt(balance)} DC", GREEN, I_COINS, True), ("ОТКРЫТО", str(stats.get("opened", 0)), BLUE, I_GIFT, False), ("ЛУЧШИЙ ВЫИГРЫШ", f"{stats.get('best', 0)} DC", GOLD, I_TROPHY, False)]
     for i, (lbl, val, color, ic_code, is_green) in enumerate(tb_data):
         bx1, bx2, by1, by2 = PAD_X + i * (col_w + gap_top), PAD_X + i * (col_w + gap_top) + col_w, top_y1, top_y1 + top_h
-        _gradient_box(img, (bx1, by1, bx2, by2), color, color, alpha=18 if is_green else 10, radius=16)
-        d.rounded_rectangle((bx1, by1, bx2, by2), radius=16, outline=color + (200,), width=2)
+        _gradient_box(img, (bx1, by1, bx2, by2), color, color, alpha=18 if is_green else 10, radius=16); d.rounded_rectangle((bx1, by1, bx2, by2), radius=16, outline=color + (200,), width=2)
         _alpha_fill(img, (bx1 + 16, by1 + 22, bx1 + 62, by1 + 68), color, alpha=45, radius=12); _icon(d, bx1 + 39, by1 + 45, ic_code, 22, color)
         d.text((bx1 + 78, by1 + 20), lbl, font=_font(11), fill=MUTED); d.text((bx1 + 78, by1 + 42), _ellipsis(d, val, _font(24), bx2 - 90), font=_font(24), fill=color)
     head_y = top_y1 + top_h + 22
