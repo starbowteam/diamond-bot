@@ -1,33 +1,17 @@
 # -*- coding: utf-8 -*-
-import os
-import asyncio
-import time
+import os, asyncio, time
 from datetime import datetime, timezone, timedelta
 from typing import List
 import disnake
 from disnake.ext import commands, tasks
 from disnake import PartialEmoji, ButtonStyle
 
-from core.utils import (
-    CONFIG, FILES, logger, db, cur, load_json, save_json, now_ts, update_user_roles, sync_invites,
-    has_admin_command_roles, log_discord, BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR,
-    get_dc_cache, save_dc_cache, sync_dc_to_json,
-)
+from core.utils import CONFIG, FILES, logger, db, cur, load_json, save_json, now_ts, update_user_roles, sync_invites, has_admin_command_roles, log_discord, BASE_DIR, ADD_DIR, DATA_DIR, CATALOG_DIR, ACTIONS_DIR, get_dc_cache, save_dc_cache, sync_dc_to_json
 from modules.actions import refresh_daily_deal
-from modules.dc import (
-    add_dc, get_user_balance, load_shop_catalog, get_user_dc_data, save_user_dc_data,
-    daily_bonus, check_unused_purchases, daily_activity_payout, CLAN_SHARE,
-)
+from modules.dc import add_dc, get_user_balance, load_shop_catalog, get_user_dc_data, save_user_dc_data, daily_bonus, check_unused_purchases, daily_activity_payout, CLAN_SHARE
 
 intents = disnake.Intents.default()
-intents.members = True
-intents.messages = True
-intents.guilds = True
-intents.message_content = True
-intents.moderation = True
-intents.invites = True
-intents.reactions = True
-intents.voice_states = True
+intents.members = True; intents.messages = True; intents.guilds = True; intents.message_content = True; intents.moderation = True; intents.invites = True; intents.reactions = True; intents.voice_states = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 _REVIEW_COOLDOWN = {}
@@ -180,8 +164,8 @@ async def daily_deal_task():
         before = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {}); deal = refresh_daily_deal(); after = load_json(os.path.join(DATA_DIR, "daily_deal.json"), {})
         if before.get("slot") != after.get("slot") and deal:
             try:
-                from bonus.core import announce_deal_change
-                await announce_deal_change(bot, deal)
+                from modules.others import announce_deal
+                await announce_deal(bot, deal, after.get("slot"))
             except Exception: pass
     except Exception: pass
 
@@ -214,9 +198,9 @@ async def on_ready():
     try:
         await bot.change_presence(activity=disnake.Game(name="Магазин и экономика"))
         try:
-            from modules.giveaways import setup_giveaways
+            from modules.others import setup_giveaways
             setup_giveaways(bot)
-        except Exception as e: pass
+        except Exception as e: logger.exception(f"giveaways init: {e}")
         
         from modules.commands_tickets import TicketPanelView, TicketPaidView, TicketView, CoinsTicketButtons, SelectView, CatalogTypeView, CatalogView, QuestionTicketView
         from modules.tickets import ReceiptView
@@ -230,8 +214,7 @@ async def on_ready():
         if guild:
             for member in guild.members:
                 if not member.bot: get_user_dc_data(member.id)
-            sync_dc_to_json()
-            counts = load_json(FILES["review_counts"], {})
+            sync_dc_to_json(); counts = load_json(FILES["review_counts"], {})
             if counts:
                 for uid_str, count in counts.items():
                     member = guild.get_member(int(uid_str))
@@ -245,7 +228,7 @@ async def on_ready():
 
         try:
             from clan import init_clan_league
-            from clan.panels import send_clan_pool_panel, send_clan_season_panel, send_clan_games_panel
+            from clan.core import send_clan_pool_panel, send_clan_season_panel, send_clan_games_panel, send_clan_admin_panel
             init_clan_league(bot)
             bot.loop.create_task(send_clan_pool_panel(bot)); bot.loop.create_task(send_clan_season_panel(bot)); bot.loop.create_task(send_clan_games_panel(bot))
             try:
@@ -308,7 +291,7 @@ async def on_member_join(member: disnake.Member):
             await add_dc(member.id, WELCOME_BONUS_DC, "Приветственный бонус за регистрацию", notify=False, log=False)
             try:
                 embed1 = disnake.Embed(color=6776679).set_image(url=IMG_WELCOME)
-                embed2 = disnake.Embed(title="Добро пожаловать в Diamond Shop!", description=f"> Привет, **{member.display_name}**! Мы начислили тебе **{WELCOME_BONUS_DC} DC** в качестве приветственного бонуса.\n\n**💎 Diamond Coin** — внутренняя валюта сервера. Зарабатывай её активностью и трать на товары.\n\n**Как заработать DC?**\n> • **Сообщения** — 1 DC за 10 сообщений\n> • **Голос** — 3 DC в час\n> • **Отзывы** — от 20 до 100 DC\n> • **Ежедневный бонус** — +10 DC с ролью «Клуб»\n> • **Ежедневный подарок** — от 10 до 30 DC в панели профиля\n> • **Питомцы** — 1–20 DC в час\n> • **Казино** — рулетка, блэкджек, монетка\n\n> Удачи и приятных покупок!", color=6776679, timestamp=datetime.now(timezone.utc)).set_image(url=IMG_STRIPE)
+                embed2 = disnake.Embed(title="Добро пожаловать в Diamond Shop!", description=f"> Привет, **{member.display_name}**! Мы начислили тебе **{WELCOME_BONUS_DC} DC** в качестве приветственного бонуса.\n\n**💎 Diamond Coin** — внутренняя валюта сервера. Зарабатывай её активностью и трать на товары.\n\n**Как заработать DC?**\n> • **Сообщения** — 1 DC за 10 сообщений\n> • **Голос** — 3 DC в час\n> • **Отзывы** — от 20 до 100 DC\n> • **Ежедневный бонус** — +10 DC с ролью «Клуб»\n> • **Ежедневный подарок** — от 10 до 30 DC\n> • **Питомцы** — 1–20 DC в час\n> • **Казино** — рулетка, блэкджек, монетка\n\n> Удачи и приятных покупок!", color=6776679, timestamp=datetime.now(timezone.utc)).set_image(url=IMG_STRIPE)
                 await member.send(embeds=[embed1, embed2])
             except Exception: pass
             await log_discord(title="🎁 Приветственный бонус", description=f"> **Пользователь:** {member.mention}\n> **Начислено:** `+{WELCOME_BONUS_DC} DC`", color=0xffaa00)
@@ -322,10 +305,9 @@ async def on_member_join(member: disnake.Member):
     for inv in invites_now:
         old = snapshot_before.get(inv.code)
         if old and inv.uses > old["uses"]: used_invite = inv; break
-    for inv in invites_now:
-        db.execute("REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)", (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
+    for inv in invites_now: db.execute("REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)", (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
     if not used_invite or not used_invite.inviter: db.commit(); return
-    inviter_id = used_invite.inviter.id; is_bot = 1 if member.bot else 0; joined_at = now_ts(); ref_user_id = None
+    inviter_id, is_bot, joined_at, ref_user_id = used_invite.inviter.id, 1 if member.bot else 0, now_ts(), None
     try:
         from bonus.core import get_user_by_ref_code
         ref_user_id = get_user_by_ref_code(used_invite.code)
@@ -387,9 +369,9 @@ async def on_message_edit(before: disnake.Message, after: disnake.Message):
     await log_discord(title="✏️ Изменено сообщение", description=f"> **Автор:** {before.author.mention}\n> **Канал:** {before.channel.mention}\n> **Было:**\n```\n{(before.content or '[Нет]')[:500]}\n```\n> **Стало:**\n```\n{(after.content or '[Нет]')[:500]}\n```", color=0xffff00)
 
 @bot.event
-async def on_guild_channel_create(channel: disnake.abc.GuildChannel): await log_discord(title="➕ Создан канал", description=f"> **{channel.mention}** (`{channel.name}`)\n> **ID:** `{channel.id}`", color=0x00ff00)
+async def on_guild_channel_create(channel): await log_discord(title="➕ Создан канал", description=f"> **{channel.mention}** (`{channel.name}`)\n> **ID:** `{channel.id}`", color=0x00ff00)
 @bot.event
-async def on_guild_channel_delete(channel: disnake.abc.GuildChannel): await log_discord(title="➖ Удалён канал", description=f"> **{channel.name}**\n> **ID:** `{channel.id}`", color=0xff0000)
+async def on_guild_channel_delete(channel): await log_discord(title="➖ Удалён канал", description=f"> **{channel.name}**\n> **ID:** `{channel.id}`", color=0xff0000)
 @bot.event
 async def on_guild_channel_update(before, after):
     if before.name != after.name: await log_discord(title="✏️ Изменён канал", description=f"> **{after.mention}**\n> **Было:** `{before.name}`\n> **Стало:** `{after.name}`", color=0xffff00)
@@ -431,13 +413,6 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent):
         if role and member:
             try: await member.remove_roles(role)
             except Exception: pass
-
-@bot.event
-async def on_interaction(inter: disnake.MessageInteraction):
-    try:
-        from clan.panels import handle_clan_interaction
-        await handle_clan_interaction(inter)
-    except Exception: pass
 
 @bot.event
 async def on_message(message: disnake.Message):
@@ -490,11 +465,11 @@ async def on_message(message: disnake.Message):
             await check_and_unlock(user_id, "reviews", value=new_count, bot=bot)
         except Exception: pass
         try:
-            from clan.quests import on_review_quest_hook
+            from clan.core import on_review_quest_hook
             await on_review_quest_hook(user_id)
         except Exception: pass
         try:
-            from modules.giveaways import process_pending_payouts
+            from modules.others import process_pending_payouts
             await process_pending_payouts(bot, user_id)
         except Exception: pass
         try:
@@ -509,7 +484,7 @@ async def on_message(message: disnake.Message):
 
     if is_guild_text:
         try:
-            from clan.quests import on_message_quest_hook
+            from clan.core import on_message_quest_hook
             await on_message_quest_hook(message)
         except Exception: pass
     await bot.process_commands(message)
@@ -536,7 +511,7 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                 from modules.dc import add_voice_dc
                 await add_voice_dc(user_id, duration)
                 try:
-                    from clan.quests import on_voice_quest_hook
+                    from clan.core import on_voice_quest_hook
                     await on_voice_quest_hook(user_id, duration)
                 except Exception: pass
                 try:
