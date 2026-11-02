@@ -149,7 +149,7 @@ async def process_gift_dc(sender: disnake.Member, recipient_id: int, amount: int
     except Exception as e:
         await add_dc(sender.id, price_paid, "Возврат — ошибка начисления"); return False, f"Ошибка начисления: {e}"
     try:
-        from clan.quests import on_gift_quest_hook
+        from clan.core import on_gift_quest_hook
         await on_gift_quest_hook(sender.id, amount)
     except Exception: pass
     try:
@@ -319,7 +319,7 @@ class GiveawayPanelView(disnake.ui.View):
 
 class GiveawayModal(ui.Modal):
     def __init__(self): super().__init__(title="Создание розыгрыша", components=[ui.TextInput(label="Приз", custom_id="prize", max_length=256), ui.TextInput(label="Описание", custom_id="description", style=disnake.TextInputStyle.paragraph, max_length=1024), ui.TextInput(label="Победителей (число)", custom_id="winners", max_length=3), ui.TextInput(label="Длительность (10m, 2h, 1d)", custom_id="duration", max_length=10, placeholder="Например: 30m, 2h, 7d")])
-    async def callback(self, inter: disnake.MessageModalInteraction):
+    async def callback(self, inter: disnake.ModalInteraction):
         if not is_giveaway_staff(inter.author): return await inter.response.send_message("⛔ У вас нет прав.", ephemeral=True)
         prize, description = inter.text_values["prize"].strip(), inter.text_values["description"].strip()
         try: winners_count = int(inter.text_values["winners"].strip())
