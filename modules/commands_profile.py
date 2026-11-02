@@ -6,32 +6,14 @@ from disnake import ButtonStyle, SelectOption, PartialEmoji
 from disnake.ui import Button, Modal, Select, TextInput, View
 from core.utils import CONFIG, FILES, ADD_DIR, logger, load_json, log_discord, get_dc_cache, clean_embed_for_discohook
 from modules.dc import get_user_purchases, claim_daily_gift, get_daily_gift_status
+from modules.tickets import generate_profile_card
+from core.ui_utils import btn_labels_total
 
 P = "\u3164"
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-IMG_INV_TOP   = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
-IMG_ROLES_TOP = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572020427366481/image.png?ex=6ab2758c&is=6ab1240c&hm=2fec780d4d97c17f705cba8dceac2434a1e521ec92c60d43569f730d613076ca&"
 PROFILE_BTN_TOTAL = 35
-
-def _btn_labels_total(labels, total=PROFILE_BTN_TOTAL):
-    base = sum(len(s) for s in labels)
-    extra = max(0, total - base)
-    n = len(labels)
-    if n == 0: return labels
-    per = extra // n
-    rem = extra % n
-    result = []
-    for i, s in enumerate(labels):
-        pad = per + (1 if i < rem else 0)
-        left = pad // 2
-        right = pad - left
-        result.append(f"{P * left}{s}{P * right}")
-    return result
-
-_L_INV, _L_ROLES, _L_ACH = _btn_labels_total(["Инвентарь", "Кастомные роли", "Достижения"])
-EMOJI_INV     = PartialEmoji(name="prize", id=1539657202170859561)
-EMOJI_ROLES   = PartialEmoji(name="image", id=1550869363266027641)
-EMOJI_ACH     = PartialEmoji(name="shla",  id=1557087851949203600)
+_L_INV, _L_ROLES, _L_ACH = btn_labels_total(["Инвентарь", "Кастомные роли", "Достижения"], PROFILE_BTN_TOTAL)
+EMOJI_INV, EMOJI_ROLES, EMOJI_ACH = PartialEmoji(name="prize", id=1539657202170859561), PartialEmoji(name="image", id=1550869363266027641), PartialEmoji(name="shla", id=1557087851949203600)
 
 def load_embed_from_file(filename: str):
     path = os.path.join(ADD_DIR, filename)
@@ -82,8 +64,7 @@ class ProfileCardView(View):
         try:
             from modules.shop.render_profile import render_inventory
             buf = await asyncio.to_thread(render_inventory, inter.author.id, balance, total_spent, purchases)
-            fname = f"inv_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            await _send_ephemeral_file(inter, buf, fname)
+            fname = f"inv_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"; await _send_ephemeral_file(inter, buf, fname)
         except Exception as e: await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
     @disnake.ui.button(label=_L_ROLES, style=ButtonStyle.gray, custom_id="pcard:roles", emoji=EMOJI_ROLES, row=0)
@@ -91,8 +72,7 @@ class ProfileCardView(View):
         try: await inter.response.defer(ephemeral=True)
         except Exception: pass
         guild = inter.guild; member = inter.author
-        excluded = set(CONFIG.get("ROLE_IDS", {}).values())
-        excluded.update({1127428607606796290, 1154757071330365490, 1471844291595731016, 1471190371181789234, 1457964854441672806, 1423360115335106570, 1539523399611580476, 1208442450373513277, 1208442449425334372})
+        excluded = set(CONFIG.get("ROLE_IDS", {}).values()); excluded.update({1127428607606796290, 1154757071330365490, 1471844291595731016, 1471190371181789234, 1457964854441672806, 1423360115335106570, 1539523399611580476, 1208442450373513277, 1208442449425334372})
         limit_role = guild.get_role(1127428607606796290); max_pos = limit_role.position if limit_role else 9999
         custom = [r for r in sorted(member.roles, key=lambda x: -x.position) if not r.is_default() and not r.managed and r.id not in excluded and r.position < max_pos]
         roles_list = [{"id": r.id, "name": r.name, "color": r.color.value if r.color else 0, "position": r.position, "mention": r.mention} for r in custom[:40]]
@@ -104,8 +84,7 @@ class ProfileCardView(View):
         try:
             from modules.shop.render_profile import render_custom_roles
             buf = await asyncio.to_thread(render_custom_roles, inter.author.id, balance, total_spent, roles_list)
-            fname = f"roles_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"
-            await _send_ephemeral_file(inter, buf, fname)
+            fname = f"roles_{inter.author.id}_{int(datetime.now(timezone.utc).timestamp())}.png"; await _send_ephemeral_file(inter, buf, fname)
         except Exception as e: await _send_ephemeral_text(inter, f"❌ Ошибка: `{str(e)[:200]}`")
 
     @disnake.ui.button(label=_L_ACH, style=ButtonStyle.gray, custom_id="pcard:achievements", emoji=EMOJI_ACH, row=0)
@@ -117,16 +96,13 @@ class ProfileCardView(View):
         await render_category(inter, "base")
 
 def _total_spent(user_id: int) -> int:
-    try:
-        return sum(abs(h.get("amount", 0) or 0) for h in (get_dc_cache(user_id).get("history", []) or []) if (h.get("amount", 0) or 0) < 0 and (h.get("reason", "") or "").startswith("Покупка"))
+    try: return sum(abs(h.get("amount", 0) or 0) for h in (get_dc_cache(user_id).get("history", []) or []) if (h.get("amount", 0) or 0) < 0 and (h.get("reason", "") or "").startswith("Покупка"))
     except Exception: return 0
 
 async def render_profile_into_interaction(inter, user, view=None):
-    from modules.profile_card import generate_profile_card
     counts = load_json(FILES["review_counts"], {}); review_count = counts.get(str(user.id), 0); role_key, _ = _role_info(review_count)
     dc = get_dc_cache(user.id); balance = dc.get("balance", 0); history = list(reversed((dc.get("history") or [])[-5:]))
-    avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
-    joined_at = user.joined_at if isinstance(user, disnake.Member) else None
+    avatar_bytes = await user.display_avatar.replace(size=256, format="png").read(); joined_at = user.joined_at if isinstance(user, disnake.Member) else None
     buf = await asyncio.to_thread(generate_profile_card, user.display_name, user.id, avatar_bytes, role_key, review_count, balance, joined_at, history)
     fname = f"profile_{user.id}_{int(datetime.now(timezone.utc).timestamp())}.png"; file = disnake.File(buf, filename=fname); embed = disnake.Embed(color=6776679); embed.set_image(url=f"attachment://{fname}")
     kwargs = dict(embed=embed, file=file, attachments=[], view=view)
@@ -135,7 +111,6 @@ async def render_profile_into_interaction(inter, user, view=None):
 
 async def show_profile_card(inter, user: disnake.Member, show_view: bool = True, viewer: disnake.Member = None):
     await inter.response.defer(with_message=True, ephemeral=True)
-    from modules.profile_card import generate_profile_card
     counts = load_json(FILES["review_counts"], {}); review_count = counts.get(str(user.id), 0); role_key, _ = _role_info(review_count)
     dc = get_dc_cache(user.id); balance = dc.get("balance", 0); history = list(reversed((dc.get("history") or [])[-5:]))
     avatar_bytes = await user.display_avatar.replace(size=256, format="png").read(); joined_at = user.joined_at if isinstance(user, disnake.Member) else None
@@ -173,13 +148,11 @@ async def show_daily_gift(inter):
         fname = f"gift_{user_id}_{int(datetime.now(timezone.utc).timestamp())}.png"; file = disnake.File(buf, filename=fname); embed = disnake.Embed(color=6776679); embed.set_image(url=f"attachment://{fname}")
         await inter.followup.send(embed=embed, file=file, ephemeral=True)
     except Exception as e:
-        await _send_ephemeral_text(inter, f"🎁 Сегодня тебе выпало **{result['amount']} DC**!" if result.get("ok") else "⏳ Ты уже забрал подарок сегодня. Возвращайся завтра!")
-        return
+        await _send_ephemeral_text(inter, f"🎁 Сегодня тебе выпало **{result['amount']} DC**!" if result.get("ok") else "⏳ Ты уже забрал подарок сегодня. Возвращайся завтра!"); return
     if result.get("ok"): asyncio.create_task(log_discord(title="🎁 Ежедневный подарок", description=f"> **Пользователь:** {inter.author.mention}\n> **Начислено:** `+{result['amount']} DC`\n> **Следующий через 24ч:** <t:{result['next_ts']}:f>", color=0xffaa00, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]))
 
 class OtherProfileModal(Modal):
-    def __init__(self):
-        super().__init__(title="👤 Профиль другого пользователя", components=[TextInput(label="ID пользователя", placeholder="Введите ID (например, 123456789012345678)", custom_id="target_id", min_length=1, max_length=30)], custom_id="other_profile_modal")
+    def __init__(self): super().__init__(title="👤 Профиль другого пользователя", components=[TextInput(label="ID пользователя", placeholder="Введите ID (например, 123456789012345678)", custom_id="target_id", min_length=1, max_length=30)], custom_id="other_profile_modal")
     async def callback(self, inter):
         raw = inter.text_values["target_id"].strip()
         if not raw.isdigit(): return await inter.response.send_message("❌ ID должен состоять только из цифр.", ephemeral=True)
