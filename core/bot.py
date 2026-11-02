@@ -54,7 +54,6 @@ IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/155673
 
 SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
 _LAST_PAYOUT_DATE, _LAST_REMINDER_DATE, _LAST_BONUS_DATE = None, None, None
-ADVERTISER_PANEL_CHANNEL_ID = 1557405478890373210
 
 def load_salary_state() -> dict: return load_json(SALARY_STATE_FILE, {"advance": "", "salary": ""})
 def save_salary_state(state: dict): save_json(SALARY_STATE_FILE, state)
@@ -152,8 +151,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
                         await guild.edit(banner=best_gif_bytes)
                         if not silent: await log_discord(title="🖼️ Анимированный баннер обновлён", description=f"> **Файл:** `{os.path.basename(gif_path)}`\n> **Количество отзывов:** `{review_count}`\n> **Сжатие:** {used_config['w']}x{used_config['h']} ({used_config['colors']} цв.)", color=0x00aaff)
                         return
-                except disnake.HTTPException as e: pass
-                except Exception as e: pass
+                except Exception: pass
         base_path = os.path.join(ADD_DIR, "banner.png"); output_path = os.path.join(DATA_DIR, "banner_ready.png")
         if not os.path.exists(base_path) or not os.path.exists(font_path): return
         img = Image.open(base_path).convert("RGBA"); draw = ImageDraw.Draw(img); font = ImageFont.truetype(font_path, 400); draw.text((594, 540), str(review_count), font=font, fill=(255, 255, 255), anchor="mm"); img.save(output_path)
@@ -161,7 +159,7 @@ async def update_server_banner(review_count: int, silent: bool = False):
         if not guild: return
         with open(output_path, "rb") as f: await guild.edit(banner=f.read())
         if not silent: await log_discord(title="🖼️ Баннер обновлён", description=f"> **Количество отзывов:** `{review_count}`", color=0x00aaff)
-    except Exception as e: pass
+    except Exception: pass
 
 @tasks.loop(hours=24)
 async def review_counter_task(): await bot.wait_until_ready(); await update_review_counter(silent=False)
@@ -224,9 +222,7 @@ async def on_ready():
         from modules.tickets import ReceiptView
         from modules.commands_profile import send_profile_panel, ProfilePanelView, ProfileCardView
         from modules.commands_staff import send_tarology_panel, send_ticket_panel, send_work_panel, send_staff_panels, TarologyView, WorkView, DCView, PromoView, AdminView
-        from modules.autoorder import setup_autoorder
         
-        setup_autoorder(bot)
         bot.add_view(TicketPanelView()); bot.add_view(TicketPaidView()); bot.add_view(TicketView()); bot.add_view(CoinsTicketButtons()); bot.add_view(SelectView()); bot.add_view(CatalogTypeView()); bot.add_view(CatalogView()); bot.add_view(ReceiptView()); bot.add_view(TarologyView()); bot.add_view(ProfilePanelView()); bot.add_view(ProfileCardView()); bot.add_view(WorkView()); bot.add_view(QuestionTicketView()); bot.add_view(DCView()); bot.add_view(PromoView()); bot.add_view(AdminView())
         bot.loop.create_task(send_tarology_panel()); bot.loop.create_task(send_ticket_panel()); bot.loop.create_task(send_profile_panel()); bot.loop.create_task(send_work_panel()); bot.loop.create_task(send_staff_panels())
 
@@ -312,7 +308,7 @@ async def on_member_join(member: disnake.Member):
             await add_dc(member.id, WELCOME_BONUS_DC, "Приветственный бонус за регистрацию", notify=False, log=False)
             try:
                 embed1 = disnake.Embed(color=6776679).set_image(url=IMG_WELCOME)
-                embed2 = disnake.Embed(title="Добро пожаловать в Diamond Shop!", description=f"> Привет, **{member.display_name}**! Мы начислили тебе **{WELCOME_BONUS_DC} DC** в качестве приветственного бонуса.\n\n**💎 Diamond Coin** — внутренняя валюта сервера. Зарабатывай её активностью и трать на товары.\n\n**Как заработать DC?**\n> • **Сообщения** — 1 DC за 10 сообщений\n> • **Голос** — 3 DC в час\n> • **Отзывы** — от 20 до 100 DC в зависимости от роли покупателя\n> • **Ежедневный бонус** — +10 DC с ролью «Клуб»\n> • **Ежедневный подарок** — от 10 до 30 DC в панели профиля\n> • **Питомцы** — 1–20 DC в час\n> • **Казино** — рулетка, блэкджек, монетка\n\n**🛒 Где потратить?**\n> Загляни в <#1462136361711829053>, нажми кнопку **Каталог** и выбери валюту **Diamond Coin**.\n\n> Удачи и приятных покупок!", color=6776679, timestamp=datetime.now(timezone.utc)).set_image(url=IMG_STRIPE)
+                embed2 = disnake.Embed(title="Добро пожаловать в Diamond Shop!", description=f"> Привет, **{member.display_name}**! Мы начислили тебе **{WELCOME_BONUS_DC} DC** в качестве приветственного бонуса.\n\n**💎 Diamond Coin** — внутренняя валюта сервера. Зарабатывай её активностью и трать на товары.\n\n**Как заработать DC?**\n> • **Сообщения** — 1 DC за 10 сообщений\n> • **Голос** — 3 DC в час\n> • **Отзывы** — от 20 до 100 DC\n> • **Ежедневный бонус** — +10 DC с ролью «Клуб»\n> • **Ежедневный подарок** — от 10 до 30 DC в панели профиля\n> • **Питомцы** — 1–20 DC в час\n> • **Казино** — рулетка, блэкджек, монетка\n\n> Удачи и приятных покупок!", color=6776679, timestamp=datetime.now(timezone.utc)).set_image(url=IMG_STRIPE)
                 await member.send(embeds=[embed1, embed2])
             except Exception: pass
             await log_discord(title="🎁 Приветственный бонус", description=f"> **Пользователь:** {member.mention}\n> **Начислено:** `+{WELCOME_BONUS_DC} DC`", color=0xffaa00)
