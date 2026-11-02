@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-"""core/render.py — единые хелперы для всех рендеров и UI (Pillow + Discord)."""
+"""core/render.py — единые хелперы для всех рендеров и UI."""
 import os
 from typing import Optional, Tuple, List
 from PIL import Image, ImageDraw, ImageFont
-
 from core.utils import ADD_DIR
 
-# --- Шрифты ---
 FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
 FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
 _FONT_CACHE, _FA_CACHE = {}, {}
@@ -15,8 +13,7 @@ def _font(size: int):
     if size in _FONT_CACHE: return _FONT_CACHE[size]
     try: f = ImageFont.truetype(FONT_BOLD, size)
     except Exception: f = ImageFont.load_default()
-    _FONT_CACHE[size] = f
-    return f
+    _FONT_CACHE[size] = f; return f
 
 def _fa(size: int):
     if size in _FA_CACHE: return _FA_CACHE[size]
@@ -24,10 +21,9 @@ def _fa(size: int):
     if os.path.exists(FONT_FA):
         try: f = ImageFont.truetype(FONT_FA, size)
         except Exception: pass
-    _FA_CACHE[size] = f
-    return f
+    _FA_CACHE[size] = f; return f
 
-# --- Палитра ---
+# Палитра
 BG, CARD_TOP = (10, 10, 12), (16, 16, 20)
 STACK_BG, STACK_BRD, STACK_HDR = (21, 21, 26), (58, 58, 64), (36, 36, 42)
 INNER_BG, INNER_BRD = (18, 18, 23), (40, 40, 47)
@@ -37,7 +33,7 @@ GREEN, RED, BLUE, PURPLE, GOLD, BRONZE = (46, 204, 113), (255, 107, 107), (106, 
 GREEN_BG, RED_BG, BLUE_BG, PURPLE_BG, GOLD_BG = (18, 44, 28), (44, 20, 20), (20, 30, 44), (32, 26, 48), (40, 32, 21)
 CARD_BRD, EMBED_COLOR, COLOR_GREY = (74, 74, 79), 0x2b2d31, 0x676767
 
-# --- Иконки FA5 (основные) ---
+# Иконки FA5
 I_GEM, I_STAR, I_CROWN, I_TROPHY = 0xf3a5, 0xf005, 0xf521, 0xf091
 I_MEDAL, I_AWARD, I_COINS, I_SACK = 0xf5a2, 0xf559, 0xf51e, 0xf81d
 I_MONEY, I_MONEY2, I_BAG, I_BRIEF = 0xf53a, 0xf53b, 0xf290, 0xf0b1
@@ -60,11 +56,10 @@ I_MOBILE, I_CREDIT, I_BAN, I_HEAD = 0xf3cd, 0xf09d, 0xf05e, 0xf590
 I_MOUSE, I_CART, I_BOX, I_CHECK_C = 0xf8cc, 0xf07a, 0xf466, 0xf058
 I_XMARK_C, I_HANDSHAKE, I_CROW, I_SEEDLING = 0xf057, 0xf2b5, 0xf520, 0xf4d8
 I_GAVEL, I_BOOK, I_LAYERS, I_BEZIER = 0xf0e3, 0xf02d, 0xf5fd, 0xf55b
-I_SMILE = 0xf118
+I_SMILE, I_BOOK_OPEN, I_PAINT = 0xf118, 0xf518, 0xf1fc
 
 CANVAS_W, CANVAS_H, M, PAD_X, PAD_Y = 1800, 1000, 14, 40, 40
 
-# --- Pillow Хелперы ---
 def _tw(d, text, font):
     b = d.textbbox((0, 0), text, font=font); return b[2] - b[0]
 
@@ -148,9 +143,7 @@ def _draw_dashed_rect(d, box, radius, color, dash=10, gap=7, width=2):
     d.arc((x1, y2 - 2 * r, x1 + 2 * r, y2), 90, 180, fill=color, width=width)
     d.arc((x2 - 2 * r, y2 - 2 * r, x2, y2), 0, 90, fill=color, width=width)
 
-# --- Discord UI Хелперы ---
 P = "\u3164"
-
 def btn_pad(text: str, total: int) -> str:
     extra = max(0, total - len(text)); left = extra // 2
     return f"{P * left}{text}{P * (extra - left)}"
@@ -165,10 +158,8 @@ def btn_labels_total(labels: List[str], total: int) -> List[str]:
         res.append(f"{P * left}{s}{P * (pad - left)}")
     return res
 
-def L(text: str) -> str:
-    return f"{P}{text}{P}"
+def L(text: str) -> str: return f"{P}{text}{P}"
 
-# --- Текст ---
 _ALLOWED_SPECIAL = set("—–‑‒―“”«»„‘’…№·•▪●◆◇■□")
 def sanitize(text: str, fallback: str = "") -> str:
     if not text: return fallback
@@ -177,7 +168,6 @@ def sanitize(text: str, fallback: str = "") -> str:
     while "  " in res: res = res.replace("  ", " ")
     return res or fallback
 
-# --- Каркас ---
 def base_canvas(uid_label: str = "", uid_value: Optional[int] = None, status_label: Optional[str] = None, logo_icon: int = I_GEM) -> Tuple[Image.Image, ImageDraw.ImageDraw]:
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), BG + (255,)); d = ImageDraw.Draw(img)
     d.rounded_rectangle((M, M, CANVAS_W - 1 - M, CANVAS_H - 1 - M), radius=28, fill=CARD_TOP + (255,), outline=CARD_BRD + (255,), width=3)
