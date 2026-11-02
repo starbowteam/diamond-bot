@@ -303,12 +303,12 @@ async def close_cycle_and_pay(bot) -> bool:
                 if not is_hard_excluded(member_row["user_id"]): bot.loop.create_task(unlock_achievement(member_row["user_id"], "clan_champion", bot=bot))
     except Exception: pass
     asyncio.create_task(send_payout_report_dm(bot, report)); asyncio.create_task(post_payout_results(bot, report)); asyncio.create_task(send_payout_dms(bot, report))
-    try: from clan.panels import post_news_season_end; asyncio.create_task(post_news_season_end(bot, report))
+    try: from clan.core import post_news_season_end; asyncio.create_task(post_news_season_end(bot, report))
     except Exception: pass
     asyncio.create_task(log_discord(title=f"🏁 Клановая лига: {get_season_title(cycle['number'])} завершён", description=f"> **Общий банк:** `{sum(c['bank'] for c in report['clans'])} DC`\n> **Выплачено:** `{total_paid} DC`\n> **Кланов:** `{len(report['clans'])}`", color=0xFFD700, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]))
     async def _delayed_start():
         await asyncio.sleep(300); start_new_cycle()
-        from clan.panels import update_clan_pool_embed, post_news_season_start
+        from clan.core import update_clan_pool_embed, post_news_season_start
         await update_clan_pool_embed(bot)
         try: await post_news_season_start(bot)
         except Exception: pass
@@ -413,7 +413,7 @@ def make_progress_bar(percent: float, length: int = 10) -> str: filled = int(rou
 def clan_status_emoji(bank: int) -> str: return "🔥" if bank >= 5000 else "⚡" if bank >= 2000 else "💤"
 
 # ============================================================
-# КВЕСТЫ (из quests.py)
+# КВЕСТЫ
 # ============================================================
 QUESTS: Dict[str, dict] = {
     "msg_50": {"title": "Болтун", "desc": "Напиши 50 сообщений в чате", "reward": 30, "goal": 50, "type": "daily", "unit": "сообщений", "icon": "fa-comment"},
@@ -515,7 +515,7 @@ async def on_panel_click_quest_hook(user_id: int):
     update_progress(user_id, "cmds_5", delta=1)
 
 # ============================================================
-# ПАНЕЛИ И РЕНДЕР (из panels.py)
+# ПАНЕЛИ
 # ============================================================
 P = "\u3164"
 EMOJI_BANK   = PartialEmoji.from_str("<:1d1ds:1552730624572391584>")
