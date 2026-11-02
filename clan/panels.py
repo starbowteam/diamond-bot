@@ -20,7 +20,9 @@ from clan.core import (
     DAILY_CLAN_LIMIT, _get_daily_contributed,
 )
 from clan.quests import format_quests_embed, reset_daily_quests, reset_weekly_quests, on_panel_click_quest_hook
-from modules.cases_views import CasesSelectView, show_cases_screen # <-- ВАЖНО: теперь модуль cases_views лежит в modules
+
+# ВОТ ТУТ БЫЛА ОШИБКА, ИСПРАВЛЕНО НА clan.cases_views
+from clan.cases_views import CasesSelectView, show_cases_screen
 from clan.render import (
     render_clan_deposits, render_clan_last, render_clan_total_pool,
     render_clan_bank, render_clan_top, render_clan_howto,
