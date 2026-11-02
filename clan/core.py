@@ -303,12 +303,11 @@ async def close_cycle_and_pay(bot) -> bool:
                 if not is_hard_excluded(member_row["user_id"]): bot.loop.create_task(unlock_achievement(member_row["user_id"], "clan_champion", bot=bot))
     except Exception: pass
     asyncio.create_task(send_payout_report_dm(bot, report)); asyncio.create_task(post_payout_results(bot, report)); asyncio.create_task(send_payout_dms(bot, report))
-    try: from clan.core import post_news_season_end; asyncio.create_task(post_news_season_end(bot, report))
+    try: asyncio.create_task(post_news_season_end(bot, report))
     except Exception: pass
     asyncio.create_task(log_discord(title=f"🏁 Клановая лига: {get_season_title(cycle['number'])} завершён", description=f"> **Общий банк:** `{sum(c['bank'] for c in report['clans'])} DC`\n> **Выплачено:** `{total_paid} DC`\n> **Кланов:** `{len(report['clans'])}`", color=0xFFD700, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]))
     async def _delayed_start():
         await asyncio.sleep(300); start_new_cycle()
-        from clan.core import update_clan_pool_embed, post_news_season_start
         await update_clan_pool_embed(bot)
         try: await post_news_season_start(bot)
         except Exception: pass
