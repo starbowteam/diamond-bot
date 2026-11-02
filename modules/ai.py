@@ -6,6 +6,8 @@ from typing import Optional, List, Dict, Any, Tuple
 import aiohttp, disnake
 from disnake.ext import commands, tasks
 from core.utils import CONFIG, FILES, DATA_DIR, load_json, save_json, get_dc_cache, cur, db
+from modules.tickets import generate_profile_card
+from modules.actions import open_case, CASES_BY_NUM
 
 logger = logging.getLogger("diamond_ai")
 logger.setLevel(logging.INFO)
@@ -54,7 +56,6 @@ _init_ai_tables()
 def memory_get(user_id: int) -> dict:
     try: row = cur.execute("SELECT * FROM ai_user_memory WHERE user_id=?", (user_id,)).fetchone(); return dict(row) if row else {}
     except Exception: return {}
-
 def memory_upsert(user_id: int, **fields):
     try:
         now = int(time.time()); existing = memory_get(user_id)
@@ -64,7 +65,6 @@ def memory_upsert(user_id: int, **fields):
             set_clause = ", ".join(f"{k}=?" for k in updates.keys()); values = list(updates.values()) + [user_id]
             cur.execute(f"UPDATE ai_user_memory SET {set_clause} WHERE user_id=?", values); db.commit()
     except Exception: pass
-
 def memory_add_fact(user_id: int, fact: str):
     try:
         mem = memory_get(user_id); facts = []
@@ -76,12 +76,9 @@ def memory_add_fact(user_id: int, fact: str):
         facts.append(fact); facts = facts[-10:]
         memory_upsert(user_id, facts_json=json.dumps(facts, ensure_ascii=False))
     except Exception: pass
-
 def memory_cleanup_old():
-    try:
-        cur.execute("DELETE FROM ai_user_memory WHERE last_seen < ?", (int(time.time()) - MEMORY_TTL_DAYS * 86400,)); db.commit()
+    try: cur.execute("DELETE FROM ai_user_memory WHERE last_seen < ?", (int(time.time()) - MEMORY_TTL_DAYS * 86400,)); db.commit()
     except Exception: pass
-
 def memory_detect_interests(user_id: int):
     try:
         mem = memory_get(user_id); facts = json.loads(mem["facts_json"]) if mem.get("facts_json") else []
@@ -92,20 +89,16 @@ def memory_detect_interests(user_id: int):
         for t, c in topics.items():
             if c >= 3: memory_add_fact(user_id, f"интересуется {t}")
     except Exception: pass
-
 def is_repeat_question(user_id: int, text: str) -> bool:
     mem = memory_get(user_id)
     if not mem: return False
     last_hash, last_ts = mem.get("last_question_hash"), mem.get("last_question_ts") or 0
     if not last_hash or int(time.time()) - last_ts > REPEAT_QUESTION_HOURS * 3600: return False
     return hashlib.md5(_normalize_text(text).encode("utf-8")).hexdigest() == last_hash
-
 def mark_question_asked(user_id: int, text: str):
     memory_upsert(user_id, last_question_hash=hashlib.md5(_normalize_text(text).encode("utf-8")).hexdigest(), last_question_ts=int(time.time()))
-
 def _normalize_text(text: str) -> str:
     t = text.lower().strip(); t = re.sub(r"[^\w\s]", "", t); return re.sub(r"\s+", " ", t)
-
 def log_unknown(user_id: int, question: str, reply: str):
     try: cur.execute("INSERT INTO ai_unknown_log (user_id, question, reply, ts) VALUES (?, ?, ?, ?)", (user_id, question[:500], reply[:500], int(time.time()))); db.commit()
     except Exception: pass
@@ -134,7 +127,6 @@ user_ctx: Dict[int, List[Dict[str, str]]] = {}
 def _push_user(user_id: int, role: str, content: str):
     lst = user_ctx.setdefault(user_id, []); lst.append({"role": role, "content": content[:600]})
     while len(lst) > MAX_USER_HISTORY * 2: lst.pop(0)
-
 def _is_reply_to_bot(message: disnake.Message) -> bool:
     try: return message.reference and isinstance(message.reference.resolved, disnake.Message) and message.reference.resolved.author.id == bot.user.id
     except Exception: return False
@@ -155,7 +147,6 @@ def should_respond(message: disnake.Message) -> bool:
     text = (message.content or "").lower()
     if "?" in text or "？" in text: return True
     return any(text.startswith(w) for w in TRIGGER_WORDS)
-
 async def is_channel_busy(channel: disnake.TextChannel) -> bool:
     try:
         since = datetime.now(timezone.utc) - timedelta(seconds=BUSY_WINDOW_SECONDS); authors = set()
@@ -174,7 +165,6 @@ def detect_sentiment(text: str) -> str:
     if text.count("!") >= 3 or text.count("?") >= 3: return "angry"
     angry_score = sum(1 for w in ANGRY_WORDS if w in t); happy_score = sum(1 for w in HAPPY_WORDS if w in t)
     return "angry" if angry_score > happy_score else "happy" if happy_score > angry_score else "neutral"
-
 def choose_style(sentiment: str, text: str) -> str:
     if sentiment == "angry": return "angry"
     if sentiment == "happy": return "happy"
@@ -210,7 +200,6 @@ def _role_key_for_reviews(reviews: int) -> str:
     if reviews >= 6: return "silver"
     if reviews >= 1: return "bronze"
     return "none"
-
 def build_clan_pet_block(user_id: int) -> str:
     try:
         from clan.core import get_user_clan
@@ -220,7 +209,6 @@ def build_clan_pet_block(user_id: int) -> str:
         pet = get_clan_pet(clan["id"]); pet_name = get_pet_name(clan["id"]); bonus = get_pet_bonus(pet["level"]); income = get_pet_hourly_income(pet["level"])
         return f"клановый питомец (Душа Клана):\n- клан: {clan['name']}\n- питомец: {pet_name} (уровень {pet['level']})\n- бонус к выплате клана: +{int(bonus*100)}%\n- пассивный доход: {income:.0f} DC/ч (раз в сутки падает в копилку)\n- всего скормлено кланом: {pet['total_fed']} DC"
     except Exception: return ""
-
 def build_user_block(user_id: int, member: Optional[disnake.Member]) -> str:
     try: balance = get_dc_cache(user_id).get("balance", 0)
     except Exception: balance = 0
@@ -252,7 +240,6 @@ def build_user_block(user_id: int, member: Optional[disnake.Member]) -> str:
     pet_block = build_clan_pet_block(user_id)
     if pet_block: lines.append(""); lines.append(pet_block)
     return "\n".join(lines)
-
 def build_shop_block() -> str:
     try:
         from modules.dc import load_shop_catalog
@@ -263,7 +250,6 @@ def build_shop_block() -> str:
                 if prices: lines.append(f"- {label}: от {min(prices)} до {max(prices)} dc")
         return "\n".join(lines) if len(lines) > 1 else ""
     except Exception: return ""
-
 def build_active_block() -> str:
     lines = []
     try:
@@ -279,7 +265,6 @@ def build_active_block() -> str:
             lines.append(f"- розыгрыш #{r['giveaway_id']}: {r['prize']}, участников {n}, до <t:{r['end_time']}:R>")
     except Exception: pass
     return "активное на сервере:\n" + "\n".join(lines) if lines else ""
-
 def build_memory_block(user_id: int) -> str:
     mem = memory_get(user_id)
     if not mem: return ""
@@ -294,7 +279,6 @@ def build_memory_block(user_id: int) -> str:
             for f in (json.loads(facts_raw) or [])[:5]: parts.append(f"- {f}")
         except Exception: pass
     return "память о юзере:\n" + "\n".join(parts) if parts else ""
-
 def build_context_block(user_id: int, member: Optional[disnake.Member]) -> str:
     parts = [build_user_block(user_id, member)]
     shop = build_shop_block()
@@ -317,16 +301,13 @@ async def tool_claim_daily_gift(user_id: int) -> str:
         if result.get("ok"): return f"подарок забран: +{result['amount']} DC"
         left = max(result.get("next_ts", 0) - int(time.time()), 0); return f"кулдаун подарка — ждать {left // 3600}ч {(left % 3600) // 60}м"
     except Exception as e: return f"ошибка: {str(e)[:100]}"
-
 async def tool_buy_case(user_id: int, case_num: int) -> str:
     try:
-        from modules.cases import open_case, CASES_BY_NUM
         case = CASES_BY_NUM.get(case_num)
         if not case: return f"кейс {case_num} не существует"
         result = await open_case(bot, user_id, case_num)
         return f"кейс открыт, выпало: {result['desc']}" if result["ok"] else f"не получилось: {result.get('error', 'ошибка')}"
     except Exception as e: return f"ошибка: {str(e)[:100]}"
-
 async def execute_tool(message: disnake.Message, name: str, args: dict) -> str:
     if name == "show_profile": return await tool_show_profile(message)
     if name == "claim_daily_gift": return await tool_claim_daily_gift(message.author.id)
@@ -342,12 +323,10 @@ DIGEST_TRIGGERS = ["что нового", "что у вас там", "дайдж
 ABOUT_TRIGGERS = ["ты кто", "кто ты", "что ты умеешь", "что умеешь", "ты кто такой", "расскажи о себе"]
 
 def _match_any(text: str, patterns: List[str]) -> bool: return any(p in _normalize_text(text) for p in patterns)
-
 async def quick_action(message: disnake.Message, text: str) -> Optional[str]:
     user_id = message.author.id
     if _match_any(text, PROFILE_TRIGGERS):
-        result = await tool_show_profile(message)
-        return "" if result.startswith("профиль") else result
+        result = await tool_show_profile(message); return "" if result.startswith("профиль") else result
     if _match_any(text, GIFT_TRIGGERS): return await tool_claim_daily_gift(user_id)
     m = re.search(r"кейс[аеуы\s]+(\d)", _normalize_text(text))
     if m:
@@ -360,7 +339,6 @@ async def quick_action(message: disnake.Message, text: str) -> Optional[str]:
 
 async def tool_show_profile(message: disnake.Message) -> str:
     try:
-        from modules.profile_card import generate_profile_card
         from modules.commands_profile import _role_info
         user = message.author
         if not isinstance(user, disnake.Member): return "ошибка: не могу получить участника"
@@ -370,7 +348,6 @@ async def tool_show_profile(message: disnake.Message) -> str:
         fname = f"profile_{user.id}_{int(time.time())}.png"; file = disnake.File(buf, filename=fname); embed = disnake.Embed(color=6776679); embed.set_image(url=f"attachment://{fname}")
         await message.channel.send(embed=embed, file=file); return "профиль отправил в чат"
     except Exception as e: return f"не получилось: {str(e)[:100]}"
-
 async def build_purchases_reply(user_id: int) -> str:
     try:
         from modules.dc import get_user_purchases
@@ -380,7 +357,6 @@ async def build_purchases_reply(user_id: int) -> str:
         if len(purchases) > 5: lines.append(f"…и ещё {len(purchases) - 5}")
         lines.append("\nоформить можно в тикете через панель магазина."); return "\n".join(lines)
     except Exception: return "не смог получить список покупок."
-
 async def build_digest_reply(user_id: int) -> str:
     parts = []
     try:
@@ -424,7 +400,6 @@ def search_catalog(query: str) -> List[Dict]:
             name = (item.get("name") or "").lower(); desc = (item.get("description") or "").lower()
             if q in name or q in desc or q in item_key.lower(): results.append({"cat": cat_key, "cat_label": cat.get("label", cat_key), "name": item.get("name", item_key), "price": item.get("price", 0), "description": item.get("description", "")})
     return results[:5]
-
 def build_catalog_search_reply(text: str) -> Optional[str]:
     t = _normalize_text(text); markers = ["есть ли", "есть ", "продаете", "продаёте", "можно купить", "можно ли купить", "ищу", "нужен", "нужна", "интересует", "хочу купить", "продается", "продаётся"]
     if not any(m in t for m in markers): return None
@@ -437,7 +412,6 @@ def build_catalog_search_reply(text: str) -> Optional[str]:
 
 SHOP_KEYWORDS = ["магазин", "покупк", "diamond", "даймонд", "dc", "роль", "оплат", "промокод", "тикет", "отзыв", "клан", "казино", "бонус", "кейс", "скидк", "акци", "розыгрыш", "нитро", "nitro", "steam", "roblox", "spotify", "телеграм", "telegram", "робукс", "буст", "подарок", "баланс", "профиль", "кланов", "лига", "сезон", "адвайтер", "реферал", "инвайт", "ставк", "рулетк", "блэкджек", "монетк", "хочу купить", "есть ли", "продаете", "продаёте", "цена", "стоит", "подскажи", "помоги с", "можешь", "сколько", "питомец", "питомц", "душа клана", "пет", "зоопарк", "кот", "лиса", "сова", "грифон", "дракон", "даймондик", "кормить", "покормить"]
 def has_shop_keywords(text: str) -> bool: return any(k in text.lower() for k in SHOP_KEYWORDS)
-
 async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
     if has_shop_keywords(text): return True
     cache_key = hashlib.md5(text[:200].encode("utf-8")).hexdigest(); cached = _TOPIC_CACHE.get(cache_key)
@@ -558,7 +532,6 @@ async def ask_llm(message: disnake.Message, user_message: str, system_content: s
         return (text or ERROR_PHRASES["parse"]), ("ok" if text else "parse")
 
 def is_unknown_reply(text: str) -> bool: return any(m in text.lower() for m in ["не знаю", "не могу", "уточни у менеджера", "уточни", "не уверен", "затрудняюсь"]) if text else False
-
 async def ask_llm_smart(message: disnake.Message, user_message: str, system_content: str, user_id: int) -> Tuple[str, str]:
     reply, status = await ask_llm(message, user_message, system_content, user_id)
     if status in ("rate_limit", "no_model", "no_api", "timeout"): return reply, status
@@ -570,7 +543,6 @@ async def ask_llm_smart(message: disnake.Message, user_message: str, system_cont
 
 TICKET_CATEGORIES = {CONFIG.get("TICKET_CATEGORY_ID"), CONFIG.get("PAID_CATEGORY_ID"), CONFIG.get("COINS_CATEGORY_ID")}
 def is_ticket_channel(channel: disnake.TextChannel) -> bool: return channel.category and channel.category.id in TICKET_CATEGORIES if channel else False
-
 async def handle_ticket_mention(message: disnake.Message) -> bool:
     try:
         row = cur.execute("SELECT user_id, category_id FROM ticket_owners WHERE channel_id=?", (message.channel.id,)).fetchone()
