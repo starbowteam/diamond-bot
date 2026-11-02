@@ -18,82 +18,15 @@ from typing import Optional, List, Dict
 import disnake
 from disnake import ButtonStyle, PartialEmoji, SelectOption
 from disnake.ui import View, Button, Modal, Select, TextInput
-
 from PIL import Image, ImageDraw, ImageFont
 
 from core.utils import (
     ADD_DIR, CONFIG, logger, log_discord,
-    get_ticket_owner,
-    remove_ticket_owner,
-    cur, db,
+    get_ticket_owner, remove_ticket_owner, cur, db,
 )
 
-# ============================================================
-# ШРИФТЫ
-# ============================================================
-FONT_BOLD = os.path.join(ADD_DIR, "Fredoka_One.ttf")
-FONT_FA   = os.path.join(ADD_DIR, "fa-solid-900.ttf")
-
-_FONT_CACHE: dict = {}
-_FA_CACHE: dict = {}
-
-def _font(size: int):
-    if size in _FONT_CACHE:
-        return _FONT_CACHE[size]
-    try:
-        f = ImageFont.truetype(FONT_BOLD, size)
-    except Exception:
-        f = ImageFont.load_default()
-    _FONT_CACHE[size] = f
-    return f
-
-def _fa(size: int):
-    if size in _FA_CACHE:
-        return _FA_CACHE[size]
-    f = None
-    if os.path.exists(FONT_FA):
-        try:
-            f = ImageFont.truetype(FONT_FA, size)
-        except Exception:
-            pass
-    _FA_CACHE[size] = f
-    return f
-
-# ============================================================
-# ПАЛИТРА
-# ============================================================
-BG        = (10, 10, 12)
-CARD_TOP  = (16, 16, 20)
-STACK_BG  = (21, 21, 26)
-STACK_BRD = (58, 58, 64)
-STACK_HDR = (36, 36, 42)
-INNER_BG  = (18, 18, 23)
-INNER_BRD = (40, 40, 47)
-TEXT      = (255, 255, 255)
-TEXT_SOFT = (232, 232, 236)
-MUTED     = (136, 136, 136)
-DIM       = (102, 102, 102)
-DARK      = (85, 85, 85)
-
-SILVER     = (198, 208, 224)
-SILVER_HI  = (224, 232, 245)
-SILVER_DIM = (120, 132, 155)
-SILVER_BG  = (34, 38, 48)
-
-GREEN     = (46, 204, 113)
-RED       = (255, 107, 107)
-BLUE      = (106, 155, 209)
-PURPLE    = (179, 157, 219)
-GOLD      = (247, 201, 145)
-BRONZE    = (209, 146, 96)
-
-GREEN_BG  = (18, 44, 28)
-RED_BG    = (44, 20, 20)
-BLUE_BG   = (20, 30, 44)
-PURPLE_BG = (32, 26, 48)
-GOLD_BG   = (40, 32, 21)
-
-CARD_BRD  = (74, 74, 79)
+# ИМПОРТИРУЕМ ВСЕ ХЕЛПЕРЫ, ПАЛИТРУ И ИКОНКИ ИЗ ЕДИНОГО МЕСТА
+from core.render import *
 
 # Внешняя ссылка-страйп (используется в ReceiptSelect)
 IMG_STRIPE = (
@@ -102,257 +35,10 @@ IMG_STRIPE = (
     "hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
 )
 
-# ============================================================
-# FA5-ИКОНКИ
-# ============================================================
-I_GEM        = 0xf3a5
-I_STAR       = 0xf005
-I_CROWN      = 0xf521
-I_TROPHY     = 0xf091
-I_MEDAL      = 0xf5a2
-I_COINS      = 0xf51e
-I_USERS      = 0xf0c0
-I_USER       = 0xf007
-I_USER_TIE   = 0xf508
-I_HAND       = 0xf4c0
-I_CHART      = 0xf201
-I_CLOCK      = 0xf017
-I_LIST       = 0xf03a
-I_INFO       = 0xf05a
-I_CHECK      = 0xf00c
-I_XMARK      = 0xf00d
-I_PERCENT    = 0xf295
-I_HISTORY    = 0xf1da
-I_FIRE       = 0xf06d
-I_GIFT       = 0xf06b
-I_MESSAGE    = 0xf075
-I_COMMENT    = 0xf075
-I_GAUGE      = 0xf624
-I_SHIELD     = 0xf3ed
-I_WARNING    = 0xf071
-I_PEN        = 0xf304
-I_SEARCH     = 0xf002
-I_BRIEFCASE  = 0xf0b1
-I_CALENDAR   = 0xf133
-I_BOOK       = 0xf02d
-I_GAVEL      = 0xf0e3
-I_RECEIPT    = 0xf543
-I_BUILDING   = 0xf19c
-I_MOBILE     = 0xf3cd
-I_CREDIT     = 0xf09d
-I_BAN        = 0xf05e
-I_ROTATE     = 0xf2ea
-I_BOX        = 0xf466
-I_HEAD       = 0xf590
-I_COMMENTS   = 0xf086
-I_MIC        = 0xf130
-I_DICE       = 0xf522
-I_MOUSE      = 0xf8cc
-I_CART       = 0xf07a
-I_HEADSET    = 0xf025
-I_DICE5      = 0xf523
-I_SACK       = 0xf81d
-I_MONEY      = 0xf53a
-
-# ============================================================
-# ОБЩИЕ УТИЛИТЫ
-# ============================================================
 MSK = timezone(timedelta(hours=3))
-
-def _tw(d, text, font):
-    b = d.textbbox((0, 0), text, font=font)
-    return b[2] - b[0]
-
-def _ellipsis(d, text, font, max_w):
-    if _tw(d, text, font) <= max_w:
-        return text
-    t = text
-    while t and _tw(d, t + "…", font) > max_w:
-        t = t[:-1]
-    return t + "…"
-
-def _wrap(d, text, font, max_w, max_lines=4):
-    words = (text or "").split()
-    lines = []
-    cur = ""
-    for w in words:
-        test = (cur + " " + w).strip()
-        if _tw(d, test, font) <= max_w:
-            cur = test
-        else:
-            if cur:
-                lines.append(cur)
-                if len(lines) >= max_lines:
-                    cur = ""
-                    break
-            cur = w
-    if cur and len(lines) < max_lines:
-        lines.append(cur)
-    return lines or [""]
-
-def _fmt(n) -> str:
-    try:
-        return f"{int(n):,}".replace(",", " ")
-    except Exception:
-        return str(n)
-
-def _draw_icon(d, cx, cy, code, size, color):
-    f = _fa(size)
-    if f is None:
-        return
-    try:
-        d.text((cx, cy), chr(code), font=f, fill=color, anchor="mm")
-    except Exception:
-        pass
-
-def _alpha_fill(base, box, color, alpha=30, radius=0):
-    x1, y1, x2, y2 = box
-    w, h = x2 - x1, y2 - y1
-    if w <= 0 or h <= 0:
-        return
-    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    ld = ImageDraw.Draw(layer)
-    if radius > 0:
-        ld.rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=color + (alpha,))
-    else:
-        ld.rectangle((0, 0, w - 1, h - 1), fill=color + (alpha,))
-    base.paste(layer, (x1, y1), layer)
-
-def _gradient_box(base, box, c1, c2, alpha=30, radius=0, horizontal=True):
-    x1, y1, x2, y2 = box
-    w, h = x2 - x1, y2 - y1
-    if w <= 0 or h <= 0:
-        return
-    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    ld = ImageDraw.Draw(layer)
-    steps = w if horizontal else h
-    for i in range(steps):
-        t = i / max(steps - 1, 1)
-        r = int(c1[0] * (1 - t) + c2[0] * t)
-        g = int(c1[1] * (1 - t) + c2[1] * t)
-        b = int(c1[2] * (1 - t) + c2[2] * t)
-        if horizontal:
-            ld.line([(i, 0), (i, h)], fill=(r, g, b, alpha))
-        else:
-            ld.line([(0, i), (w, i)], fill=(r, g, b, alpha))
-    if radius > 0:
-        mask = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
-        alpha_ch = layer.split()[3]
-        alpha_ch = Image.composite(alpha_ch, Image.new("L", (w, h), 0), mask)
-        layer.putalpha(alpha_ch)
-    base.paste(layer, (x1, y1), layer)
-
-def _draw_stack_panel(base, d, box, radius=22):
-    x1, y1, x2, y2 = box
-    _alpha_fill(base, (x1 + 12, y1 + 12, x2 + 12, y2 + 12),
-                (46, 46, 52), alpha=110, radius=radius)
-    _alpha_fill(base, (x1 + 6, y1 + 6, x2 + 6, y2 + 6),
-                (46, 46, 52), alpha=180, radius=radius)
-    d.rounded_rectangle(box, radius=radius,
-                        fill=STACK_BG + (255,),
-                        outline=STACK_BRD + (255,), width=3)
-
-def _lighten(c, amount: float = 0.4):
-    amount = max(0.0, min(1.0, amount))
-    return (
-        min(int(c[0] + (255 - c[0]) * amount), 255),
-        min(int(c[1] + (255 - c[1]) * amount), 255),
-        min(int(c[2] + (255 - c[2]) * amount), 255),
-    )
-
-_ALLOWED_SPECIAL = set("—–‑‒―“”«»„‘’…№·•▪●◆◇■□")
-
-def _sanitize(text: str, fallback: str = "") -> str:
-    if not text:
-        return fallback
-    out = []
-    for ch in text:
-        cp = ord(ch)
-        if 0x20 <= cp <= 0x7E:
-            out.append(ch); continue
-        if 0x0400 <= cp <= 0x04FF:
-            out.append(ch); continue
-        if 0x00C0 <= cp <= 0x017F:
-            out.append(ch); continue
-        if ch in _ALLOWED_SPECIAL:
-            out.append(ch); continue
-    result = "".join(out).strip()
-    while "  " in result:
-        result = result.replace("  ", " ")
-    return result or fallback
 
 def _now_msk_str() -> str:
     return datetime.now(MSK).strftime("%d.%m.%Y %H:%M")
-
-# ============================================================
-# КАРКАС
-# ============================================================
-CANVAS_W, CANVAS_H = 1800, 1000
-M = 14
-PAD_X = 40
-PAD_Y = 40
-
-def _base_canvas(user_id: int, uid_label: str, status_label: Optional[str] = None):
-    img = Image.new("RGBA", (CANVAS_W, CANVAS_H), BG + (255,))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle(
-        (M, M, CANVAS_W - 1 - M, CANVAS_H - 1 - M),
-        radius=28, fill=CARD_TOP + (255,),
-        outline=CARD_BRD + (255,), width=3,
-    )
-
-    hx = PAD_X
-    hy = PAD_Y
-
-    logo_size = 64
-    d.rounded_rectangle((hx, hy, hx + logo_size, hy + logo_size), radius=16,
-                        fill=(58, 58, 64) + (255,),
-                        outline=(94, 94, 100) + (255,), width=2)
-    _draw_icon(d, hx + logo_size // 2, hy + logo_size // 2 + 1, I_GEM, 30, SILVER_HI)
-
-    brand_x = hx + logo_size + 20
-    d.text((brand_x, hy + 4), "DIAMOND", font=_font(34), fill=TEXT)
-    d.text((brand_x + 4, hy + 46), "SHOP & ECOSYSTEM", font=_font(15), fill=MUTED)
-
-    meta_r = CANVAS_W - M - PAD_X
-    lbl = uid_label.upper()
-    w1 = _tw(d, lbl, _font(15))
-    d.text((meta_r - w1, hy + 12), lbl, font=_font(15), fill=MUTED)
-
-    if status_label is None:
-        meta_text = f"UID · {user_id}"
-        meta_font = _font(24)
-        w2 = _tw(d, meta_text, meta_font)
-        d.text((meta_r - w2, hy + 38), meta_text, font=meta_font, fill=TEXT)
-    else:
-        meta_text = status_label.upper()
-        meta_font = _font(22)
-        w2 = _tw(d, meta_text, meta_font)
-        d.text((meta_r - w2, hy + 36), meta_text, font=meta_font, fill=TEXT)
-
-    sep_y = hy + logo_size + 20
-    d.line((PAD_X, sep_y, CANVAS_W - M - PAD_X, sep_y),
-           fill=STACK_HDR + (255,), width=2)
-
-    return img, d
-
-def _draw_footer(d, left_text: str, page: str):
-    y = CANVAS_H - M - PAD_Y + 6
-    d.line((PAD_X, y - 10, CANVAS_W - M - PAD_X, y - 10),
-           fill=STACK_HDR + (255,), width=2)
-    _draw_icon(d, PAD_X + 12, y + 10, I_INFO, 16, DIM)
-    d.text((PAD_X + 38, y), left_text, font=_font(15), fill=DIM)
-    pw = _tw(d, page, _font(15))
-    d.text((CANVAS_W - M - PAD_X - pw, y), page, font=_font(15), fill=DIM)
-
-def _draw_right_head(d, x1, y1, x2, title: str, sub: str):
-    d.rounded_rectangle((x1, y1 + 4, x1 + 6, y1 + 50), radius=3,
-                        fill=SILVER + (255,))
-    d.text((x1 + 22, y1 + 2), title.upper(), font=_font(32), fill=TEXT)
-    sub_w = _tw(d, sub.upper(), _font(15))
-    d.text((x2 - sub_w, y1 + 20), sub.upper(), font=_font(15), fill=MUTED)
-    d.line((x1, y1 + 66, x2, y1 + 66), fill=STACK_HDR + (255,), width=2)
 
 # ============================================================
 # БЛОК 1: СЧЁТ (Pillow)
@@ -877,7 +563,7 @@ def _draw_left_panel_rating(img, d, box, top_icon, top_label, top_value, blocks)
             )
 
 def render_policy(user_id: int) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "политика магазина", "действует с 26.07.26")
+    img, d = _base_canvas(uid_label="политика магазина", status_label="действует с 26.07.26", logo_icon=I_GEM)
 
     body_y = 140
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
@@ -979,7 +665,6 @@ async def show_policy(inter: disnake.MessageInteraction):
 # ============================================================
 # БЛОК 4: КОДЕКС МАГАЗИНА
 # ============================================================
-# 👇 Employer (1471190371181789234) УДАЛЕН
 SALARY_ROLES = [
     {
         "role_id": 1471844291595731016,
@@ -1171,7 +856,7 @@ def _draw_salary_card(img, d, x, y, w, h, role_data: dict):
            "DC", font=_font(14), fill=GREEN)
 
 def render_work_salary(user_id: int) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "кодекс · зарплата")
+    img, d = _base_canvas(uid_label="кодекс · зарплата", logo_icon=I_GEM)
 
     body_y = 140
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
@@ -1274,7 +959,7 @@ def _draw_rule_card(img, d, x, y, w, h, rule: dict):
         d.text((x + 24 + 34, ex_y + 9), example, font=ex_font, fill=light)
 
 def render_work_tickets(user_id: int) -> io.BytesIO:
-    img, d = _base_canvas(user_id, "кодекс · правила")
+    img, d = _base_canvas(uid_label="кодекс · правила", logo_icon=I_GEM)
 
     body_y = 140
     body_h = CANVAS_H - M - PAD_Y - body_y - 26
@@ -1292,7 +977,7 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
             {"label": "Строго для", "value": "Sales Manager",
              "icon": I_USER_TIE, "color": BLUE},
             {"label": "Нарушение", "value": "выговор",
-             "icon": I_WARNING, "color": RED},
+             "icon": I_WARNING if False else I_XMARK, "color": RED},
             {"label": "Обязательно", "value": "к прочтению",
              "icon": I_CHECK, "color": GREEN},
         ],
@@ -1332,7 +1017,7 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
                   "фактического подтверждения оплаты покупателем. "
                   "До подтверждения — кнопка не нажимается."),
          "color": BLUE},
-        {"icon": I_WARNING, "title": "Ответственность", "subtitle": "правило №4",
+        {"icon": I_XMARK, "title": "Ответственность", "subtitle": "правило №4",
          "text": ("За нарушение любого из пунктов выше — выговор. "
                   "Систематические нарушения ведут к снятию "
                   "с должности Sales Manager."),
