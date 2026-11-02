@@ -7,7 +7,7 @@ from disnake.ui import Button, Modal, Select, TextInput, View
 from core.utils import CONFIG, FILES, ADD_DIR, logger, load_json, log_discord, get_dc_cache, clean_embed_for_discohook
 from modules.dc import get_user_purchases, claim_daily_gift, get_daily_gift_status
 from modules.tickets import generate_profile_card
-from core.ui_utils import btn_labels_total
+from core.render import btn_labels_total
 
 P = "\u3164"
 _IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
