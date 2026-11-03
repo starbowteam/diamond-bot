@@ -15,7 +15,7 @@ from disnake.ext import commands, tasks
 
 from core.utils import (
     CONFIG, DATA_DIR, logger, db, cur,
-    load_json, save_json, now_ts, log_discord,
+    load_json, save_json, now_ts,
     get_ticket_owner,
 )
 from core.catalog import load_catalog_from_db, auto_init
@@ -57,19 +57,13 @@ SPAM_SHORT_COUNT = 5
 
 COLOR_GREY = 0x676767
 COLOR_GREEN = 0x2ecc71
-IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
+IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aeaabe3&is=6ae95a63&hm=9f64fd7deb75b088ad88aec985099620a358aa0dde41e94db426b5a0d8b4fa36&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
 
 ABUSE_WORDS = [
     "хуй", "хуя", "хуе", "хуи", "пизд", "бляд", "блят", "ебан", "ебал", "ебат",
     "сука", "суки", "нахуй", "нахер", "заткнись", "тупой", "тупая", "идиот",
     "дебил", "дебилы", "мразь", "гандо", "пидо", "педик", "долбоеб", "мудак",
 ]
-
-# Регулярка на "доплату на X р" / "доплата X руб" / "доплату 310₽"
-_SURCHARGE_RE = re.compile(
-    r"доплат\w*\s+(?:на\s+)?(\d+)\s*(?:р(?:уб(?:лей|ля|ль)?)?|₽)?",
-    re.IGNORECASE | re.UNICODE,
-)
 
 # ============================================================
 # СИНОНИМЫ КАТАЛОГА
@@ -103,6 +97,22 @@ if not ai_logger.handlers:
     sh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
     ai_logger.addHandler(fh)
     ai_logger.addHandler(sh)
+
+# ============================================================
+# ЛОКАЛЬНЫЙ LOG_DISCORD
+# ============================================================
+async def log_discord(title: str, description: str, color: int = 0x00ff00, channel_id: int = None):
+    try:
+        ch_id = channel_id or LOG_CHANNEL
+        ch = bot.get_channel(ch_id)
+        if not ch:
+            ch = await bot.fetch_channel(ch_id)
+        if not ch:
+            return
+        embed = disnake.Embed(title=title, description=description, color=color, timestamp=datetime.now(timezone.utc))
+        await ch.send(embed=embed)
+    except Exception as e:
+        ai_logger.warning(f"log_discord: {e}")
 
 # ============================================================
 # БД
@@ -387,7 +397,7 @@ def find_relevant_items(user_text: str, full_catalog: Dict[str, dict]) -> List[s
                 break
     if any(x in t for x in ["подар", "другу", "подарить"]):
         for key in ("discord_nitro_gift_basic", "discord_nitro_gift_full", "discord_nitro_gift"):
-            if key not in seen and any(it.get("id") == key for cat in full_catalog.values() for it in cat.get("items", [])):
+            if key not in seen and any(it.get("id") == key for cat in full_catalog.values() for it in cat.get("items")):
                 seen.add(key)
                 result.insert(0, key)
     return result
@@ -519,13 +529,11 @@ async def notify_managers_dm(message, file_url):
 # ХЕЛПЕРЫ СООБЩЕНИЙ
 # ============================================================
 def _build_ai_greeting(is_coins: bool) -> disnake.Embed:
-    desc = (
-        "> Привет! ИИ-Менеджер Diamond Shop.\n\n"
-        "AI-режим включён — я помогу с заказом.\n"
-        "Расскажи, что ищешь: нитро, бусты, звёзды, робуксы?\n"
-        "Как определимся — выставлю счёт. После оплаты пришли чек одним файлом."
+    embed = disnake.Embed(
+        title="💸 ИИ-Менеджер подключен к тикету",
+        description=">>> AI-режим включён — я помогу с заказом.\nРасскажи, что ищешь: нитро, бусты, звёзды, робуксы?\nКак определимся — выставлю счёт. После оплаты пришли чек одним файлом.",
+        color=COLOR_GREEN
     )
-    embed = disnake.Embed(title="", description=desc, color=COLOR_GREEN)
     embed.set_image(url=IMG_STRIPE)
     return embed
 
@@ -805,6 +813,12 @@ async def on_ready():
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
     asyncio.create_task(select_fastest_model())
 
+    try:
+        await bot.sync_commands()
+        ai_logger.info("Слэш-команды синхронизированы.")
+    except Exception as e:
+        ai_logger.warning(f"sync_commands: {e}")
+
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
         asyncio.create_task(_cleanup_loop())
@@ -1020,7 +1034,7 @@ async def _auto_confirm_receipt(channel, message, sess):
 
     embed = disnake.Embed(
         title="💚 Оплата принята.",
-        description="> Чек у меня, все проверил. <@796293832751972352> | <@&1127428607606796294> скоро подключится и выдаст заказ! Спасибо что выбираете нас!",
+        description=">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n<@796293832751972352> скоро подключится и выдаст заказ! ",
         color=COLOR_GREEN
     )
     embed.set_image(url=IMG_STRIPE)
@@ -1157,36 +1171,49 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         elif name == "escalate_to_human":
             await escalate(channel, args.get("reason", "Товар не найден"))
 
+@bot.slash_command(name="доплата", description="Выставить счёт на доплату (только для менеджеров)")
+async def surcharge_cmd(
+    ctx: disnake.ApplicationCommandInteraction,
+    amount: int = commands.Param(description="Сумма доплаты в рублях")
+):
+    is_manager = ctx.author.id == OWNER_ID or any(r.id == SALES_MANAGER_ROLE for r in getattr(ctx.author, "roles", []))
+    if not is_manager:
+        await ctx.response.send_message("⛔ Только для менеджеров.", ephemeral=True)
+        return
+
+    if amount <= 0:
+        await ctx.response.send_message("❌ Сумма должна быть больше 0.", ephemeral=True)
+        return
+
+    await ctx.response.defer(ephemeral=True)
+    
+    owner_id = get_ticket_owner(ctx.channel.id)
+    owner_member = ctx.guild.get_member(owner_id) if owner_id else None
+    customer_name = owner_member.display_name if owner_member else "Клиент"
+
+    ok = await send_invoice(ctx.channel, "Доплата", amount, 0, customer_name)
+    if ok:
+        await ctx.edit_original_response(content=f"✅ Счёт на доплату {amount} ₽ выставлен.")
+    else:
+        await ctx.edit_original_response(content="❌ Ошибка при создании счёта.")
+
 @bot.event
 async def on_message(message: disnake.Message):
     if message.author.bot or not isinstance(message.channel, disnake.TextChannel):
         return
     channel = message.channel
 
-    # ─── PAID-категория: только доплата по пингу ───
+    # ─── PAID-категория: только галочка на файл, без текста ───
     if _is_paid_category(channel):
-        if _mentions_bot(message):
-            if any(r.id == SALES_MANAGER_ROLE for r in getattr(message.author, "roles", [])):
-                text = (message.content or "").strip()
-                m = _SURCHARGE_RE.search(text)
-                if m:
-                    try:
-                        amount = int(m.group(1))
-                    except Exception:
-                        return
-                    if amount <= 0:
-                        return
-                    owner_id_here = get_ticket_owner(channel.id) or message.author.id
-                    owner_member = channel.guild.get_member(owner_id_here)
-                    customer_name = owner_member.display_name if owner_member else "Клиент"
-                    await send_invoice(
-                        channel,
-                        "Доплата",
-                        amount,
-                        0,
-                        customer_name,
-                    )
-                    ai_logger.info(f"surcharge: {channel.id} → {amount}₽ (by {message.author.id})")
+        if message.attachments:
+            att = message.attachments[0]
+            low = att.filename.lower()
+            if any(low.endswith(x) for x in (".png", ".jpg", ".jpeg", ".pdf")):
+                try:
+                    await message.add_reaction("✅")
+                except Exception:
+                    pass
+                ai_logger.info(f"Доплата принята (файл): {channel.id} {att.filename}")
         return
 
     owner_id = get_ticket_owner(channel.id)
