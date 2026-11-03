@@ -56,6 +56,7 @@ SPAM_WINDOW_SEC = 60
 SPAM_SHORT_COUNT = 5
 
 COLOR_GREY = 0x676767
+COLOR_GREEN = 0x2ecc71
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
 ABUSE_WORDS = [
@@ -63,6 +64,12 @@ ABUSE_WORDS = [
     "сука", "суки", "нахуй", "нахер", "заткнись", "тупой", "тупая", "идиот",
     "дебил", "дебилы", "мразь", "гандо", "пидо", "педик", "долбоеб", "мудак",
 ]
+
+# Регулярка на "доплату на X р" / "доплата X руб" / "доплату 310₽"
+_SURCHARGE_RE = re.compile(
+    r"доплат\w*\s+(?:на\s+)?(\d+)\s*(?:р(?:уб(?:лей|ля|ль)?)?|₽)?",
+    re.IGNORECASE | re.UNICODE,
+)
 
 # ============================================================
 # СИНОНИМЫ КАТАЛОГА
@@ -83,12 +90,6 @@ CATALOG_SYNONYMS: Dict[str, List[str]] = {
     "spotify": ["споти", "спф", "spotify", "спотифай", "спот", "музыка споти", "спотифай подписка", "подписка музыка"],
     "gift_marker": ["подарок", "подарочек", "подарить", "подари", "другу", "друг", "подруге", "подарок другу", "хочу подарить"],
 }
-
-# Регулярка на "доплату на X р" / "доплата X руб" / "доплату 310₽"
-_SURCHARGE_RE = re.compile(
-    r"доплат\w*\s+(?:на\s+)?(\d+)\s*(?:р(?:уб(?:лей|ля|ль)?)?|₽)?",
-    re.IGNORECASE | re.UNICODE,
-)
 
 # ============================================================
 # ЛОГГЕР
@@ -515,22 +516,18 @@ async def notify_managers_dm(message, file_url):
                 pass
 
 # ============================================================
-# ХЕЛПЕРЫ СООБЩЕНИЙ (НОВЫЕ)
+# ХЕЛПЕРЫ СООБЩЕНИЙ
 # ============================================================
-def _build_ai_greeting(is_coins: bool) -> str:
-    if is_coins:
-        return (
-            "> Привет! Я AI-менеджер Diamond Shop.\n\n"
-            "Ты включил AI-режим — заказ веду я.\n"
-            "Напиши, что хочешь взять: подберу вариант и выставлю счёт.\n"
-            "После оплаты просто пришли скриншот — сразу подтвержу."
-        )
-    return (
-        "> Привет! Я AI-менеджер Diamond Shop.\n\n"
+def _build_ai_greeting(is_coins: bool) -> disnake.Embed:
+    desc = (
+        "> Привет! ИИ-Менеджер Diamond Shop.\n\n"
         "AI-режим включён — я помогу с заказом.\n"
         "Расскажи, что ищешь: нитро, бусты, звёзды, робуксы?\n"
         "Как определимся — выставлю счёт. После оплаты пришли чек одним файлом."
     )
+    embed = disnake.Embed(title="", description=desc, color=COLOR_GREEN)
+    embed.set_image(url=IMG_STRIPE)
+    return embed
 
 def _build_idle_ping(owner_id: int) -> str:
     return (
@@ -651,6 +648,11 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - Жди явного подтверждения: «да», «ок», «выставляй», «давай», «го», «+».
 - Только после подтверждения — вызывай create_invoice.
 - Если клиент передумал или что-то поменял — не выставляй счёт, уточни заново.
+
+ЕСЛИ ТОВАРА НЕТ В КАТАЛОГЕ:
+- НЕ уточняй, НЕ угадывай.
+- Просто ответь: "Зову менеджера <@&1154757071330365490> для уточнения."
+- И больше не отвечай (передай тикет менеджеру).
 
 ЕСЛИ СЧЁТ УЖЕ ВЫСТАВЛЕН:
 - Не выставляй повторно тот же товар.
@@ -867,7 +869,7 @@ async def on_guild_channel_create(channel):
     if ai_on:
         await asyncio.sleep(1)
         try:
-            await channel.send(_build_ai_greeting(is_coins))
+            await channel.send(embed=_build_ai_greeting(is_coins))
             ai_logger.info(f"ai greeting: {channel.id} → user {owner_id}")
         except Exception as e:
             ai_logger.warning(f"ai greeting send: {e}")
@@ -1003,6 +1005,9 @@ async def _auto_confirm_receipt(channel, message, sess):
     if paid_cat:
         try:
             await channel.edit(category=paid_cat)
+            manager_role = channel.guild.get_role(SALES_MANAGER_ROLE)
+            if manager_role:
+                await channel.set_permissions(manager_role, send_messages=True, view_channel=True)
         except Exception as e:
             ai_logger.warning(f"auto_confirm edit category: {e}")
 
@@ -1013,12 +1018,14 @@ async def _auto_confirm_receipt(channel, message, sess):
         post_invoice_text_count=0,
     )
 
+    embed = disnake.Embed(
+        title="💚 Оплата принята.",
+        description="> Чек у меня, все проверил. <@796293832751972352> | <@&1127428607606796294> скоро подключится и выдаст заказ! Спасибо что выбираете нас!",
+        color=COLOR_GREEN
+    )
+    embed.set_image(url=IMG_STRIPE)
     try:
-        await channel.send(
-            "> Оплата принята.\n\n"
-            "Чек у меня, передал в обработку. "
-            "Менеджер подключится и выдаст заказ в течение пары часов."
-        )
+        await channel.send(embed=embed)
     except Exception:
         pass
 
@@ -1046,6 +1053,10 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
     if not sess:
         create_session(channel.id, user_id)
         sess = get_session(channel.id)
+    
+    if sess.get("escalated") or sess.get("abuse_closed"):
+        return
+
     try:
         if await _check_and_close_abuse(channel, user_id):
             return
@@ -1089,6 +1100,14 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
     update_session(channel.id, fail_count=0)
     text = (result.get("text") or "").strip()
     funcs = result.get("funcs") or []
+
+    if text and "Зову менеджера" in text:
+        try:
+            await channel.send(text)
+        except Exception:
+            pass
+        await escalate(channel, "Товар не найден / нужен менеджер")
+        return
 
     if text and not funcs:
         try:
@@ -1147,26 +1166,27 @@ async def on_message(message: disnake.Message):
     # ─── PAID-категория: только доплата по пингу ───
     if _is_paid_category(channel):
         if _mentions_bot(message):
-            text = (message.content or "").strip()
-            m = _SURCHARGE_RE.search(text)
-            if m:
-                try:
-                    amount = int(m.group(1))
-                except Exception:
-                    return
-                if amount <= 0:
-                    return
-                owner_id_here = get_ticket_owner(channel.id) or message.author.id
-                owner_member = channel.guild.get_member(owner_id_here)
-                customer_name = owner_member.display_name if owner_member else "Клиент"
-                await send_invoice(
-                    channel,
-                    "Доплата",
-                    amount,
-                    0,
-                    customer_name,
-                )
-                ai_logger.info(f"surcharge: {channel.id} → {amount}₽ (by {message.author.id})")
+            if any(r.id == SALES_MANAGER_ROLE for r in getattr(message.author, "roles", [])):
+                text = (message.content or "").strip()
+                m = _SURCHARGE_RE.search(text)
+                if m:
+                    try:
+                        amount = int(m.group(1))
+                    except Exception:
+                        return
+                    if amount <= 0:
+                        return
+                    owner_id_here = get_ticket_owner(channel.id) or message.author.id
+                    owner_member = channel.guild.get_member(owner_id_here)
+                    customer_name = owner_member.display_name if owner_member else "Клиент"
+                    await send_invoice(
+                        channel,
+                        "Доплата",
+                        amount,
+                        0,
+                        customer_name,
+                    )
+                    ai_logger.info(f"surcharge: {channel.id} → {amount}₽ (by {message.author.id})")
         return
 
     owner_id = get_ticket_owner(channel.id)
@@ -1174,11 +1194,15 @@ async def on_message(message: disnake.Message):
 
     if isinstance(message.author, disnake.Member) and _is_manager(message.author) and not is_ticket_owner:
         if _is_ai_ticket(channel):
-            sess = get_session(channel.id)
-            if sess is None:
-                create_session(channel.id, message.author.id)
-            touch_manager_msg(channel.id)
-            DEBOUNCE.pop(channel.id, None)
+            # Если ИИ включён и тикет ещё не оплачен — менеджер не может писать
+            if get_user_ai_pref(owner_id) and not _is_paid_category(channel):
+                return
+            else:
+                sess = get_session(channel.id)
+                if sess is None:
+                    create_session(channel.id, message.author.id)
+                touch_manager_msg(channel.id)
+                DEBOUNCE.pop(channel.id, None)
         return
 
     if not _is_ai_ticket(channel):
