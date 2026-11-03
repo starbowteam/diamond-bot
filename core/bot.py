@@ -14,6 +14,40 @@ intents = disnake.Intents.default()
 intents.members = True; intents.messages = True; intents.guilds = True; intents.message_content = True; intents.moderation = True; intents.invites = True; intents.reactions = True; intents.voice_states = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
+# ============================================================
+# ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК ОШИБОК В ДИСКОРД
+# ============================================================
+original_on_error = disnake.ui.View.on_error
+async def custom_view_on_error(self, inter, exception):
+    import traceback
+    error_msg = f"🔴 **Ошибка в UI (кнопка/селект)**\n> **Юзер:** {inter.author.mention}\n> **Ошибка:** `{exception}`\n```py\n{traceback.format_exc()[-1800:]}\n```"
+    try:
+        ch = bot.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
+        if ch: await ch.send(error_msg)
+    except: pass
+    await original_on_error(self, inter, exception)
+disnake.ui.View.on_error = custom_view_on_error
+
+@bot.event
+async def on_error(event_method: str, *args, **kwargs):
+    import traceback
+    error_msg = f"🔴 **Ошибка в событии `{event_method}`**\n```py\n{traceback.format_exc()[-1800:]}\n```"
+    try:
+        ch = bot.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
+        if ch: await ch.send(error_msg)
+    except: pass
+
+@bot.event
+async def on_slash_command_error(inter, exception):
+    import traceback
+    error_msg = f"🔴 **Ошибка в слэш-команде**\n> **Юзер:** {inter.author.mention}\n> **Ошибка:** `{exception}`\n```py\n{traceback.format_exc()[-1800:]}\n```"
+    try:
+        ch = bot.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
+        if ch: await ch.send(error_msg)
+    except: pass
+
+# ============================================================
+
 _REVIEW_COOLDOWN = {}
 REVIEW_COOLDOWN_SECONDS = 120
 REVIEW_MIN_LENGTH = 3
