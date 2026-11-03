@@ -38,7 +38,7 @@ LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
 
 SALES_MANAGER_ROLE = 1154757071330365490
-OWNER_ID = 796293832751972352
+OWNER_IDS = [796293832751972352, 1168943921171288135]  # <--- ДОБАВЛЕН ВТОРОЙ ID
 LOG_CHANNEL = 1530453871581855744
 
 SESSION_MAX_MESSAGES = 20
@@ -439,13 +439,13 @@ def _is_ai_ticket(channel) -> bool:
     if _is_paid_category(channel):
         return False
     if _is_coins_category(channel):
-        return False # <--- ЗАПРЕЩАЕМ AI В DC-КАТЕГОРИИ
+        return False # AI не работает в DC
     if _is_real_category(channel):
         return True
     return bool(get_ticket_owner(channel.id))
 
 def _is_manager(member) -> bool:
-    return member.id == OWNER_ID or any(r.id == SALES_MANAGER_ROLE for r in getattr(member, "roles", []))
+    return member.id in OWNER_IDS or any(r.id == SALES_MANAGER_ROLE for r in getattr(member, "roles", []))
 
 async def get_ticket_discount(channel) -> int:
     try:
@@ -502,7 +502,11 @@ async def escalate(channel, reason: str):
     elif sess.get("escalated"):
         return
     update_session(channel.id, escalated=1)
-    ping = f"<@{OWNER_ID}>" if "BuyALL" in reason or "не найден" in reason.lower() else f"<@&{SALES_MANAGER_ROLE}>"
+    
+    # Пинг всех владельцев
+    owners_ping = " ".join(f"<@{oid}>" for oid in OWNER_IDS)
+    ping = owners_ping if "BuyALL" in reason or "не найден" in reason.lower() else f"<@&{SALES_MANAGER_ROLE}>"
+    
     embed = disnake.Embed(title="⚠️ Требуется помощь менеджера", description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}", color=COLOR_GREY)
     embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=embed)
@@ -532,7 +536,7 @@ async def notify_managers_dm(message, file_url):
 # ============================================================
 # ХЕЛПЕРЫ СООБЩЕНИЙ
 # ============================================================
-def _build_ai_greeting(is_coins: bool) -> disnake.Embed:
+def _build_ai_greeting() -> disnake.Embed:
     embed = disnake.Embed(
         title="💸 ИИ-Менеджер подключен к тикету",
         description=">>> AI-режим включён — я помогу с заказом.\nРасскажи, что ищешь: нитро, бусты, звёзды, робуксы?\nКак определимся — выставлю счёт. После оплаты пришли чек одним файлом.",
@@ -860,24 +864,18 @@ async def on_guild_channel_create(channel):
         return
 
     if is_coins:
-        try:
-            purchases = await get_user_purchases(owner_id, only_unused=True)
-            custom_p = next((p for p in purchases if "Кастомная роль" in p.get("value", "")), None)
-            if custom_p:
-                has_emoji = "с эмодзи" in custom_p["value"].lower()
-                view = CustomRoleSetupView(has_emoji=has_emoji)
-                await channel.send(
-                    content=_build_custom_role_message(has_emoji),
-                    view=view,
-                )
-                full_purchases = await get_user_purchases(owner_id, only_unused=False)
-                for i, fp in enumerate(full_purchases):
-                    if fp["value"] == custom_p["value"] and not fp.get("used"):
-                        await remove_purchase(owner_id, i)
-                        break
-                ai_logger.info(f"custom_role: {channel.id} — выдан setup-view")
-        except Exception as e:
-            ai_logger.warning(f"custom_role setup: {e}")
+        # ИСПРАВЛЕНИЕ: основной бот УДАЛЯЕТ покупку до того, как AI проверит её.
+        # Поэтому проверяем НАЗВАНИЕ КАНАЛА.
+        is_custom_role = "кастомная-роль" in channel.name.lower() or "кастомная_роль" in channel.name.lower()
+        
+        if is_custom_role:
+            has_emoji = "эмодзи" in channel.name.lower()
+            view = CustomRoleSetupView(has_emoji=has_emoji)
+            await channel.send(
+                content=_build_custom_role_message(has_emoji),
+                view=view,
+            )
+            ai_logger.info(f"custom_role: {channel.id} — выдан setup-view (по названию канала)")
         return # <--- Выходим, чтобы не отправлять приветствие ИИ
 
     # AI приветствие (ТОЛЬКО для is_real)
@@ -885,7 +883,7 @@ async def on_guild_channel_create(channel):
     if ai_on:
         await asyncio.sleep(1)
         try:
-            await channel.send(embed=_build_ai_greeting(is_coins))
+            await channel.send(embed=_build_ai_greeting())
             ai_logger.info(f"ai greeting: {channel.id} → user {owner_id}")
         except Exception as e:
             ai_logger.warning(f"ai greeting send: {e}")
@@ -1005,7 +1003,6 @@ async def _auto_confirm_receipt(channel, message, sess):
         except Exception as e:
             ai_logger.warning(f"auto_confirm edit category: {e}")
 
-    # Жестко ставим escalated=1, чтобы fallback_task больше не срабатывал
     update_session(
         channel.id,
         invoice_sent=0,
@@ -1015,9 +1012,10 @@ async def _auto_confirm_receipt(channel, message, sess):
         escalated=1,
     )
 
+    owners_ping = " | ".join(f"<@{oid}>" for oid in OWNER_IDS)
     embed = disnake.Embed(
         title="💚 Оплата принята.",
-        description=">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n<@796293832751972352> скоро подключится и выдаст заказ! ",
+        description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{owners_ping} скоро подключатся и выдадут заказ! ",
         color=COLOR_GREEN
     )
     embed.set_image(url=IMG_STRIPE)
@@ -1163,7 +1161,7 @@ async def surcharge_cmd(
     ctx: disnake.ApplicationCommandInteraction,
     amount: int = commands.Param(description="Сумма доплаты в рублях")
 ):
-    is_manager = ctx.author.id == OWNER_ID or any(r.id == SALES_MANAGER_ROLE for r in getattr(ctx.author, "roles", []))
+    is_manager = ctx.author.id in OWNER_IDS or any(r.id == SALES_MANAGER_ROLE for r in getattr(ctx.author, "roles", []))
     if not is_manager:
         await ctx.response.send_message("⛔ Только для менеджеров.", ephemeral=True)
         return
@@ -1191,10 +1189,8 @@ async def on_message(message: disnake.Message):
         return
     channel = message.channel
 
-    # ─── PAID-категория: только галочка на файл, без текста ───
     if _is_paid_category(channel):
         touch_ai_response(channel.id)
-        
         if message.attachments:
             try:
                 await message.add_reaction(YES_EMOJI)
@@ -1203,7 +1199,7 @@ async def on_message(message: disnake.Message):
             ai_logger.info(f"Доплата принята (файл): {channel.id} {message.attachments[0].filename}")
         return
 
-    # ─── DC-категория: ИИ полностью игнорируется ───
+    # DC категория полностью игнорируется ИИ
     if _is_coins_category(channel):
         return
 
@@ -1229,7 +1225,6 @@ async def on_message(message: disnake.Message):
 
     touch_client_msg(channel.id, message.author.id)
 
-    # ─── Если есть вложение и выставлен счёт, ЛЮБОЕ вложение = чек ───
     if message.attachments:
         sess = get_session(channel.id)
         if sess and sess.get("invoice_sent"):
