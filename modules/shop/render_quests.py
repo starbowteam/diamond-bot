@@ -5,7 +5,12 @@ import os
 import math
 from typing import List, Dict
 from PIL import Image, ImageDraw
-from core.render import *
+from core.render import (
+    _font, _icon, _tw, _ellipsis, _wrap, _fmt, _alpha_fill, _gradient_box,
+    BG, CARD_TOP, STACK_BG, STACK_BRD, STACK_HDR, INNER_BG, INNER_BRD, TEXT, TEXT_SOFT, MUTED, DIM, DARK, SILVER, SILVER_HI, SILVER_DIM, SILVER_BG, GREEN, RED, BLUE, PURPLE, GOLD, CARD_BRD, CANVAS_W, CANVAS_H, M, PAD_X, PAD_Y,
+    I_GEM, I_STAR, I_USER, I_IMAGE, I_BEZIER, I_SMILE, I_PEN_NIB, I_LAYERS, I_MASKS, I_TAG, I_BULLHORN, I_BOLT, I_DICE, I_GIFT, I_CART, I_BAG, I_COINS, I_TICKET, I_CLOCK, I_INFO, I_CHECK, I_CROWN, I_MIC, I_COMMENT, I_CHART, I_BRIEFCASE, I_ELLIPSIS, I_MONEY, I_CUBE, I_TROPHY, I_SHOP, I_ARROW_L, I_CALENDAR, I_DICE5, I_SACK, I_FIRE, I_MOUSE, I_COMMENTS, I_HEADPH,
+    base_canvas
+)
 
 DESC_GREY = (168, 174, 186)
 GREEN_BG, PURPLE_BG, SILVER_BG = (18, 44, 28), (32, 26, 48), (34, 38, 48)
