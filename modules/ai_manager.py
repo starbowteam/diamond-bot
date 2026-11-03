@@ -38,7 +38,7 @@ LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
 
 SALES_MANAGER_ROLE = 1154757071330365490
-OWNER_IDS = [796293832751972352, 1168943921171288135]  # <--- ДОБАВЛЕН ВТОРОЙ ID
+OWNER_IDS = [796293832751972352, 1168943921171288135]
 LOG_CHANNEL = 1530453871581855744
 
 SESSION_MAX_MESSAGES = 20
@@ -60,6 +60,13 @@ COLOR_GREEN = 0x2ecc71
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aeaabe3&is=6ae95a63&hm=9f64fd7deb75b088ad88aec985099620a358aa0dde41e94db426b5a0d8b4fa36&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
 
 YES_EMOJI = "<:Yes:1540361827295170722>"
+
+CHANNEL_LOCKS = {}
+
+def get_lock(channel_id: int) -> asyncio.Lock:
+    if channel_id not in CHANNEL_LOCKS:
+        CHANNEL_LOCKS[channel_id] = asyncio.Lock()
+    return CHANNEL_LOCKS[channel_id]
 
 ABUSE_WORDS = [
     "хуй", "хуя", "хуе", "хуи", "пизд", "бляд", "блят", "ебан", "ебал", "ебат",
@@ -503,8 +510,7 @@ async def escalate(channel, reason: str):
         return
     update_session(channel.id, escalated=1)
     
-    # Пинг всех владельцев
-    owners_ping = " ".join(f"<@{oid}>" for oid in OWNER_IDS)
+    owners_ping = " | ".join(f"<@{oid}>" for oid in OWNER_IDS)
     ping = owners_ping if "BuyALL" in reason or "не найден" in reason.lower() else f"<@&{SALES_MANAGER_ROLE}>"
     
     embed = disnake.Embed(title="⚠️ Требуется помощь менеджера", description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}", color=COLOR_GREY)
@@ -864,10 +870,7 @@ async def on_guild_channel_create(channel):
         return
 
     if is_coins:
-        # ИСПРАВЛЕНИЕ: основной бот УДАЛЯЕТ покупку до того, как AI проверит её.
-        # Поэтому проверяем НАЗВАНИЕ КАНАЛА.
         is_custom_role = "кастомная-роль" in channel.name.lower() or "кастомная_роль" in channel.name.lower()
-        
         if is_custom_role:
             has_emoji = "эмодзи" in channel.name.lower()
             view = CustomRoleSetupView(has_emoji=has_emoji)
@@ -914,6 +917,11 @@ async def fallback_task():
         channel_id = r["channel_id"]
         if (r["last_ai_response_ts"] or 0) >= (r["last_client_msg_ts"] or 0):
             continue
+        
+        # Ждем 15 секунд, чтобы дебаунс и LLM успели отработать
+        if (now - (r["last_client_msg_ts"] or 0)) < 15:
+            continue
+            
         if r["last_manager_msg_ts"] and (now - r["last_manager_msg_ts"]) < MANAGER_SILENCE_SEC:
             continue
         if (now - (r["last_client_msg_ts"] or 0)) > CLIENT_MAX_SILENCE_SEC:
@@ -923,6 +931,12 @@ async def fallback_task():
         channel = bot.get_channel(channel_id)
         if not channel or not _is_ai_ticket(channel):
             continue
+            
+        # Свежая проверка сессии
+        fresh_sess = get_session(channel_id)
+        if fresh_sess and (fresh_sess.get("invoice_sent") or fresh_sess.get("escalated") or fresh_sess.get("abuse_closed")):
+            continue
+
         try:
             if await _check_and_close_abuse(channel, r["user_id"]):
                 continue
@@ -932,10 +946,8 @@ async def fallback_task():
         last_text = hist_last_client_msg(channel_id)
         if not last_text:
             continue
-        try:
-            await channel.send("⏳ Подключаюсь, секунду…")
-        except Exception:
-            pass
+            
+        # Убрали спам "Подключаюсь..."
         try:
             member = channel.guild.get_member(r["user_id"])
             if member:
@@ -1044,117 +1056,128 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
     if not user_text.strip() or _is_paid_category(channel) or _is_coins_category(channel):
         return
     user_id = author.id
-    sess = get_session(channel.id)
-    if not sess:
-        create_session(channel.id, user_id)
-        sess = get_session(channel.id)
     
-    if sess.get("escalated") or sess.get("abuse_closed"):
+    lock = get_lock(channel.id)
+    if lock.locked():
         return
 
-    try:
-        if await _check_and_close_abuse(channel, user_id):
+    async with lock:
+        sess = get_session(channel.id)
+        if not sess:
+            create_session(channel.id, user_id)
+            sess = get_session(channel.id)
+        
+        if sess.get("escalated") or sess.get("abuse_closed") or sess.get("invoice_sent"):
             return
-    except Exception:
-        pass
-    if is_ai_muted(channel.id):
-        return
-    if sess["message_count"] >= SESSION_MAX_MESSAGES:
-        await escalate(channel, "исчерпан лимит сообщений")
-        return
 
-    update_session(channel.id, message_count=(sess["message_count"] or 0) + 1)
-    hist_append(channel.id, "user", user_text)
+        try:
+            if await _check_and_close_abuse(channel, user_id):
+                return
+        except Exception:
+            pass
+        if is_ai_muted(channel.id):
+            return
+        if sess["message_count"] >= SESSION_MAX_MESSAGES:
+            await escalate(channel, "исчерпан лимит сообщений")
+            return
 
-    discount = await get_ticket_discount(channel)
-    full_catalog = load_catalog_from_db()
-    if not full_catalog:
-        await channel.send("⚠️ Каталог пуст.")
-        return
-    catalog_text = build_catalog_block(user_text, get_filtered_catalog(user_text, full_catalog))
-    system_prompt = SYSTEM_PROMPT.format(
-        catalog=catalog_text,
-        user_name=author.display_name,
-        discount=discount,
-    )
-    history = hist_load(channel.id)
-    async with channel.typing():
-        result = await call_llm(system_prompt, history, user_text)
-    if not result:
-        new_fails = (sess["fail_count"] or 0) + 1
-        update_session(channel.id, fail_count=new_fails)
-        if new_fails >= SESSION_MAX_FAILS:
-            await escalate(channel, "сбой LLM")
-        else:
+        update_session(channel.id, message_count=(sess["message_count"] or 0) + 1)
+        hist_append(channel.id, "user", user_text)
+
+        discount = await get_ticket_discount(channel)
+        full_catalog = load_catalog_from_db()
+        if not full_catalog:
+            await channel.send("⚠️ Каталог пуст.")
+            return
+        catalog_text = build_catalog_block(user_text, get_filtered_catalog(user_text, full_catalog))
+        system_prompt = SYSTEM_PROMPT.format(
+            catalog=catalog_text,
+            user_name=author.display_name,
+            discount=discount,
+        )
+        history = hist_load(channel.id)
+        async with channel.typing():
+            result = await call_llm(system_prompt, history, user_text)
+            
+        if not result:
+            new_fails = (sess["fail_count"] or 0) + 1
+            update_session(channel.id, fail_count=new_fails)
+            if new_fails >= SESSION_MAX_FAILS:
+                await escalate(channel, "сбой LLM")
+            else:
+                try:
+                    await channel.send("⏳ Секунду, уточняю информацию…")
+                except Exception:
+                    pass
+            return
+
+        update_session(channel.id, fail_count=0)
+        text = (result.get("text") or "").strip()
+        funcs = result.get("funcs") or []
+
+        if text and "Зову менеджера" in text:
             try:
-                await channel.send("⏳ Секунду, уточняю информацию…")
+                await channel.send(text)
             except Exception:
                 pass
-        return
-
-    update_session(channel.id, fail_count=0)
-    text = (result.get("text") or "").strip()
-    funcs = result.get("funcs") or []
-
-    if text and "Зову менеджера" in text:
-        try:
-            await channel.send(text)
-        except Exception:
-            pass
-        touch_ai_response(channel.id)
-        update_session(channel.id, escalated=1)
-        await escalate(channel, "Товар не найден / нужен менеджер")
-        return
-
-    if text and not funcs:
-        try:
-            await channel.send(text)
-        except Exception:
-            pass
-        hist_append(channel.id, "ai", text)
-
-    touch_ai_response(channel.id)
-
-    if funcs:
-        fc = funcs[0]
-        name = fc["name"]
-        args = fc.get("args", {})
-
-        if name == "create_invoice":
-            items_list = args.get("items", [])
-            if not items_list and args.get("item_id"):
-                items_list = [{"item_id": args.get("item_id"), "quantity": args.get("quantity", 1)}]
-            if not items_list:
-                await channel.send("⚠️ Не удалось распознать товар.")
-                return
-            total_amount = 0
-            receipt_names = []
-            for itm in items_list:
-                item_id = itm.get("item_id")
-                quantity = max(1, int(itm.get("quantity", 1)))
-                row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
-                if not row:
-                    await escalate(channel, f"Товар `{item_id}` не найден")
-                    return
-                base_price = float(row["price"])
-                total_base = base_price * quantity
-                amount = int(total_base) if total_base % 1 == 0 else int(math.ceil(total_base))
-                total_amount += amount
-                receipt_names.append(row["name"] if quantity == 1 else f"{row['name']} × {quantity}")
-
-            product_display = ", ".join(receipt_names)
-            ok = await send_invoice(channel, product_display, total_amount, discount, author.display_name)
-            if ok:
-                ai_logger.info(f"Счёт: {channel.id} → {product_display}")
-                hist_clear(channel.id)
-                hist_append(channel.id, "ai", f"[счёт выставлен: {product_display}]")
-                update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0)
-                touch_ai_response(channel.id)
-
-        elif name == "escalate_to_human":
-            await escalate(channel, args.get("reason", "Товар не найден"))
-            update_session(channel.id, escalated=1)
             touch_ai_response(channel.id)
+            update_session(channel.id, escalated=1)
+            await escalate(channel, "Товар не найден / нужен менеджер")
+            return
+
+        if text and not funcs:
+            try:
+                await channel.send(text)
+            except Exception:
+                pass
+            hist_append(channel.id, "ai", text)
+
+        touch_ai_response(channel.id)
+
+        if funcs:
+            fc = funcs[0]
+            name = fc["name"]
+            args = fc.get("args", {})
+
+            if name == "create_invoice":
+                fresh_sess = get_session(channel.id)
+                if fresh_sess and fresh_sess.get("invoice_sent"):
+                    return # уже выставлен
+                    
+                items_list = args.get("items", [])
+                if not items_list and args.get("item_id"):
+                    items_list = [{"item_id": args.get("item_id"), "quantity": args.get("quantity", 1)}]
+                if not items_list:
+                    await channel.send("⚠️ Не удалось распознать товар.")
+                    return
+                total_amount = 0
+                receipt_names = []
+                for itm in items_list:
+                    item_id = itm.get("item_id")
+                    quantity = max(1, int(itm.get("quantity", 1)))
+                    row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
+                    if not row:
+                        await escalate(channel, f"Товар `{item_id}` не найден")
+                        return
+                    base_price = float(row["price"])
+                    total_base = base_price * quantity
+                    amount = int(total_base) if total_base % 1 == 0 else int(math.ceil(total_base))
+                    total_amount += amount
+                    receipt_names.append(row["name"] if quantity == 1 else f"{row['name']} × {quantity}")
+
+                product_display = ", ".join(receipt_names)
+                ok = await send_invoice(channel, product_display, total_amount, discount, author.display_name)
+                if ok:
+                    ai_logger.info(f"Счёт: {channel.id} → {product_display}")
+                    hist_clear(channel.id)
+                    hist_append(channel.id, "ai", f"[счёт выставлен: {product_display}]")
+                    update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0)
+                    touch_ai_response(channel.id)
+
+            elif name == "escalate_to_human":
+                await escalate(channel, args.get("reason", "Товар не найден"))
+                update_session(channel.id, escalated=1)
+                touch_ai_response(channel.id)
 
 @bot.slash_command(name="доплата", description="Выставить счёт на доплату (только для менеджеров)")
 async def surcharge_cmd(
@@ -1199,7 +1222,6 @@ async def on_message(message: disnake.Message):
             ai_logger.info(f"Доплата принята (файл): {channel.id} {message.attachments[0].filename}")
         return
 
-    # DC категория полностью игнорируется ИИ
     if _is_coins_category(channel):
         return
 
