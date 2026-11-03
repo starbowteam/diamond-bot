@@ -191,12 +191,18 @@ async def add_dc(user_id: int, amount: int, reason: str, notify: bool = True, lo
         except Exception as e:
             logger.warning(f"balance ach: {e}")
 
-    # 👇 АВТОВЫДАЧА КЛАНА: баланс только что дорос до порога (было < MIN_BALANCE)
+    # 👇 АВТОВЫДАЧА КЛАНА: только если юзер уже клубный (есть CLUB_ROLE_ID)
     if amount > 0:
         try:
-            from clan.core import try_auto_assign_clan, MIN_BALANCE
+            from clan.core import try_auto_assign_clan, MIN_BALANCE, CLUB_ROLE_ID
+            from core.bot import bot
             if data["balance"] >= MIN_BALANCE > data["balance"] - amount:
-                await try_auto_assign_clan(user_id)
+                guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+                if guild:
+                    member = guild.get_member(user_id)
+                    has_club = member and any(r.id == CLUB_ROLE_ID for r in member.roles)
+                    if has_club:
+                        await try_auto_assign_clan(user_id)
         except Exception as e:
             logger.warning(f"auto-assign clan после начисления {user_id}: {e}")
 
