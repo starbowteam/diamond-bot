@@ -59,6 +59,8 @@ COLOR_GREY = 0x676767
 COLOR_GREEN = 0x2ecc71
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aeaabe3&is=6ae95a63&hm=9f64fd7deb75b088ad88aec985099620a358aa0dde41e94db426b5a0d8b4fa36&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6a8e62e3&"
 
+YES_EMOJI = "<:Yes:1540361827295170722>"
+
 ABUSE_WORDS = [
     "хуй", "хуя", "хуе", "хуи", "пизд", "бляд", "блят", "ебан", "ебал", "ебат",
     "сука", "суки", "нахуй", "нахер", "заткнись", "тупой", "тупая", "идиот",
@@ -436,7 +438,9 @@ def _is_real_category(channel) -> bool:
 def _is_ai_ticket(channel) -> bool:
     if _is_paid_category(channel):
         return False
-    if _is_real_category(channel) or _is_coins_category(channel):
+    if _is_coins_category(channel):
+        return False # <--- ЗАПРЕЩАЕМ AI В DC-КАТЕГОРИИ
+    if _is_real_category(channel):
         return True
     return bool(get_ticket_owner(channel.id))
 
@@ -872,10 +876,11 @@ async def on_guild_channel_create(channel):
                         await remove_purchase(owner_id, i)
                         break
                 ai_logger.info(f"custom_role: {channel.id} — выдан setup-view")
-                return
         except Exception as e:
             ai_logger.warning(f"custom_role setup: {e}")
+        return # <--- Выходим, чтобы не отправлять приветствие ИИ
 
+    # AI приветствие (ТОЛЬКО для is_real)
     ai_on = get_user_ai_pref(owner_id)
     if ai_on:
         await asyncio.sleep(1)
@@ -925,26 +930,6 @@ async def fallback_task():
                 continue
         except Exception:
             pass
-
-        try:
-            if _is_coins_category(channel):
-                purchases = await get_user_purchases(r["user_id"], only_unused=True)
-                custom_p = next((p for p in purchases if "Кастомная роль" in p.get("value", "")), None)
-                if custom_p:
-                    has_emoji = "с эмодзи" in custom_p["value"].lower()
-                    view = CustomRoleSetupView(has_emoji=has_emoji)
-                    await channel.send(
-                        content=_build_custom_role_message(has_emoji),
-                        view=view,
-                    )
-                    full_purchases = await get_user_purchases(r["user_id"], only_unused=False)
-                    for i, fp in enumerate(full_purchases):
-                        if fp["value"] == custom_p["value"] and not fp.get("used"):
-                            await remove_purchase(r["user_id"], i)
-                            break
-                    continue
-        except Exception as e:
-            ai_logger.warning(f"fallback custom_role: {e}")
 
         last_text = hist_last_client_msg(channel_id)
         if not last_text:
@@ -1006,7 +991,7 @@ async def _auto_confirm_receipt(channel, message, sess):
     """Файл от клиента = автоподтверждение оплаты."""
     user_id = sess.get("user_id") or message.author.id
     try:
-        await message.add_reaction("✅")
+        await message.add_reaction(YES_EMOJI)
     except Exception:
         pass
 
@@ -1058,7 +1043,7 @@ async def _auto_confirm_receipt(channel, message, sess):
     )
 
 async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = False):
-    if not user_text.strip() or _is_paid_category(channel):
+    if not user_text.strip() or _is_paid_category(channel) or _is_coins_category(channel):
         return
     user_id = author.id
     sess = get_session(channel.id)
@@ -1212,10 +1197,14 @@ async def on_message(message: disnake.Message):
         
         if message.attachments:
             try:
-                await message.add_reaction("✅")
+                await message.add_reaction(YES_EMOJI)
             except Exception:
                 pass
             ai_logger.info(f"Доплата принята (файл): {channel.id} {message.attachments[0].filename}")
+        return
+
+    # ─── DC-категория: ИИ полностью игнорируется ───
+    if _is_coins_category(channel):
         return
 
     owner_id = get_ticket_owner(channel.id)
@@ -1240,16 +1229,13 @@ async def on_message(message: disnake.Message):
 
     touch_client_msg(channel.id, message.author.id)
 
-    # ─── ИСПРАВЛЕНИЕ: Если есть вложение и выставлен счёт, ЛЮБОЕ вложение = чек ───
+    # ─── Если есть вложение и выставлен счёт, ЛЮБОЕ вложение = чек ───
     if message.attachments:
         sess = get_session(channel.id)
         if sess and sess.get("invoice_sent"):
-            # Если ожидаем чек, полностью игнорируем текст и обрабатываем файл
             await _auto_confirm_receipt(channel, message, sess)
             return
         else:
-            # Если счёт не выставлен, игнорируем вложение, чтобы не спамить "Подключаюсь..."
-            # Можно добавить уведомление, что сначала нужен счёт, но лучше просто проигнорировать
             return
 
     text = (message.content or "").strip()
