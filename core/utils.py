@@ -1,0 +1,962 @@
+# -*- coding: utf-8 -*-
+import os
+import sys
+import json
+import sqlite3
+import logging
+import functools
+import asyncio
+import time
+import re
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List
+from PIL import Image, ImageDraw, ImageFont
+import disnake
+from disnake.ext import commands
+from disnake import PartialEmoji, ButtonStyle
+
+# ============================================================
+# Базовая директория проекта
+# ============================================================
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADD_DIR = os.path.join(BASE_DIR, "add")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+CATALOG_DIR = os.path.join(BASE_DIR, "catalog")
+ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(CATALOG_DIR, exist_ok=True)
+os.makedirs(ADD_DIR, exist_ok=True)
+os.makedirs(ACTIONS_DIR, exist_ok=True)
+
+# ============================================================
+# Конфигурация
+# ============================================================
+CONFIG = {
+    "BOT_TOKEN": os.getenv("BOT_TOKEN"),
+    "ADMIN_COMMAND_ROLES": [
+        1127428607606796294,
+        1471844291595731016,
+        1530822331188903966
+    ],
+    "ADMIN_USER_IDS": [1415191217179856967],
+    "REVIEW_MODERATION_ROLES": [1154757071330365490, 1127428607606796294, 1471844291595731016],
+    "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],
+    "TICKET_MANAGE_ROLES": [1154757071330365490, 1471844291595731016, 1127428607606796294],
+    "LOG_CHANNEL_ID": 1462418981825810535,
+    "LOG_CHANNEL_ID_PANEL": 1462418981825810535,
+    "LOG_TICKET_CHANNEL_ID": 1530453871581855744,
+    "MODERATION_LOG_CHANNEL": 1531731027272269895,
+    "DC_PANEL_CHANNEL": 1531731804828991611,
+    "TOP_CHANNEL_ID": 1532278656519635104,
+    "ACTIONS_CHANNEL_ID": 1469698608390606898,
+    "ANALYTICS_CHANNEL_ID": 1536947571082403840,
+    "MANAGER_ROLE_ID": 1127428607606796290,
+    "EMBED_IMAGE_URL": "https://media.discordapp.net/attachments/1527006158282555412/1527007499192893561/image.png?ex=6a60584e&is=6a5f06ce&hm=1b0ba12a8c8d57f41c57bc03a6998178f6cfb6b83db5837d448d1ab495c46830&=&format=webp&quality=lossless&width=1766&height=686",
+    "PANEL_CHANNEL_ID": 1462136361711829053,
+    "TICKET_CATEGORY_ID": 1462419587835363614,
+    "COINS_CATEGORY_ID": 1491827388391358504,
+    "PAID_CATEGORY_ID": 1470779295650549885,
+    "TARGET_REVIEWER_ID": 796293832751972352,
+    "REVIEW_COUNT_CHANNEL": 1462074763437543435,
+    "TICKET_COOLDOWN_SECONDS": 5,
+    "INFO_TEMPLATE_PATH": os.path.join(ADD_DIR, "info-o-zakaze.json"),
+    "COINS_INFO_TEMPLATE_PATH": os.path.join(ADD_DIR, "info-coins.json"),
+    "PK_FILE_PATH": os.path.join(ADD_DIR, "pk.json"),
+    "GUILD_ID": "1127428607606796288",
+    "VOICE_CHANNEL_ID": 1464699044751478815,
+    "MANAGER_ROLE_ID": 1154757071330365490,
+    "PAID_NOTIFY_CHANNEL_ID": 1462418981825810535,
+    "ROLE_IDS": {
+        "club": 1284697274655576186,
+        "bronze": 1127430321214861395,
+        "silver": 1137721688683970643,
+        "gold": 1184886111722545232,
+        "diamond": 1195799151783461016,
+        "crystalis": 1471005335111335957,
+        "pka": 1208442176321626162
+    },
+    "DC_RECALC_IGNORE": [796293832751972352, 1168943921171288135],
+    "FIXED_PKA_ROLE_ID": 1208442176321626162,
+    "MAX_DAILY_MESSAGES": 30,
+    "MAX_DAILY_VOICE": 15,
+    "VOICE_RATE": 3,
+    "MESSAGE_RATE": 1,
+    "MESSAGE_BATCH": 10,
+    "MIN_MESSAGE_LENGTH": 3,
+    "SHOP_CATALOG_PATH": os.path.join(CATALOG_DIR, "shop_catalog.json"),
+    "TICKET_ROLES": {
+        "real_created": 1539668621981257809,
+        "real_paid": 1539668675530072175,
+        "coins_created": 1539669323185131570,
+    },
+    "CLAN_POOL_CHANNEL_ID": 1552700960474800128,
+    "CLAN_SEASON_CHANNEL_ID": 1552700989465956403,
+    "CLAN_GAMES_CHANNEL_ID": 1552700973753827509,
+    "CLAN_NEWS_CHANNEL_ID": 1552700701128400979,
+}
+
+FILES = {
+    "promo": os.path.join(DATA_DIR, "promo_codes.json"),
+    "used_promo": os.path.join(DATA_DIR, "used_promo.json"),
+    "promo_txt": os.path.join(DATA_DIR, "promo_codes.txt"),
+    "rates": os.path.join(DATA_DIR, "rates.json"),
+    "last_review_id": os.path.join(DATA_DIR, "last_review_id.json"),
+    "review_counts": os.path.join(DATA_DIR, "review_counts.json"),
+    "shop_json": os.path.join(CATALOG_DIR, "menu_coins_shop.json"),
+    "dc_data": os.path.join(ADD_DIR, "dc_data.json"),
+    "jackpot": os.path.join(DATA_DIR, "jackpot.json"),
+}
+
+# ============================================================
+# СПИСКИ ИСКЛЮЧЕНИЙ
+# ============================================================
+EXEMPT_USERS = [562318422982262793, 1168943921171288135, 796293832751972352]
+SUPREME_USERS = [796293832751972352]
+
+
+def is_supreme(user_id: int) -> bool:
+    return user_id in SUPREME_USERS
+
+
+DEPRECATED_ROLE_IDS = [
+    1208442450373513277,
+    1208442449425334372,
+]
+
+# ============================================================
+# Logging
+# ============================================================
+LOG_FILE = os.path.join(BASE_DIR, "bot.log")
+logger = logging.getLogger("dmshop")
+logger.setLevel(logging.INFO)
+fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+fh.setLevel(logging.INFO)
+fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+fh.setFormatter(fmt)
+sh = logging.StreamHandler()
+sh.setFormatter(fmt)
+logger.addHandler(fh)
+logger.addHandler(sh)
+
+# ============================================================
+# SQLite БД
+# ============================================================
+db = sqlite3.connect(os.path.join(DATA_DIR, "diamond.db"), check_same_thread=False, timeout=30)
+db.row_factory = sqlite3.Row
+db.execute("PRAGMA journal_mode=WAL")
+db.execute("PRAGMA synchronous=NORMAL")
+
+cur = db.cursor()
+
+cur.executescript("""
+CREATE TABLE IF NOT EXISTS invites_snapshot (
+    invite_code TEXT PRIMARY KEY,
+    guild_id    INTEGER,
+    uses        INTEGER,
+    inviter_id  INTEGER
+);
+CREATE TABLE IF NOT EXISTS invites (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id    INTEGER,
+    inviter_id  INTEGER,
+    member_id   INTEGER,
+    joined_at   INTEGER,
+    is_bot      INTEGER DEFAULT 0,
+    is_fake     INTEGER DEFAULT 0,
+    left_at     INTEGER DEFAULT NULL
+);
+CREATE TABLE IF NOT EXISTS reaction_roles (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id    INTEGER,
+    channel_id  INTEGER,
+    message_id  INTEGER,
+    emoji       TEXT,
+    role_id     INTEGER
+);
+CREATE TABLE IF NOT EXISTS dc_cache (
+    user_id         INTEGER PRIMARY KEY,
+    balance         INTEGER DEFAULT 0,
+    purchases       TEXT,
+    history         TEXT,
+    last_review     INTEGER DEFAULT 0,
+    last_bonus      INTEGER DEFAULT 0,
+    messages_today  INTEGER DEFAULT 0,
+    voice_time_today INTEGER DEFAULT 0,
+    last_reset_date INTEGER DEFAULT 0,
+    last_voice_dc   INTEGER DEFAULT 0,
+    last_active_ts  INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS promo_codes (
+    code TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS ticket_owners (
+    channel_id INTEGER PRIMARY KEY,
+    user_id    INTEGER,
+    category_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS ticket_managers (
+    channel_id INTEGER PRIMARY KEY,
+    manager_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS manager_stats (
+    user_id INTEGER PRIMARY KEY,
+    closed_tickets INTEGER DEFAULT 0,
+    total_rating INTEGER DEFAULT 0,
+    ratings_count INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS closed_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    manager_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    closed_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_items (
+    user_id      INTEGER NOT NULL,
+    item_key     TEXT NOT NULL,
+    item_type    TEXT NOT NULL,
+    value        REAL DEFAULT 0,
+    expires_at   INTEGER DEFAULT 0,
+    uses_left    INTEGER DEFAULT -1,
+    activated_at INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS ticket_reviews (
+    channel_id INTEGER PRIMARY KEY,
+    user_id    INTEGER,
+    manager_id INTEGER,
+    rating     INTEGER,
+    rated_at   INTEGER
+);
+CREATE TABLE IF NOT EXISTS ticket_cooldowns (
+    user_id   INTEGER PRIMARY KEY,
+    until_ts  INTEGER NOT NULL,
+    reason    TEXT,
+    set_by    INTEGER,
+    set_at    INTEGER
+);
+CREATE TABLE IF NOT EXISTS clans (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT,
+    emoji       TEXT,
+    role_id     INTEGER,
+    color       INTEGER,
+    description TEXT
+);
+CREATE TABLE IF NOT EXISTS clan_members (
+    user_id      INTEGER PRIMARY KEY,
+    clan_id      INTEGER,
+    joined_at    INTEGER,
+    left_at      INTEGER DEFAULT NULL,
+    cycle_joined INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS clan_cycle (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    number      INTEGER,
+    started_at  INTEGER,
+    ends_at     INTEGER,
+    state       TEXT DEFAULT 'active',
+    total_paid  INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS clan_contributions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id    INTEGER,
+    clan_id     INTEGER,
+    user_id     INTEGER,
+    amount      INTEGER,
+    reason      TEXT,
+    ts          INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_clan_contrib_cycle_clan
+    ON clan_contributions (cycle_id, clan_id);
+CREATE INDEX IF NOT EXISTS idx_clan_contrib_cycle_user
+    ON clan_contributions (cycle_id, user_id);
+CREATE TABLE IF NOT EXISTS quests (
+    key         TEXT PRIMARY KEY,
+    title       TEXT,
+    description TEXT,
+    reward      INTEGER,
+    goal        INTEGER,
+    type        TEXT,
+    emoji       TEXT,
+    active      INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS quest_progress (
+    user_id      INTEGER,
+    quest_key    TEXT,
+    cycle_id     INTEGER,
+    progress     INTEGER DEFAULT 0,
+    completed_at INTEGER DEFAULT NULL,
+    claimed      INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, quest_key, cycle_id)
+);
+CREATE TABLE IF NOT EXISTS clan_payouts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id     INTEGER,
+    clan_id      INTEGER,
+    user_id      INTEGER,
+    weight       REAL,
+    bonus_mult   REAL,
+    final_amount INTEGER,
+    paid_at      INTEGER
+);
+CREATE TABLE IF NOT EXISTS clan_achievements (
+    user_id     INTEGER,
+    ach_key     TEXT,
+    unlocked_at INTEGER,
+    season_id   INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, ach_key)
+);
+CREATE INDEX IF NOT EXISTS idx_clan_ach_user ON clan_achievements (user_id);
+
+-- ============================================================
+-- AI MANAGER / AUTOORDER
+-- ============================================================
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS autoorder_catalog (
+    id        TEXT PRIMARY KEY,
+    category  TEXT,
+    name      TEXT,
+    price     REAL,
+    unit      TEXT,
+    min_qty   INTEGER DEFAULT 1,
+    max_qty   INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS ai_manager_sessions (
+    channel_id     INTEGER PRIMARY KEY,
+    user_id        INTEGER,
+    message_count  INTEGER DEFAULT 0,
+    fail_count     INTEGER DEFAULT 0,
+    started_at     INTEGER,
+    escalated      INTEGER DEFAULT 0,
+    receipt_url    TEXT,
+    created_at     INTEGER
+);
+
+-- 👇 NEW: персональные предпочтения AI Manager
+CREATE TABLE IF NOT EXISTS ai_manager_user_prefs (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER DEFAULT 1
+);
+""")
+db.commit()
+
+
+# ============================================================
+# МИГРАЦИИ СХЕМЫ
+# ============================================================
+def _ensure_column(table: str, column: str, ddl: str):
+    try:
+        cols = [r[1] for r in cur.execute(f'PRAGMA table_info("{table}")').fetchall()]
+        if column not in cols:
+            cur.execute(f'ALTER TABLE "{table}" ADD COLUMN {ddl}')
+            db.commit()
+            logger.info(f"Миграция БД: {table}.{column} добавлена")
+    except Exception as e:
+        logger.error(f"Миграция {table}.{column}: {e}")
+
+
+_ensure_column("dc_cache", "last_active_ts", "last_active_ts INTEGER DEFAULT 0")
+_ensure_column("invites", "invite_code",   "invite_code TEXT DEFAULT NULL")
+_ensure_column("invites", "advertiser_id", "advertiser_id INTEGER DEFAULT NULL")
+_ensure_column("invites", "rewarded",      "rewarded INTEGER DEFAULT 0")
+
+
+# ============================================================
+# Загрузка JSON
+# ============================================================
+def load_json(path: str, default):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error("Ошибка загрузки JSON %s: %s", path, e)
+    return default
+
+def save_json(path: str, obj):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error("Ошибка сохранения JSON %s: %s", path, e)
+
+# ============================================================
+# Общие утилиты
+# ============================================================
+def now_ts():
+    return int(datetime.now(timezone.utc).timestamp())
+
+def parse_emoji(emoji_str: str):
+    try:
+        return disnake.PartialEmoji.from_str(emoji_str)
+    except Exception:
+        return emoji_str
+
+def clean_embed_for_discohook(embed_dict: Dict[str, Any]) -> Dict[str, Any]:
+    e = dict(embed_dict)
+    if "image" in e and isinstance(e["image"], dict) and "url" in e["image"]:
+        e["image"] = {"url": e["image"]["url"]}
+    return e
+
+# ============================================================
+# Проверки ролей
+# ============================================================
+def has_admin_command_roles(author):
+    if any(r.id in CONFIG["ADMIN_COMMAND_ROLES"] for r in author.roles):
+        return True
+    if author.id in CONFIG.get("ADMIN_USER_IDS", []):
+        return True
+    return False
+
+def has_review_moderation_roles(author):
+    return any(r.id in CONFIG["REVIEW_MODERATION_ROLES"] for r in author.roles)
+
+def has_ticket_view_roles(author):
+    return any(r.id in CONFIG["TICKET_VIEW_ROLES"] for r in author.roles)
+
+def has_ticket_manage_roles(author):
+    return any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in author.roles)
+
+# ============================================================
+# Логирование в Discord
+# ============================================================
+async def log_discord(title: str, description: str, color: int = 0x00ff00, panel: bool = False, fields: list = None, channel_id: int = None):
+    try:
+        from core.bot import bot
+    except ImportError:
+        return
+    try:
+        if channel_id:
+            ch_id = channel_id
+        else:
+            ch_id = CONFIG["LOG_CHANNEL_ID_PANEL"] if panel else CONFIG["LOG_CHANNEL_ID"]
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+        if not guild:
+            logger.warning("log_discord: guild not found")
+            return
+        log_ch = guild.get_channel(ch_id)
+        if not log_ch:
+            logger.warning("log_discord: channel %s not found", ch_id)
+            return
+        embed = disnake.Embed(
+            title=title,
+            description=description,
+            color=color,
+            timestamp=datetime.now(timezone.utc)
+        )
+        if fields:
+            for name, value, inline in fields:
+                embed.add_field(name=name, value=value, inline=inline)
+        await log_ch.send(embed=embed)
+    except Exception as e:
+        logger.exception("Ошибка логирования в Discord: %s", e)
+
+# ============================================================
+# Декоратор для логов команд
+# ============================================================
+def log_command(func):
+    @functools.wraps(func)
+    async def wrapper(ctx, *args, **kwargs):
+        if not has_admin_command_roles(ctx.author):
+            await ctx.send("⛔ У вас нет прав на использование этой команды.", ephemeral=True)
+            return
+        try:
+            from core.bot import bot
+            guild = ctx.guild or bot.get_guild(int(CONFIG["GUILD_ID"]))
+            if guild:
+                log_ch = guild.get_channel(CONFIG["LOG_CHANNEL_ID_PANEL"])
+                if log_ch:
+                    embed = disnake.Embed(
+                        title="🔧 Использована команда",
+                        description=f"> **Команда:** `{func.__name__}`\n> **Пользователь:** {ctx.author} (`{ctx.author.id}`)\n> **Канал:** {getattr(ctx.channel, 'mention', 'dm')}",
+                        timestamp=datetime.now(timezone.utc),
+                        color=0x2f3136
+                    )
+                    await log_ch.send(embed=embed)
+        except Exception as e:
+            logger.exception("Ошибка в log_command: %s", e)
+        try:
+            return await func(ctx, *args, **kwargs)
+        except Exception as e:
+            logger.exception("Ошибка выполнения команды %s: %s", func.__name__, e)
+            try:
+                await ctx.send("Произошла ошибка при выполнении команды.", ephemeral=True)
+            except Exception:
+                pass
+    return wrapper
+
+# ============================================================
+# Система ролей по отзывам
+# ============================================================
+def get_roles_for_count(count: int) -> list[int]:
+    roles = []
+    role_ids = CONFIG["ROLE_IDS"]
+
+    if count >= 1:
+        roles.append(role_ids["club"])
+
+    if 1 <= count <= 5:
+        roles.append(role_ids["bronze"])
+    elif 6 <= count <= 10:
+        roles.append(role_ids["silver"])
+    elif 11 <= count <= 15:
+        roles.append(role_ids["gold"])
+    elif 16 <= count <= 20:
+        roles.append(role_ids["diamond"])
+    elif 21 <= count <= 25:
+        roles.append(role_ids["crystalis"])
+    elif count >= 26:
+        roles.append(role_ids["pka"])
+    return roles
+
+
+async def update_user_roles(member: disnake.Member, count: int, keep_pka: bool = False):
+    dep_to_remove = [r for r in member.roles if r.id in DEPRECATED_ROLE_IDS]
+    for role in dep_to_remove:
+        try:
+            await member.remove_roles(role)
+            await log_discord(
+                title="🔄 Снята устаревшая роль",
+                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention} (`{role.id}`)",
+                color=0xff6600
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось снять deprecated {role.id} у {member.id}: {e}")
+
+    if member.id in EXEMPT_USERS:
+        role_ids = CONFIG["ROLE_IDS"]
+        club_role_id = role_ids["club"]
+        pka_role_id = role_ids["pka"]
+        current_role_ids = [r.id for r in member.roles]
+        all_buyer_roles = list(role_ids.values())
+        to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in [club_role_id, pka_role_id]]
+        to_add = []
+        if club_role_id not in current_role_ids:
+            to_add.append(club_role_id)
+        if pka_role_id not in current_role_ids:
+            to_add.append(pka_role_id)
+        guild = member.guild
+        for rid in to_remove:
+            role = guild.get_role(rid)
+            if role:
+                await member.remove_roles(role)
+        for rid in to_add:
+            role = guild.get_role(rid)
+            if role:
+                await member.add_roles(role)
+        return
+
+    role_ids = CONFIG["ROLE_IDS"]
+    all_buyer_roles = list(role_ids.values())
+    target_role_ids = get_roles_for_count(count)
+    current_role_ids = [r.id for r in member.roles]
+    to_remove = [rid for rid in all_buyer_roles if rid in current_role_ids and rid not in target_role_ids]
+    if keep_pka and CONFIG["FIXED_PKA_ROLE_ID"] in to_remove:
+        to_remove.remove(CONFIG["FIXED_PKA_ROLE_ID"])
+    to_add = [rid for rid in target_role_ids if rid not in current_role_ids]
+    guild = member.guild
+    for rid in to_remove:
+        role = guild.get_role(rid)
+        if role:
+            await member.remove_roles(role)
+            await log_discord(
+                title="🔄 Снята роль покупателя",
+                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
+                color=0xff6600
+            )
+    for rid in to_add:
+        role = guild.get_role(rid)
+        if role:
+            await member.add_roles(role)
+            await log_discord(
+                title="🔄 Выдана роль покупателя",
+                description=f"> **Пользователь:** {member.mention}\n> **Роль:** {role.mention}\n> **Отзывов:** `{count}`",
+                color=0x00ff00
+            )
+
+
+# ============================================================
+# Инвайты / владельцы / менеджеры / отзывы / cooldown
+# ============================================================
+async def sync_invites(guild: disnake.Guild):
+    try:
+        invites = await guild.invites()
+    except Exception:
+        return
+    for inv in invites:
+        cur.execute("REPLACE INTO invites_snapshot (invite_code, guild_id, uses, inviter_id) VALUES (?, ?, ?, ?)",
+                    (inv.code, guild.id, inv.uses, inv.inviter.id if inv.inviter else None))
+    db.commit()
+
+
+def add_ticket_owner(channel_id: int, user_id: int, category_id: int):
+    cur.execute("INSERT OR REPLACE INTO ticket_owners (channel_id, user_id, category_id) VALUES (?, ?, ?)",
+                (channel_id, user_id, category_id))
+    db.commit()
+
+def remove_ticket_owner(channel_id: int):
+    cur.execute("DELETE FROM ticket_owners WHERE channel_id = ?", (channel_id,))
+    db.commit()
+
+def get_ticket_owner(channel_id: int) -> Optional[int]:
+    row = cur.execute("SELECT user_id FROM ticket_owners WHERE channel_id = ?", (channel_id,)).fetchone()
+    return row["user_id"] if row else None
+
+def get_user_ticket_channels_ids(user_id: int, category_id: int) -> List[int]:
+    rows = cur.execute("SELECT channel_id FROM ticket_owners WHERE user_id = ? AND category_id = ?", (user_id, category_id)).fetchall()
+    return [row["channel_id"] for row in rows]
+
+def get_user_tickets_count_in_category(user_id: int, category_id: int) -> int:
+    row = cur.execute("SELECT COUNT(*) FROM ticket_owners WHERE user_id = ? AND category_id = ?", (user_id, category_id)).fetchone()
+    return row[0] if row else 0
+
+
+def assign_ticket_manager(channel_id: int, manager_id: int):
+    cur.execute("INSERT OR REPLACE INTO ticket_managers (channel_id, manager_id) VALUES (?, ?)",
+                (channel_id, manager_id))
+    db.commit()
+
+def get_ticket_manager(channel_id: int) -> Optional[int]:
+    row = cur.execute("SELECT manager_id FROM ticket_managers WHERE channel_id = ?", (channel_id,)).fetchone()
+    return row["manager_id"] if row else None
+
+def clear_ticket_manager(channel_id: int):
+    cur.execute("DELETE FROM ticket_managers WHERE channel_id = ?", (channel_id,))
+    db.commit()
+
+def increment_manager_closed(manager_id: int):
+    cur.execute("INSERT INTO manager_stats (user_id, closed_tickets) VALUES (?, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET closed_tickets = closed_tickets + 1",
+                (manager_id,))
+    db.commit()
+
+def add_manager_rating(manager_id: int, rating: int):
+    cur.execute("INSERT INTO manager_stats (user_id, total_rating, ratings_count) VALUES (?, ?, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET total_rating = total_rating + ?, ratings_count = ratings_count + 1",
+                (manager_id, rating, rating))
+    db.commit()
+
+def reset_manager_stats():
+    cur.execute("DELETE FROM manager_stats")
+    db.commit()
+
+def add_closed_order(manager_id: int, channel_id: int):
+    cur.execute("INSERT INTO closed_orders (manager_id, channel_id, closed_at) VALUES (?, ?, ?)",
+                (manager_id, channel_id, int(time.time())))
+    db.commit()
+
+def get_closed_orders(manager_id: int) -> List[dict]:
+    rows = cur.execute("SELECT id, channel_id, closed_at FROM closed_orders WHERE manager_id = ? ORDER BY closed_at DESC",
+                       (manager_id,)).fetchall()
+    return [dict(row) for row in rows]
+
+def remove_closed_order(order_id: int):
+    cur.execute("DELETE FROM closed_orders WHERE id = ?", (order_id,))
+    db.commit()
+
+
+def save_ticket_review(channel_id: int, user_id: int, manager_id: int, rating: int):
+    cur.execute(
+        "INSERT OR REPLACE INTO ticket_reviews (channel_id, user_id, manager_id, rating, rated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (channel_id, user_id, manager_id, rating, int(time.time()))
+    )
+    db.commit()
+
+def get_ticket_review(channel_id: int) -> Optional[dict]:
+    row = cur.execute(
+        "SELECT channel_id, user_id, manager_id, rating, rated_at FROM ticket_reviews WHERE channel_id = ?",
+        (channel_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+def clear_ticket_review(channel_id: int):
+    cur.execute("DELETE FROM ticket_reviews WHERE channel_id = ?", (channel_id,))
+    db.commit()
+
+
+def set_ticket_cooldown(user_id: int, seconds: int = 7200, reason: str = "", set_by: int = 0):
+    if is_supreme(user_id):
+        logger.info(f"set_ticket_cooldown: {user_id} — supreme, пропуск")
+        return 0
+    until_ts = int(time.time()) + seconds
+    cur.execute(
+        "INSERT OR REPLACE INTO ticket_cooldowns (user_id, until_ts, reason, set_by, set_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, until_ts, reason, set_by, int(time.time()))
+    )
+    db.commit()
+    return until_ts
+
+def get_ticket_cooldown(user_id: int) -> int:
+    if is_supreme(user_id):
+        return 0
+    row = cur.execute("SELECT until_ts FROM ticket_cooldowns WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        return 0
+    until_ts = row["until_ts"]
+    if until_ts <= int(time.time()):
+        cur.execute("DELETE FROM ticket_cooldowns WHERE user_id = ?", (user_id,))
+        db.commit()
+        return 0
+    return until_ts
+
+def get_ticket_cooldown_info(user_id: int) -> Optional[dict]:
+    if is_supreme(user_id):
+        return None
+    row = cur.execute(
+        "SELECT user_id, until_ts, reason, set_by, set_at FROM ticket_cooldowns WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return None
+    if row["until_ts"] <= int(time.time()):
+        cur.execute("DELETE FROM ticket_cooldowns WHERE user_id = ?", (user_id,))
+        db.commit()
+        return None
+    return dict(row)
+
+def clear_ticket_cooldown(user_id: int):
+    cur.execute("DELETE FROM ticket_cooldowns WHERE user_id = ?", (user_id,))
+    db.commit()
+
+def is_ticket_blocked(user_id: int) -> bool:
+    return get_ticket_cooldown(user_id) > 0
+
+# ============================================================
+# Промокоды и курсы
+# ============================================================
+promo_codes: Dict[str, str] = {}
+used_promo: Dict[str, list] = {}
+rates: Dict[str, float] = {}
+
+def reload_promo():
+    global promo_codes, used_promo, rates
+    promo_codes = load_json(FILES["promo"], {})
+    used_promo = load_json(FILES["used_promo"], {})
+    rates = load_json(FILES["rates"], {"KZT": 0.14, "UAH": 1.8, "RUB": 1.0, "ROBLOX_RATE": 0.65})
+    try:
+        lines = [f"{k} - {v}" for k, v in promo_codes.items()]
+        with open(FILES["promo_txt"], "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    except Exception as e:
+        logger.exception("reload_promo: write promo_txt error: %s", e)
+
+reload_promo()
+
+# ============================================================
+# Кеширование DC
+# ============================================================
+def init_dc_cache_from_json():
+    data = load_json(FILES["dc_data"], {})
+    for uid_str, user_data in data.items():
+        uid = int(uid_str)
+        cur.execute("""
+            INSERT OR REPLACE INTO dc_cache (
+                user_id, balance, purchases, history,
+                last_review, last_bonus, messages_today,
+                voice_time_today, last_reset_date, last_voice_dc,
+                last_active_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            uid,
+            user_data.get("balance", 0),
+            json.dumps(user_data.get("purchases", [])),
+            json.dumps(user_data.get("history", [])),
+            user_data.get("last_review", 0),
+            user_data.get("last_bonus", 0),
+            user_data.get("messages_today", 0),
+            user_data.get("voice_time_today", 0),
+            user_data.get("last_reset_date", 0),
+            user_data.get("last_voice_dc", 0),
+            user_data.get("last_active_ts", 0)
+        ))
+    db.commit()
+
+def get_dc_cache(user_id: int) -> dict:
+    row = db.execute("SELECT * FROM dc_cache WHERE user_id = ?", (user_id,)).fetchone()
+    if row:
+        return {
+            "balance": row["balance"],
+            "purchases": json.loads(row["purchases"]) if row["purchases"] else [],
+            "history": json.loads(row["history"]) if row["history"] else [],
+            "last_review": row["last_review"],
+            "last_bonus": row["last_bonus"],
+            "messages_today": row["messages_today"],
+            "voice_time_today": row["voice_time_today"],
+            "last_reset_date": row["last_reset_date"],
+            "last_voice_dc": row["last_voice_dc"],
+            "last_active_ts": row["last_active_ts"] if "last_active_ts" in row.keys() else 0
+        }
+    return {
+        "balance": 0,
+        "purchases": [],
+        "history": [],
+        "last_review": 0,
+        "last_bonus": 0,
+        "messages_today": 0,
+        "voice_time_today": 0,
+        "last_reset_date": 0,
+        "last_voice_dc": 0,
+        "last_active_ts": 0
+    }
+
+def save_dc_cache(user_id: int, data: dict):
+    if "last_active_ts" not in data:
+        row = db.execute(
+            "SELECT last_active_ts FROM dc_cache WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        data["last_active_ts"] = row["last_active_ts"] if row else 0
+
+    cur.execute("""
+        INSERT OR REPLACE INTO dc_cache (
+            user_id, balance, purchases, history,
+            last_review, last_bonus, messages_today,
+            voice_time_today, last_reset_date, last_voice_dc,
+            last_active_ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id,
+        data.get("balance", 0),
+        json.dumps(data.get("purchases", [])),
+        json.dumps(data.get("history", [])),
+        data.get("last_review", 0),
+        data.get("last_bonus", 0),
+        data.get("messages_today", 0),
+        data.get("voice_time_today", 0),
+        data.get("last_reset_date", 0),
+        data.get("last_voice_dc", 0),
+        data.get("last_active_ts", 0)
+    ))
+    db.commit()
+
+def sync_dc_to_json():
+    rows = cur.execute("SELECT * FROM dc_cache").fetchall()
+    data = {}
+    for row in rows:
+        uid = row["user_id"]
+        data[str(uid)] = {
+            "balance": row["balance"],
+            "purchases": json.loads(row["purchases"]) if row["purchases"] else [],
+            "history": json.loads(row["history"]) if row["history"] else [],
+            "last_review": row["last_review"],
+            "last_bonus": row["last_bonus"],
+            "messages_today": row["messages_today"],
+            "voice_time_today": row["voice_time_today"],
+            "last_reset_date": row["last_reset_date"],
+            "last_voice_dc": row["last_voice_dc"],
+            "last_active_ts": row["last_active_ts"] if "last_active_ts" in row.keys() else 0
+        }
+    save_json(FILES["dc_data"], data)
+
+if cur.execute("SELECT COUNT(*) FROM dc_cache").fetchone()[0] == 0:
+    init_dc_cache_from_json()
+
+# ============================================================
+# Промокоды в SQLite
+# ============================================================
+def get_promo_codes() -> dict:
+    rows = cur.execute("SELECT code, value FROM promo_codes").fetchall()
+    return {row["code"]: row["value"] for row in rows}
+
+def add_promo_code(code: str, value: str):
+    cur.execute("INSERT OR REPLACE INTO promo_codes (code, value) VALUES (?, ?)", (code, value))
+    db.commit()
+
+def remove_promo_code(code: str):
+    cur.execute("DELETE FROM promo_codes WHERE code = ?", (code,))
+    db.commit()
+
+def clear_promo_codes():
+    cur.execute("DELETE FROM promo_codes")
+    db.commit()
+
+# ============================================================
+# USER ITEMS
+# ============================================================
+def activate_item(user_id: int, item_key: str, item_type: str,
+                  value: float = 0, duration_hours: int = 0, uses: int = -1):
+    now = int(time.time())
+    expires_at = (now + duration_hours * 3600) if duration_hours > 0 else 0
+    cur.execute("""
+        INSERT OR REPLACE INTO user_items
+        (user_id, item_key, item_type, value, expires_at, uses_left, activated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, item_key, item_type, value, expires_at, uses, now))
+    db.commit()
+
+def get_item(user_id: int, item_key: str) -> Optional[dict]:
+    now = int(time.time())
+    row = cur.execute(
+        "SELECT * FROM user_items WHERE user_id=? AND item_key=?",
+        (user_id, item_key)
+    ).fetchone()
+    if not row:
+        return None
+    if row["expires_at"] > 0 and row["expires_at"] < now:
+        cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+        db.commit()
+        return None
+    if row["uses_left"] == 0:
+        cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+        db.commit()
+        return None
+    return dict(row)
+
+def get_active_items(user_id: int) -> list:
+    now = int(time.time())
+    rows = cur.execute("""
+        SELECT * FROM user_items
+        WHERE user_id=?
+          AND (expires_at = 0 OR expires_at > ?)
+          AND uses_left != 0
+    """, (user_id, now)).fetchall()
+    return [dict(r) for r in rows]
+
+def consume_use(user_id: int, item_key: str) -> bool:
+    item = get_item(user_id, item_key)
+    if not item:
+        return False
+    if item["uses_left"] < 0:
+        return True
+    new_uses = item["uses_left"] - 1
+    if new_uses <= 0:
+        cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+    else:
+        cur.execute("UPDATE user_items SET uses_left=? WHERE user_id=? AND item_key=?",
+                    (new_uses, user_id, item_key))
+    db.commit()
+    return True
+
+def clear_item(user_id: int, item_key: str):
+    cur.execute("DELETE FROM user_items WHERE user_id=? AND item_key=?", (user_id, item_key))
+    db.commit()
+
+# ============================================================
+# JACKPOT
+# ============================================================
+def load_jackpot() -> dict:
+    return load_json(FILES["jackpot"], {"bank": 1000, "last_draw": 0, "last_winner": 0, "history": []})
+
+def save_jackpot(data: dict):
+    save_json(FILES["jackpot"], data)
+
+def add_jackpot_bank(amount: int):
+    data = load_jackpot()
+    data["bank"] = data.get("bank", 0) + amount
+    save_jackpot(data)
+
+def get_jackpot_participants() -> list:
+    rows = cur.execute(
+        "SELECT user_id FROM user_items WHERE item_key='casino_jackpot_ticket'"
+    ).fetchall()
+    return [r["user_id"] for r in rows]
+
+def clear_all_jackpot_tickets():
+    cur.execute("DELETE FROM user_items WHERE item_key='casino_jackpot_ticket'")
+    db.commit()
