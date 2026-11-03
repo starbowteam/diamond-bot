@@ -842,7 +842,6 @@ async def on_guild_channel_create(channel):
     if not (is_real or is_coins):
         return
 
-    # Ждём пока основной бот досоздаст тикет (add_ticket_owner в конце)
     owner_id = None
     for _ in range(6):
         owner_id = get_ticket_owner(channel.id)
@@ -856,7 +855,6 @@ async def on_guild_channel_create(channel):
     if not owner:
         return
 
-    # Кастом-роль — ТОЛЬКО в DC-категории и только если товар в инвентаре
     if is_coins:
         try:
             purchases = await get_user_purchases(owner_id, only_unused=True)
@@ -878,7 +876,6 @@ async def on_guild_channel_create(channel):
         except Exception as e:
             ai_logger.warning(f"custom_role setup: {e}")
 
-    # AI приветствие
     ai_on = get_user_ai_pref(owner_id)
     if ai_on:
         await asyncio.sleep(1)
@@ -906,9 +903,9 @@ async def fallback_task():
     now = int(time.time())
     rows = cur.execute("""
         SELECT channel_id, user_id, last_client_msg_ts, last_ai_response_ts,
-               last_manager_msg_ts, invoice_sent, fail_count, abuse_closed
+               last_manager_msg_ts, invoice_sent, fail_count, abuse_closed, escalated
         FROM ai_manager_sessions
-        WHERE last_client_msg_ts > 0 AND invoice_sent = 0 AND abuse_closed = 0 AND fail_count < 3
+        WHERE last_client_msg_ts > 0 AND invoice_sent = 0 AND abuse_closed = 0 AND fail_count < 3 AND escalated = 0
     """).fetchall()
     for r in rows:
         channel_id = r["channel_id"]
@@ -929,7 +926,6 @@ async def fallback_task():
         except Exception:
             pass
 
-        # Кастом-роль — только в DC-категории
         try:
             if _is_coins_category(channel):
                 purchases = await get_user_purchases(r["user_id"], only_unused=True)
@@ -966,7 +962,6 @@ async def fallback_task():
 
 @tasks.loop(minutes=1)
 async def activity_ping_task():
-    """Раз в минуту: если тикет создан 5+ мин назад и в нём нет сообщений клиента — пингануть."""
     await bot.wait_until_ready()
     targets = [
         CONFIG.get("TICKET_CATEGORY_ID"),
@@ -984,7 +979,7 @@ async def activity_ping_task():
             except Exception:
                 continue
             if age < 300 or age > 330:
-                continue  # окно 5-5.5 мин, чтобы не спамить
+                continue
 
             owner_id = get_ticket_owner(channel.id)
             if not owner_id:
@@ -1008,7 +1003,7 @@ async def activity_ping_task():
                 ai_logger.warning(f"idle_ping send: {e}")
 
 async def _auto_confirm_receipt(channel, message, sess):
-    """Файл от клиента = автоподтверждение оплаты. Меняем категорию, AI уходит."""
+    """Файл от клиента = автоподтверждение оплаты."""
     user_id = sess.get("user_id") or message.author.id
     try:
         await message.add_reaction("✅")
@@ -1025,11 +1020,14 @@ async def _auto_confirm_receipt(channel, message, sess):
         except Exception as e:
             ai_logger.warning(f"auto_confirm edit category: {e}")
 
+    # Жестко ставим escalated=1, чтобы fallback_task больше не срабатывал
     update_session(
         channel.id,
         invoice_sent=0,
-        receipt_url=message.attachments[0].url,
+        receipt_url=message.attachments[0].url if message.attachments else "",
         post_invoice_text_count=0,
+        last_ai_response_ts=int(time.time()),
+        escalated=1,
     )
 
     embed = disnake.Embed(
@@ -1045,7 +1043,7 @@ async def _auto_confirm_receipt(channel, message, sess):
 
     ai_logger.info(
         f"receipt auto-confirm: channel={channel.id} user={user_id} "
-        f"file={message.attachments[0].filename}"
+        f"file={message.attachments[0].filename if message.attachments else 'none'}"
     )
 
     await log_discord(
@@ -1053,7 +1051,7 @@ async def _auto_confirm_receipt(channel, message, sess):
         description=(
             f"> **Тикет:** {channel.mention}\n"
             f"> **Клиент:** <@{user_id}>\n"
-            f"> **Файл:** `{message.attachments[0].filename}`"
+            f"> **Файл:** `{message.attachments[0].filename if message.attachments else 'нет'}`"
         ),
         color=0x2ecc71,
         channel_id=LOG_CHANNEL,
@@ -1120,6 +1118,8 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
             await channel.send(text)
         except Exception:
             pass
+        touch_ai_response(channel.id)
+        update_session(channel.id, escalated=1)
         await escalate(channel, "Товар не найден / нужен менеджер")
         return
 
@@ -1170,6 +1170,8 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
         elif name == "escalate_to_human":
             await escalate(channel, args.get("reason", "Товар не найден"))
+            update_session(channel.id, escalated=1)
+            touch_ai_response(channel.id)
 
 @bot.slash_command(name="доплата", description="Выставить счёт на доплату (только для менеджеров)")
 async def surcharge_cmd(
@@ -1193,6 +1195,7 @@ async def surcharge_cmd(
 
     ok = await send_invoice(ctx.channel, "Доплата", amount, 0, customer_name)
     if ok:
+        update_session(ctx.channel.id, invoice_sent=1, escalated=0, fail_count=0, message_count=0, last_ai_response_ts=int(time.time()))
         await ctx.edit_original_response(content=f"✅ Счёт на доплату {amount} ₽ выставлен.")
     else:
         await ctx.edit_original_response(content="❌ Ошибка при создании счёта.")
@@ -1205,15 +1208,14 @@ async def on_message(message: disnake.Message):
 
     # ─── PAID-категория: только галочка на файл, без текста ───
     if _is_paid_category(channel):
+        touch_ai_response(channel.id)
+        
         if message.attachments:
-            att = message.attachments[0]
-            low = att.filename.lower()
-            if any(low.endswith(x) for x in (".png", ".jpg", ".jpeg", ".pdf")):
-                try:
-                    await message.add_reaction("✅")
-                except Exception:
-                    pass
-                ai_logger.info(f"Доплата принята (файл): {channel.id} {att.filename}")
+            try:
+                await message.add_reaction("✅")
+            except Exception:
+                pass
+            ai_logger.info(f"Доплата принята (файл): {channel.id} {message.attachments[0].filename}")
         return
 
     owner_id = get_ticket_owner(channel.id)
@@ -1221,7 +1223,6 @@ async def on_message(message: disnake.Message):
 
     if isinstance(message.author, disnake.Member) and _is_manager(message.author) and not is_ticket_owner:
         if _is_ai_ticket(channel):
-            # Если ИИ включён и тикет ещё не оплачен — менеджер не может писать
             if get_user_ai_pref(owner_id) and not _is_paid_category(channel):
                 return
             else:
@@ -1239,17 +1240,17 @@ async def on_message(message: disnake.Message):
 
     touch_client_msg(channel.id, message.author.id)
 
-    # ─── Файл-чек (автоподтверждение) ───
+    # ─── ИСПРАВЛЕНИЕ: Если есть вложение и выставлен счёт, ЛЮБОЕ вложение = чек ───
     if message.attachments:
         sess = get_session(channel.id)
-        if not sess or not sess.get("invoice_sent"):
+        if sess and sess.get("invoice_sent"):
+            # Если ожидаем чек, полностью игнорируем текст и обрабатываем файл
+            await _auto_confirm_receipt(channel, message, sess)
             return
-        att = message.attachments[0]
-        low = att.filename.lower()
-        if not any(low.endswith(x) for x in (".png", ".jpg", ".jpeg", ".pdf")):
+        else:
+            # Если счёт не выставлен, игнорируем вложение, чтобы не спамить "Подключаюсь..."
+            # Можно добавить уведомление, что сначала нужен счёт, но лучше просто проигнорировать
             return
-        await _auto_confirm_receipt(channel, message, sess)
-        return
 
     text = (message.content or "").strip()
     if not text:
