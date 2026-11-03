@@ -506,7 +506,7 @@ async def on_ready():
 
         from modules.autoorder import setup_autoorder
         setup_autoorder(bot)
-        
+
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
         bot.add_view(TicketView())
@@ -854,9 +854,11 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in added)}",
                 color=0x00ff00
             )
+            # 👇 Клан выдаём ТОЛЬКО при получении Клуб-роли, не раньше
             try:
                 from clan.core import CLUB_ROLE_ID, assign_user_to_clan, get_user_clan
-                if any(r.id == CLUB_ROLE_ID for r in added) and not get_user_clan(after.id):
+                added_ids = {r.id for r in added}
+                if CLUB_ROLE_ID in added_ids and not get_user_clan(after.id):
                     assign_user_to_clan(after.id, after.guild)
             except Exception as e:
                 logger.warning(f"clan auto-assign on role: {e}")
@@ -1211,7 +1213,6 @@ async def on_message(message: disnake.Message):
             logger.warning(f"clan quest hook msg: {e}")
 
     await bot.process_commands(message)
-
 
 voice_track = {}
 
