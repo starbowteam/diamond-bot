@@ -4,7 +4,12 @@ import io, os, math
 from typing import Optional, List, Dict, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from core.utils import ADD_DIR, logger
-from core.render import *
+from core.render import (
+    _font, _icon, _tw, _ellipsis, _wrap, _fmt, _alpha_fill, _gradient_box, _draw_stack_panel, _draw_dashed_rect, _lighten,
+    BG, CARD_TOP, STACK_BG, STACK_BRD, STACK_HDR, INNER_BG, INNER_BRD, TEXT, TEXT_SOFT, MUTED, DIM, DARK, SILVER, SILVER_HI, SILVER_DIM, SILVER_BG, GREEN, RED, BLUE, PURPLE, GOLD, CARD_BRD, CANVAS_W, CANVAS_H, M, PAD_X, PAD_Y,
+    I_GEM, I_STAR, I_USER, I_IMAGE, I_BEZIER, I_SMILE, I_PEN_NIB, I_LAYERS, I_MASKS, I_TAG, I_BULLHORN, I_BOLT, I_DICE, I_GIFT, I_CART, I_BAG, I_COINS, I_TICKET, I_CLOCK, I_INFO, I_CHECK, I_CROWN, I_MIC, I_COMMENT, I_CHART, I_BRIEFCASE, I_ELLIPSIS, I_MONEY, I_CUBE, I_TROPHY, I_SHOP, I_ARROW_L,
+    base_canvas, draw_right_head, draw_footer
+)
 
 TYPE_FA = {"design": I_IMAGE, "ads": I_BULLHORN, "roles": I_MASKS, "discounts": I_TAG, "boosts": I_BOLT, "casino": I_DICE, "gifts": I_GIFT, "custom": I_CROWN, "Кастом": I_CROWN}
 
