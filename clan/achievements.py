@@ -86,6 +86,7 @@ CATEGORY_ORDER: List[str] = [c["key"] for c in CATEGORIES]
 # ДОСТИЖЕНИЯ — 48 штук
 # Порядок в словаре = порядок в сетке внутри категории.
 # Иконки — fa-solid (900.ttf).
+# reward — награда в DC за получение
 # ============================================================
 ACHIEVEMENTS: Dict[str, dict] = {
 
@@ -95,31 +96,35 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "Зайти на сервер впервые",
         "icon": "fa-seedling",
         "category": "base",
-        "rare": False,
+        "reward": 100,
     },
     "first_message": {
         "name": "Первое слово",
         "desc": "Написать первое сообщение в чате",
         "icon": "fa-comment",
         "category": "base",
+        "reward": 50,
     },
     "first_voice": {
         "name": "Голос",
         "desc": "Зайти в голосовой канал впервые",
         "icon": "fa-microphone",
         "category": "base",
+        "reward": 50,
     },
     "first_review": {
         "name": "Первый отзыв",
         "desc": "Оставить первый отзыв в канале",
         "icon": "fa-pen-fancy",
         "category": "base",
+        "reward": 100,
     },
     "first_purchase": {
         "name": "Первая покупка",
         "desc": "Купить товар в магазине за DC",
         "icon": "fa-cart-shopping",
         "category": "base",
+        "reward": 100,
     },
     "creator": {
         "name": "Создатель Diamond",
@@ -127,6 +132,7 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "icon": "fa-crown",
         "category": "base",
         "rare": True,
+        "reward": 1000,
     },
 
     # ─────────── 🛍 ПОКУПАТЕЛИ ───────────
@@ -135,36 +141,42 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "Получить роль Bronze Buyer (1-5 отзывов)",
         "icon": "fa-medal",
         "category": "buyers",
+        "reward": 100,
     },
     "role_silver": {
         "name": "Серебро",
         "desc": "Получить роль Silver Buyer (6-10 отзывов)",
         "icon": "fa-award",
         "category": "buyers",
+        "reward": 200,
     },
     "role_gold": {
         "name": "Золото",
         "desc": "Получить роль Gold Buyer (11-15 отзывов)",
         "icon": "fa-trophy",
         "category": "buyers",
+        "reward": 300,
     },
     "role_diamond": {
         "name": "Алмаз",
         "desc": "Получить роль Diamond Buyer (16-20 отзывов)",
         "icon": "fa-gem",
         "category": "buyers",
+        "reward": 500,
     },
     "role_crystalis": {
         "name": "Кристалис",
         "desc": "Получить роль Crystalis Buyer (21-25 отзывов)",
         "icon": "fa-diamond",
         "category": "buyers",
+        "reward": 700,
     },
     "role_pka": {
         "name": "Покупатель Века",
         "desc": "Получить роль PKA (26+ отзывов)",
         "icon": "fa-crown",
         "category": "buyers",
+        "reward": 1000,
     },
 
     # ─────────── 💰 ЭКОНОМИКА ───────────
@@ -173,36 +185,42 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "10 000 DC на балансе",
         "icon": "fa-coins",
         "category": "economy",
+        "reward": 100,
     },
     "rich_100k": {
         "name": "Сотня",
         "desc": "100 000 DC на балансе",
         "icon": "fa-sack-dollar",
         "category": "economy",
+        "reward": 300,
     },
     "rich_1m": {
         "name": "Миллионер",
         "desc": "1 000 000 DC на балансе",
         "icon": "fa-money-bill-wave",
         "category": "economy",
+        "reward": 1000,
     },
     "investor_5k": {
         "name": "Инвестор",
         "desc": "Потратить 5 000 DC в магазине",
         "icon": "fa-chart-line",
         "category": "economy",
+        "reward": 150,
     },
     "investor_100k": {
         "name": "Банкир",
         "desc": "Потратить 100 000 DC в магазине",
         "icon": "fa-building-columns",
         "category": "economy",
+        "reward": 500,
     },
     "generous_10k": {
         "name": "Щедрый",
         "desc": "Подарить 10 000 DC другим",
         "icon": "fa-gift",
         "category": "economy",
+        "reward": 200,
     },
 
     # ─────────── 💬 АКТИВНОСТЬ ───────────
@@ -211,36 +229,42 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "1 000 сообщений в чате",
         "icon": "fa-comments",
         "category": "activity",
+        "reward": 100,
     },
     "talker_10k": {
         "name": "Спамер",
         "desc": "10 000 сообщений в чате",
         "icon": "fa-bullhorn",
         "category": "activity",
+        "reward": 300,
     },
     "talker_100k": {
         "name": "Легенда чата",
         "desc": "100 000 сообщений в чате",
         "icon": "fa-fire",
         "category": "activity",
+        "reward": 1000,
     },
     "voice_100h": {
         "name": "Голос комьюнити",
         "desc": "100 часов в голосовых каналах",
         "icon": "fa-microphone",
         "category": "activity",
+        "reward": 200,
     },
     "voice_500h": {
         "name": "Голосовой маньяк",
         "desc": "500 часов в голосовых каналах",
         "icon": "fa-headphones",
         "category": "activity",
+        "reward": 500,
     },
     "reviewer_100": {
         "name": "Критик",
         "desc": "100 отзывов оставлено",
         "icon": "fa-scroll",
         "category": "activity",
+        "reward": 300,
     },
 
     # ─────────── 🏛 КЛАНЫ ───────────
@@ -249,36 +273,42 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "Внести DC в копилку клана",
         "icon": "fa-hand-holding-dollar",
         "category": "clan",
+        "reward": 50,
     },
     "clan_1k": {
         "name": "Тысячник",
         "desc": "1 000 DC вклада за сезон",
         "icon": "fa-coins",
         "category": "clan",
+        "reward": 100,
     },
     "clan_10k": {
         "name": "Мега-вклад",
         "desc": "10 000 DC вклада за сезон",
         "icon": "fa-gem",
         "category": "clan",
+        "reward": 300,
     },
     "clan_50k": {
         "name": "Клан-магнат",
         "desc": "50 000 DC вклада за сезон",
         "icon": "fa-crown",
         "category": "clan",
+        "reward": 1000,
     },
     "clan_champion": {
         "name": "Чемпион",
         "desc": "Выиграть сезон вместе с кланом",
         "icon": "fa-trophy",
         "category": "clan",
+        "reward": 500,
     },
     "clan_faithful": {
         "name": "Верный",
         "desc": "3 сезона в одном клане",
         "icon": "fa-shield-halved",
         "category": "clan",
+        "reward": 300,
     },
 
     # ─────────── 🎰 КАЗИНО ───────────
@@ -287,36 +317,42 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "Сыграть в монетку",
         "icon": "fa-coins",
         "category": "casino",
+        "reward": 20,
     },
     "casino_bj21": {
         "name": "Двадцать одно",
         "desc": "Блэкджек с двух карт",
         "icon": "fa-spade",
         "category": "casino",
+        "reward": 100,
     },
     "casino_jackpot": {
         "name": "Джекпот",
         "desc": "Мега-джекпот в рулетке",
         "icon": "fa-dice",
         "category": "casino",
+        "reward": 300,
     },
     "casino_100": {
         "name": "Азартный",
         "desc": "100 партий в казино",
         "icon": "fa-dice-five",
         "category": "casino",
+        "reward": 150,
     },
     "casino_1000": {
         "name": "Казино-магнат",
         "desc": "1 000 партий в казино",
         "icon": "fa-dice-six",
         "category": "casino",
+        "reward": 500,
     },
     "casino_highroller": {
         "name": "Хайроллер",
         "desc": "Ставка 10 000 DC за раз",
         "icon": "fa-money-bill-1-wave",
         "category": "casino",
+        "reward": 200,
     },
 
     # ─────────── 🎯 КВЕСТЫ ───────────
@@ -325,36 +361,42 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "Выполнить первый квест",
         "icon": "fa-check",
         "category": "quests",
+        "reward": 50,
     },
     "quest_10": {
         "name": "Новичок-охотник",
         "desc": "10 квестов выполнено",
         "icon": "fa-list",
         "category": "quests",
+        "reward": 100,
     },
     "quest_50": {
         "name": "Квест-охотник",
         "desc": "50 квестов выполнено",
         "icon": "fa-list-check",
         "category": "quests",
+        "reward": 300,
     },
     "quest_100": {
         "name": "Мастер квестов",
         "desc": "100 квестов выполнено",
         "icon": "fa-medal",
         "category": "quests",
+        "reward": 500,
     },
     "quest_200": {
         "name": "Гуру квестов",
         "desc": "200 квестов выполнено",
         "icon": "fa-star",
         "category": "quests",
+        "reward": 800,
     },
     "quest_500": {
         "name": "Легенда квестов",
         "desc": "500 квестов выполнено",
         "icon": "fa-trophy",
         "category": "quests",
+        "reward": 1500,
     },
 
     # ─────────── 👔 ПЕРСОНАЛ ───────────
@@ -363,36 +405,42 @@ ACHIEVEMENTS: Dict[str, dict] = {
         "desc": "Закрыть первый тикет",
         "icon": "fa-ticket",
         "category": "staff",
+        "reward": 100,
     },
     "staff_10_tickets": {
         "name": "Менеджер",
         "desc": "10 закрытых тикетов",
         "icon": "fa-briefcase",
         "category": "staff",
+        "reward": 300,
     },
     "staff_100_tickets": {
         "name": "Топ-менеджер",
         "desc": "100 закрытых тикетов",
         "icon": "fa-trophy",
         "category": "staff",
+        "reward": 1000,
     },
     "staff_perfect": {
         "name": "Идеальный сервис",
         "desc": "10 оценок 5/5 от покупателей",
         "icon": "fa-star",
         "category": "staff",
+        "reward": 200,
     },
     "staff_first_salary": {
         "name": "Первая зарплата",
         "desc": "Получить первую зарплату",
         "icon": "fa-sack-dollar",
         "category": "staff",
+        "reward": 100,
     },
     "staff_year": {
         "name": "Годовщина",
         "desc": "12 зарплат подряд",
         "icon": "fa-calendar-check",
         "category": "staff",
+        "reward": 500,
     },
 }
 
@@ -479,11 +527,30 @@ async def unlock_achievement(user_id: int, ach_key: str,
     cycle_id = cycle["id"] if cycle else 0
 
     cur.execute(
-        "INSERT INTO clan_achievements (user_id, ach_key, unlocked_at, season_id) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO clan_achievements (user_id, ach_key, unlocked_at, season_id, rewarded) "
+        "VALUES (?, ?, ?, ?, 0)",
         (user_id, ach_key, int(time.time()), cycle_id)
     )
     db.commit()
+
+    # 👇 НАЧИСЛЕНИЕ DC ЗА ДОСТИЖЕНИЕ
+    reward = ach.get("reward", 0)
+    if reward > 0:
+        try:
+            from modules.dc import add_dc
+            await add_dc(
+                user_id, reward,
+                f"Достижение: {ach['name']}",
+                notify=False, log=False, to_clan_pool=False
+            )
+            cur.execute(
+                "UPDATE clan_achievements SET rewarded=1 WHERE user_id=? AND ach_key=?",
+                (user_id, ach_key)
+            )
+            db.commit()
+            logger.info(f"💰 Выдано {reward} DC за достижение «{ach['name']}» (user {user_id})")
+        except Exception as e:
+            logger.warning(f"achievement reward {user_id}: {e}")
 
     logger.info(f"🏆 Достижение выдано: {user_id} → {ach['name']}")
 
@@ -494,7 +561,8 @@ async def unlock_achievement(user_id: int, ach_key: str,
             description=(
                 f"> **Пользователь:** <@{user_id}>\n"
                 f"> **Достижение:** {ach['name']}\n"
-                f"> **Описание:** {ach['desc']}"
+                f"> **Описание:** {ach['desc']}\n"
+                f"> **Награда:** `+{reward} DC`"
             ),
             color=0xffaa00,
             channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]
@@ -533,6 +601,7 @@ async def _send_achievement_dm(bot, user_id: int, ach_key: str):
         color = color_map.get(cat_color, 0xf7c991)
 
         cat_label = CATEGORY_MAP.get(cat_key, {}).get("label", "")
+        reward = ach.get("reward", 0)
 
         embed = disnake.Embed(
             title="🏆 Достижение разблокировано!",
@@ -540,6 +609,7 @@ async def _send_achievement_dm(bot, user_id: int, ach_key: str):
                 f"**{ach['name']}**\n"
                 f"> {ach['desc']}\n\n"
                 f"> Категория: **{cat_label}**\n"
+                f"> Награда: **+{reward} DC** 💰\n\n"
                 f"Продолжай в том же духе! 💎"
             ),
             color=color,
@@ -664,13 +734,13 @@ async def check_and_unlock(user_id: int, trigger: str, value: int = 0,
 
 
 # ============================================================
-# ПЕРЕСЧЁТ ВСЕХ
+# ПЕРЕСЧЁТ ВСЕХ + ВЫДАЧА DC
 # ============================================================
 async def recalculate_all_achievements(bot) -> Dict[str, int]:
     from clan.core import get_user_clan, get_user_contribution
     from modules.dc import get_dc_cache
 
-    stats = {"checked": 0, "errors": 0}
+    stats = {"checked": 0, "errors": 0, "dc_paid": 0}
 
     guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
     if not guild:
@@ -726,6 +796,42 @@ async def recalculate_all_achievements(bot) -> Dict[str, int]:
             stats["errors"] += 1
             continue
 
+    # 👇 ВЫДАЧА DC ЗА ВСЕ РАНЕЕ ПОЛУЧЕННЫЕ ДОСТИЖЕНИЯ
+    rows = cur.execute(
+        "SELECT user_id, ach_key FROM clan_achievements WHERE rewarded=0"
+    ).fetchall()
+
+    dc_paid = 0
+    for r in rows:
+        ach = ACHIEVEMENTS.get(r["ach_key"])
+        if not ach:
+            cur.execute("UPDATE clan_achievements SET rewarded=1 WHERE user_id=? AND ach_key=?",
+                        (r["user_id"], r["ach_key"]))
+            db.commit()
+            continue
+
+        reward = ach.get("reward", 0)
+        if reward <= 0:
+            cur.execute("UPDATE clan_achievements SET rewarded=1 WHERE user_id=? AND ach_key=?",
+                        (r["user_id"], r["ach_key"]))
+            db.commit()
+            continue
+
+        try:
+            from modules.dc import add_dc
+            await add_dc(
+                r["user_id"], reward,
+                f"Достижение: {ach['name']}",
+                notify=False, log=False, to_clan_pool=False
+            )
+            cur.execute("UPDATE clan_achievements SET rewarded=1 WHERE user_id=? AND ach_key=?",
+                        (r["user_id"], r["ach_key"]))
+            db.commit()
+            dc_paid += reward
+            stats["dc_paid"] += reward
+        except Exception as e:
+            logger.warning(f"recalc reward {r['user_id']}: {e}")
+
     logger.info(f"🏆 Пересчёт достижений: {stats}")
     return stats
 
@@ -734,5 +840,12 @@ async def recalculate_all_achievements(bot) -> Dict[str, int]:
 # ИНИЦИАЛИЗАЦИЯ
 # ============================================================
 def init_achievements():
-    """Заглушка для симметрии."""
-    pass
+    """Миграция БД: добавляем колонку rewarded, если её нет."""
+    try:
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(clan_achievements)").fetchall()]
+        if "rewarded" not in cols:
+            cur.execute("ALTER TABLE clan_achievements ADD COLUMN rewarded INTEGER DEFAULT 0")
+            db.commit()
+            logger.info("Миграция clan_achievements.rewarded добавлена")
+    except Exception as e:
+        logger.warning(f"Миграция rewarded: {e}")
