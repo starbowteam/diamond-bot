@@ -406,7 +406,7 @@ async def goto_purchases(inter: disnake.MessageInteraction):
 
 
 async def goto_daily(inter: disnake.MessageInteraction):
-    from modules.actions import refresh_daily_deal
+    from modules.systems import refresh_daily_deal
     user_id = inter.author.id
     balance = await get_user_balance(user_id)
     total_spent = _get_total_spent(user_id)
