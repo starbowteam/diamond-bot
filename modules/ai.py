@@ -697,7 +697,7 @@ def build_shop_block() -> str:
 def build_active_block() -> str:
     lines = []
     try:
-        from modules.actions import refresh_daily_deal
+        from modules.systems import refresh_daily_deal
         deal = refresh_daily_deal()
         if deal:
             item = deal.get("item_data", {})
@@ -974,7 +974,7 @@ async def build_digest_reply(user_id: int) -> str:
     parts = []
 
     try:
-        from modules.actions import refresh_daily_deal
+        from modules.systems import refresh_daily_deal
         deal = refresh_daily_deal()
         if deal:
             item = deal.get("item_data", {})
@@ -1510,7 +1510,7 @@ _last_auto_chat_ts = 0.0
 
 def build_auto_deal() -> Optional[str]:
     try:
-        from modules.actions import refresh_daily_deal
+        from modules.systems import refresh_daily_deal
         deal = refresh_daily_deal()
         if not deal:
             return None
