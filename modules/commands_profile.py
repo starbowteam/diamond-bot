@@ -257,7 +257,7 @@ class ProfileCardView(View):
             pass
 
         try:
-            from modules.achievements_views import render_category
+            from modules.systems import render_category
         except Exception as e:
             logger.exception(f"ach_btn import: {e}")
             return await _send_ephemeral_text(
