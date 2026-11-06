@@ -281,7 +281,7 @@ def build_quests_embeds(user_id: int):
         q["reward_cut"] = clan_cut(q["reward"])
 
     # 👇 ТОЛЬКО PILLOW — без первого embed с картинкой
-    e = disnake.Embed(color=clan["color"] if clan else 6776679)
+    e = disnake.Embed(color=6776679)
     file = None
 
     if render_quests is not None:
