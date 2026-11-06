@@ -65,9 +65,9 @@ WELCOME_BONUS_DC = 50
 MSK = timezone(timedelta(hours=3))
 
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6abdd8e3&is=6abc8763&hm=103c4a69ce7a0e770b41ad99b7b1fcfab93163979bbe3f15b435645bcbb7e098&"
-IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1551608259230695595/image.png?ex=6ab2974c&is=6ab145cc&hm=a6e78b3cb2686d6c61fcf7e618564c04c557856b1af501eb26bf9015793e8a93&"
-IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1551572210811011142/image.png?ex=6ab275b9&is=6ab12439&hm=7d8e471545619f792391577a7a0bf5335995f759c5c8b09534ac840b881fc806&"
-IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1556733201970626732/image.png?backend=b2&ex=6ac5e506&is=6ac49386&hm=574cd55b0658621f44bee53d8ed386f3b7e7372997e73326c327efef482daca5&"
+IMG_ORDER_PAID = "https://cdn.discordapp.com/attachments/1527006158282555412/1568108629658439761/image.png?ex=6aee9e77&is=6aed4cf7&hm=e0c0b2dceadc5edcac43fe753290a362b4834110b7435333245ace3532a15cce&"
+IMG_UNUSED = "https://cdn.discordapp.com/attachments/1527006158282555412/1568106139848015882/image.png?ex=6aee9c25&is=6aed4aa5&hm=87e34b069b3a8d8d8fb1d1a27327d730514eac53e1d887930af63129a805875e&"
+IMG_WELCOME = "https://cdn.discordapp.com/attachments/1527006158282555412/1568106061511262391/image.png?ex=6aee9c13&is=6aed4a93&hm=df11eacac56b15d45b13a10be7f2b6a6cd6f6e4e44ec856538a67c71fe3f8163&"
 
 SALARY_STATE_FILE = os.path.join(DATA_DIR, "salary_state.json")
 
