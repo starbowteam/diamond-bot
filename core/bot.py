@@ -482,7 +482,7 @@ async def on_ready():
         await bot.change_presence(activity=disnake.Game(name="Магазин и экономика"))
 
         try:
-            from modules.giveaways import setup_giveaways
+            from modules.systems import setup_giveaways
             setup_giveaways(bot)
             logger.info("🎁 Модуль розыгрышей подключён")
         except Exception as e:
@@ -1155,7 +1155,7 @@ async def on_message(message: disnake.Message):
 
         # 👇 ВЫПЛАТА ПРИЗОВ ЗА ШАБЛОННЫЕ РОЗЫГРЫШИ (после отзыва)
         try:
-            from modules.giveaways import process_pending_payouts
+            from modules.systems import process_pending_payouts
             paid = await process_pending_payouts(bot, user_id)
             if paid > 0:
                 logger.info(f"💰 Призы за розыгрыши выплачены: {user_id} → {paid} DC")
