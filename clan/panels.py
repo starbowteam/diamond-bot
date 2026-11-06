@@ -507,7 +507,7 @@ async def _clan_games_select_callback(inter: disnake.MessageInteraction):
         await show_cases_screen(inter)
         return
         
-    from modules.actions import RouletteModal, BlackjackBetModal, CoinflipBetModal
+    from modules.systems import RouletteModal, BlackjackBetModal, CoinflipBetModal
 
     if value == "roulette":
         await inter.response.send_modal(RouletteModal())
