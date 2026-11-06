@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Tupl
+from typing import Optional, List, Dict, Any, Tuple
 
 import aiohttp
 import disnake
