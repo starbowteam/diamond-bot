@@ -718,7 +718,7 @@ class QuestionTicketView(View):
     @disnake.ui.button(label="ㅤКак правильно задать вопрос?ㅤ", style=disnake.ButtonStyle.gray, custom_id="question:howto", emoji=PartialEmoji(name="pravil", id=1544388874497687622), row=0)
     async def howto(self, button: Button, inter: disnake.MessageInteraction):
         embed1 = disnake.Embed(color=6776679)
-        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1544387485684203682/image.png?ex=6a98526d&is=6a9700ed&hm=e6eb0b7ec153c23c7d63cb3fe64a405c56dee64cc9edbe9792cd69bfe7e4fe3b&")
+        embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1568105863682465915/image.png?ex=6aee9be3&is=6aed4a63&hm=aadbca44ed60deab2a17324238c1735c985214a7a10270b3344d4bfd6033dca4&")
         embed2 = disnake.Embed(title="Как правильно задать вопрос?", description="> Чтобы правильно задать вопрос, нужно сформулировать его чётко, кратко и без скрытых подсказок, указав суть проблемы и ожидаемый результат.\n\n> Основные правила сильного вопроса\n\n`Определите цель: `Поймите, какая информация вам нужна.\n`Говорите просто: `Избегайте сложных терминов и длинных конструкций.\n`Избегайте наводок:` Не подталкивайте собеседника к нужному вам ответу.\n`Используйте открытые вопросы:` Начинайте со слов «что», «как» и тд. чтобы получить развёрнутый ответ.\n`Добавляйте контекст:` Если это технический вопрос или обращение на форум, опишите проблему, что вы уже сделали и какой результат ожидали.", color=6776679)
         embed2.set_image(url=_IMG_STRIPE)
         await inter.response.send_message(embeds=[embed1, embed2])
