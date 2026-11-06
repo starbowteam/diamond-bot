@@ -1238,26 +1238,73 @@ def fix_content(content: str) -> tuple[str, int]:
     return new_content, count
 
 def run_fix(verbose: bool = True) -> dict:
-    stats = {"scanned": 0, "changed": 0, "total_replacements": 0, "files": []}
+    # Регулярки для замены старых импортов на новый единый модуль
+    MODULE_REPLACEMENTS = [
+        (re.compile(r"from\s+modules\.actions\b"), "from modules.systems"),
+        (re.compile(r"from\s+modules\.giveaways\b"), "from modules.systems"),
+        (re.compile(r"from\s+modules\.others\b"), "from modules.systems"),
+        (re.compile(r"from\s+modules\.achievements_panel\b"), "from modules.systems"),
+        (re.compile(r"from\s+modules\.achievements_views\b"), "from modules.systems"),
+        (re.compile(r"from\s+modules\.casino_render\b"), "from modules.systems"),
+    ]
+
+    stats = {
+        "scanned": 0,
+        "changed": 0,
+        "total_replacements": 0,
+        "imports_replaced": 0,
+        "files": []
+    }
+
     for root, dirs, files in os.walk(BASE_DIR_FIX):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+
         for fname in files:
             path = Path(root) / fname
-            if should_skip(path): continue
+            if should_skip(path):
+                continue
+
             stats["scanned"] += 1
+
             try:
-                with open(path, "r", encoding="utf-8") as f: content = f.read()
-            except (UnicodeDecodeError, PermissionError, IsADirectoryError): continue
-            new_content, count = fix_content(content)
-            if count == 0: continue
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except (UnicodeDecodeError, PermissionError, IsADirectoryError):
+                continue
+
+            # 1. Чиним ссылки Stripe
+            new_content, stripe_count = fix_content(content)
+            
+            # 2. Чиним старые импорты
+            import_count = 0
+            for regex, replacement in MODULE_REPLACEMENTS:
+                if regex.search(new_content):
+                    import_count += len(regex.findall(new_content))
+                    new_content = regex.sub(replacement, new_content)
+
+            if stripe_count == 0 and import_count == 0:
+                continue
+
             try:
-                with open(path, "w", encoding="utf-8") as f: f.write(new_content)
-                stats["changed"] += 1; stats["total_replacements"] += count
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+
+                stats["changed"] += 1
+                stats["total_replacements"] += stripe_count
+                stats["imports_replaced"] += import_count
                 rel = str(path.relative_to(BASE_DIR_FIX))
-                stats["files"].append((rel, count))
-                if verbose: print(f"  ✅ {rel} — {count} замен")
+                stats["files"].append((rel, stripe_count, import_count))
+
+                if verbose:
+                    if stripe_count > 0:
+                        print(f"  ✅ {rel} — {stripe_count} ссылок Stripe")
+                    if import_count > 0:
+                        print(f"  🔄 {rel} — {import_count} импортов")
+
             except Exception as e:
-                if verbose: print(f"  ❌ {path}: {e}")
+                if verbose:
+                    print(f"  ❌ {path}: {e}")
+
     return stats
 
 
