@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Точка входа. Запускает ТРИ бота:
+Единая точка входа. Запускает ТРИ бота в одном процессе:
   · Основной (BOT_TOKEN)
   · AI-консультант (AI_TOKEN)
   · AI-менеджер (AI_MANAGER_TOKEN)
 """
 import os
 import sys
-import atexit
+import asyncio
 import signal
-import subprocess
+import logging
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
@@ -24,75 +24,40 @@ try:
 except Exception as e:
     print(f"⚠️ fix_stripe: {e}")
 
-from core.bot import bot, CONFIG
+# Импортируем ботов и их токены
+from core.bot import bot as main_bot, CONFIG
 from core.utils import logger
 from modules.commands_staff import setup_commands_staff
 
+# Отключаем лишний спам от disnake в консоли
+logging.getLogger("disnake").setLevel(logging.WARNING)
 
-# ============================================================
-# SUBPROCESSES
-# ============================================================
-_ai_proc: subprocess.Popen = None
-_ai_manager_proc: subprocess.Popen = None
+# Безопасный импорт AI
+try:
+    from modules.ai import bot as ai_bot, AI_TOKEN
+except ImportError as e:
+    logger.error(f"Ошибка импорта AI: {e}")
+    ai_bot = None
+    AI_TOKEN = None
 
+# Безопасный импорт AI-менеджера
+try:
+    from modules.ai_manager import bot as ai_manager_bot, AI_MANAGER_TOKEN, AI_MANAGER_API_KEY
+except ImportError as e:
+    logger.error(f"Ошибка импорта AI Manager: {e}")
+    ai_manager_bot = None
+    AI_MANAGER_TOKEN = None
+    AI_MANAGER_API_KEY = None
 
-def _start_subprocess(script: str, name: str, env_key: str):
-    if not os.getenv(env_key):
-        print(f"⚠️ {env_key} не установлен — {name} не будет запущен")
-        return None
-    try:
-        proc = subprocess.Popen(
-            [sys.executable, "-u", script],
-            cwd=BASE_DIR,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-        )
-        print(f"✅ {name} запущен (PID: {proc.pid})")
-        return proc
-    except Exception as e:
-        logger.exception(f"Не удалось запустить {name}: {e}")
-        return None
-
-
-def _stop_subprocess(proc, name: str):
-    if proc is None:
-        return
-    if proc.poll() is not None:
-        return
-    try:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=3)
-        print(f"🛑 {name} остановлен")
-    except Exception as e:
-        logger.warning(f"_stop_subprocess({name}): {e}")
-
-
-def _stop_all():
-    _stop_subprocess(_ai_proc, "AI-консультант")
-    _stop_subprocess(_ai_manager_proc, "AI-менеджер")
-
-
-def _sigterm_handler(signum, frame):
-    _stop_all()
-    sys.exit(0)
-
-
-# ============================================================
-# RUN
-# ============================================================
-if __name__ == "__main__":
-    setup_commands_staff(bot)
+async def start_all():
+    setup_commands_staff(main_bot)
 
     if not CONFIG["BOT_TOKEN"]:
         logger.error("BOT_TOKEN не установлен")
         print("❌ Ошибка: не установлен BOT_TOKEN")
         sys.exit(1)
 
-    # ─── Автоинициализация каталога (создаст файл и загрузит в БД) ───
+    # ─── Автоинициализация каталога ───
     try:
         from core.catalog import auto_init
         _catalog_count = auto_init()
@@ -100,18 +65,68 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning(f"auto_init catalog: {e}")
 
-    _ai_proc = _start_subprocess("ai_main.py", "AI-консультант", "AI_TOKEN")
-    _ai_manager_proc = _start_subprocess("ai_manager_main.py", "AI-менеджер", "AI_MANAGER_TOKEN")
+    tasks = []
 
-    atexit.register(_stop_all)
-    signal.signal(signal.SIGTERM, _sigterm_handler)
+    # 1. Основной бот
+    tasks.append(main_bot.start(CONFIG["BOT_TOKEN"]))
+    print("⏳ Запуск основного бота...")
+
+    # 2. AI-консультант
+    if ai_bot and AI_TOKEN:
+        tasks.append(ai_bot.start(AI_TOKEN))
+        print("⏳ Запуск AI-консультанта...")
+    else:
+        print("⚠️ AI_TOKEN не установлен — AI-консультант не запущен")
+
+    # 3. AI-менеджер
+    if ai_manager_bot and AI_MANAGER_TOKEN and AI_MANAGER_API_KEY:
+        tasks.append(ai_manager_bot.start(AI_MANAGER_TOKEN))
+        print("⏳ Запуск AI-менеджера...")
+    else:
+        print("⚠️ AI_MANAGER_TOKEN или AI_MANAGER_API_KEY не установлен — AI-менеджер не запущен")
+
+    if not tasks:
+        print("❌ Нет активных ботов для запуска.")
+        return
+
+    # Запускаем все задачи параллельно. 
+    # return_exceptions=True не даст одному упавшему боту убить остальные.
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Если мы дошли сюда, значит один из ботов упал или завершился
+    for i, res in enumerate(results):
+        if isinstance(res, Exception):
+            logger.error(f"Бот упал с ошибкой: {res}")
+
+def main():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    main_task = loop.create_task(start_all())
+
+    def shutdown():
+        print("\n🛑 Остановка всех ботов...")
+        for task in asyncio.all_tasks(loop):
+            task.cancel()
+        loop.stop()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, shutdown)
+        except NotImplementedError:
+            pass # Для Windows
 
     try:
-        bot.run(CONFIG["BOT_TOKEN"])
+        loop.run_until_complete(main_task)
+    except asyncio.CancelledError:
+        pass
     except KeyboardInterrupt:
         print("\n🛑 Остановлено пользователем")
     except Exception as e:
-        logger.exception("Ошибка запуска бота: %s", e)
-        raise
+        logger.exception(f"Критическая ошибка: {e}")
     finally:
-        _stop_all()
+        print("Завершение работы...")
+        loop.close()
+
+if __name__ == "__main__":
+    main()
