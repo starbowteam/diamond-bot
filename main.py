@@ -9,7 +9,6 @@
 import os
 import sys
 import asyncio
-import signal
 import logging
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,32 +23,16 @@ try:
 except Exception as e:
     print(f"⚠️ fix_stripe: {e}")
 
-# Импортируем ботов и их токены
+# Импортируем только основного бота и утилиты на верхнем уровне
 from core.bot import bot as main_bot, CONFIG
 from core.utils import logger
 from modules.commands_staff import setup_commands_staff
 
-# Отключаем лишний спам от disnake в консоли
+# Отключаем спам от disnake в консоли
 logging.getLogger("disnake").setLevel(logging.WARNING)
 
-# Безопасный импорт AI
-try:
-    from modules.ai import bot as ai_bot, AI_TOKEN
-except ImportError as e:
-    logger.error(f"Ошибка импорта AI: {e}")
-    ai_bot = None
-    AI_TOKEN = None
-
-# Безопасный импорт AI-менеджера
-try:
-    from modules.ai_manager import bot as ai_manager_bot, AI_MANAGER_TOKEN, AI_MANAGER_API_KEY
-except ImportError as e:
-    logger.error(f"Ошибка импорта AI Manager: {e}")
-    ai_manager_bot = None
-    AI_MANAGER_TOKEN = None
-    AI_MANAGER_API_KEY = None
-
 async def start_all():
+    # Настраиваем команды для основного бота
     setup_commands_staff(main_bot)
 
     if not CONFIG["BOT_TOKEN"]:
@@ -66,67 +49,55 @@ async def start_all():
         logger.warning(f"auto_init catalog: {e}")
 
     tasks = []
-
+    
     # 1. Основной бот
     tasks.append(main_bot.start(CONFIG["BOT_TOKEN"]))
     print("⏳ Запуск основного бота...")
 
-    # 2. AI-консультант
-    if ai_bot and AI_TOKEN:
-        tasks.append(ai_bot.start(AI_TOKEN))
-        print("⏳ Запуск AI-консультанта...")
-    else:
-        print("⚠️ AI_TOKEN не установлен — AI-консультант не запущен")
+    # 2. AI-консультант (импорт внутри запущенного цикла!)
+    try:
+        from modules.ai import bot as ai_bot, AI_TOKEN
+        if ai_bot and AI_TOKEN:
+            tasks.append(ai_bot.start(AI_TOKEN))
+            print("⏳ Запуск AI-консультанта...")
+        else:
+            print("⚠️ AI_TOKEN не установлен — AI-консультант не запущен")
+    except ImportError as e:
+        logger.error(f"Ошибка импорта AI: {e}")
 
-    # 3. AI-менеджер
-    if ai_manager_bot and AI_MANAGER_TOKEN and AI_MANAGER_API_KEY:
-        tasks.append(ai_manager_bot.start(AI_MANAGER_TOKEN))
-        print("⏳ Запуск AI-менеджера...")
-    else:
-        print("⚠️ AI_MANAGER_TOKEN или AI_MANAGER_API_KEY не установлен — AI-менеджер не запущен")
+    # 3. AI-менеджер (импорт внутри запущенного цикла!)
+    try:
+        from modules.ai_manager import bot as ai_manager_bot, AI_MANAGER_TOKEN, AI_MANAGER_API_KEY
+        if ai_manager_bot and AI_MANAGER_TOKEN and AI_MANAGER_API_KEY:
+            tasks.append(ai_manager_bot.start(AI_MANAGER_TOKEN))
+            print("⏳ Запуск AI-менеджера...")
+        else:
+            print("⚠️ AI_MANAGER_TOKEN или API_KEY не установлен — AI-менеджер не запущен")
+    except ImportError as e:
+        logger.error(f"Ошибка импорта AI Manager: {e}")
 
     if not tasks:
         print("❌ Нет активных ботов для запуска.")
         return
 
-    # Запускаем все задачи параллельно. 
-    # return_exceptions=True не даст одному упавшему боту убить остальные.
+    print("✅ Все боты отправлены на подключение. Ожидание событий...\n")
+    
+    # Запускаем параллельно. Если один упадет, остальные продолжат работу.
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Если мы дошли сюда, значит один из ботов упал или завершился
+    # Если один из ботов упал, логируем это
     for i, res in enumerate(results):
         if isinstance(res, Exception):
-            logger.error(f"Бот упал с ошибкой: {res}")
+            logger.error(f"Один из ботов упал с ошибкой: {res}")
 
 def main():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    main_task = loop.create_task(start_all())
-
-    def shutdown():
-        print("\n🛑 Остановка всех ботов...")
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
-        loop.stop()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, shutdown)
-        except NotImplementedError:
-            pass # Для Windows
-
     try:
-        loop.run_until_complete(main_task)
-    except asyncio.CancelledError:
-        pass
+        # asyncio.run сам создает нужный цикл, запускает корутину и корректно закрывает цикл
+        asyncio.run(start_all())
     except KeyboardInterrupt:
-        print("\n🛑 Остановлено пользователем")
+        print("\n🛑 Остановлено пользователем (Ctrl+C)")
     except Exception as e:
-        logger.exception(f"Критическая ошибка: {e}")
-    finally:
-        print("Завершение работы...")
-        loop.close()
+        logger.exception(f"Критическая ошибка при запуске: {e}")
 
 if __name__ == "__main__":
     main()
