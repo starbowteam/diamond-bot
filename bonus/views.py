@@ -132,7 +132,7 @@ async def _build_payload(inter, screen):
 
     if screen == "deal":
         balance = await get_user_balance(user_id)
-        from modules.actions import refresh_daily_deal
+        from modules.systems import refresh_daily_deal
         deal = refresh_daily_deal()
         import time as _t
         slot_sec = 5 * 3600
