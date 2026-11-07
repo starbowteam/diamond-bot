@@ -20,9 +20,9 @@
       "character": {"name": "Персонаж в стилистике Diamond",   "price": 600, "description": "Уникальный арт-персонаж в стилистике Даймонда"}
     }
   },
-  "roles": {
-    "label": "🎭 Особые роли",
-    "description": "Временные и постоянные роли",
+  "roles_auto": {
+    "label": "⚡ Статусные роли",
+    "description": "Роли с автоматической выдачей сразу после покупки",
     "items": {
       "role_active":          {"name": "Роль «Активный»",                 "price": 90,  "description": "Постоянная роль «Активный»", "role_id": 1533140263789395998},
       "role_helper":          {"name": "Роль «Помощник»",                 "price": 120, "description": "Роль «Помощник» (навсегда)", "role_id": 1536948551265812551},
@@ -30,13 +30,16 @@
       "role_mega":            {"name": "Роль «Мега-активный»",            "price": 180, "description": "Роль «Мега-активный»",        "role_id": 1536948737514151976},
       "role_legend":          {"name": "Роль «Легенда»",                  "price": 210, "description": "Легендарная роль",            "role_id": 1535638212557541438},
       "role_newbie":          {"name": "Роль «Новичок месяца»",           "price": 225, "description": "Роль для новичков",           "role_id": 1536948841394212934},
-
-      "role_dc_magnate":      {"name": "Роль «DC-Магнат»",                "price": 500, "description": "Роль для магнатов валюты",    "role_id": 1555987193502236792},
-
       "role_crystalized":     {"name": "Роль «Кристализированный»",        "price": 120, "description": "Особая роль от Diamond",       "role_id": 1553243214750687322},
       "role_mega_buyer":      {"name": "Роль «Мега-Скупщик»",             "price": 120, "description": "Особая роль от Diamond",       "role_id": 1553243179296366652},
-      "role_reseller":        {"name": "Роль «Перекуп»",                  "price": 120, "description": "Особая роль от Diamond",       "role_id": 1553243215870558269},
-
+      "role_reseller":        {"name": "Роль «Перекуп»",                  "price": 120, "description": "Особая роль от Diamond",       "role_id": 1553243215870558269}
+    }
+  },
+  "roles_custom": {
+    "label": "👑 Особые роли",
+    "description": "Элитные роли и создание кастомных",
+    "items": {
+      "role_dc_magnate":      {"name": "Роль «DC-Магнат»",                "price": 1000, "description": "Роль для магнатов валюты",    "role_id": 1555987193502236792},
       "custom_role":          {"name": "Кастомная роль",                  "price": 315, "description": "Создание индивидуальной роли (выдача вручную)"},
       "custom_role_emoji":    {"name": "Кастомная роль с эмодзи в списке", "price": 390, "description": "Создание индивидуальной роли и эмодзи к ней (выдача вручную)"}
     }
