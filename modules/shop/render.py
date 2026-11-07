@@ -110,6 +110,7 @@ I_CUBE       = 0xf1b2
 I_SHOP       = 0xf54f
 I_TAG        = 0xf02b
 I_MASKS      = 0xf630
+I_CROWN      = 0xf521
 I_IMAGE      = 0xf03e
 I_SMILE      = 0xf118
 I_PEN_NIB    = 0xf5ad
@@ -119,14 +120,17 @@ I_HOURGLASS  = 0xf252
 I_SACK       = 0xf81d
 I_WALLET     = 0xf555
 I_SEARCH     = 0xf002
-I_CROWN      = 0xf521
 
+
+# 👇 ОБНОВЛЕНО: Добавлены иконки для рекламы (Рупор)
 CATEGORY_FA = {
     "discounts":    I_TAG,
     "design":       I_PALETTE,
-    "ads":          I_BULLHORN,
     "roles_auto":   I_MASKS,
     "roles_custom": I_CROWN,
+    "ads_forever":  I_BULLHORN,
+    "ads_24h":      I_BULLHORN,
+    "ads_personal": I_BULLHORN,
     "gifts":        I_GIFT,
 }
 
@@ -276,9 +280,6 @@ def _draw_dashed_rect(d, box, radius, color, dash=8, gap=6, width=2):
     d.arc((x2 - 2 * r, y2 - 2 * r, x2, y2), 0, 90, fill=color, width=width)
 
 
-# ============================================================
-# КАРКАС
-# ============================================================
 CANVAS_W, CANVAS_H = 1800, 1000
 M = 14
 PAD_X = 40
@@ -331,9 +332,6 @@ def _draw_footer(d, left_text: str, page: str):
     d.text((CANVAS_W - M - PAD_X - pw, y), page, font=_font(15), fill=DIM)
 
 
-# ============================================================
-# ЛЕВАЯ ПАНЕЛЬ
-# ============================================================
 def _draw_left_panel(img, d, box, user_id, balance, total_spent,
                      extra_blocks: List[Dict] = None):
     _draw_stack_panel(img, d, box, radius=22)
@@ -421,9 +419,6 @@ def _draw_left_panel(img, d, box, user_id, balance, total_spent,
             d.text((tx, by1 + 40), bv_shown, font=val_font, fill=bcolor)
 
 
-# ============================================================
-# ПРАВЫЙ ЗАГОЛОВОК
-# ============================================================
 def _draw_right_head(d, x1, y1, x2, title: str, sub: str):
     d.rounded_rectangle((x1, y1 + 4, x1 + 6, y1 + 46), radius=3,
                         fill=SILVER + (255,))
@@ -433,9 +428,6 @@ def _draw_right_head(d, x1, y1, x2, title: str, sub: str):
     d.line((x1, y1 + 62, x2, y1 + 62), fill=STACK_HDR + (255,), width=2)
 
 
-# ============================================================
-# ПЛИТКА КАТЕГОРИИ
-# ============================================================
 def _draw_category_tile(d, img, x, y, w, h,
                         cat_key, label, count, min_price, description,
                         active=False):
@@ -510,15 +502,11 @@ def _draw_category_tile(d, img, x, y, w, h,
     _draw_icon(d, x + w - pad - 12, foot_y + 10, I_ARROW_L, 18, DIM)
 
 
-# ============================================================
-# ПЛИТКА ТОВАРА
-# ============================================================
 def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
     owned = bool(item.get("owned"))
     pad = 22
 
     if owned:
-        # Красный фон + рамка
         _gradient_box(img, (x, y, x + w, y + h), RED, RED, alpha=8, radius=18)
         d.rounded_rectangle((x, y, x + w, y + h), radius=18,
                             outline=RED + (170,), width=3)
@@ -599,9 +587,7 @@ def _draw_item_tile(d, img, x, y, w, h, item, balance, active=False):
                         outline=badge_color + (180,), width=2)
     d.text((bx + bpad, by + 9), badge_text, font=bf, fill=badge_color)
 
-# ============================================================
-# СТРОКА ОПЕРАЦИИ
-# ============================================================
+
 def _draw_operation_row(d, img, x, y, w, h, op):
     d.rounded_rectangle((x, y, x + w, y + h), radius=14,
                         fill=INNER_BG + (255,),
@@ -660,9 +646,6 @@ def _draw_operation_row(d, img, x, y, w, h, op):
     d.text((rx, y + h // 2 - 18), amt_str, font=amt_f, fill=accent)
 
 
-# ============================================================
-# СТРОКА ПОКУПКИ
-# ============================================================
 def _draw_purchase_row(d, img, x, y, w, h, p):
     d.rounded_rectangle((x, y, x + w, y + h), radius=14,
                         fill=INNER_BG + (255,),
@@ -703,9 +686,6 @@ def _draw_purchase_row(d, img, x, y, w, h, p):
     d.text((bx + 16, by + 10), badge_text, font=bf, fill=GREEN)
 
 
-# ============================================================
-# ЭКРАН 1: КАТЕГОРИИ
-# ============================================================
 def render_categories(user_id, balance, total_spent, categories, total_items=0):
     img, d = _base_canvas(user_id, "витрина · dc")
 
@@ -781,9 +761,6 @@ def render_categories(user_id, balance, total_spent, categories, total_items=0):
     return buf
 
 
-# ============================================================
-# ЭКРАН 2: ТОВАРЫ (с пагинацией)
-# ============================================================
 def render_products(user_id, balance, total_spent,
                     category_key, category_label, items,
                     page: int = 0, total_pages: int = 1,
@@ -804,7 +781,6 @@ def render_products(user_id, balance, total_spent,
     affordable = sum(1 for it in items if balance >= it["price"] and not it.get("owned"))
     min_price = min((it["price"] for it in items), default=0)
 
-    # Левая панель — блоки зависят от категории
     if is_roles_category and owned_count > 0:
         left_blocks = [
             {
@@ -885,10 +861,7 @@ def render_products(user_id, balance, total_spent,
     img.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
     return buf
-                        
-# ============================================================
-# ЭКРАН 3: КАРТОЧКА ТОВАРА
-# ============================================================
+
 
 def render_detail(user_id, balance, total_spent,
                   category_key, category_label, item):
@@ -909,7 +882,6 @@ def render_detail(user_id, balance, total_spent,
     can_afford = balance >= price
     missing = max(price - balance, 0)
 
-    # ─── Левая панель ───
     blocks = [
         {
             "label": "Навигация",
@@ -942,7 +914,6 @@ def render_detail(user_id, balance, total_spent,
     rx1 = right_x1 + 30
     rx2 = right_x2 - 30
 
-    # ─── Заголовок ───
     if owned:
         head_sub = "уже у тебя на аккаунте"
     elif can_afford:
@@ -954,7 +925,6 @@ def render_detail(user_id, balance, total_spent,
                      "Информация о товаре",
                      head_sub)
 
-    # ─── Верхний блок: иконка + имя + описание ───
     top_y = body_y + 110
     icon_size = 220
     ix = rx1
@@ -994,7 +964,6 @@ def render_detail(user_id, balance, total_spent,
     for i, line in enumerate(lines):
         d.text((tx, iy + 145 + i * 26), line, font=desc_font, fill=TEXT_SOFT)
 
-    # ─── Спек-блок: ЦЕНА / НАЛИЧИЕ / СРОК ───
     spec_y = iy + icon_size + 28
     spec_h = 110
     spec_x1 = rx1
@@ -1030,7 +999,6 @@ def render_detail(user_id, balance, total_spent,
                     spec_x1 + (i + 1) * cell_w, spec_y + spec_h - 24),
                    fill=INNER_BRD + (255,), width=2)
 
-    # ─── Финальный блок: красный если owned, зелёный если купить, красный если не хватает ───
     foot_y = spec_y + spec_h + 24
     foot_h = 100
 
@@ -1068,7 +1036,6 @@ def render_detail(user_id, balance, total_spent,
                "Заработай DC активностью или выбери другой товар",
                font=_font(14), fill=RED)
 
-    # ─── Футер ───
     if owned:
         footer_text = "Роль уже у тебя — повторная покупка невозможна"
     else:
@@ -1081,9 +1048,6 @@ def render_detail(user_id, balance, total_spent,
     return buf
 
 
-# ============================================================
-# ЭКРАН 4: МОИ ПОКУПКИ
-# ============================================================
 def render_purchases(user_id, balance, total_spent, purchases):
     img, d = _base_canvas(user_id, "витрина · dc")
 
@@ -1159,9 +1123,6 @@ def render_purchases(user_id, balance, total_spent, purchases):
     return buf
 
 
-# ============================================================
-# ЭКРАН 5: АКЦИЯ ДНЯ
-# ============================================================
 def render_daily_deal(user_id, balance, total_spent, deal, hours_left):
     img, d = _base_canvas(user_id, "акция дня")
 
@@ -1224,7 +1185,6 @@ def render_daily_deal(user_id, balance, total_spent, deal, hours_left):
                         rx2 - rx1, deal_h, deal, balance)
         extra_y = body_y + 100 + deal_h + 20
 
-    # ---- ИНФО-БЛОК ----
     d.text((rx1, extra_y), "КАК РАБОТАЕТ АКЦИЯ", font=_font(15), fill=MUTED)
     d.line((rx1, extra_y + 28, rx2, extra_y + 28),
            fill=STACK_HDR + (255,), width=2)
@@ -1261,7 +1221,6 @@ def render_daily_deal(user_id, balance, total_spent, deal, hours_left):
         d.text((ib_x + icon_size + 12, tiles_y + 36),
                v, font=_font(20), fill=TEXT)
 
-    # Условия
     note_y = tiles_y + tile_h + 14
     note_h = body_y + body_h - 30 - note_y
     if note_h >= 70:
@@ -1380,9 +1339,6 @@ def _draw_deal_card(d, img, x, y, w, h, deal, balance):
            font=_font(13), fill=DIM)
 
 
-# ============================================================
-# ЭКРАН 6: ИСТОРИЯ ПОКУПОК
-# ============================================================
 def render_history(user_id, balance, total_spent, history):
     img, d = _base_canvas(user_id, "история dc")
 
@@ -1460,9 +1416,6 @@ def render_history(user_id, balance, total_spent, history):
     return buf
 
 
-# ============================================================
-# ЭКРАН 7: УСПЕШНАЯ ПОКУПКА
-# ============================================================
 def render_success(user_id, balance, total_spent, outcome):
     img, d = _base_canvas(user_id, outcome.get("uid_label", "покупка"))
 
