@@ -84,10 +84,10 @@ def save_salary_state(state: dict):
     save_json(SALARY_STATE_FILE, state)
 
 SALARY_ROLES = {
-    1471844291595731016: {"advance": 750, "salary": 1750},
-    1513935883475226796: {"advance": 550, "salary": 1250},
-    1154757071330365490: {"advance": 550, "salary": 1250},
-    1457964854441672806: {"advance": 375, "salary": 875},
+    1471844291595731016: {"advance": 1275, "salary": 2975},
+    1513935883475226796: {"advance": 935,  "salary": 2125},
+    1154757071330365490: {"advance": 935,  "salary": 2125},
+    1457964854441672806: {"advance": 638,  "salary": 1488},
 }
 
 SALARY_ROLE_ORDER = [
