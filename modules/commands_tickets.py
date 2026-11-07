@@ -152,12 +152,13 @@ def _is_coins_ticket(channel: disnake.TextChannel) -> bool:
         return False
     return channel.category.id == CONFIG["COINS_CATEGORY_ID"]
 
+# 👇 ОБНОВЛЕНО: теперь ищем и в roles_auto, и в roles_custom
 def _get_auto_role_names() -> set:
     try:
         catalog = load_shop_catalog()
         names = set()
         for cat_key, cat_data in catalog.items():
-            if cat_key != "roles":
+            if not cat_key.startswith("roles"):
                 continue
             for item_key, item_data in cat_data.get("items", {}).items():
                 if item_data.get("role_id"):
@@ -167,13 +168,14 @@ def _get_auto_role_names() -> set:
         logger.warning(f"_get_auto_role_names err: {e}")
         return set()
 
+# 👇 ОБНОВЛЕНО: теперь проверяем startswith("roles")
 def _filter_purchases_for_ticket(purchases: list) -> list:
     auto_role_names = _get_auto_role_names()
     result = []
     for p in purchases:
         ptype = p.get("type", "")
         pvalue = p.get("value", "")
-        if ptype == "roles" and pvalue in auto_role_names:
+        if ptype.startswith("roles") and pvalue in auto_role_names:
             continue
         result.append(p)
     return result
@@ -400,7 +402,6 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         f"> Время: <t:{current_time}:f>"
     )
 
-    # Отправляем ТОЛЬКО стандартную панель. Кастомные роли будет ловить AI-Менеджер.
     view = CoinsTicketButtons()
     await ticket_channel.send(
         content=(
@@ -607,8 +608,6 @@ class CustomRoleSuccessView(View):
         except Exception as e:
             logger.error(f"Ошибка закрытия тикета: {e}")
 
-# ... (Остальные классы BuySelect, CoinsBuyView, QuestionModal, SelectView, TicketView, TicketPaidView, CoinsTicketButtons, CatalogSelect и т.д. оставляем без изменений, они уже есть в файле)
-# (Вставляю их для полноты скрипта)
 class BuySelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
