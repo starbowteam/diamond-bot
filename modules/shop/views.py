@@ -62,15 +62,13 @@ E_CAT_CASINO = PartialEmoji(name="kazik",   id=1555654356152623104)
 
 
 CATEGORY_EMOJI = {
-    "discounts": PartialEmoji(name="skidka", id=1540819242625146961),
-    "design":    PartialEmoji(name="image",  id=1550869363266027641),
-    "ads":       E_CAT_ADS,
-    "roles":     E_CAT_ROLES,
-    "boosts":    PartialEmoji(name="flash",  id=1551289202279325756),
-    "casino":    E_CAT_CASINO,
-    "gifts":     PartialEmoji(name="prize",  id=1539657202170859561),
+    "discounts":    PartialEmoji(name="skidka", id=1540819242625146961),
+    "design":       PartialEmoji(name="image",  id=1550869363266027641),
+    "ads":          E_CAT_ADS,
+    "roles_auto":   E_CAT_ROLES,
+    "roles_custom": E_CAT_ROLES,
+    "gifts":        PartialEmoji(name="prize",  id=1539657202170859561),
 }
-
 
 # ============================================================
 # SELECT КАТЕГОРИЙ
