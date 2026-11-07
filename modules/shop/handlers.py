@@ -333,7 +333,7 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: i
         total_pages=total_pages,
         owned_count=owned_count,
         available_count=available_count,
-        is_roles_category=(cat_key == "roles"),
+        is_roles_category=cat_key.startswith("roles"),
     )
     view = ShopProductsView(cat_key, all_items, balance, page, total_pages)
     await _edit_screen(inter, buf=buf, view=view)
@@ -462,7 +462,7 @@ def _build_outcome(cat_key: str, item: dict, name: str, price: int,
     cat = (cat_key or "").lower()
     has_role = bool(item.get("role_id"))
     boost_type = item.get("boost_type")
-    is_auto_role = (cat == "roles" and has_role)
+    is_auto_role = (cat.startswith("roles") and has_role)
     is_boost = bool(boost_type) and cat in ("boosts", "casino")
 
     if is_auto_role:
@@ -627,7 +627,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
         )
 
     auto_role_given = False
-    if cat_key == "roles" and item.get("role_id"):
+    if cat_key.startswith("roles") and item.get("role_id"):
         role = inter.guild.get_role(int(item["role_id"]))
         if role:
             try:
@@ -654,7 +654,7 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
         except Exception as e:
             logger.warning(f"shop boost activate {user_id}: {e}")
 
-    if not (cat_key == "roles" and item.get("role_id")) and not item.get("boost_type"):
+    if not (cat_key.startswith("roles") and item.get("role_id")) and not item.get("boost_type"):
         await add_purchase(user_id, cat_key, name)
 
     try:
