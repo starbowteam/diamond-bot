@@ -22,10 +22,6 @@ def L(text: str) -> str:
 
 
 def _L_total(labels, total: int):
-    """
-    Раскидывает невидимые пробелы так, чтобы СУММА длин == total.
-    Используется, когда из вью убрали кнопку — компенсируем длины.
-    """
     base = sum(len(s) for s in labels)
     extra = max(0, total - base)
     n = len(labels)
@@ -41,11 +37,7 @@ def _L_total(labels, total: int):
         result.append(f"{P * left}{s}{P * right}")
     return result
 
-
-# Суммарная длина 2 кнопок ShopMainView = 27
-# (раньше было 3 кнопки: Мои покупки + Акция дня + История = 27)
 _L_PURCHASES, _L_HISTORY = _L_total(["Мои покупки", "История"], 27)
-
 
 E_BAG     = PartialEmoji(name="prize",     id=1539657202170859561)
 E_FIRE    = PartialEmoji(name="skidka",    id=1540819242625146961)
@@ -60,19 +52,18 @@ E_CAT_ADS    = PartialEmoji(name="reklama", id=1555654392202535073)
 E_CAT_ROLES  = PartialEmoji(name="peope",   id=1555654375781834883)
 E_CAT_CASINO = PartialEmoji(name="kazik",   id=1555654356152623104)
 
-
+# 👇 ОБНОВЛЕНО: Добавлены новые эмодзи для рекламы
 CATEGORY_EMOJI = {
     "discounts":    PartialEmoji(name="skidka", id=1540819242625146961),
     "design":       PartialEmoji(name="image",  id=1550869363266027641),
-    "ads":          E_CAT_ADS,
+    "ads_forever":  PartialEmoji(name="nacves",    id=1568670488698421333),
+    "ads_24h":      PartialEmoji(name="twefoping", id=1568669931594190889),
+    "ads_personal": PartialEmoji(name="mycha",     id=1568669912103260261),
     "roles_auto":   E_CAT_ROLES,
     "roles_custom": E_CAT_ROLES,
     "gifts":        PartialEmoji(name="prize",  id=1539657202170859561),
 }
 
-# ============================================================
-# SELECT КАТЕГОРИЙ
-# ============================================================
 class ShopCategorySelect(Select):
     def __init__(self, categories: List[Dict], active: str = ""):
         options = []
@@ -106,9 +97,6 @@ class ShopCategorySelect(Select):
         await goto_products(inter, cat_key, page=0)
 
 
-# ============================================================
-# SELECT ТОВАРОВ (скрывает купленные роли)
-# ============================================================
 class ShopItemSelect(Select):
     def __init__(self, cat_key: str, items: List[Dict], balance: int):
         available = [it for it in items if not it.get("owned")]
@@ -143,9 +131,6 @@ class ShopItemSelect(Select):
         await goto_detail(inter, cat_key, it_key)
 
 
-# ============================================================
-# КНОПКИ
-# ============================================================
 class BtnPurchases(Button):
     def __init__(self, row: int = 1, label: str = None):
         super().__init__(
@@ -321,9 +306,6 @@ class BtnPageRight(Button):
         await goto_products(inter, cat_key, page=page + 1)
 
 
-# ============================================================
-# МОДАЛКА ПОДАРКА
-# ============================================================
 class ShopGiftModal(Modal):
     def __init__(self, cat_key: str, item_key: str):
         self.cat_key = cat_key
@@ -352,15 +334,7 @@ class ShopGiftModal(Modal):
         await handle_gift(inter, self.cat_key, self.item_key, int(recipient))
 
 
-# ============================================================
-# VIEWS
-# ============================================================
 class ShopMainView(View):
-    """
-    Главная витрины. Кнопка «Акция дня» убрана —
-    акции теперь в канале Бонусы. Длины двух кнопок компенсированы
-    до суммарных 27 символов (как было с 3 кнопками).
-    """
     def __init__(self, categories: List[Dict], active: str = ""):
         super().__init__(timeout=None)
         self.add_item(ShopCategorySelect(categories, active))
@@ -408,7 +382,6 @@ class ShopPurchasesView(View):
 
 
 class ShopDealView(View):
-    """Оставлено на всякий — акция дня теперь в /bonus."""
     def __init__(self, cat_key: str = "", item_key: str = "", price: int = 0):
         super().__init__(timeout=None)
         if cat_key and item_key and price > 0:
