@@ -97,15 +97,26 @@ def _default_cat_description(key: str) -> str:
             "баннер, логотип — сделаем под твой вкус, уточним "
             "детали в тикете."
         ),
-        "ads": (
-            "Реклама сервера или проекта в каналах Diamond. Пост, "
-            "закреп или упоминание в новостях — расскажем о тебе "
-            "сообществу."
+        "ads_forever": (
+            "Реклама на сервере навсегда. Выбирай нужный пинг "
+            "(@everyone, @here или без пинга)."
         ),
-        "roles": (
+        "ads_24h": (
+            "Реклама на сервере ровно на 24 часа. Отличный вариант "
+            "для быстрого анонса."
+        ),
+        "ads_personal": (
+            "Личный канал с вашей рекламой на 1 неделю. "
+            "Максимум внимания к вашему проекту."
+        ),
+        "roles_auto": (
             "Особые роли сервера. Часть выдаётся автоматически "
             "после покупки, часть — вручную в тикете. Каждая даёт "
             "свой стиль и доступ."
+        ),
+        "roles_custom": (
+            "Элитные роли и кастомные. Включают в себя ручную "
+            "выдачу или создание индивидуального дизайна."
         ),
         "boosts": (
             "Усилители DC-заработка: ×2 к сообщениям, войсу, "
@@ -128,8 +139,11 @@ def _default_item_description(cat_key: str, name: str) -> str:
     m = {
         "discounts": f"Скидка «{name}» действует на любой заказ в магазине. Применяется в тикете — она автоматически вычитается из итоговой суммы.",
         "design":    f"«{name}» делаем под тебя: стиль, цвета и композиция согласуются в тикете. Срок — до 2 рабочих дней.",
-        "ads":       f"«{name}» публикуется в каналах Diamond. Расскажем о тебе или твоём проекте нашей аудитории.",
-        "roles":     f"«{name}» — особая роль сервера. Даёт свой стиль, доступ к закрытым каналам и активностям.",
+        "ads_forever": f"«{name}» публикуется в каналах Diamond и остается там навсегда. Расскажем о тебе или твоём проекте нашей аудитории.",
+        "ads_24h":     f"«{name}» публикуется в каналах Diamond ровно на 24 часа. Расскажем о тебе или твоём проекте нашей аудитории.",
+        "ads_personal": f"«{name}» создает отдельный канал на 1 неделю, где будет висеть ваша реклама.",
+        "roles_auto": f"«{name}» — особая роль сервера. Даёт свой стиль, доступ к закрытым каналам и активностям.",
+        "roles_custom": f"«{name}» — индивидуальная роль или создание кастомного дизайна.",
         "boosts":    f"«{name}» активируется сразу после покупки. Работает указанное время, потом можно купить снова.",
         "casino":    f"«{name}» — усилитель для игр в казино. Применяется автоматически в следующей партии.",
         "gifts":     f"«{name}» — подарок DC другому участнику. Комиссия магазина 5%.",
@@ -141,7 +155,6 @@ def _default_item_description(cat_key: str, name: str) -> str:
 # ПОЛУЧЕНИЕ СПИСКА
 # ============================================================
 def _resolve_member(inter) -> Optional[disnake.Member]:
-    """Возвращает Member если возможно."""
     a = inter.author
     if isinstance(a, disnake.Member):
         return a
@@ -174,10 +187,6 @@ def _get_categories_list() -> List[Dict]:
 
 
 def _get_items_for_category(cat_key: str, member: Optional[disnake.Member] = None) -> List[Dict]:
-    """
-    Возвращает все товары категории.
-    Для ролей с role_id — ставит флаг owned=True если роль уже у юзера.
-    """
     catalog = load_shop_catalog()
     cat = catalog.get(cat_key, {})
     items = cat.get("items", {})
@@ -312,7 +321,6 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: i
     cat_label = _strip_emoji(_LABEL_OVERRIDES.get(cat_key, cat.get("label", cat_key)))
     all_items = _get_items_for_category(cat_key, member)
 
-    # Считаем купленные
     owned_count = sum(1 for it in all_items if it.get("owned"))
     available_count = len(all_items) - owned_count
 
@@ -381,8 +389,10 @@ async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key:
     )
 
     if owned:
+        from modules.shop.views import ShopDetailOwnedView
         view = ShopDetailOwnedView(cat_key)
     else:
+        from modules.shop.views import ShopDetailView
         view = ShopDetailView(cat_key, item_key, item_view["price"])
 
     await _edit_screen(inter, buf=buf, view=view)
@@ -599,7 +609,6 @@ async def handle_buy(inter: disnake.MessageInteraction, cat_key: str, item_key: 
     price = int(item.get("price", 0))
     name = _strip_emoji(item.get("name", item_key))
 
-    # 👇 Проверка: если роль уже куплена — не даём купить
     role_id = item.get("role_id")
     if role_id and member is not None:
         try:
