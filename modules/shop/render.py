@@ -119,7 +119,7 @@ I_HOURGLASS  = 0xf252
 I_SACK       = 0xf81d
 I_WALLET     = 0xf555
 I_SEARCH     = 0xf002
-
+I_CROWN      = 0xf521
 
 CATEGORY_FA = {
     "discounts":    I_TAG,
