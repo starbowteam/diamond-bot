@@ -628,7 +628,7 @@ def generate_random_deal(discount):
     catalog = load_shop_catalog()
     items = []
     for cat_key, cat_data in catalog.items():
-        if cat_key in ("boosts", "casino", "gifts"): continue
+        if cat_key in ("boosts", "casino", "gifts", "roles_custom"): continue
         for item_key, item_data in cat_data.get("items", {}).items():
             items.append((cat_key, item_key, item_data))
     if not items: return None
