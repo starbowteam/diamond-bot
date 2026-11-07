@@ -1,6 +1,6 @@
 {
   "discounts": {
-    "label": "🛒 Скидки",
+    "label": " Скидки",
     "description": "Скидки на заказы в магазине",
     "items": {
       "3":  {"name": "Скидка 3%",  "price": 270,  "description": "Скидка 3% на любой заказ"},
@@ -12,7 +12,7 @@
     }
   },
   "design": {
-    "label": "🎨 Дизайн от Diamond",
+    "label": " Дизайн от Diamond",
     "description": "Услуги дизайнера",
     "items": {
       "avatar":    {"name": "Аватарка",                        "price": 135, "description": "Уникальная аватарка"},
@@ -21,7 +21,7 @@
     }
   },
   "roles_auto": {
-    "label": "⚡ Статусные роли",
+    "label": " Статусные роли",
     "description": "Роли с автоматической выдачей сразу после покупки",
     "items": {
       "role_active":          {"name": "Роль «Активный»",                 "price": 90,  "description": "Постоянная роль «Активный»", "role_id": 1533140263789395998},
@@ -36,7 +36,7 @@
     }
   },
   "roles_custom": {
-    "label": "👑 Особые роли",
+    "label": " Особые роли",
     "description": "Элитные роли и создание кастомных",
     "items": {
       "role_dc_magnate":      {"name": "Роль «DC-Магнат»",                "price": 500, "description": "Роль для магнатов валюты",    "role_id": 1555987193502236792},
@@ -45,7 +45,7 @@
     }
   },
   "ads_forever": {
-    "label": "📢 Реклама навсегда",
+    "label": " Реклама навсегда",
     "description": "Ваша реклама останется в канале навсегда",
     "items": {
       "ads_everyone_forever": {"name": "Реклама @everyone (Навсегда)", "price": 2000, "description": "Реклама с пингом @everyone на постоянной основе"},
@@ -54,7 +54,7 @@
     }
   },
   "ads_24h": {
-    "label": "⏳ Реклама на 24 часа",
+    "label": " Реклама на 24 часа",
     "description": "Ваша реклама провисит в канале ровно сутки",
     "items": {
       "ads_everyone_24h": {"name": "Реклама @everyone (24ч)", "price": 500, "description": "Реклама с пингом @everyone на 24 часа"},
@@ -63,7 +63,7 @@
     }
   },
   "ads_personal": {
-    "label": "📺 Личный канал",
+    "label": " Личный канал",
     "description": "Выделенный канал с вашей рекламой на 1 неделю",
     "items": {
       "ads_everyone_personal": {"name": "Личный канал @everyone (1 нед)", "price": 1800, "description": "Личный канал с возможностью пинга @everyone на неделю"},
