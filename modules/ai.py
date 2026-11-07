@@ -74,9 +74,6 @@ MEMORY_TTL_DAYS = 30
 REPEAT_QUESTION_HOURS = 1
 REPEAT_IDENTICAL_MINUTES = 5
 
-CHAT_AUTO_INTERVAL_HOURS = 24
-CHAT_AUTO_IDLE_HOURS = 12
-
 BUSY_WINDOW_SECONDS = 120
 BUSY_DISTINCT_AUTHORS = 3
 
@@ -681,10 +678,10 @@ def build_shop_block() -> str:
         from modules.dc import load_shop_catalog
         catalog = load_shop_catalog()
         lines = ["цены в dc-магазине:"]
-        # 👇 Обновили ключи под новую структуру (roles_auto, roles_custom)
         for key, label in [("discounts", "скидки"), ("roles_auto", "статусные роли"),
                             ("roles_custom", "особые роли"), ("design", "дизайн"),
-                            ("gifts", "подарки")]:
+                            ("ads_forever", "реклама навсегда"), ("ads_24h", "реклама 24ч"),
+                            ("ads_personal", "личный канал"), ("gifts", "подарки")]:
             if key in catalog:
                 items = catalog[key].get("items", {})
                 prices = [it["price"] for it in items.values() if it.get("price")]
@@ -1119,7 +1116,7 @@ SHOP_KEYWORDS = [
     "хочу купить", "есть ли", "продаете", "продаёте", "цена", "стоит",
     "подскажи", "помоги с", "можешь", "сколько",
     "питомец", "питомц", "душа клана", "пет", "зоопарк", "кот", "лиса", "сова",
-    "грифон", "дракон", "даймондик", "кормить", "покормить",
+    "грифон", "дракон", "даймондик", "кормить", "покормить", "реклама",
 ]
 
 
@@ -1145,7 +1142,7 @@ async def is_on_topic(session: aiohttp.ClientSession, text: str) -> bool:
                 "role": "user",
                 "parts": [{"text": (
                     "относится ли это сообщение к магазину diamond shop "
-                    "(товары, dc-валюта, роли, кейсы, казино, клан, тикеты, душа клана)? "
+                    "(товары, dc-валюта, роли, кейсы, казино, клан, тикеты, душа клана, реклама)? "
                     "ответь одним словом: да или нет.\n\n"
                     f"сообщение: {text[:300]}"
                 )}],
@@ -1504,136 +1501,6 @@ async def handle_ticket_mention(message: disnake.Message) -> bool:
 
 
 # ============================================================
-# АВТО-СООБЩЕНИЯ
-# ============================================================
-_last_auto_chat_ts = 0.0
-
-
-def build_auto_deal() -> Optional[str]:
-    try:
-        from modules.systems import refresh_daily_deal
-        deal = refresh_daily_deal()
-        if not deal:
-            return None
-        item = deal.get("item_data", {})
-        return (
-            f"💎 акция дня: скидка {deal.get('discount', 0)}% на «{item.get('name', '—')}» "
-            f"→ {deal.get('new_price', 0)} DC. панель **Бонусы → Акция дня**."
-        )
-    except Exception:
-        return None
-
-
-def build_auto_giveaway() -> Optional[str]:
-    try:
-        row = cur.execute(
-            "SELECT giveaway_id, prize, end_time, participants FROM giveaways "
-            "WHERE status='active' AND end_time > ? ORDER BY end_time LIMIT 1",
-            (int(time.time()),),
-        ).fetchone()
-        if not row:
-            return None
-        try:
-            n = len(json.loads(row["participants"] or "[]"))
-        except Exception:
-            n = 0
-        return (
-            f"🎉 идёт розыгрыш: {row['prize']} · уже {n} участников · "
-            f"до <t:{row['end_time']}:R>. заходи в канал розыгрышей."
-        )
-    except Exception:
-        return None
-
-
-def build_auto_top_case() -> Optional[str]:
-    try:
-        row = cur.execute(
-            "SELECT prize_desc FROM bonus_case_opens "
-            "WHERE prize_type='dc' AND opened_at > ? "
-            "ORDER BY CAST(json_extract(prize_value, '$.value') AS INTEGER) DESC LIMIT 1",
-            (int(time.time()) - 7 * 86400,),
-        ).fetchone()
-        if not row:
-            return None
-        return f"🎰 топ-кейс недели: {row['prize_desc']}. крути в панели Бонусы."
-    except Exception:
-        return None
-
-
-def build_auto_gift_reminder() -> Optional[str]:
-    return (
-        "🎁 ежедневный подарок в панели профиля — 10–30 DC, кулдаун 24 часа. "
-        "не забудь забрать сегодня!"
-    )
-
-
-def build_auto_pets() -> Optional[str]:
-    try:
-        from pet.core import get_clan_pet, get_pet_hourly_income
-        # Просто проверяем, есть ли питомец у 1-го клана (для примера)
-        pet = get_clan_pet(1)
-        if pet["level"] > 1:
-            return (
-                "🐾 душа клана качается! не забудьте покормить питомца, "
-                "чтобы он приносил больше DC и бонусов в копилку."
-            )
-        return (
-            "🐾 питомец клана «Душа Клана» — кормите его всей семьёй (1 DC = 1 XP). "
-            "Он приносит пассивный доход и даёт бонус к выплате!"
-        )
-    except Exception:
-        return None
-
-
-AUTO_BUILDERS = [
-    build_auto_deal,
-    build_auto_giveaway,
-    build_auto_top_case,
-    build_auto_gift_reminder,
-    build_auto_pets,
-]
-
-
-@tasks.loop(hours=CHAT_AUTO_INTERVAL_HOURS)
-async def auto_chat_task():
-    global _last_auto_chat_ts
-    await bot.wait_until_ready()
-    try:
-        ch = bot.get_channel(ALLOWED_CHANNEL_ID)
-        if not ch:
-            ch = await bot.fetch_channel(ALLOWED_CHANNEL_ID)
-        if not ch:
-            return
-
-        since = datetime.now(timezone.utc) - timedelta(hours=CHAT_AUTO_IDLE_HOURS)
-        async for msg in ch.history(limit=50, after=since):
-            if not msg.author.bot:
-                return
-
-        now = time.time()
-        if now - _last_auto_chat_ts < CHAT_AUTO_INTERVAL_HOURS * 3600 * 0.8:
-            return
-
-        random.shuffle(AUTO_BUILDERS)
-        text = None
-        for builder in AUTO_BUILDERS:
-            try:
-                text = builder()
-                if text:
-                    break
-            except Exception:
-                continue
-        if not text:
-            return
-
-        await ch.send(text)
-        _last_auto_chat_ts = now
-        logger.info(f"auto_chat: {text[:100]}")
-    except Exception as e:
-        logger.exception(f"auto_chat_task: {e}")
-
-
-# ============================================================
 # СТАТУС
 # ============================================================
 STATUS_ROTATION = ["Консультант Магазина", "Готов работать!"]
@@ -1891,7 +1758,8 @@ async def on_ready():
     except Exception:
         pass
 
-    for task in (auto_chat_task, smart_status_task, weekly_unknown_digest,
+    # 👇 УБРАЛИ auto_chat_task. Теперь бот не спамит в чат.
+    for task in (smart_status_task, weekly_unknown_digest,
                  auto_unknown_alert, review_reminder_task):
         if not task.is_running():
             task.start()
@@ -1899,7 +1767,7 @@ async def on_ready():
     await _log_to_discord(
         "✅ Diamond AI v3.3 запущен",
         f"> **{bot.user}** онлайн.\n> Отвечаю в <#{ALLOWED_CHANNEL_ID}> и тикетах.\n"
-        f"> Знаю про Душу Клана 🐾",
+        f"> Режим: только по запросу (пинги, реплаи, вопросы).",
         color=0x00ff00,
     )
 
@@ -1927,6 +1795,7 @@ async def on_message(message: disnake.Message):
     user_id = message.author.id
     member = message.author if isinstance(message.author, disnake.Member) else None
 
+    # 1. Реакции на короткие фразы (спасибо, ахаха и т.д.)
     reaction = check_reaction_reply(text)
     if reaction and not _is_reply_to_bot(message) and not _mentions_bot(message):
         try:
@@ -1936,6 +1805,7 @@ async def on_message(message: disnake.Message):
         memory_upsert(user_id)
         return
 
+    # 2. Быстрые триггеры (профиль, подарок, кейс и т.д.)
     quick = await quick_action(message, text)
     if quick is not None:
         if quick:
@@ -1946,6 +1816,7 @@ async def on_message(message: disnake.Message):
         memory_upsert(user_id)
         return
 
+    # 3. Поиск в каталоге (есть ли нитро?)
     catalog_reply = build_catalog_search_reply(text)
     if catalog_reply:
         try:
@@ -1955,15 +1826,18 @@ async def on_message(message: disnake.Message):
         memory_upsert(user_id)
         return
 
+    # 4. Проверяем, нужно ли вообще отвечать (реплай, пинг, вопрос, триггер)
     if not should_respond(message):
         memory_upsert(user_id)
         return
 
+    # Если канал забит людьми, не лезем
     if not _is_reply_to_bot(message) and not _mentions_bot(message):
         if await is_channel_busy(message.channel):
             memory_upsert(user_id)
             return
 
+    # Проверяем на тему магазина (если это не реплай/пинг)
     if not _is_reply_to_bot(message) and not _mentions_bot(message):
         async with aiohttp.ClientSession() as s:
             if not await is_on_topic(s, text):
