@@ -15,10 +15,9 @@
     "label": "🎨 Дизайн от Diamond",
     "description": "Услуги дизайнера",
     "items": {
-      "avatar": {"name": "Аватарка",              "price": 135, "description": "Уникальная аватарка"},
-      "emoji":  {"name": "Эмодзи в стиле Diamond", "price": 165, "description": "Уникальный стиль эмодзи"},
-      "banner": {"name": "Баннер",                "price": 270, "description": "Баннер для профиля"},
-      "logo":   {"name": "Логотип",               "price": 405, "description": "Логотип для бренда"}
+      "avatar":    {"name": "Аватарка",                        "price": 135, "description": "Уникальная аватарка"},
+      "banner":    {"name": "Баннер",                          "price": 270, "description": "Баннер для профиля"},
+      "character": {"name": "Персонаж в стилистике Diamond",   "price": 600, "description": "Уникальный арт-персонаж в стилистике Даймонда"}
     }
   },
   "roles": {
@@ -40,28 +39,6 @@
 
       "custom_role":          {"name": "Кастомная роль",                  "price": 315, "description": "Создание индивидуальной роли (выдача вручную)"},
       "custom_role_emoji":    {"name": "Кастомная роль с эмодзи в списке", "price": 390, "description": "Создание индивидуальной роли и эмодзи к ней (выдача вручную)"}
-    }
-  },
-  "boosts": {
-    "label": "⚡ Бусты",
-    "description": "Временные усилители DC-заработка",
-    "items": {
-      "boost_messages_x2":   {"name": "x2 к DC за сообщения (24ч)",     "price": 255, "description": "Удвоение награды за 10 сообщений на сутки", "boost_type": "messages_mult", "value": 2.0, "duration_hours": 24},
-      "boost_voice_x2":      {"name": "x2 к DC за войс (24ч)",          "price": 255, "description": "Удвоение награды за час в войсе на сутки",  "boost_type": "voice_mult",    "value": 2.0, "duration_hours": 24},
-      "boost_all_x2":        {"name": "x2 ко всему DC-заработку (12ч)", "price": 600, "description": "Удвоение ЛЮБОГО заработка на 12 часов",     "boost_type": "all_mult",      "value": 2.0, "duration_hours": 12},
-      "boost_review_x2":     {"name": "x2 к DC за отзывы (7 дней)",     "price": 675, "description": "Удвоение награды за отзывы на неделю",       "boost_type": "review_mult",   "value": 2.0, "duration_hours": 168},
-      "boost_cooldown_half": {"name": "Кулдаун отзыва 60 сек (24ч)",    "price": 195, "description": "Отзыв можно оставить через минуту вместо двух", "boost_type": "review_cd",  "value": 60,  "duration_hours": 24},
-      "boost_daily_reset":   {"name": "Сброс дневного лимита",          "price": 135, "description": "Обнуляет счётчики сообщений/войса на сегодня", "boost_type": "daily_reset", "value": 0,   "duration_hours": 0}
-    }
-  },
-  "casino": {
-    "label": "🎲 Казино-предметы",
-    "description": "Усилители и бонусы для игр в казино",
-    "items": {
-      "casino_insurance":     {"name": "Страховка ставки",        "price": 195, "description": "Возврат 50% при проигрыше в следующей игре",  "boost_type": "insurance",      "value": 0.5, "uses": 1},
-      "casino_boost_x2":      {"name": "x2 к следующему выигрышу","price": 600, "description": "Удвоение любой выплаты в 1 партии",            "boost_type": "next_mult",      "value": 2.0, "uses": 1},
-      "casino_lucky_hour":    {"name": "Удачный час (60 мин)",    "price": 675, "description": "Все множители +20% на час",                    "boost_type": "lucky_hour",     "value": 1.2, "duration_hours": 1},
-      "casino_jackpot_ticket":{"name": "Билет в мега-джекпот",    "price": 840, "description": "Участвует в розыгрыше общего банка казино",    "boost_type": "jackpot_ticket", "value": 0,   "uses": 1}
     }
   }
 }
