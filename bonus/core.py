@@ -333,14 +333,15 @@ async def ref_reward_task(bot):
 
 
 # ============================================================
-# АНОНС АКЦИИ ДНЯ
+# АНОНС АКЦИИ ДНЯ (РАССЫЛКА В ЛС)
 # ============================================================
 DEAL_ANNOUNCE_STATE = os.path.join(DATA_DIR, "bonus_deal_announce.json")
 
+# 👇 ТУТ ОБНОВЛЕНА ССЫЛКА НА КАРТИНКУ
 DEAL_ANNOUNCE_IMG = (
-    "https://cdn.discordapp.com/attachments/1527006158282555412/"
-    "1537851307757539390/image.png?ex=6ac864e3&is=6ac71363&"
-    "hm=8fc2a4970e9d4a67c7031812597700fbd32286d0919ee5aa1a460ec0a5316ad6&"
+    "https://cdn.discordapp.com/attachments/1530453871581855744/"
+    "1568655620708769853/image.png?ex=6af09be4&is=6aef4a64&"
+    "hm=dd55fad952e7ac7ed7f8e7e0fe83c6a54ade54875442eb22ebf38a271af5e336&"
 )
 
 def _load_announce_state() -> dict:
@@ -356,19 +357,16 @@ async def announce_deal_change(bot, deal: dict):
     if state.get("slot") == slot:
         return
 
-    ch = bot.get_channel(BONUS_CHANNEL_ID)
-    if not ch:
-        try:
-            ch = await bot.fetch_channel(BONUS_CHANNEL_ID)
-        except Exception as e:
-            logger.warning(f"announce_deal_change channel: {e}")
-            return
-
+    # Удаляем старый анонс из канала (чтобы почистить мусор, если он там был раньше)
     old_id = state.get("message_id")
     if old_id:
         try:
-            old = await ch.fetch_message(old_id)
-            await old.delete()
+            ch = bot.get_channel(BONUS_CHANNEL_ID)
+            if not ch:
+                ch = await bot.fetch_channel(BONUS_CHANNEL_ID)
+            if ch:
+                old = await ch.fetch_message(old_id)
+                await old.delete()
         except Exception:
             pass
 
@@ -382,31 +380,42 @@ async def announce_deal_change(bot, deal: dict):
     item = deal.get("item_data", {})
     name = item.get("name", "—")
 
+    # Новый исправленный текст
     embed = disnake.Embed(
         title="Новая скидка на товар!",
         description=(
-            f"> Сейчас проходит ссылка на товар - **{name}**.\n"
-            f"> Хочешь узнать о скидке больше? Выбери в панели - **Акция дня**.\n\n"
+            f"> Сейчас проходит скидка на товар - **{name}**.\n"
+            f"> Хочешь узнать о скидке больше? Перейди в <#{BONUS_CHANNEL_ID}>.\n\n"
             f"`Следующее обновление акции через 5ч`"
         ),
         color=6776679,
     )
     embed.set_image(url=DEAL_ANNOUNCE_IMG)
 
-    try:
-        msg = await ch.send(
-            content=f"|| <@&{DEAL_PING_ROLE_ID}> ||",
-            embed=embed,
-            allowed_mentions=disnake.AllowedMentions(roles=True),
-        )
-    except Exception as e:
-        logger.warning(f"announce_deal_change send: {e}")
-        return
+    # Рассылка в ЛС только тем, у кого есть роль Club
+    guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+    if guild:
+        club_role = guild.get_role(CLUB_ROLE_ID)
+        if club_role:
+            logger.info(f"🔥 Начинаю рассылку акции дня в ЛС клубным (слот {slot})")
+            success_count = 0
+            for member in club_role.members:
+                if member.bot:
+                    continue
+                try:
+                    await member.send(embed=embed)
+                    success_count += 1
+                    await asyncio.sleep(1.0) # Задержка, чтобы Discord не выдал Rate Limit
+                except disnake.Forbidden:
+                    pass # У пользователя закрыты ЛС
+                except Exception as e:
+                    logger.warning(f"Ошибка отправки ЛС {member.id}: {e}")
+            
+            logger.info(f"🔥 Рассылка акции дня завершена. Отправлено: {success_count} чел.")
 
     state["slot"] = slot
-    state["message_id"] = msg.id
+    state["message_id"] = 0 # Больше не храним ID сообщения в канале
     _save_announce_state(state)
-    logger.info(f"🔥 Анонс акции: {name} · слот {slot}")
 
 
 # ============================================================
