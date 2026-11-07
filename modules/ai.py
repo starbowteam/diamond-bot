@@ -681,9 +681,10 @@ def build_shop_block() -> str:
         from modules.dc import load_shop_catalog
         catalog = load_shop_catalog()
         lines = ["цены в dc-магазине:"]
-        for key, label in [("discounts", "скидки"), ("roles", "роли"),
-                            ("design", "дизайн"), ("boosts", "бусты"),
-                            ("casino", "казино"), ("gifts", "подарки")]:
+        # 👇 Обновили ключи под новую структуру (roles_auto, roles_custom)
+        for key, label in [("discounts", "скидки"), ("roles_auto", "статусные роли"),
+                            ("roles_custom", "особые роли"), ("design", "дизайн"),
+                            ("gifts", "подарки")]:
             if key in catalog:
                 items = catalog[key].get("items", {})
                 prices = [it["price"] for it in items.values() if it.get("price")]
