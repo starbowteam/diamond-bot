@@ -122,13 +122,12 @@ I_SEARCH     = 0xf002
 
 
 CATEGORY_FA = {
-    "discounts": I_TAG,
-    "design":    I_PALETTE,
-    "ads":       I_BULLHORN,
-    "roles":     I_MASKS,
-    "boosts":    I_BOLT,
-    "casino":    I_DICE,
-    "gifts":     I_GIFT,
+    "discounts":    I_TAG,
+    "design":       I_PALETTE,
+    "ads":          I_BULLHORN,
+    "roles_auto":   I_MASKS,
+    "roles_custom": I_CROWN,
+    "gifts":        I_GIFT,
 }
 
 
