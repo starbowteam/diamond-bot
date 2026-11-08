@@ -47,11 +47,10 @@ def build_ad_embed(item_name: str) -> disnake.Embed:
 # ============================================================
 class AdStartView(ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # timeout=None обязательно!
+        super().__init__(timeout=None)
 
     @ui.button(label="📝 Заполнить бриф", style=ButtonStyle.primary, custom_id="ad_start_btn")
     async def start(self, button, inter: disnake.MessageInteraction):
-        # Вытаскиваем название товара из эмбеда
         item_name = "Реклама"
         if inter.message.embeds:
             desc = inter.message.embeds[0].description or ""
@@ -82,15 +81,35 @@ class AdTextViewModal(Modal):
         is_24h = "24ч" in self.item_name
         
         if is_personal:
-            await inter.response.send_modal(AdChannelNameModal(ad_text=text, ping=ping))
+            # Вместо открытия второй модалки, шлем сообщение с кнопкой
+            embed = disnake.Embed(
+                title="Шаг 2: Название канала",
+                description="Текст принят! Нажмите на кнопку ниже, чтобы ввести название для вашего личного канала.",
+                color=0x676767
+            )
+            view = AdChannelNameView(ad_text=text, ping=ping)
+            await inter.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
+            # Обычная реклама, показываем превью
             embed = disnake.Embed(description=text, color=0x676767)
-            # СОХРАНЯЕМ ДАННЫЕ В ФУТЕР ДЛЯ ПЕРЕЖИВАНИЯ ПЕРЕЗАПУСКА
             embed.set_footer(text=f"item:{self.item_name}|24h:{1 if is_24h else 0}")
             
             view = AdPublishConfirmView()
             await inter.channel.send(content=f"> **Предпросмотр рекламы:**\n{ping}", embed=embed, view=view)
             await inter.response.send_message("✅ Предпросмотр отправлен в чат.", ephemeral=True)
+
+# ============================================================
+# ВЬЮ ДЛЯ ВВОДА НАЗВАНИЯ КАНАЛА (ВМЕСТО ЦЕПОЧКИ МОДАЛОК)
+# ============================================================
+class AdChannelNameView(ui.View):
+    def __init__(self, ad_text: str, ping: str):
+        super().__init__(timeout=300)
+        self.ad_text = ad_text
+        self.ping = ping
+
+    @ui.button(label="📝 Ввести название", style=ButtonStyle.primary, custom_id="ad_chan_name_btn")
+    async def enter_name(self, button, inter: disnake.MessageInteraction):
+        await inter.response.send_modal(AdChannelNameModal(ad_text=self.ad_text, ping=self.ping))
 
 # ============================================================
 # МОДАЛКА: ВВОД НАЗВАНИЯ КАНАЛА
@@ -155,7 +174,6 @@ class AdPublishConfirmView(ui.View):
     async def publish(self, button, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
         
-        # Вытаскиваем данные из сообщения
         text = inter.message.embeds[0].description or ""
         footer = inter.message.embeds[0].footer.text or ""
         
