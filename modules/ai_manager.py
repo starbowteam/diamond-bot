@@ -11,6 +11,8 @@ from typing import Optional, List, Dict, Tuple
 
 import aiohttp
 import disnake
+from disnake import ui, ButtonStyle, TextInputStyle
+from disnake.ui import Modal, TextInput
 from disnake.ext import commands, tasks
 
 from core.utils import (
@@ -23,8 +25,6 @@ from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_
 from modules.commands_tickets import (
     CustomRoleSetupView, get_user_purchases, remove_purchase
 )
-# 👇 Импорт системы рекламы (включая новые View)
-from modules.ads_system import init_ads_db, AdStartView, AdPublishConfirmView, ADS_CHANNEL_ID
 
 # ============================================================
 # КОНСТАНТЫ
@@ -62,6 +62,10 @@ COLOR_GREEN = 0x2ecc71
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aeaabe3&is=6ae95a63&hm=9f64fd7deb75b088ad88aec985099620a358aa0dde41e94db426b5a0d8b4fa36&"
 
 YES_EMOJI = "<:Yes:1540361827295170722>"
+
+# Настройки рекламы
+ADS_CATEGORY_ID = 1568673531900727407
+ADS_CHANNEL_ID = 1553694881564590143
 
 CHANNEL_LOCKS = {}
 def get_lock(channel_id: int) -> asyncio.Lock:
@@ -138,6 +142,15 @@ def init_ai_manager_tables():
     );
     CREATE INDEX IF NOT EXISTS idx_ai_hist_channel ON ai_manager_history(channel_id, id);
     CREATE TABLE IF NOT EXISTS ai_manager_user_prefs (user_id INTEGER PRIMARY KEY, enabled INTEGER DEFAULT 1);
+    
+    CREATE TABLE IF NOT EXISTS active_ads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        channel_id INTEGER,
+        message_id INTEGER,
+        is_personal INTEGER DEFAULT 0,
+        expires_at INTEGER
+    );
     """)
     db.commit()
     
@@ -160,7 +173,190 @@ def _ensure_col(table: str, column: str, ddl: str):
         ai_logger.warning(f"Миграция {table}.{column}: {e}")
 
 init_ai_manager_tables()
-init_ads_db()
+
+# ============================================================
+# СИСТЕМА РЕКЛАМЫ (ИНТЕГРИРОВАНА)
+# ============================================================
+def build_ad_embed(item_name: str) -> disnake.Embed:
+    embed = disnake.Embed(
+        title="📢 Оформление рекламы",
+        description=(
+            f"Вы приобрели: **{item_name}**\n\n"
+            "Чтобы я подготовил пост, нажмите на кнопку ниже.\n\n"
+            "> 📝 Вам нужно будет отправить **только текст** вашей рекламы.\n"
+            "> ⚙️ Пинги и время размещения я настрою автоматически.\n"
+            "> 📺 Если это личный канал — я попрошу его название."
+        ),
+        color=0x676767
+    )
+    embed.set_image(url=IMG_STRIPE)
+    return embed
+
+class AdStartView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(label="📝 Заполнить бриф", style=ButtonStyle.primary, custom_id="ad_start_btn")
+    async def start(self, button, inter: disnake.MessageInteraction):
+        item_name = "Реклама"
+        if inter.message.embeds:
+            desc = inter.message.embeds[0].description or ""
+            match = re.search(r"Вы приобрели:\s*\*\*(.+?)\*\*", desc)
+            if match:
+                item_name = match.group(1)
+        
+        await inter.response.send_modal(AdTextViewModal(item_name=item_name))
+
+class AdTextViewModal(Modal):
+    def __init__(self, item_name: str):
+        self.item_name = item_name
+        super().__init__(title="Текст рекламы", components=[
+            TextInput(label="Ваш рекламный текст", placeholder="Опишите проект, добавьте ссылки. Без пингов.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000)
+        ])
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        text = inter.text_values["ad_text"]
+        
+        ping = ""
+        if "@everyone" in self.item_name: ping = "@everyone"
+        elif "@here" in self.item_name: ping = "@here"
+        
+        is_personal = "Личный канал" in self.item_name
+        is_24h = "24ч" in self.item_name
+        
+        if is_personal:
+            embed = disnake.Embed(
+                title="Шаг 2: Название канала",
+                description="Текст принят! Нажмите на кнопку ниже, чтобы ввести название для вашего личного канала.",
+                color=0x676767
+            )
+            view = AdChannelNameView(ad_text=text, ping=ping)
+            await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+        else:
+            embed = disnake.Embed(description=text, color=0x676767)
+            embed.set_footer(text=f"item:{self.item_name}|24h:{1 if is_24h else 0}")
+            
+            view = AdPublishConfirmView()
+            await inter.channel.send(content=f"> **Предпросмотр рекламы:**\n{ping}", embed=embed, view=view)
+            await inter.response.send_message("✅ Предпросмотр отправлен в чат.", ephemeral=True)
+
+class AdChannelNameView(ui.View):
+    def __init__(self, ad_text: str, ping: str):
+        super().__init__(timeout=300)
+        self.ad_text = ad_text
+        self.ping = ping
+
+    @ui.button(label="📝 Ввести название", style=ButtonStyle.primary, custom_id="ad_chan_name_btn")
+    async def enter_name(self, button, inter: disnake.MessageInteraction):
+        await inter.response.send_modal(AdChannelNameModal(ad_text=self.ad_text, ping=self.ping))
+
+class AdChannelNameModal(Modal):
+    def __init__(self, ad_text: str, ping: str):
+        self.ad_text = ad_text
+        self.ping = ping
+        super().__init__(title="Название личного канала", components=[
+            TextInput(label="Введите название канала", placeholder="Например: реклама-моего-сервера", custom_id="chan_name", min_length=2, max_length=90)
+        ])
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        await inter.response.defer(ephemeral=True)
+        
+        raw_name = inter.text_values["chan_name"].lower().replace(" ", "-")
+        clean_name = re.sub(r"[^a-zа-яё0-9\-_]", "", raw_name)
+        channel_name = f"├┃📚・{clean_name}"[:100] 
+        
+        if not clean_name: channel_name = f"├┃📚・ad-{inter.author.id}"
+        
+        guild = inter.guild
+        category = guild.get_channel(ADS_CATEGORY_ID)
+        if not category: 
+            return await inter.followup.send("❌ Категория не найдена.", ephemeral=True)
+
+        overwrites = {
+            guild.default_role: disnake.PermissionOverwrite(read_messages=True, send_messages=False),
+            guild.me: disnake.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+        
+        try:
+            new_channel = await category.create_text_channel(name=channel_name, overwrites=overwrites)
+        except Exception as e:
+            return await inter.followup.send(f"❌ Ошибка создания: {e}", ephemeral=True)
+        
+        embed = disnake.Embed(description=self.ad_text, color=0x676767)
+        msg = await new_channel.send(content=self.ping, embed=embed)
+        
+        expires = int(time.time()) + (7 * 24 * 3600)
+        cur.execute("INSERT INTO active_ads (user_id, channel_id, message_id, is_personal, expires_at) VALUES (?, ?, ?, ?, ?)", (inter.author.id, new_channel.id, msg.id, 1, expires))
+        db.commit()
+
+        success_embed = disnake.Embed(
+            title="✅ Реклама успешно опубликована!",
+            description=f"Ваш личный канал создан: {new_channel.mention}\n> **Срок размещения:** 1 неделя.\n> После этого канал будет автоматически удален.",
+            color=0x676767
+        )
+        success_embed.set_image(url=IMG_STRIPE)
+        
+        await inter.channel.send(embed=success_embed)
+        await inter.edit_original_response(content="Канал создан.")
+
+class AdPublishConfirmView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        
+    @ui.button(label="✅ Опубликовать", style=ButtonStyle.success, custom_id="ad_pub_confirm")
+    async def publish(self, button, inter: disnake.MessageInteraction):
+        # 1. СРАЗУ отключаем кнопку, чтобы предотвратить двойной клик
+        button.disabled = True
+        try:
+            await inter.message.edit(view=self)
+        except Exception:
+            pass # Если сообщение уже удалено, игнорим
+
+        await inter.response.defer(ephemeral=True)
+
+        # 2. УДАЛЯЕМ сообщение с превью (защита от дюпа)
+        try:
+            await inter.message.delete()
+        except Exception:
+            pass
+
+        text = inter.message.embeds[0].description or ""
+        footer = inter.message.embeds[0].footer.text or ""
+        
+        item_name = "Реклама"
+        is_24h = False
+        
+        if "item:" in footer and "|24h:" in footer:
+            parts = footer.split("|24h:")
+            item_name = parts[0].replace("item:", "")
+            is_24h = parts[1] == "1"
+            
+        ping = ""
+        if inter.message.content and "@everyone" in inter.message.content: ping = "@everyone"
+        elif inter.message.content and "@here" in inter.message.content: ping = "@here"
+
+        guild = inter.guild
+        ad_channel = guild.get_channel(ADS_CHANNEL_ID)
+        if not ad_channel: 
+            return await inter.followup.send("❌ Канал для рекламы не найден.", ephemeral=True)
+
+        # 3. Публикуем
+        embed = disnake.Embed(description=text, color=0x676767)
+        msg = await ad_channel.send(content=ping, embed=embed)
+        
+        expires = int(time.time()) + (24 * 3600) if is_24h else 0
+        cur.execute("INSERT INTO active_ads (user_id, channel_id, message_id, is_personal, expires_at) VALUES (?, ?, ?, ?, ?)", (inter.author.id, ad_channel.id, msg.id, 0, expires))
+        db.commit()
+
+        success_embed = disnake.Embed(
+            title="✅ Реклама успешно опубликована!",
+            description=f"Ваш пост отправлен в канал: {ad_channel.mention}\n> **Срок размещения:** {'24 часа' if is_24h else 'Навсегда'}.\n> Ссылка на пост: [Клик]({msg.jump_url})",
+            color=0x676767
+        )
+        success_embed.set_image(url=IMG_STRIPE)
+
+        await inter.channel.send(embed=success_embed)
+
 
 # ============================================================
 # ФУНКЦИИ РАБОТЫ С СЕССИЯМИ
@@ -678,8 +874,6 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
             elif name == "start_ad_brief":
                 item_name = args.get("item_name", "Реклама")
-                # Отправляем кнопку (без аргументов, т.к. мы их убрали)
-                from modules.ads_system import AdStartView, build_ad_embed
                 embed = build_ad_embed(item_name)
                 view = AdStartView()
                 await channel.send(embed=embed, view=view)
@@ -709,12 +903,9 @@ async def on_ready():
     count = auto_init()
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
     
-    # 👇 Инициализация таблиц рекламы (чтобы не было no such table)
-    init_ads_db()
-    
-    # 👇 РЕГИСТРАЦИЯ VIEW ДЛЯ ПЕРЕЗАПУСКА
     bot.add_view(AdStartView())
     bot.add_view(AdPublishConfirmView())
+    bot.add_view(AdChannelNameView("", "")) # Регистрация View для названия
     
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
@@ -741,7 +932,6 @@ async def on_message(message: disnake.Message):
     owner_id = get_ticket_owner(channel.id)
     is_ticket_owner = (owner_id is not None and message.author.id == owner_id)
 
-    # Если пишет менеджер — ставим ИИ на паузу
     if isinstance(message.author, disnake.Member) and _is_manager(message.author) and not is_ticket_owner:
         if _is_ai_ticket(channel):
             if get_user_ai_pref(owner_id) and not _is_paid_category(channel):
