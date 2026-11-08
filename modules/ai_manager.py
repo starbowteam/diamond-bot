@@ -23,8 +23,8 @@ from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_
 from modules.commands_tickets import (
     CustomRoleSetupView, get_user_purchases, remove_purchase
 )
-# 👇 Импортируем систему рекламы
-from modules.ads_system import init_ads_db, ADS_CHANNEL_ID 
+# 👇 Импорт системы рекламы (включая новые View)
+from modules.ads_system import init_ads_db, AdStartView, AdPublishConfirmView, ADS_CHANNEL_ID
 
 # ============================================================
 # КОНСТАНТЫ
@@ -74,6 +74,23 @@ ABUSE_WORDS = [
     "сука", "суки", "нахуй", "нахер", "заткнись", "тупой", "тупая", "идиот",
     "дебил", "дебилы", "мразь", "гандо", "пидо", "педик", "долбоеб", "мудак",
 ]
+
+CATALOG_SYNONYMS = {
+    "discord_nitro": ["нитро", "nitro", "нт", "дс нитро", "discord nitro", "дискорд нитро"],
+    "discord_nitro_basic": ["басик", "бейсик", "базовое", "basic", "нитро басик", "нитро бейсик", "дешевое нитро", "нитро базовое", "базовая подписка"],
+    "discord_nitro_gift": ["гифт", "gift", "подарочное", "подарок нитро", "нитро подарок"],
+    "discord_nitro_trial": ["триал", "trial", "пробное", "пробник", "триал нитро"],
+    "discord_nitro_activation": ["активация", "activation", "актив", "активировать"],
+    "discord_boosts": ["буст", "бусты", "boost", "boosts", "бустик", "буст сервер", "буст канал"],
+    "steam_region": ["регион steam", "смена региона", "сменить регион", "регион стим", "стим регион", "перенос региона"],
+    "steam_rub": ["стим пополнение", "пополнение стим", "steam пополн", "пополнить стим", "стим рубл", "рубли стим", "steam rub", "баланс стим"],
+    "tg_stars": ["звезды тг", "звёзды тг", "тг старс", "tg stars", "stars", "telegram stars", "телеграм звезды", "телеграм звёзды", "звезды телеграм", "звёзды телеграм", "тг звезды", "тг звёзды", "телега звезды", "телега звёзды", "звезда", "телега", "телеграм старс", "звезды", "звёзды"],
+    "tg_acc": ["акк тг", "акк телеграм", "телеграм аккаунт", "тг аккаунт", "tg account", "аккаунт телега", "акк телега"],
+    "roblox_robux": ["робукс", "robux", "рб робукс", "роблокс робукс", "робуксы", "роблокс", "рб"],
+    "roblox_plus": ["роблокс плюс", "roblox plus", "роблокс премиум", "рб плюс", "плюс роблокс"],
+    "spotify": ["споти", "спф", "spotify", "спотифай", "спот", "музыка споти", "спотифай подписка", "подписка музыка"],
+    "gift_marker": ["подарок", "подарочек", "подарить", "подари", "другу", "друг", "подруге", "подарок другу", "хочу подарить"],
+}
 
 # ============================================================
 # ЛОГГЕР
@@ -142,7 +159,6 @@ def _ensure_col(table: str, column: str, ddl: str):
     except Exception as e:
         ai_logger.warning(f"Миграция {table}.{column}: {e}")
 
-# Инициализируем таблицы
 init_ai_manager_tables()
 init_ads_db()
 
@@ -288,6 +304,9 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
     except Exception as e:
         ai_logger.exception(f"close_ticket_abuse: {e}")
 
+# ============================================================
+# КАТАЛОГ И ТИКЕТЫ
+# ============================================================
 def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[str, dict]:
     t = user_text.lower()
     result = {}
@@ -659,10 +678,10 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
             elif name == "start_ad_brief":
                 item_name = args.get("item_name", "Реклама")
-                # В случае, если ИИ сам решает вызвать (хотя мы уже сделали это при создании тикета)
+                # Отправляем кнопку (без аргументов, т.к. мы их убрали)
                 from modules.ads_system import AdStartView, build_ad_embed
                 embed = build_ad_embed(item_name)
-                view = AdStartView(item_name=item_name)
+                view = AdStartView()
                 await channel.send(embed=embed, view=view)
                 update_session(channel.id, escalated=1)
                 return
@@ -692,6 +711,10 @@ async def on_ready():
     
     # 👇 Инициализация таблиц рекламы (чтобы не было no such table)
     init_ads_db()
+    
+    # 👇 РЕГИСТРАЦИЯ VIEW ДЛЯ ПЕРЕЗАПУСКА
+    bot.add_view(AdStartView())
+    bot.add_view(AdPublishConfirmView())
     
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
@@ -786,7 +809,6 @@ async def _auto_confirm_receipt(channel, message, sess):
 async def ads_cleanup_task():
     try:
         now = int(time.time())
-        # Теперь таблица точно существует благодаря init_ads_db() в on_ready
         rows = cur.execute("SELECT id, channel_id, message_id, is_personal FROM active_ads WHERE expires_at > 0 AND expires_at <= ?", (now,)).fetchall()
         
         for r in rows:
