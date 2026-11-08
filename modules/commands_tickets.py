@@ -391,11 +391,11 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     # 2. ЕСЛИ ЭТО РЕКЛАМА — ДОБАВЛЯЕМ ФОРМУ НИЖЕ
     if "реклама" in item_name.lower() or "личный канал" in item_name.lower():
-        from modules.ads_system import AdStartView, build_ad_embed
+        from modules.ai_manager import AdStartView, build_ad_embed # 👈 ИМПОРТ ИЗ AI_MANAGER
         await ticket_channel.send(
             content=f"> **👇 Действия по рекламе:**",
             embed=build_ad_embed(item_name),
-            view=AdStartView() # 👈 ВОТ ТУТ УБРАН АРГУМЕНТ, ЧТОБЫ НЕ БЫЛО ОШИБКИ
+            view=AdStartView()
         )
         
     # 3. ЕСЛИ ЭТО КАСТОМНАЯ РОЛЬ — ДОБАВЛЯЕМ ПАЛИТРУ НИЖЕ
