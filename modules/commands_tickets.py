@@ -152,7 +152,6 @@ def _is_coins_ticket(channel: disnake.TextChannel) -> bool:
         return False
     return channel.category.id == CONFIG["COINS_CATEGORY_ID"]
 
-# 👇 ОБНОВЛЕНО: теперь ищем и в roles_auto, и в roles_custom
 def _get_auto_role_names() -> set:
     try:
         catalog = load_shop_catalog()
@@ -168,7 +167,6 @@ def _get_auto_role_names() -> set:
         logger.warning(f"_get_auto_role_names err: {e}")
         return set()
 
-# 👇 ОБНОВЛЕНО: теперь проверяем startswith("roles")
 def _filter_purchases_for_ticket(purchases: list) -> list:
     auto_role_names = _get_auto_role_names()
     result = []
@@ -397,7 +395,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         await ticket_channel.send(
             content=f"> **👇 Действия по рекламе:**",
             embed=build_ad_embed(item_name),
-            view=AdStartView(item_name=item_name)
+            view=AdStartView() # 👈 ВОТ ТУТ УБРАН АРГУМЕНТ, ЧТОБЫ НЕ БЫЛО ОШИБКИ
         )
         
     # 3. ЕСЛИ ЭТО КАСТОМНАЯ РОЛЬ — ДОБАВЛЯЕМ ПАЛИТРУ НИЖЕ
@@ -418,6 +416,7 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         await ticket_channel.send(content=f"> **👇 Действия по кастомной роли:**", embed=embed, view=view)
 
     await inter.edit_original_response(content=f"> {user.mention}, тикет создан: {ticket_channel.mention}")
+
 # ============================================================
 # КАСТОМНЫЕ РОЛИ
 # ============================================================
