@@ -2,7 +2,8 @@
 import time
 import re
 import disnake
-from disnake import ui, ButtonStyle, Modal, TextInput, TextInputStyle
+from disnake import ui, ButtonStyle, TextInputStyle
+from disnake.ui import Modal, TextInput
 
 from core.utils import logger, db, cur
 
