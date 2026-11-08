@@ -7,8 +7,8 @@ from disnake.ui import Modal, TextInput
 
 from core.utils import logger, db, cur
 
-ADS_CATEGORY_ID = 1568673531900727407 # Категория для личных каналов
-ADS_CHANNEL_ID = 1553694881564590143 # Канал для обычной рекламы
+ADS_CATEGORY_ID = 1568673531900727407
+ADS_CHANNEL_ID = 1553694881564590143
 IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6aba8d23&is=6ab93ba3&hm=ae3ed04a3d7751d003df0753d1784af492fd0ad971a033f3dafca3a5b57cb26d&"
 
 def init_ads_db():
@@ -24,7 +24,6 @@ def init_ads_db():
         );
         """)
         db.commit()
-        logger.info("Таблица active_ads успешно инициализирована.")
     except Exception as e:
         logger.error(f"Ошибка создания таблицы active_ads: {e}")
 
@@ -43,15 +42,28 @@ def build_ad_embed(item_name: str) -> disnake.Embed:
     embed.set_image(url=IMG_STRIPE)
     return embed
 
+# ============================================================
+# КНОПКА "ЗАПОЛНИТЬ БРИФ"
+# ============================================================
 class AdStartView(ui.View):
-    def __init__(self, item_name: str):
-        super().__init__(timeout=None)
-        self.item_name = item_name
+    def __init__(self):
+        super().__init__(timeout=None) # timeout=None обязательно!
 
     @ui.button(label="📝 Заполнить бриф", style=ButtonStyle.primary, custom_id="ad_start_btn")
     async def start(self, button, inter: disnake.MessageInteraction):
-        await inter.response.send_modal(AdTextViewModal(item_name=self.item_name))
+        # Вытаскиваем название товара из эмбеда
+        item_name = "Реклама"
+        if inter.message.embeds:
+            desc = inter.message.embeds[0].description or ""
+            match = re.search(r"Вы приобрели:\s*\*\*(.+?)\*\*", desc)
+            if match:
+                item_name = match.group(1)
+        
+        await inter.response.send_modal(AdTextViewModal(item_name=item_name))
 
+# ============================================================
+# МОДАЛКА: ВВОД ТЕКСТА
+# ============================================================
 class AdTextViewModal(Modal):
     def __init__(self, item_name: str):
         self.item_name = item_name
@@ -60,7 +72,8 @@ class AdTextViewModal(Modal):
         ])
 
     async def callback(self, inter: disnake.ModalInteraction):
-        text = inter.text_values["ad_text"] # 👈 ИСПРАВЛЕНО
+        text = inter.text_values["ad_text"]
+        
         ping = ""
         if "@everyone" in self.item_name: ping = "@everyone"
         elif "@here" in self.item_name: ping = "@here"
@@ -72,11 +85,16 @@ class AdTextViewModal(Modal):
             await inter.response.send_modal(AdChannelNameModal(ad_text=text, ping=ping))
         else:
             embed = disnake.Embed(description=text, color=0x676767)
-            embed.set_footer(text="Предпросмотр. Нажмите 'Опубликовать' для отправки.")
-            view = AdPublishConfirmView(item_name=self.item_name, text=text, ping=ping, is_24h=is_24h)
+            # СОХРАНЯЕМ ДАННЫЕ В ФУТЕР ДЛЯ ПЕРЕЖИВАНИЯ ПЕРЕЗАПУСКА
+            embed.set_footer(text=f"item:{self.item_name}|24h:{1 if is_24h else 0}")
+            
+            view = AdPublishConfirmView()
             await inter.channel.send(content=f"> **Предпросмотр рекламы:**\n{ping}", embed=embed, view=view)
             await inter.response.send_message("✅ Предпросмотр отправлен в чат.", ephemeral=True)
 
+# ============================================================
+# МОДАЛКА: ВВОД НАЗВАНИЯ КАНАЛА
+# ============================================================
 class AdChannelNameModal(Modal):
     def __init__(self, ad_text: str, ping: str):
         self.ad_text = ad_text
@@ -87,7 +105,8 @@ class AdChannelNameModal(Modal):
 
     async def callback(self, inter: disnake.ModalInteraction):
         await inter.response.defer(ephemeral=True)
-        raw_name = inter.text_values["chan_name"].lower().replace(" ", "-") # 👈 ИСПРАВЛЕНО
+        
+        raw_name = inter.text_values["chan_name"].lower().replace(" ", "-")
         clean_name = re.sub(r"[^a-zа-яё0-9\-_]", "", raw_name)
         channel_name = f"├┃📚・{clean_name}"[:100] 
         
@@ -121,20 +140,37 @@ class AdChannelNameModal(Modal):
             color=0x676767
         )
         success_embed.set_image(url=IMG_STRIPE)
+        
         await inter.channel.send(embed=success_embed)
         await inter.edit_original_response(content="Канал создан.")
 
+# ============================================================
+# КНОПКА ПУБЛИКАЦИИ
+# ============================================================
 class AdPublishConfirmView(ui.View):
-    def __init__(self, item_name, text, ping, is_24h):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.item_name = item_name
-        self.text = text
-        self.ping = ping
-        self.is_24h = is_24h
         
     @ui.button(label="✅ Опубликовать", style=ButtonStyle.success, custom_id="ad_pub_confirm")
     async def publish(self, button, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
+        
+        # Вытаскиваем данные из сообщения
+        text = inter.message.embeds[0].description or ""
+        footer = inter.message.embeds[0].footer.text or ""
+        
+        item_name = "Реклама"
+        is_24h = False
+        
+        if "item:" in footer and "|24h:" in footer:
+            parts = footer.split("|24h:")
+            item_name = parts[0].replace("item:", "")
+            is_24h = parts[1] == "1"
+            
+        ping = ""
+        if inter.message.content and "@everyone" in inter.message.content: ping = "@everyone"
+        elif inter.message.content and "@here" in inter.message.content: ping = "@here"
+
         button.disabled = True
         await inter.message.edit(view=self)
 
@@ -143,18 +179,19 @@ class AdPublishConfirmView(ui.View):
         if not ad_channel: 
             return await inter.followup.send("❌ Канал для рекламы не найден.", ephemeral=True)
 
-        embed = disnake.Embed(description=self.text, color=0x676767)
-        msg = await ad_channel.send(content=self.ping, embed=embed)
+        embed = disnake.Embed(description=text, color=0x676767)
+        msg = await ad_channel.send(content=ping, embed=embed)
         
-        expires = int(time.time()) + (24 * 3600) if self.is_24h else 0
+        expires = int(time.time()) + (24 * 3600) if is_24h else 0
         cur.execute("INSERT INTO active_ads (user_id, channel_id, message_id, is_personal, expires_at) VALUES (?, ?, ?, ?, ?)", (inter.author.id, ad_channel.id, msg.id, 0, expires))
         db.commit()
 
         success_embed = disnake.Embed(
             title="✅ Реклама успешно опубликована!",
-            description=f"Ваш пост отправлен в канал: {ad_channel.mention}\n> **Срок размещения:** {'24 часа' if self.is_24h else 'Навсегда'}.\n> Ссылка на пост: [Клик]({msg.jump_url})",
+            description=f"Ваш пост отправлен в канал: {ad_channel.mention}\n> **Срок размещения:** {'24 часа' if is_24h else 'Навсегда'}.\n> Ссылка на пост: [Клик]({msg.jump_url})",
             color=0x676767
         )
         success_embed.set_image(url=IMG_STRIPE)
+
         await inter.channel.send(embed=success_embed)
         await inter.edit_original_response(content="Готово.")
