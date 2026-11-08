@@ -297,6 +297,16 @@ class AdChannelNameModal(Modal):
         success_embed.set_image(url=IMG_STRIPE)
         
         await inter.channel.send(embed=success_embed)
+
+        # 👇 УДАЛЯЕМ СТАРОЕ СООБЩЕНИЕ С БРИФОМ
+        try:
+            async for msg_hist in inter.channel.history(limit=15):
+                if msg_hist.author.bot and msg_hist.embeds and msg_hist.embeds[0].title == "📢 Оформление рекламы":
+                    await msg_hist.delete()
+                    break
+        except Exception:
+            pass
+
         await inter.edit_original_response(content="Канал создан.")
 
 class AdPublishConfirmView(ui.View):
@@ -311,7 +321,7 @@ class AdPublishConfirmView(ui.View):
 
         await inter.response.defer(ephemeral=True)
 
-        # Защита от дюпа
+        # Защита от дюпа (удаляем превью)
         try: await inter.message.delete()
         except Exception: pass
 
@@ -350,8 +360,17 @@ class AdPublishConfirmView(ui.View):
         success_embed.set_image(url=IMG_STRIPE)
         await inter.channel.send(embed=success_embed)
 
+        # 👇 УДАЛЯЕМ СТАРОЕ СООБЩЕНИЕ С БРИФОМ
+        try:
+            async for msg_hist in inter.channel.history(limit=15):
+                if msg_hist.author.bot and msg_hist.embeds and msg_hist.embeds[0].title == "📢 Оформление рекламы":
+                    await msg_hist.delete()
+                    break
+        except Exception:
+            pass
+
 # ============================================================
-# ФУНКЦИИ РАБОТЫ С СЕССИЯМИ И Т.Д.
+# ФУНКЦИИ РАБОТЫ С СЕССИЯМИ
 # ============================================================
 def get_session(channel_id: int) -> Optional[dict]:
     row = cur.execute("SELECT * FROM ai_manager_sessions WHERE channel_id=?", (channel_id,)).fetchone()
@@ -890,7 +909,6 @@ async def on_ready():
         if not activity_ping_task.is_running(): activity_ping_task.start()
         if not ads_cleanup_task.is_running(): ads_cleanup_task.start()
 
-# 👇 ВОТ ТУТ МАГИЯ: Слушаем создание канала ИИ-Менеджером
 @bot.event
 async def on_guild_channel_create(channel):
     if not isinstance(channel, disnake.TextChannel):
@@ -898,7 +916,6 @@ async def on_guild_channel_create(channel):
     if channel.category_id != CONFIG.get("COINS_CATEGORY_ID"):
         return
     
-    # Ждем 3 секунды, чтобы основной бот успел отправить эмбед с заказом
     await asyncio.sleep(3)
     
     item_name = None
@@ -914,13 +931,12 @@ async def on_guild_channel_create(channel):
     if not item_name:
         return
 
-    # Если куплена реклама или кастомная роль — ИИ-Менеджер шлет форму
     if "реклама" in item_name.lower() or "личный канал" in item_name.lower():
         embed = build_ad_embed(item_name)
         view = AdStartView()
         await channel.send(embed=embed, view=view)
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
-        update_session(channel.id, escalated=1) # Чтобы ИИ не спамил
+        update_session(channel.id, escalated=1)
     elif "кастомная роль" in item_name.lower():
         has_emoji = "эмодзи" in item_name.lower()
         embed = disnake.Embed(
