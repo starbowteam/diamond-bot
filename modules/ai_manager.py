@@ -905,7 +905,6 @@ async def on_ready():
     
     bot.add_view(AdStartView())
     bot.add_view(AdPublishConfirmView())
-    bot.add_view(AdChannelNameView("", "")) # Регистрация View для названия
     
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
