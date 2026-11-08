@@ -175,7 +175,7 @@ def _ensure_col(table: str, column: str, ddl: str):
 init_ai_manager_tables()
 
 # ============================================================
-# СИСТЕМА РЕКЛАМЫ (ИНТЕГРИРОВАНА)
+# СИСТЕМА РЕКЛАМЫ
 # ============================================================
 def build_ad_embed(item_name: str) -> disnake.Embed:
     embed = disnake.Embed(
@@ -305,20 +305,15 @@ class AdPublishConfirmView(ui.View):
         
     @ui.button(label="✅ Опубликовать", style=ButtonStyle.success, custom_id="ad_pub_confirm")
     async def publish(self, button, inter: disnake.MessageInteraction):
-        # 1. СРАЗУ отключаем кнопку, чтобы предотвратить двойной клик
         button.disabled = True
-        try:
-            await inter.message.edit(view=self)
-        except Exception:
-            pass # Если сообщение уже удалено, игнорим
+        try: await inter.message.edit(view=self)
+        except Exception: pass
 
         await inter.response.defer(ephemeral=True)
 
-        # 2. УДАЛЯЕМ сообщение с превью (защита от дюпа)
-        try:
-            await inter.message.delete()
-        except Exception:
-            pass
+        # Защита от дюпа
+        try: await inter.message.delete()
+        except Exception: pass
 
         text = inter.message.embeds[0].description or ""
         footer = inter.message.embeds[0].footer.text or ""
@@ -340,7 +335,6 @@ class AdPublishConfirmView(ui.View):
         if not ad_channel: 
             return await inter.followup.send("❌ Канал для рекламы не найден.", ephemeral=True)
 
-        # 3. Публикуем
         embed = disnake.Embed(description=text, color=0x676767)
         msg = await ad_channel.send(content=ping, embed=embed)
         
@@ -354,12 +348,10 @@ class AdPublishConfirmView(ui.View):
             color=0x676767
         )
         success_embed.set_image(url=IMG_STRIPE)
-
         await inter.channel.send(embed=success_embed)
 
-
 # ============================================================
-# ФУНКЦИИ РАБОТЫ С СЕССИЯМИ
+# ФУНКЦИИ РАБОТЫ С СЕССИЯМИ И Т.Д.
 # ============================================================
 def get_session(channel_id: int) -> Optional[dict]:
     row = cur.execute("SELECT * FROM ai_manager_sessions WHERE channel_id=?", (channel_id,)).fetchone()
@@ -400,9 +392,6 @@ def is_ai_muted(channel_id: int) -> bool:
     if not lmt: return False
     return (int(time.time()) - lmt) < MANAGER_SILENCE_SEC
 
-# ============================================================
-# ИСТОРИЯ
-# ============================================================
 def hist_load(channel_id: int, ttl_sec: int = HISTORY_TTL_SEC, limit: int = HISTORY_MAX_MSG):
     cutoff = int(time.time()) - ttl_sec
     rows = cur.execute("SELECT role, content, created_at FROM ai_manager_history WHERE channel_id=? AND created_at >= ? ORDER BY id DESC LIMIT ?", (channel_id, cutoff, limit)).fetchall()
@@ -426,9 +415,6 @@ def hist_recent_user(channel_id: int, window_sec: int = SPAM_WINDOW_SEC, limit: 
     rows = cur.execute("SELECT content FROM ai_manager_history WHERE channel_id=? AND role='user' AND created_at > ? ORDER BY id DESC LIMIT ?", (channel_id, cutoff, limit)).fetchall()
     return [r["content"] for r in rows]
 
-# ============================================================
-# DEBOUNCE И АБЬЮЗ
-# ============================================================
 DEBOUNCE: Dict[int, dict] = {}
 
 async def _debounce_flush(channel, user, gen: int, delay: float = DEBOUNCE_SEC):
@@ -500,9 +486,6 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
     except Exception as e:
         ai_logger.exception(f"close_ticket_abuse: {e}")
 
-# ============================================================
-# КАТАЛОГ И ТИКЕТЫ
-# ============================================================
 def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[str, dict]:
     t = user_text.lower()
     result = {}
@@ -595,9 +578,6 @@ async def get_ticket_discount(channel) -> int:
         pass
     return 0
 
-# ============================================================
-# ПРОМПТ И ИНСТРУМЕНТЫ
-# ============================================================
 SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете. задача — помочь клиенту оформить заказ, как живой помощник.
 
 ПРАВИЛА ОБЩЕНИЯ:
@@ -726,9 +706,6 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
             return res
     return None
 
-# ============================================================
-# ОСНОВНАЯ ЛОГИКА ИИ
-# ============================================================
 async def escalate(channel, reason: str):
     if _is_paid_category(channel): return
     sess = get_session(channel.id)
@@ -913,6 +890,55 @@ async def on_ready():
         if not activity_ping_task.is_running(): activity_ping_task.start()
         if not ads_cleanup_task.is_running(): ads_cleanup_task.start()
 
+# 👇 ВОТ ТУТ МАГИЯ: Слушаем создание канала ИИ-Менеджером
+@bot.event
+async def on_guild_channel_create(channel):
+    if not isinstance(channel, disnake.TextChannel):
+        return
+    if channel.category_id != CONFIG.get("COINS_CATEGORY_ID"):
+        return
+    
+    # Ждем 3 секунды, чтобы основной бот успел отправить эмбед с заказом
+    await asyncio.sleep(3)
+    
+    item_name = None
+    async for msg in channel.history(limit=5):
+        if msg.author.bot and msg.embeds:
+            for embed in msg.embeds:
+                for field in embed.fields:
+                    if "Нужный товар" in field.name:
+                        item_name = field.value.strip("`\n ")
+                        break
+            if item_name: break
+            
+    if not item_name:
+        return
+
+    # Если куплена реклама или кастомная роль — ИИ-Менеджер шлет форму
+    if "реклама" in item_name.lower() or "личный канал" in item_name.lower():
+        embed = build_ad_embed(item_name)
+        view = AdStartView()
+        await channel.send(embed=embed, view=view)
+        create_session(channel.id, get_ticket_owner(channel.id) or 0)
+        update_session(channel.id, escalated=1) # Чтобы ИИ не спамил
+    elif "кастомная роль" in item_name.lower():
+        has_emoji = "эмодзи" in item_name.lower()
+        embed = disnake.Embed(
+            title="🎨 Настройка кастомной роли",
+            description=(
+                f"Давайте создадим вашу уникальную роль!\n\n"
+                "> 🎨 Нажмите на кнопку ниже, чтобы выбрать цвет.\n"
+                "> ✏️ Затем введите название роли."
+                + ("\n> 😀 И не забудьте добавить эмодзи!" if has_emoji else "")
+            ),
+            color=COLOR_GREY
+        )
+        embed.set_image(url=IMG_STRIPE)
+        view = CustomRoleSetupView(has_emoji=has_emoji)
+        await channel.send(embed=embed, view=view)
+        create_session(channel.id, get_ticket_owner(channel.id) or 0)
+        update_session(channel.id, escalated=1)
+
 @bot.event
 async def on_message(message: disnake.Message):
     if message.author.bot or not isinstance(message.channel, disnake.TextChannel): return
@@ -992,7 +1018,7 @@ async def _auto_confirm_receipt(channel, message, sess):
     except Exception: pass
 
 # ============================================================
-# ФОНОВЫЕ ЗАДАЧИ (ТАСКИ)
+# ФОНОВЫЕ ЗАДАЧИ
 # ============================================================
 @tasks.loop(minutes=1)
 async def ads_cleanup_task():
