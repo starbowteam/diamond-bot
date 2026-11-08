@@ -389,36 +389,13 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         view=view
     )
 
-    # 2. ЕСЛИ ЭТО РЕКЛАМА — ДОБАВЛЯЕМ ФОРМУ НИЖЕ
-    if "реклама" in item_name.lower() or "личный канал" in item_name.lower():
-        from modules.ai_manager import AdStartView, build_ad_embed # 👈 ИМПОРТ ИЗ AI_MANAGER
-        await ticket_channel.send(
-            content=f"> **👇 Действия по рекламе:**",
-            embed=build_ad_embed(item_name),
-            view=AdStartView()
-        )
-        
-    # 3. ЕСЛИ ЭТО КАСТОМНАЯ РОЛЬ — ДОБАВЛЯЕМ ПАЛИТРУ НИЖЕ
-    elif "кастомная роль" in item_name.lower():
-        has_emoji = "эмодзи" in item_name.lower()
-        embed = disnake.Embed(
-            title="🎨 Настройка кастомной роли",
-            description=(
-                f"Давайте создадим вашу уникальную роль!\n\n"
-                "> 🎨 Нажмите на кнопку ниже, чтобы выбрать цвет.\n"
-                "> ✏️ Затем введите название роли."
-                + ("\n> 😀 И не забудьте добавить эмодзи!" if has_emoji else "")
-            ),
-            color=COLOR_GREY
-        )
-        embed.set_image(url=_IMG_STRIPE)
-        view = CustomRoleSetupView(has_emoji=has_emoji)
-        await ticket_channel.send(content=f"> **👇 Действия по кастомной роли:**", embed=embed, view=view)
+    # ❗️ УБРАЛИ ОТСЮДА ВСЮ ЛОГИКУ РЕКЛАМЫ И КАСТОМНЫХ РОЛЕЙ.
+    # ТЕПЕРЬ ЭТИМ ЗАНИМАЕТСЯ ИИ-МЕНЕДЖЕР В on_guild_channel_create
 
     await inter.edit_original_response(content=f"> {user.mention}, тикет создан: {ticket_channel.mention}")
 
 # ============================================================
-# КАСТОМНЫЕ РОЛИ
+# КАСТОМНЫЕ РОЛИ (Для ИИ-Менеджера)
 # ============================================================
 
 def hex_to_rgb(hex_str: str) -> tuple:
