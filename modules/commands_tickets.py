@@ -350,98 +350,74 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict, purchase_index: int):
     user = inter.author
     guild = inter.guild
-
-    if await _check_ticket_blocked(inter):
-        return
-
+    if await _check_ticket_blocked(inter): return
+    
     cat = guild.get_channel(CONFIG["COINS_CATEGORY_ID"])
-    if not cat:
-        return await _safe_edit(inter, content="❌ Категория не найдена.", embeds=[], view=None)
+    if not cat: return await _safe_edit(inter, content="❌ Категория не найдена.", embeds=[], view=None)
 
     item_name = purchase.get("value", "—")
-
     raw = item_name.lower().replace(" ", "-")
-    raw = re.sub(r"[^a-zа-яё0-9\-_]", "", raw)
-    channel_name = raw[:80] or f"item-{user.id}"
+    channel_name = re.sub(r"[^a-zа-яё0-9\-_]", "", raw)[:80] or f"item-{user.id}"
 
     overwrites = _build_ticket_overwrites(guild, user)
-
     await _safe_edit(inter, content="⏳ Создаём тикет...", embeds=[], view=None)
+    
+    try: ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
+    except Exception as e: return await inter.edit_original_response(content=f"❌ Ошибка: {e}")
+    
+    try: await remove_purchase(user.id, purchase_index)
+    except Exception as e: logger.warning(f"Не удалось удалить покупку: {e}")
 
-    try:
-        ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
-    except Exception as e:
-        logger.error(f"Не удалось создать DC-тикет: {e}")
-        try:
-            await inter.edit_original_response(content=f"❌ Ошибка: {e}")
-        except Exception:
-            pass
-        return
+    add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    try:
-        await remove_purchase(user.id, purchase_index)
-    except Exception as e:
-        logger.warning(f"Не удалось удалить покупку #{purchase_index} у {user.id}: {e}")
-
+    # Загружаем стандартный шаблон
     try:
         with open(CONFIG["COINS_INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
         embeds_list = [disnake.Embed.from_dict(e) for e in data.get("embeds", [])]
-    except Exception as e:
-        logger.error(f"Ошибка загрузки шаблона: {e}")
+    except Exception:
         embeds_list = [disnake.Embed(color=6776679), disnake.Embed(title="Информация о заказе", color=6776679)]
 
-    embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=0x7c3131)
+    embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=6776679)
     embed_order_info.clear_fields()
     embed_order_info.add_field(name="> Нужный товар", value=f"```{item_name}```", inline=False)
+    embed_order_info.description = f"Статус - Оформляется\n> Время: <t:{int(_time.time())}:f>"
 
-    current_time = int(_time.time())
-    embed_order_info.description = (
-        f"Статус - Оформляется\n"
-        f"> Ожидайте подтверждения.\n"
-        f"> Время: <t:{current_time}:f>"
-    )
-
+    # 1. ОТПРАВЛЯЕМ СТАНДАРТНЫЙ ЭМБЕД + КНОПКИ (ВСЕГДА)
     view = CoinsTicketButtons()
     await ticket_channel.send(
-        content=(
-            f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n"
-            f"> Ожидайте ответа от <@&1154757071330365490>, приятных покупок в будущем"
-        ),
+        content=f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n> Ожидайте ответа от <@&1154757071330365490>",
         embeds=[embeds_list[0], embed_order_info],
         view=view
     )
 
-    add_ticket_owner(ticket_channel.id, user.id, cat.id)
-
-    try:
-        await inter.edit_original_response(
-            content=(
-                f"> {user.mention}   ᶻ 𝘇 𐰁, тикет на DC — создан.\n"
-                f"> Перейти: {ticket_channel.mention}"
-            )
+    # 2. ЕСЛИ ЭТО РЕКЛАМА — ДОБАВЛЯЕМ ФОРМУ НИЖЕ
+    if "реклама" in item_name.lower() or "личный канал" in item_name.lower():
+        from modules.ads_system import AdStartView, build_ad_embed
+        await ticket_channel.send(
+            content=f"> **👇 Действия по рекламе:**",
+            embed=build_ad_embed(item_name),
+            view=AdStartView(item_name=item_name)
         )
-    except Exception:
-        try:
-            await inter.followup.send(
-                content=(
-                    f"> {user.mention}   ᶻ 𝘇 𐰁, тикет на DC — создан.\n"
-                    f"> Перейти: {ticket_channel.mention}"
-                ),
-                ephemeral=True
-            )
-        except Exception:
-            pass
+        
+    # 3. ЕСЛИ ЭТО КАСТОМНАЯ РОЛЬ — ДОБАВЛЯЕМ ПАЛИТРУ НИЖЕ
+    elif "кастомная роль" in item_name.lower():
+        has_emoji = "эмодзи" in item_name.lower()
+        embed = disnake.Embed(
+            title="🎨 Настройка кастомной роли",
+            description=(
+                f"Давайте создадим вашу уникальную роль!\n\n"
+                "> 🎨 Нажмите на кнопку ниже, чтобы выбрать цвет.\n"
+                "> ✏️ Затем введите название роли."
+                + ("\n> 😀 И не забудьте добавить эмодзи!" if has_emoji else "")
+            ),
+            color=COLOR_GREY
+        )
+        embed.set_image(url=_IMG_STRIPE)
+        view = CustomRoleSetupView(has_emoji=has_emoji)
+        await ticket_channel.send(content=f"> **👇 Действия по кастомной роли:**", embed=embed, view=view)
 
-    log_ch = guild.get_channel(CONFIG["LOG_TICKET_CHANNEL_ID"])
-    if log_ch:
-        await log_ch.send(embed=disnake.Embed(
-            title="📩 Тикет создан (Diamond Coins)",
-            description=f"> **Пользователь:** {user.mention}\n> **Канал:** {ticket_channel.mention}\n> **Товар:** `{item_name}`",
-            timestamp=datetime.now(timezone.utc),
-            color=0x00ff00
-        ))
-
+    await inter.edit_original_response(content=f"> {user.mention}, тикет создан: {ticket_channel.mention}")
 # ============================================================
 # КАСТОМНЫЕ РОЛИ
 # ============================================================
