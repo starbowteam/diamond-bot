@@ -587,8 +587,9 @@ UPSELL (ДОПРОДАЖИ - ВАЖНО):
 - Перед тем как выставить счёт, проверь итоговую сумму.
 - Если сумма заказа превышает 500₽:
   1. Предложи клиенту крутую скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ другой товар из каталога (предложи 1-2 интересных варианта).
-  2. Пример: "Кстати, ваш заказ уже на ХХХ₽. Если добавите вот этот товар за YYY₽, я сделаю вам скидку 5% на всё!"
-  3. Если клиент соглашается, пересчитай итоговую сумму с учетом скидки 5% и только потом вызывай инструмент create_invoice.
+  2. Если клиент соглашается, СНАЧАЛА добавь новый товар в корзину.
+  3. При вызове `create_invoice` передай параметр `discount_percent: 5`.
+  - ❗️ ВАЖНО: В поле `item_name` пиши ТОЛЬКО оригинальное название товара (например, "Discord Nitro 12 Month"), НЕ ДОБАВЛЯЙ туда "(Combo Discount 5%)" или другие пометки. Скидка передается ТОЛЬКО через параметр `discount_percent`.
 
 ГЛАВНОЕ ПРАВИЛО ПЕРЕД СЧЁТОМ:
 - НИКОГДА не вызывай create_invoice сразу после того, как клиент назвал товар.
@@ -599,12 +600,6 @@ UPSELL (ДОПРОДАЖИ - ВАЖНО):
 ЗАПРЕТ НА DC (DIAMOND COINS):
 - В этом тикете ты продаешь ТОЛЬКО за реальные деньги (рубли).
 - Если клиент просит что-то купить за DC, ответь: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop). Здесь я оформляю только заказы за реальные деньги."
-
-ПЕРЕИМЕНОВАНИЕ ТИКЕТА (ПОСЛЕ ОПЛАТЫ):
-- Как только клиент оплатил заказ (прислал чек), ты ОБЯЗАН переименовать тикет.
-- Формат названия: `Категория-подкатегория1-подкатегория2` (строго латиницей, через дефис).
-- Пример: `тип-nitro-full-1m`, `steam-пополнение-124`, `spotify-1m`.
-- Используй инструмент `rename_ticket` для этого.
 
 КАТАЛОГ РЕАЛЬНЫХ ТОВАРОВ (ЦЕНЫ В РУБЛЯХ):
 {real_catalog}
@@ -630,28 +625,15 @@ TOOLS_OPENAI = [
                             "type": "object",
                             "properties": {
                                 "item_name": {"type": "string", "description": "Название товара (для чека)"},
-                                "price": {"type": "number", "description": "Цена в рублях (НАША ЦЕНА, или со скидкой если UpSell)"},
+                                "price": {"type": "number", "description": "Цена в рублях (НАША ЦЕНА, ОРИГИНАЛЬНАЯ, БЕЗ ВЫЧЕТА СКИДКИ)"},
                                 "quantity": {"type": "integer", "description": "Количество", "default": 1}
                             },
                             "required": ["item_name", "price"]
                         }
-                    }
+                    },
+                    "discount_percent": {"type": "integer", "description": "Процент скидки (если была UpSell акция, укажи 5, иначе 0)", "default": 0}
                 },
                 "required": ["items"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "rename_ticket",
-            "description": "Переименовать тикет. Используй формат Категория-подкатегория1-подкатегория2 (например, тип-nitro-full-1m).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "new_name": {"type": "string", "description": "Новое название тикета (строго латиницей, через дефис)"}
-                },
-                "required": ["new_name"]
             }
         }
     },
@@ -827,6 +809,9 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                     await channel.send("⚠️ Не удалось распознать товар.")
                     return
                     
+                upsell_discount = int(args.get("discount_percent", 0))
+                final_discount = max(discount, upsell_discount)
+                
                 total_amount = 0
                 receipt_names = []
                 for itm in items_list:
@@ -839,23 +824,13 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                     receipt_names.append(item_name if quantity == 1 else f"{item_name} × {quantity}")
 
                 product_display = ", ".join(receipt_names)
-                ok = await send_invoice(channel, product_display, total_amount, discount, author.display_name)
+                ok = await send_invoice(channel, product_display, total_amount, final_discount, author.display_name)
                 if ok:
-                    ai_logger.info(f"Счёт: {channel.id} → {product_display} ({total_amount} Р)")
+                    ai_logger.info(f"Счёт: {channel.id} → {product_display} ({total_amount} Р, скидка {final_discount}%)")
                     hist_clear(channel.id)
                     hist_append(channel.id, "ai", f"[счёт выставлен: {product_display}]")
                     update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0)
                     touch_ai_response(channel.id)
-
-            elif name == "rename_ticket":
-                new_name = args.get("new_name", "")
-                new_name = re.sub(r"[^a-zа-яё0-9\-_]", "", new_name.lower().replace(" ", "-"))[:80]
-                if new_name:
-                    try:
-                        await channel.edit(name=new_name)
-                        await channel.send(f"✅ Тикет переименован в `{new_name}`.")
-                    except Exception as e:
-                        ai_logger.warning(f"rename_ticket err: {e}")
 
             elif name == "escalate_to_human":
                 await escalate(channel, args.get("reason", "Товар не найден"))
@@ -894,17 +869,19 @@ async def on_guild_channel_create(channel):
     if channel.category_id != CONFIG.get("COINS_CATEGORY_ID"):
         return
     
-    await asyncio.sleep(3)
-    
+    # Ищем сообщение до 10 секунд (5 попыток по 2 сек)
     item_name = None
-    async for msg in channel.history(limit=5):
-        if msg.author.bot and msg.embeds:
-            for embed in msg.embeds:
-                for field in embed.fields:
-                    if "Нужный товар" in field.name:
-                        item_name = field.value.strip("`\n ")
-                        break
-            if item_name: break
+    for _ in range(5):
+        async for msg in channel.history(limit=10):
+            if msg.author.bot and msg.embeds:
+                for embed in msg.embeds:
+                    for field in embed.fields:
+                        if "Нужный товар" in field.name:
+                            item_name = field.value.strip("`\n ")
+                            break
+                if item_name: break
+        if item_name: break
+        await asyncio.sleep(2)
             
     if not item_name:
         return
@@ -924,6 +901,22 @@ async def on_guild_channel_create(channel):
         embed.set_image(url=IMG_STRIPE)
         view = CustomRoleSetupView(has_emoji=has_emoji)
         await channel.send(embed=embed, view=view)
+        create_session(channel.id, get_ticket_owner(channel.id) or 0)
+        update_session(channel.id, escalated=1)
+    elif any(x in item_name.lower() for x in ["аватарка", "баннер", "персонаж", "логотип", "дизайн"]):
+        # 👇 НОВАЯ ЛОГИКА ДЛЯ ДИЗАЙНА
+        embed = disnake.Embed(
+            title="🎨 Оформление дизайна",
+            description=(
+                f"Вы приобрели: **{item_name}**\n\n"
+                "Пожалуйста, опишите, что именно вы хотите получить.\n\n"
+                "> 🎨 Укажите стиль, цвета, референсы (картинки-примеры) и ваши пожелания.\n"
+                "> ✍️ Дизайнер приступит к работе после того, как вы отправите описание."
+            ),
+            color=COLOR_GREY
+        )
+        embed.set_image(url=IMG_STRIPE)
+        await channel.send(embed=embed)
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
         update_session(channel.id, escalated=1)
 
@@ -998,26 +991,41 @@ async def _auto_confirm_receipt(channel, message, sess):
                     break
             break
 
+    # 1. Сначала переименовываем канал (пока он в старой категории)
+    try:
+        clean_name = item_name.lower()
+        clean_name = clean_name.replace("discord ", "").replace("нитро ", "nitro-")
+        clean_name = clean_name.replace(" month", "m").replace(" year", "y")
+        clean_name = clean_name.replace(" ", "-")
+        clean_name = re.sub(r"[^a-z0-9\-_]", "", clean_name)
+        
+        if clean_name:
+            await channel.edit(name=clean_name[:80])
+            ai_logger.info(f"✅ Тикет переименован в {clean_name}")
+            await asyncio.sleep(1) # Пауза чтобы Discord не выдал rate limit
+    except Exception as e:
+        ai_logger.warning(f"Rename error: {e}")
+
+    # 2. Затем меняем категорию на "Оплачено"
     paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
     if paid_cat:
         try:
             await channel.edit(category=paid_cat)
             seller_role = channel.guild.get_role(SELLER_ROLE)
             if seller_role: await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
-        except Exception as e: ai_logger.warning(f"auto_confirm edit category: {e}")
+            await asyncio.sleep(1)
+        except Exception as e: 
+            ai_logger.warning(f"auto_confirm edit category: {e}")
 
+    # 3. Сбрасываем сессию
     update_session(channel.id, invoice_sent=0, receipt_url=message.attachments[0].url if message.attachments else "", post_invoice_text_count=0, last_ai_response_ts=int(time.time()), escalated=1)
 
+    # 4. Отправляем сообщение об оплате
     sellers_ping = f"<@&{SELLER_ROLE}>"
     embed = disnake.Embed(title="💚 Оплата принята.", description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{sellers_ping} скоро подключатся и выдадут заказ! ", color=COLOR_GREEN)
     embed.set_image(url=IMG_STRIPE)
     try: await channel.send(embed=embed)
     except Exception: pass
-
-    try:
-        asyncio.create_task(_handle_dialog(channel, bot.user, f"Клиент оплатил заказ: {item_name}. Вызови функцию rename_ticket с правильным названием в формате Категория-Подкатегория1-Подкатегория2 (латиницей, через дефис)."))
-    except Exception as e:
-        ai_logger.warning(f"AI rename trigger err: {e}")
 
 # ============================================================
 # ФОНОВЫЕ ЗАДАЧИ
