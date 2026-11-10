@@ -195,9 +195,10 @@ class ProfileCardView(View):
         guild = inter.guild
         member = inter.author
 
+        # 👇 УДАЛЕН ID SALES MANAGER ИЗ ИСКЛЮЧЕНИЙ
         excluded = set(CONFIG.get("ROLE_IDS", {}).values())
         excluded.update({
-            1127428607606796290, 1154757071330365490, 1471844291595731016,
+            1127428607606796290, 1471844291595731016,
             1471190371181789234, 1457964854441672806, 1423360115335106570,
             1539523399611580476,
             1208442450373513277, 1208442449425334372,
@@ -257,7 +258,7 @@ class ProfileCardView(View):
             pass
 
         try:
-            from modules.systems import render_category
+            from modules.achievements_views import render_category
         except Exception as e:
             logger.exception(f"ach_btn import: {e}")
             return await _send_ephemeral_text(
