@@ -503,9 +503,6 @@ async def on_ready():
             DCView, PromoView, AdminView,
         )
 
-        from modules.autoorder import setup_autoorder
-        setup_autoorder(bot)
-
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
         bot.add_view(TicketView())
