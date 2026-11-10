@@ -1017,13 +1017,13 @@ class TicketPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label="ㅤㅤКупитьㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:buy", emoji=PartialEmoji(name="shopg", id=1539646815530651718))
+    @disnake.ui.button(label="ㅤㅤㅤㅤㅤКупитьㅤㅤㅤㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:buy", emoji=PartialEmoji(name="shopg", id=1539646815530651718))
     async def buy(self, button: disnake.Button, inter: disnake.MessageInteraction):
         embed = disnake.Embed(color=6776679, title="Выбор категории по оплате", description="В какой валюте вы хотите купить товар? Если у вас есть вопрос, вы можете его задать, выбрав соответствующий пункт ниже.")
         embed.set_image(url=_IMG_STRIPE)
         await inter.response.send_message(embed=embed, view=BuyTypeView(), ephemeral=True)
 
-    @disnake.ui.button(label="ㅤㅤКаталогㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:catalog", emoji=PartialEmoji(name="catal", id=1539646769053306980))
+    @disnake.ui.button(label="ㅤㅤㅤㅤㅤКаталогㅤㅤㅤㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:catalog", emoji=PartialEmoji(name="catal", id=1539646769053306980))
     async def catalog(self, button: disnake.Button, inter: disnake.MessageInteraction):
         embed = disnake.Embed(title="Выбор категории товаров", description="В чем представлен ваш товар? Выберите метод ниже.", color=6776679)
         embed.set_image(url=_IMG_STRIPE)
