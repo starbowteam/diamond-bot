@@ -425,7 +425,7 @@ def generate_receipt_png(
     d.line((PAD_X, sep_y, CANVAS_W - M - PAD_X, sep_y),
            fill=STACK_HDR + (255,), width=2)
 
-    # ── HERO + INFO ──
+      # ── HERO + INFO ──
     body_y = sep_y + 10
     body_h = CANVAS_H - PAD_Y - body_y - 32
 
@@ -469,15 +469,38 @@ def generate_receipt_png(
                I_CHECK, 52, GREEN)
 
     tx = icon_x2 + 34
-    d.text((tx, top_y1 + 40), "ИТОГО К ОПЛАТЕ",
+    d.text((tx, top_y1 + 30), "ИТОГО К ОПЛАТЕ",
            font=_font(15), fill=GREEN)
 
-    sum_str = _fmt(total)
-    sum_font = _font(90)
-    sum_w = _tw(d, sum_str, sum_font)
-    d.text((tx, top_y1 + 68), sum_str, font=sum_font, fill=TEXT)
-    d.text((tx + sum_w + 16, top_y1 + 68 + 90 - 48),
-           "Р", font=_font(36), fill=SILVER)
+    # 👇 НОВАЯ ЛОГИКА ОТРИСОВКИ ЦЕН (СО СКИДКОЙ ИЛИ БЕЗ)
+    if discount_percent > 0:
+        orig_str = f"{_fmt(amount)} Р"
+        of = _font(28)
+        ow = _tw(d, orig_str, of)
+        d.text((tx, top_y1 + 60), orig_str, font=of, fill=DIM)
+        d.line((tx, top_y1 + 74, tx + ow, top_y1 + 74), fill=DIM, width=3)
+        
+        sum_str = _fmt(total)
+        sum_font = _font(80)
+        sum_w = _tw(d, sum_str, sum_font)
+        d.text((tx, top_y1 + 100), sum_str, font=sum_font, fill=TEXT)
+        d.text((tx + sum_w + 16, top_y1 + 100 + 80 - 42),
+               "Р", font=_font(32), fill=SILVER)
+        
+        # Плашка "Скидка 5%"
+        badge_w = 130
+        badge_x = tx + sum_w + 80
+        badge_y = top_y1 + 118
+        _alpha_fill(img, (badge_x, badge_y, badge_x + badge_w, badge_y + 40), GREEN, alpha=40, radius=10)
+        d.rounded_rectangle((badge_x, badge_y, badge_x + badge_w, badge_y + 40), radius=10, outline=GREEN + (200,), width=2)
+        d.text((badge_x + 15, badge_y + 10), f"-{discount_percent}%", font=_font(18), fill=GREEN)
+    else:
+        sum_str = _fmt(total)
+        sum_font = _font(90)
+        sum_w = _tw(d, sum_str, sum_font)
+        d.text((tx, top_y1 + 68), sum_str, font=sum_font, fill=TEXT)
+        d.text((tx + sum_w + 16, top_y1 + 68 + 90 - 48),
+               "Р", font=_font(36), fill=SILVER)
 
     _gradient_box(img, (info_x1, top_y1, info_x2, top_y2),
                   SILVER, SILVER, alpha=10, radius=22)
