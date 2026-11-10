@@ -503,7 +503,10 @@ async def on_ready():
             TarologyView, WorkView,
             DCView, PromoView, AdminView,
         )
-
+        
+        # 👇 ДОБАВЬ ЭТИ 2 СТРОКИ
+        from modules.econ_panel import init_econ_panel
+        init_econ_panel(bot)
 
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
