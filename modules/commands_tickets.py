@@ -53,6 +53,10 @@ QUESTIONS_CATEGORY_ID = 1544363672128987196
 
 REVIEW_CHANNEL_ID = 1462074763437543435
 
+# 👇 НОВАЯ РОЛЬ (бывший Control Diamond)
+SELLER_ROLE = 1471844291595731016
+OWNER_IDS = [796293832751972352, 1168943921171288135]
+
 _BUY_LOCKS = {}
 _BUY_LOCK_TIMEOUT = 15
 
@@ -306,14 +310,14 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     current_time = int(_time.time())
     embed_order_info.description = (
         f"Статус - Оформляется\n"
-        f"> Ожидайте подтверждения.\n"
+        f"> Ожидайте оформление, а после - выдачу от продавца.\n"
         f"> Время заказа: <t:{current_time}:f>"
     )
 
     view = TicketView()
     await ticket_channel.send(
-        f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте ответа от <@&1154757071330365490>\n"
-        f"> После уточнения заказа - менеджер создаст вам счёт.",
+        f"> Добрый день, {user.mention}, ваш тикет создан. Ожидайте оформление, а после - выдачу от продавца.\n"
+        f"> После уточнения заказа - продавец создаст вам счёт.",
         embeds=[embeds_list[0], embed_order_info],
         view=view
     )
@@ -379,12 +383,12 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     embed_order_info = embeds_list[1] if len(embeds_list) > 1 else disnake.Embed(title="Информация о заказе", color=6776679)
     embed_order_info.clear_fields()
     embed_order_info.add_field(name="> Нужный товар", value=f"```{item_name}```", inline=False)
-    embed_order_info.description = f"Статус - Оформляется\n> Время: <t:{int(_time.time())}:f>"
+    embed_order_info.description = f"Статус - Оформляется\n> Ожидайте оформление, а после - выдачу от продавца.\n> Время: <t:{int(_time.time())}:f>"
 
     # 1. ОТПРАВЛЯЕМ СТАНДАРТНЫЙ ЭМБЕД + КНОПКИ (ВСЕГДА)
     view = CoinsTicketButtons()
     await ticket_channel.send(
-        content=f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n> Ожидайте ответа от <@&1154757071330365490>",
+        content=f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n> Ожидайте оформление, а после - выдачу от продавца.",
         embeds=[embeds_list[0], embed_order_info],
         view=view
     )
@@ -710,7 +714,9 @@ class SelectView(View):
 
     @disnake.ui.button(label="Счёт на оплату", style=ButtonStyle.gray, custom_id="ticket_action:requisites", emoji=PartialEmoji(name="Rekvi", id=1539656975091105892), row=0)
     async def requisites_btn(self, button: Button, inter: disnake.MessageInteraction):
-        if not any(r.id == 1154757071330365490 for r in inter.author.roles): return await inter.response.send_message("⛔ Кнопка доступна только менеджерам.", ephemeral=True)
+        # 👇 ТЕПЕРЬ ДОСТУПНО ТОЛЬКО ПРОДАВЦАМ И ВЛАДЕЛЬЦАМ
+        if inter.author.id not in OWNER_IDS and not any(r.id == SELLER_ROLE for r in inter.author.roles):
+            return await inter.response.send_message("⛔ Кнопка доступна только продавцам.", ephemeral=True)
         await inter.response.send_modal(InvoiceModal())
 
     @disnake.ui.button(label="Политика", style=ButtonStyle.gray, custom_id="ticket_action:policy", emoji=PartialEmoji(name="Politic", id=1539657020695650384), row=0)
@@ -719,7 +725,9 @@ class SelectView(View):
 
     @disnake.ui.button(label="Изменить название", style=ButtonStyle.gray, custom_id="ticket_action:rename", emoji=PartialEmoji(name="image", id=1550869363266027641), row=0)
     async def rename_btn(self, button: Button, inter: disnake.MessageInteraction):
-        if not _is_paid_ticket(inter.channel): return await inter.response.send_message("⛔ **Кнопка доступна только для оплаченных тикетов.**\n> Дождитесь подтверждения оплаты менеджером.", ephemeral=True)
+        if not _is_paid_ticket(inter.channel): return await inter.response.send_message("⛔ **Кнопка доступна только для оплаченных тикетов.**\n> Дождитесь подтверждения оплаты продавцом.", ephemeral=True)
+        if inter.author.id not in OWNER_IDS and not any(r.id == SELLER_ROLE for r in inter.author.roles):
+            return await inter.response.send_message("⛔ Доступно только продавцам.", ephemeral=True)
         await inter.response.send_modal(RenameTicketModal())
 
 class InvoiceModal(Modal):
@@ -754,7 +762,7 @@ class InvoiceModal(Modal):
         embed.set_image(url=f"attachment://receipt_{order_id}.png")
         await inter.channel.send(embed=embed, file=file, view=ReceiptView())
         await inter.edit_original_response(content="✅ Счёт отправлен в тикет.")
-        await log_discord(title="🧾 Создан счёт", description=f"> **Менеджер:** {inter.author.mention}\n> **Канал:** {inter.channel.mention}\n> **Товар/Услуга:** {product_name}\n> **Сумма:** {amount} Р" + (f"\n> **Скидка:** {discount_percent}%\n" if discount_percent > 0 else "") + f"> **Итого:** {total} Р", color=0x00aaff, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"])
+        await log_discord(title="🧾 Создан счёт", description=f"> **Продавец:** {inter.author.mention}\n> **Канал:** {inter.channel.mention}\n> **Товар/Услуга:** {product_name}\n> **Сумма:** {amount} Р" + (f"\n> **Скидка:** {discount_percent}%\n" if discount_percent > 0 else "") + f"> **Итого:** {total} Р", color=0x00aaff, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"])
 
 class PromoCodeModal(Modal):
     def __init__(self, original_view: View):
@@ -795,11 +803,11 @@ class TicketView(View):
         btn_discounts.callback = self.discounts_callback; self.add_item(btn_discounts)
 
     async def close_callback(self, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав на закрытие.", ephemeral=True)
+        if inter.author.id not in OWNER_IDS and not any(r.id == SELLER_ROLE for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав на закрытие.", ephemeral=True)
         await _do_close_ticket(inter, check_reviews=False)
 
     async def pay_callback(self, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав на подтверждение оплаты.", ephemeral=True)
+        if inter.author.id not in OWNER_IDS and not any(r.id == SELLER_ROLE for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав на подтверждение оплаты.", ephemeral=True)
         channel = inter.channel
         try: age = _time.time() - channel.created_at.timestamp()
         except Exception: age = PAY_CONFIRM_DELAY_SECONDS
@@ -826,7 +834,7 @@ class TicketView(View):
             owner_member = inter.guild.get_member(owner_id_here) if owner_id_here else None
             if owner_member:
                 embed_dm1 = disnake.Embed(color=6776679); embed_dm1.set_image(url=IMG_ORDER_PAID)
-                embed_dm2 = disnake.Embed(title="💚 Ваш заказ подтверждён как оплачен!", description=f"> Менеджер **{inter.author.display_name}** подтвердил оплату вашего заказа.\n\n> **Тикет:** {channel.mention}\n\n> Скоро мы приступим к его выполнению. Если у вас есть вопросы — пишите прямо в тикете.", color=0x2ecc71, timestamp=datetime.now(timezone.utc))
+                embed_dm2 = disnake.Embed(title="💚 Ваш заказ подтверждён как оплачен!", description=f"> Продавец **{inter.author.display_name}** подтвердил оплату вашего заказа.\n\n> **Тикет:** {channel.mention}\n\n> Скоро мы приступим к его выполнению. Если у вас есть вопросы — пишите прямо в тикете.", color=0x2ecc71, timestamp=datetime.now(timezone.utc))
                 embed_dm2.set_image(url=_IMG_STRIPE)
                 await owner_member.send(embeds=[embed_dm1, embed_dm2])
         except Exception: pass
@@ -899,7 +907,7 @@ class TicketPaidView(View):
         self.add_item(btn_discounts)
 
     async def close_callback(self, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        if inter.author.id not in OWNER_IDS and not any(r.id == SELLER_ROLE for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await _do_close_ticket(inter, check_reviews=False)
 
 class CoinsTicketButtons(View):
@@ -912,7 +920,7 @@ class CoinsTicketButtons(View):
 
     @disnake.ui.button(label="ㅤㅤЗакрытьㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="coins_ticket:close", emoji=PartialEmoji(name="OffTicket", id=1539657125716824185), row=0)
     async def close(self, button, inter: disnake.MessageInteraction):
-        if not has_admin_command_roles(inter.author) and not any(r.id in CONFIG["TICKET_MANAGE_ROLES"] for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
+        if inter.author.id not in OWNER_IDS and not any(r.id == SELLER_ROLE for r in inter.author.roles): return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
         await _do_close_ticket(inter, check_reviews=False)
 
 class CatalogTypeSelect(disnake.ui.StringSelect):
@@ -976,8 +984,8 @@ def set_user_ai_pref(user_id: int, enabled: bool):
     cur.execute("INSERT INTO ai_manager_user_prefs (user_id, enabled) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled", (user_id, 1 if enabled else 0))
     db.commit()
 
-AI_PREF_ON_JSON = """{"content": "", "tts": false, "flags": 0, "embeds": [{"description": "", "color": 6776679, "image": {"url": "https://media.discordapp.net/attachments/1527006158282555412/1565727195937378344/image.png?ex=6ae5f495&is=6ae4a315&hm=3605809f04325ca8ccbd386e4962bff10ad735ded3f0c5a01fe50e7160273e3f&=&format=webp&quality=lossless&width=1536&height=597"}, "fields": []}, {"title": "ИИ-Менеджер в тикетах покупки", "description": "> Нынешнее состояние: __**Включено **__\\n\\n> ИИ-Менеджер будет помогать с заказом в ваших тикетах сразу, как только вы напишете. Если живой менеджер ответит — AI замолчит на 5 минут и вернётся, если менеджер перестанет отвечать.\\n", "color": 6664538, "image": {"url": "https://cdn.discordapp.com/attachments/1530453871581855744/1565726492069994577/image.png?ex=6ae5f3ed&is=6ae4a26d&hm=a116b22698dbe9e0cdc8514b53ea34947b0652dcdee9dd552c6ca269397b8e99&"}, "fields": []}]}"""
-AI_PREF_OFF_JSON = """{"content": "", "tts": false, "flags": 0, "embeds": [{"description": "", "color": 6776679, "image": {"url": "https://media.discordapp.net/attachments/1527006158282555412/1565727195937378344/image.png?ex=6ae5f495&is=6ae4a315&hm=3605809f04325ca8ccbd386e4962bff10ad735ded3f0c5a01fe50e7160273e3f&=&format=webp&quality=lossless&width=1536&height=597"}, "fields": []}, {"title": "ИИ-Менеджер в тикетах покупки", "description": "> Нынешнее состояние: __**Выключено **__\\n\\n> ИИ-Менеджер не будет отвечать сразу — сначала ждём живого менеджера. Но если менеджер не ответит в течение 5 минут — AI подключится и поможет с заказом.\\n", "color": 12131613, "image": {"url": "https://cdn.discordapp.com/attachments/1530453871581855744/1565726339103985725/image.png?ex=6ae5f3c9&is=6ae4a249&hm=b0be245164e439c2fb3f8001cd89a85d5f661728113b00e4cbaea88291571f23&"}, "fields": []}]}"""
+AI_PREF_ON_JSON = """{"content": "", "tts": false, "flags": 0, "embeds": [{"description": "", "color": 6776679, "image": {"url": "https://media.discordapp.net/attachments/1527006158282555412/1565727195937378344/image.png?ex=6ae5f495&is=6ae4a315&hm=3605809f04325ca8ccbd386e4962bff10ad735ded3f0c5a01fe50e7160273e3f&=&format=webp&quality=lossless&width=1536&height=597"}, "fields": []}, {"title": "ИИ-Менеджер в тикетах покупки", "description": "> Нынешнее состояние: __**Включено **__\\n\\n> ИИ-Менеджер будет помогать с заказом в ваших тикетах сразу, как только вы напишете. Если живой продавец ответит — AI замолчит на 5 минут и вернётся, если продавец перестанет отвечать.\\n", "color": 6664538, "image": {"url": "https://cdn.discordapp.com/attachments/1530453871581855744/1565726492069994577/image.png?ex=6ae5f3ed&is=6ae4a26d&hm=a116b22698dbe9e0cdc8514b53ea34947b0652dcdee9dd552c6ca269397b8e99&"}, "fields": []}]}"""
+AI_PREF_OFF_JSON = """{"content": "", "tts": false, "flags": 0, "embeds": [{"description": "", "color": 6776679, "image": {"url": "https://media.discordapp.net/attachments/1527006158282555412/1565727195937378344/image.png?ex=6ae5f495&is=6ae4a315&hm=3605809f04325ca8ccbd386e4962bff10ad735ded3f0c5a01fe50e7160273e3f&=&format=webp&quality=lossless&width=1536&height=597"}, "fields": []}, {"title": "ИИ-Менеджер в тикетах покупки", "description": "> Нынешнее состояние: __**Выключено **__\\n\\n> ИИ-Менеджер не будет отвечать сразу — сначала ждём живого продавца. Но если продавец не ответит в течение 5 минут — AI подключится и поможет с заказом.\\n", "color": 12131613, "image": {"url": "https://cdn.discordapp.com/attachments/1530453871581855744/1565726339103985725/image.png?ex=6ae5f3c9&is=6ae4a249&hm=b0be245164e439c2fb3f8001cd89a85d5f661728113b00e4cbaea88291571f23&"}, "fields": []}]}"""
 
 def build_ai_pref_embeds(enabled: bool) -> List[disnake.Embed]:
     data = json.loads(AI_PREF_ON_JSON if enabled else AI_PREF_OFF_JSON)
