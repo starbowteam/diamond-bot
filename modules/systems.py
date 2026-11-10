@@ -612,7 +612,7 @@ ACTIONS_DIR = os.path.join(BASE_DIR, "actions")
 DAILY_DEAL_FILE = os.path.join(DATA_DIR, "daily_deal.json")
 ROULETTE_STATS_FILE = os.path.join(DATA_DIR, "roulette_stats.json")
 
-DAILY_DEAL_REFRESH_HOURS = 5
+DAILY_DEAL_REFRESH_HOURS = 25
 DAILY_DEAL_DISCOUNT = 30
 DAILY_DEALS_PER_CYCLE = 5
 
@@ -1148,7 +1148,7 @@ def _build_deal_text(deal: dict) -> str:
         f"**{new} DC** вместо ~~{orig} DC~~.\n\n"
         f"**Как забрать:**\n"
         f"> **Каталог** → **Diamond Coins** → **Акция дня**\n"
-        f"Успей — товар дня меняется каждые несколько часов."
+        f"Успей — товар дня меняется каждый день!"
     )
 
 async def announce_deal(bot, deal: dict, slot: int):
