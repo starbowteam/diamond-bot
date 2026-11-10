@@ -6,6 +6,7 @@ import time
 import math
 import asyncio
 import logging
+import glob
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple
 
@@ -16,7 +17,7 @@ from disnake.ui import Modal, TextInput
 from disnake.ext import commands, tasks
 
 from core.utils import (
-    CONFIG, DATA_DIR, logger, db, cur,
+    CONFIG, DATA_DIR, CATALOG_DIR, logger, db, cur,
     load_json, save_json, now_ts,
     get_ticket_owner,
 )
@@ -39,7 +40,6 @@ LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
 
-# 👇 НОВАЯ РОЛЬ (бывший Control Diamond)
 SELLER_ROLE = 1471844291595731016
 OWNER_IDS = [796293832751972352, 1168943921171288135]
 LOG_CHANNEL = 1530453871581855744
@@ -50,7 +50,7 @@ DEBOUNCE_SEC = 2.0
 HISTORY_TTL_SEC = 20 * 60
 HISTORY_MAX_MSG = 10
 
-MANAGER_SILENCE_SEC = 5
+MANAGER_SILENCE_SEC = 300
 FALLBACK_WAIT_SEC = 300
 CLIENT_MAX_SILENCE_SEC = 600
 
@@ -64,7 +64,6 @@ IMG_STRIPE = "https://cdn.discordapp.com/attachments/1527006158282555412/1537851
 
 YES_EMOJI = "<:Yes:1540361827295170722>"
 
-# Настройки рекламы
 ADS_CATEGORY_ID = 1568673531900727407
 ADS_CHANNEL_ID = 1553694881564590143
 
@@ -121,6 +120,31 @@ async def log_discord(title: str, description: str, color: int = 0x00ff00, chann
         await ch.send(embed=embed)
     except Exception as e:
         ai_logger.warning(f"log_discord: {e}")
+
+# ============================================================
+# ПАРСЕР РЕАЛЬНОГО КАТАЛОГА (menu_*.json)
+# ============================================================
+def build_real_catalog_text():
+    files = glob.glob(os.path.join(CATALOG_DIR, "menu_*.json"))
+    lines = []
+    for f in files:
+        if "shop_catalog" in f: 
+            continue
+        try:
+            with open(f, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+            for e in data.get("embeds", []):
+                title = e.get("title", "")
+                if title: 
+                    lines.append(f"\n--- {title} ---")
+                for field in e.get("fields", []):
+                    name = field.get("name", "").replace("*", "").replace(">", "").strip()
+                    value = field.get("value", "").replace("`", "").strip()
+                    if name and value:
+                        lines.append(f"  • {name} [НАША ЦЕНА: {value}]")
+        except Exception:
+            pass
+    return "\n".join(lines)
 
 # ============================================================
 # БД И МИГРАЦИИ
@@ -299,7 +323,6 @@ class AdChannelNameModal(Modal):
         
         await inter.channel.send(embed=success_embed)
 
-        # 👇 УДАЛЯЕМ СТАРОЕ СООБЩЕНИЕ С БРИФОМ
         try:
             async for msg_hist in inter.channel.history(limit=15):
                 if msg_hist.author.bot and msg_hist.embeds and msg_hist.embeds[0].title == "📢 Оформление рекламы":
@@ -322,7 +345,6 @@ class AdPublishConfirmView(ui.View):
 
         await inter.response.defer(ephemeral=True)
 
-        # Защита от дюпа
         try: await inter.message.delete()
         except Exception: pass
 
@@ -361,7 +383,6 @@ class AdPublishConfirmView(ui.View):
         success_embed.set_image(url=IMG_STRIPE)
         await inter.channel.send(embed=success_embed)
 
-        # 👇 УДАЛЯЕМ СТАРОЕ СООБЩЕНИЕ С БРИФОМ
         try:
             async for msg_hist in inter.channel.history(limit=15):
                 if msg_hist.author.bot and msg_hist.embeds and msg_hist.embeds[0].title == "📢 Оформление рекламы":
@@ -506,65 +527,6 @@ async def close_ticket_abuse(channel, reason: str, user_id: int):
     except Exception as e:
         ai_logger.exception(f"close_ticket_abuse: {e}")
 
-def get_filtered_catalog(user_text: str, full_catalog: Dict[str, dict]) -> Dict[str, dict]:
-    t = user_text.lower()
-    result = {}
-    keywords = {
-        "discord":  ["дискорд", "discord", "нитро", "nitro", "буст", "boost", "гифт", "активация"],
-        "telegram": ["телега", "телеграм", "telegram", "тг", "tg", "звезд", "звёзд", "stars"],
-        "steam":    ["стим", "steam", "пополнени", "регион", "рубл"],
-        "roblox":   ["роблокс", "roblox", "робукс", "robux", "плюс"],
-        "spotify":  ["споти", "spotify", "спф"],
-        "decoration": ["украшени", "декор", "бейдж", "профиль"],
-        "ads": ["реклама", "ad", "пинг", "everyone", "here", "личный канал"]
-    }
-    matched_cats = [cat_key for cat_key, words in keywords.items() if any(w in t for w in words)]
-    if not matched_cats: return full_catalog
-    for db_key, cat_data in full_catalog.items():
-        for mc in matched_cats:
-            if mc in db_key.lower() or mc in cat_data["label"].lower():
-                result[db_key] = cat_data
-                break
-    return result if result else full_catalog
-
-def find_relevant_items(user_text: str, full_catalog: Dict[str, dict]) -> List[str]:
-    t = (user_text or "").lower().strip()
-    result, seen = [], set()
-    for item_key, words in CATALOG_SYNONYMS.items():
-        for w in words:
-            if w in t:
-                found_ids = [it.get("id", "") for cat in full_catalog.values() for it in cat.get("items", []) if it.get("id", "").startswith(item_key)]
-                for fid in found_ids:
-                    if fid not in seen:
-                        seen.add(fid)
-                        result.append(fid)
-                break
-    if any(x in t for x in ["подар", "другу", "подарить"]):
-        for key in ("discord_nitro_gift_basic", "discord_nitro_gift_full", "discord_nitro_gift"):
-            if key not in seen and any(it.get("id") == key for cat in full_catalog.values() for it in cat.get("items")):
-                seen.add(key)
-                result.insert(0, key)
-    return result
-
-def build_catalog_block(user_text: str, filtered_catalog: Dict[str, dict]) -> str:
-    relevant = find_relevant_items(user_text, filtered_catalog)
-    parts = []
-    if relevant:
-        parts.append("🎯 ВОЗМОЖНО РЕЛЕВАНТНО:")
-        for rid in relevant[:15]:
-            for cat in filtered_catalog.values():
-                for it in cat.get("items", []):
-                    if it.get("id") == rid:
-                        parts.append(f"  ⭐ {it['id']}: {it['name']} — {it['price']}₽" + (f" / {it['unit']}" if it.get("unit") else ""))
-                        break
-        parts.append("")
-    parts.append("📦 ДОСТУПНЫЕ ТОВАРЫ:")
-    for cat_label, cat in filtered_catalog.items():
-        parts.append(f"\n[{cat_label}]")
-        for it in cat.get("items", []):
-            parts.append(f"  - {it['id']}: {it['name']} — {it['price']}₽" + (f" / {it['unit']}" if it.get("unit") else ""))
-    return "\n".join(parts)
-
 def _is_paid_category(channel) -> bool:
     return channel.category and channel.category.id == CONFIG.get("PAID_CATEGORY_ID")
 
@@ -580,7 +542,6 @@ def _is_ai_ticket(channel) -> bool:
     if _is_real_category(channel): return True
     return bool(get_ticket_owner(channel.id))
 
-# 👇 Теперь проверяем только Sellers и Владельцев
 def _is_manager(member) -> bool:
     return member.id in OWNER_IDS or any(r.id == SELLER_ROLE for r in getattr(member, "roles", []))
 
@@ -599,6 +560,11 @@ async def get_ticket_discount(channel) -> int:
         pass
     return 0
 
+# ============================================================
+# СИСТЕМНЫЙ ПРОМПТ
+# ============================================================
+REAL_CATALOG_TEXT = build_real_catalog_text()
+
 SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете. задача — помочь клиенту оформить заказ, как живой помощник.
 
 ПРАВИЛА ОБЩЕНИЯ:
@@ -608,28 +574,44 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
   > **Название** — 460 ₽
 - Если клиент просит категорию без уточнений — покажи ВСЕ варианты с ценами.
 
+ГЛАВНОЕ ПРАВИЛО ПО ЦЕНАМ:
+- В каталоге ниже некоторые товары имеют ДВЕ цены: цена Discord (в скобках) и НАША ЦЕНА (указана как `[НАША ЦЕНА: XXX]`).
+- Для выставления счета ВСЕГДА бери **НАШУ ЦЕНУ**.
+- Пример: `4.99 $ | 219 ₽ [НАША ЦЕНА: 200₽]` -> выставляй счет на 200 рублей, а не на 219.
+
+ГЛОБАЛЬНЫЕ ЗНАНИЯ И ИНТЕРНЕТ:
+- Если клиент спрашивает про условия подписки, сроки активации, работу товара вне нашего магазина (например, "Как работает Nitro?", "Что дает Roblox Plus?", "Сгорят ли звезды ТГ?", "В чем разница Full и Basic?"), используй СВОИ знания об этих сервисах.
+- Отвечай как эксперт, не зови продавца, если вопрос касается общедоступной информации о продукте.
+
+UPSELL (ДОПРОДАЖИ - ВАЖНО):
+- Перед тем как выставить счёт, проверь итоговую сумму.
+- Если сумма заказа превышает 500₽:
+  1. Предложи клиенту крутую скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ другой товар из каталога (предложи 1-2 интересных варианта).
+  2. Пример: "Кстати, ваш заказ уже на ХХХ₽. Если добавите вот этот товар за YYY₽, я сделаю вам скидку 5% на всё!"
+  3. Если клиент соглашается, пересчитай итоговую сумму с учетом скидки 5% и только потом вызывай инструмент create_invoice.
+
 ГЛАВНОЕ ПРАВИЛО ПЕРЕД СЧЁТОМ:
 - НИКОГДА не вызывай create_invoice сразу после того, как клиент назвал товар.
 - Сначала спроси: «Выставить счёт на <товар> за <цена>?»
 - Жди явного подтверждения: «да», «ок», «выставляй», «давай», «го», «+».
 - Только после подтверждения — вызывай create_invoice.
 
-ОСОБЕННОСТЬ: РЕКЛАМА
-Если пользователь купил рекламу (в истории есть слова "Реклама @everyone", "Реклама @here", "Личный канал"):
-- Не пытайся выставить счёт.
-- Если клиент задает вопросы, отвечай, что нужно нажать на кнопку **"Заполнить бриф"**, которая уже висит в чате.
-- Если клиент уже заполнил форму (в истории есть "Предпросмотр рекламы"), отвечай, что нужно нажать "Опубликовать".
+ЗАПРЕТ НА DC (DIAMOND COINS):
+- В этом тикете ты продаешь ТОЛЬКО за реальные деньги (рубли).
+- Если клиент просит что-то купить за DC, ответь: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop). Здесь я оформляю только заказы за реальные деньги."
 
-ЕСЛИ ТОВАРА НЕТ В КАТАЛОГЕ:
-- НЕ уточняй, НЕ угадывай.
-- Просто ответь: "Зову продавцов <@&1471844291595731016> для уточнения."
-- И больше не отвечай (передай тикет продавцу).
+ПЕРЕИМЕНОВАНИЕ ТИКЕТА (ПОСЛЕ ОПЛАТЫ):
+- Как только клиент оплатил заказ (прислал чек), ты ОБЯЗАН переименовать тикет.
+- Формат названия: `Категория-подкатегория1-подкатегория2` (строго латиницей, через дефис).
+- Пример: `тип-nitro-full-1m`, `steam-пополнение-124`, `spotify-1m`.
+- Используй инструмент `rename_ticket` для этого.
 
-каталог:
-{catalog}
+КАТАЛОГ РЕАЛЬНЫХ ТОВАРОВ (ЦЕНЫ В РУБЛЯХ):
+{real_catalog}
 
 контекст:
 - клиент: {user_name}
+- скидка в тикете: {discount}%
 """
 
 TOOLS_OPENAI = [
@@ -647,10 +629,11 @@ TOOLS_OPENAI = [
                         "items": {
                             "type": "object",
                             "properties": {
-                                "item_id": {"type": "string", "description": "ID товара из каталога"},
+                                "item_name": {"type": "string", "description": "Название товара (для чека)"},
+                                "price": {"type": "number", "description": "Цена в рублях (НАША ЦЕНА, или со скидкой если UpSell)"},
                                 "quantity": {"type": "integer", "description": "Количество", "default": 1}
                             },
-                            "required": ["item_id"]
+                            "required": ["item_name", "price"]
                         }
                     }
                 },
@@ -661,14 +644,14 @@ TOOLS_OPENAI = [
     {
         "type": "function",
         "function": {
-            "name": "start_ad_brief",
-            "description": "Вызвать форму заполнения рекламы. Используй, если куплен товар категории ads.",
+            "name": "rename_ticket",
+            "description": "Переименовать тикет. Используй формат Категория-подкатегория1-подкатегория2 (например, тип-nitro-full-1m).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "item_name": {"type": "string", "description": "Название купленного товара рекламы"}
+                    "new_name": {"type": "string", "description": "Новое название тикета (строго латиницей, через дефис)"}
                 },
-                "required": ["item_name"]
+                "required": ["new_name"]
             }
         }
     },
@@ -727,7 +710,6 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
             return res
     return None
 
-# 👇 Эскалация пингует Sellers
 async def escalate(channel, reason: str):
     if _is_paid_category(channel): return
     sess = get_session(channel.id)
@@ -790,13 +772,13 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         hist_append(channel.id, "user", user_text)
 
         discount = await get_ticket_discount(channel)
-        full_catalog = load_catalog_from_db()
-        if not full_catalog:
-            await channel.send("⚠️ Каталог пуст.")
-            return
         
-        catalog_text = build_catalog_block(user_text, get_filtered_catalog(user_text, full_catalog))
-        system_prompt = SYSTEM_PROMPT.format(catalog=catalog_text, user_name=author.display_name)
+        system_prompt = SYSTEM_PROMPT.format(
+            real_catalog=REAL_CATALOG_TEXT,
+            user_name=author.display_name, 
+            discount=discount
+        )
+        
         history = hist_load(channel.id)
         
         async with channel.typing():
@@ -841,42 +823,39 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 if fresh_sess and fresh_sess.get("invoice_sent"): return
                     
                 items_list = args.get("items", [])
-                if not items_list and args.get("item_id"):
-                    items_list = [{"item_id": args.get("item_id"), "quantity": args.get("quantity", 1)}]
                 if not items_list:
                     await channel.send("⚠️ Не удалось распознать товар.")
                     return
+                    
                 total_amount = 0
                 receipt_names = []
                 for itm in items_list:
-                    item_id = itm.get("item_id")
+                    item_name = itm.get("item_name", "Товар")
+                    price = float(itm.get("price", 0))
                     quantity = max(1, int(itm.get("quantity", 1)))
-                    row = cur.execute("SELECT * FROM autoorder_catalog WHERE id=?", (item_id,)).fetchone()
-                    if not row:
-                        await escalate(channel, f"Товар `{item_id}` не найден")
-                        return
-                    base_price = float(row["price"])
-                    total_base = base_price * quantity
-                    amount = int(total_base) if total_base % 1 == 0 else int(math.ceil(total_base))
+                    
+                    amount = int(price * quantity)
                     total_amount += amount
-                    receipt_names.append(row["name"] if quantity == 1 else f"{row['name']} × {quantity}")
+                    receipt_names.append(item_name if quantity == 1 else f"{item_name} × {quantity}")
 
                 product_display = ", ".join(receipt_names)
                 ok = await send_invoice(channel, product_display, total_amount, discount, author.display_name)
                 if ok:
-                    ai_logger.info(f"Счёт: {channel.id} → {product_display}")
+                    ai_logger.info(f"Счёт: {channel.id} → {product_display} ({total_amount} Р)")
                     hist_clear(channel.id)
                     hist_append(channel.id, "ai", f"[счёт выставлен: {product_display}]")
                     update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0)
                     touch_ai_response(channel.id)
 
-            elif name == "start_ad_brief":
-                item_name = args.get("item_name", "Реклама")
-                embed = build_ad_embed(item_name)
-                view = AdStartView()
-                await channel.send(embed=embed, view=view)
-                update_session(channel.id, escalated=1)
-                return
+            elif name == "rename_ticket":
+                new_name = args.get("new_name", "")
+                new_name = re.sub(r"[^a-zа-яё0-9\-_]", "", new_name.lower().replace(" ", "-"))[:80]
+                if new_name:
+                    try:
+                        await channel.edit(name=new_name)
+                        await channel.send(f"✅ Тикет переименован в `{new_name}`.")
+                    except Exception as e:
+                        ai_logger.warning(f"rename_ticket err: {e}")
 
             elif name == "escalate_to_human":
                 await escalate(channel, args.get("reason", "Товар не найден"))
@@ -900,9 +879,6 @@ async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
-    
-    bot.add_view(AdStartView())
-    bot.add_view(AdPublishConfirmView())
     
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
@@ -933,13 +909,7 @@ async def on_guild_channel_create(channel):
     if not item_name:
         return
 
-    if "реклама" in item_name.lower() or "личный канал" in item_name.lower():
-        embed = build_ad_embed(item_name)
-        view = AdStartView()
-        await channel.send(embed=embed, view=view)
-        create_session(channel.id, get_ticket_owner(channel.id) or 0)
-        update_session(channel.id, escalated=1)
-    elif "кастомная роль" in item_name.lower():
+    if "кастомная роль" in item_name.lower():
         has_emoji = "эмодзи" in item_name.lower()
         embed = disnake.Embed(
             title="🎨 Настройка кастомной роли",
@@ -1019,6 +989,15 @@ async def _auto_confirm_receipt(channel, message, sess):
     try: await message.add_reaction(YES_EMOJI)
     except Exception: pass
 
+    item_name = "Товар"
+    async for msg in channel.history(limit=20):
+        if msg.author == bot.user and msg.embeds and "Счёт для оплаты" in (msg.embeds[0].title or ""):
+            for field in msg.embeds[0].fields:
+                if "Товары" in field.name:
+                    item_name = field.value
+                    break
+            break
+
     paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
     if paid_cat:
         try:
@@ -1034,6 +1013,11 @@ async def _auto_confirm_receipt(channel, message, sess):
     embed.set_image(url=IMG_STRIPE)
     try: await channel.send(embed=embed)
     except Exception: pass
+
+    try:
+        asyncio.create_task(_handle_dialog(channel, bot.user, f"Клиент оплатил заказ: {item_name}. Вызови функцию rename_ticket с правильным названием в формате Категория-Подкатегория1-Подкатегория2 (латиницей, через дефис)."))
+    except Exception as e:
+        ai_logger.warning(f"AI rename trigger err: {e}")
 
 # ============================================================
 # ФОНОВЫЕ ЗАДАЧИ
