@@ -1002,7 +1002,7 @@ async def _auto_confirm_receipt(channel, message, sess):
         if clean_name:
             await channel.edit(name=clean_name[:80])
             ai_logger.info(f"✅ Тикет переименован в {clean_name}")
-            await asyncio.sleep(1) # Пауза чтобы Discord не выдал rate limit
+            await asyncio.sleep(15) # Пауза чтобы Discord не выдал rate limit
     except Exception as e:
         ai_logger.warning(f"Rename error: {e}")
 
@@ -1013,7 +1013,7 @@ async def _auto_confirm_receipt(channel, message, sess):
             await channel.edit(category=paid_cat)
             seller_role = channel.guild.get_role(SELLER_ROLE)
             if seller_role: await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
-            await asyncio.sleep(1)
+            await asyncio.sleep(15)
         except Exception as e: 
             ai_logger.warning(f"auto_confirm edit category: {e}")
 
