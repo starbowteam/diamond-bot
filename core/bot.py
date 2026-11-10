@@ -18,7 +18,7 @@ from core.utils import (
     get_dc_cache, save_dc_cache, sync_dc_to_json,
 )
 
-from modules.actions import refresh_daily_deal
+from modules.systems import refresh_daily_deal
 from modules.dc import (
     add_dc, get_user_balance, load_shop_catalog,
     get_user_dc_data, save_user_dc_data,
@@ -83,17 +83,16 @@ def load_salary_state() -> dict:
 def save_salary_state(state: dict):
     save_json(SALARY_STATE_FILE, state)
 
+# 👇 УДАЛЕНА РОЛЬ SALES MANAGER
 SALARY_ROLES = {
     1471844291595731016: {"advance": 1275, "salary": 2975},
     1513935883475226796: {"advance": 935,  "salary": 2125},
-    1154757071330365490: {"advance": 935,  "salary": 2125},
     1457964854441672806: {"advance": 638,  "salary": 1488},
 }
 
 SALARY_ROLE_ORDER = [
     1471844291595731016,
     1513935883475226796,
-    1154757071330365490,
     1457964854441672806,
 ]
 
@@ -482,7 +481,7 @@ async def on_ready():
         await bot.change_presence(activity=disnake.Game(name="Магазин и экономика"))
 
         try:
-            from modules.systems import setup_giveaways
+            from modules.giveaways import setup_giveaways
             setup_giveaways(bot)
             logger.info("🎁 Модуль розыгрышей подключён")
         except Exception as e:
@@ -503,10 +502,9 @@ async def on_ready():
             TarologyView, WorkView,
             DCView, PromoView, AdminView,
         )
-        
-        # 👇 ДОБАВЬ ЭТИ 2 СТРОКИ
-        from modules.econ_panel import init_econ_panel
-        init_econ_panel(bot)
+
+        from modules.autoorder import setup_autoorder
+        setup_autoorder(bot)
 
         bot.add_view(TicketPanelView())
         bot.add_view(TicketPaidView())
@@ -855,7 +853,6 @@ async def on_member_update(before: disnake.Member, after: disnake.Member):
                 description=f"> **Пользователь:** {after.mention}\n> **Роль:** {', '.join(r.mention for r in added)}",
                 color=0x00ff00
             )
-            # 👇 Клан выдаём ТОЛЬКО при получении Клуб-роли, не раньше
             try:
                 from clan.core import CLUB_ROLE_ID, assign_user_to_clan, get_user_clan
                 added_ids = {r.id for r in added}
@@ -1156,7 +1153,7 @@ async def on_message(message: disnake.Message):
 
         # 👇 ВЫПЛАТА ПРИЗОВ ЗА ШАБЛОННЫЕ РОЗЫГРЫШИ (после отзыва)
         try:
-            from modules.systems import process_pending_payouts
+            from modules.giveaways import process_pending_payouts
             paid = await process_pending_payouts(bot, user_id)
             if paid > 0:
                 logger.info(f"💰 Призы за розыгрыши выплачены: {user_id} → {paid} DC")
