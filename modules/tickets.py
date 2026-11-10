@@ -373,7 +373,7 @@ def generate_receipt_png(
     order_id: Optional[str] = None,
 ) -> io.BytesIO:
     """1800×1000 · Premium-дизайн счёта."""
-    manager_name  = _sanitize(manager_name,  fallback="Менеджер")
+    manager_name  = _sanitize(manager_name,  fallback="Продавец")
     customer_name = _sanitize(customer_name, fallback="Заказчик")
     product_name  = _sanitize(product_name,  fallback="Товар")
 
@@ -921,12 +921,12 @@ def render_policy(user_id: int) -> io.BytesIO:
          "text": "Если вы отказываетесь после оплаты — возврат 50% от суммы. "
                  "50% удерживаются для покрытия комиссий платёжных систем и обработки."},
         {"color": GOLD,  "icon": I_BAN,    "title": "Стоп-лист",
-         "text": "Массовые пинги персонала, продавца или менеджеров, "
+         "text": "Массовые пинги персонала, продавца или продавцов, "
                  "а также агрессивное поведение переводят тикет в «стоп-лист». "
                  "Такие заказы обрабатываются в последнюю очередь."},
         {"color": GREEN, "icon": I_CHECK,  "title": "Подтверждение оплаты",
          "text": "Для подтверждения необходимо прикрепить чек оплаты и указать, "
-                 "куда перевод был сделан. После проверки менеджер подтвердит оплату — "
+                 "куда перевод был сделан. После проверки продавец подтвердит оплату — "
                  "и продавец начнёт работу."},
     ]
 
@@ -979,12 +979,12 @@ async def show_policy(inter: disnake.MessageInteraction):
 # ============================================================
 # БЛОК 4: КОДЕКС МАГАЗИНА
 # ============================================================
-# 👇 Employer (1471190371181789234) УДАЛЕН
+# 👇 РОЛЬ SALES MANAGER УДАЛЕНА ИЗ СПИСКА
 SALARY_ROLES = [
     {
         "role_id": 1471844291595731016,
-        "name": "Control Diamond",
-        "tag": "CONTROL",
+        "name": "Sellers",
+        "tag": "SELLERS",
         "advance": 1275,
         "salary": 2975,
         "color": (0xcd, 0xce, 0xd1),
@@ -998,15 +998,6 @@ SALARY_ROLES = [
         "salary": 2125,
         "color": (0xbe, 0x85, 0x85),
         "icon": I_USER_TIE,
-    },
-    {
-        "role_id": 1154757071330365490,
-        "name": "Sales Manager",
-        "tag": "SALES",
-        "advance": 935,
-        "salary": 2125,
-        "color": (0x39, 0xf4, 0x7b),
-        "icon": I_HAND,
     },
     {
         "role_id": 1457964854441672806,
@@ -1289,7 +1280,7 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
     _draw_left_panel_work(
         img, d, (left_x1, body_y, left_x2, body_y + body_h),
         extra_blocks=[
-            {"label": "Строго для", "value": "Sales Manager",
+            {"label": "Строго для", "value": "Sellers",
              "icon": I_USER_TIE, "color": BLUE},
             {"label": "Нарушение", "value": "выговор",
              "icon": I_WARNING, "color": RED},
@@ -1305,7 +1296,7 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
 
     _draw_right_head(d, rx1, body_y + 22, rx2,
                      "Правила по тикетам",
-                     "регламент для sales manager")
+                     "регламент для Sellers")
 
     items_y = body_y + 118
     items_bottom = body_y + body_h - 22
@@ -1335,7 +1326,7 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
         {"icon": I_WARNING, "title": "Ответственность", "subtitle": "правило №4",
          "text": ("За нарушение любого из пунктов выше — выговор. "
                   "Систематические нарушения ведут к снятию "
-                  "с должности Sales Manager."),
+                  "с должности Sellers."),
          "color": RED},
     ]
 
@@ -1343,7 +1334,7 @@ def render_work_tickets(user_id: int) -> io.BytesIO:
         cy = items_y + i * (item_h + gap_item)
         _draw_rule_card(img, d, rx1, cy, rx2 - rx1, item_h, rule)
 
-    _draw_footer(d, "Обязательно к прочтению каждым менеджером", "стр. 2 / 2")
+    _draw_footer(d, "Обязательно к прочтению каждым продавцом", "стр. 2 / 2")
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
