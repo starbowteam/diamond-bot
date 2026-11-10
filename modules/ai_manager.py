@@ -39,7 +39,8 @@ LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
 
-SALES_MANAGER_ROLE = 1154757071330365490
+# 👇 НОВАЯ РОЛЬ (бывший Control Diamond)
+SELLER_ROLE = 1471844291595731016
 OWNER_IDS = [796293832751972352, 1168943921171288135]
 LOG_CHANNEL = 1530453871581855744
 
@@ -321,7 +322,7 @@ class AdPublishConfirmView(ui.View):
 
         await inter.response.defer(ephemeral=True)
 
-        # Защита от дюпа (удаляем превью)
+        # Защита от дюпа
         try: await inter.message.delete()
         except Exception: pass
 
@@ -579,8 +580,9 @@ def _is_ai_ticket(channel) -> bool:
     if _is_real_category(channel): return True
     return bool(get_ticket_owner(channel.id))
 
+# 👇 Теперь проверяем только Sellers и Владельцев
 def _is_manager(member) -> bool:
-    return member.id in OWNER_IDS or any(r.id == SALES_MANAGER_ROLE for r in getattr(member, "roles", []))
+    return member.id in OWNER_IDS or any(r.id == SELLER_ROLE for r in getattr(member, "roles", []))
 
 async def get_ticket_discount(channel) -> int:
     try:
@@ -620,8 +622,8 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 
 ЕСЛИ ТОВАРА НЕТ В КАТАЛОГЕ:
 - НЕ уточняй, НЕ угадывай.
-- Просто ответь: "Зову менеджера <@&1154757071330365490> для уточнения."
-- И больше не отвечай (передай тикет менеджеру).
+- Просто ответь: "Зову продавцов <@&1471844291595731016> для уточнения."
+- И больше не отвечай (передай тикет продавцу).
 
 каталог:
 {catalog}
@@ -674,7 +676,7 @@ TOOLS_OPENAI = [
         "type": "function",
         "function": {
             "name": "escalate_to_human",
-            "description": "Позвать менеджера если не можешь понять или товара нет в каталоге.",
+            "description": "Позвать продавца если не можешь понять или товара нет в каталоге.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -725,6 +727,7 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
             return res
     return None
 
+# 👇 Эскалация пингует Sellers
 async def escalate(channel, reason: str):
     if _is_paid_category(channel): return
     sess = get_session(channel.id)
@@ -732,10 +735,9 @@ async def escalate(channel, reason: str):
     elif sess.get("escalated"): return
     update_session(channel.id, escalated=1)
     
-    owners_ping = " | ".join(f"<@{oid}>" for oid in OWNER_IDS)
-    ping = owners_ping if "BuyALL" in reason or "не найден" in reason.lower() else f"<@&{SALES_MANAGER_ROLE}>"
+    ping = f"<@&{SELLER_ROLE}>"
     
-    embed = disnake.Embed(title="⚠️ Требуется помощь менеджера", description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}", color=COLOR_GREY)
+    embed = disnake.Embed(title="⚠️ Требуется помощь продавца", description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}", color=COLOR_GREY)
     embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=embed)
     ai_logger.info(f"Эскалация: {channel.id} — {reason}")
@@ -814,12 +816,12 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         text = (result.get("text") or "").strip()
         funcs = result.get("funcs") or []
 
-        if text and "Зову менеджера" in text:
+        if text and "Зову продавцов" in text:
             try: await channel.send(text)
             except Exception: pass
             touch_ai_response(channel.id)
             update_session(channel.id, escalated=1)
-            await escalate(channel, "Товар не найден / нужен менеджер")
+            await escalate(channel, "Товар не найден / нужен продавец")
             return
 
         if text and not funcs:
@@ -1021,14 +1023,14 @@ async def _auto_confirm_receipt(channel, message, sess):
     if paid_cat:
         try:
             await channel.edit(category=paid_cat)
-            manager_role = channel.guild.get_role(SALES_MANAGER_ROLE)
-            if manager_role: await channel.set_permissions(manager_role, send_messages=True, view_channel=True)
+            seller_role = channel.guild.get_role(SELLER_ROLE)
+            if seller_role: await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
         except Exception as e: ai_logger.warning(f"auto_confirm edit category: {e}")
 
     update_session(channel.id, invoice_sent=0, receipt_url=message.attachments[0].url if message.attachments else "", post_invoice_text_count=0, last_ai_response_ts=int(time.time()), escalated=1)
 
-    owners_ping = " | ".join(f"<@{oid}>" for oid in OWNER_IDS)
-    embed = disnake.Embed(title="💚 Оплата принята.", description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{owners_ping} скоро подключатся и выдадут заказ! ", color=COLOR_GREEN)
+    sellers_ping = f"<@&{SELLER_ROLE}>"
+    embed = disnake.Embed(title="💚 Оплата принята.", description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{sellers_ping} скоро подключатся и выдадут заказ! ", color=COLOR_GREEN)
     embed.set_image(url=IMG_STRIPE)
     try: await channel.send(embed=embed)
     except Exception: pass
