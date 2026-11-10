@@ -74,6 +74,9 @@ MEMORY_TTL_DAYS = 30
 REPEAT_QUESTION_HOURS = 1
 REPEAT_IDENTICAL_MINUTES = 5
 
+CHAT_AUTO_INTERVAL_HOURS = 24
+CHAT_AUTO_IDLE_HOURS = 12
+
 BUSY_WINDOW_SECONDS = 120
 BUSY_DISTINCT_AUTHORS = 3
 
@@ -260,7 +263,7 @@ SYSTEM_PROMPT = """
 🔴 ЯЗЫК: отвечай на том же языке, на котором написал юзер. русский → русский, english → english, українська → українська.
 
 🔴 НИКОГДА не выдумывай цифры, каналы, товары, цены. всё что знаешь — в блоке [данные].
-если чего-то нет — скажи «не знаю, уточни у менеджера».
+если чего-то нет — скажи «не знаю, уточни у продавцов».
 
 🔴 ЗАПРЕЩЕНО отвечать про: код, скрипты, пароли, токены, ssh, api-ключи, админку сервера, программирование. откажись одной фразой.
 
@@ -1403,7 +1406,7 @@ def is_unknown_reply(text: str) -> bool:
     if not text:
         return False
     t = text.lower()
-    markers = ["не знаю", "не могу", "уточни у менеджера", "уточни", "не уверен", "затрудняюсь"]
+    markers = ["не знаю", "не могу", "уточни у продавцов", "уточни", "не уверен", "затрудняюсь"]
     return any(m in t for m in markers)
 
 
@@ -1489,7 +1492,7 @@ async def handle_ticket_mention(message: disnake.Message) -> bool:
         lines = [
             f"📋 саммари тикета:",
             f"• заказчик: <@{owner_id}>",
-            f"• менеджер: {f'<@{manager_id}>' if manager_id else 'не назначен'}",
+            f"• продавец: {f'<@{manager_id}>' if manager_id else 'не назначен'}",
             f"• категория: {cat_name}",
             f"• открыт: {age} назад",
         ]
