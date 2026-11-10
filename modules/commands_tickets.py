@@ -1023,7 +1023,7 @@ class TicketPanelView(View):
         embed.set_image(url=_IMG_STRIPE)
         await inter.response.send_message(embed=embed, view=BuyTypeView(), ephemeral=True)
 
-    @disnake.ui.button(label="ㅤㅤㅤㅤКаталогㅤㅤㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:catalog", emoji=PartialEmoji(name="catal", id=1539646769053306980))
+    @disnake.ui.button(label="ㅤㅤㅤㅤКаталогㅤㅤㅤㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:catalog", emoji=PartialEmoji(name="catal", id=1539646769053306980))
     async def catalog(self, button: disnake.Button, inter: disnake.MessageInteraction):
         embed = disnake.Embed(title="Выбор категории товаров", description="В чем представлен ваш товар? Выберите метод ниже.", color=6776679)
         embed.set_image(url=_IMG_STRIPE)
