@@ -35,14 +35,14 @@ os.makedirs(ACTIONS_DIR, exist_ok=True)
 CONFIG = {
     "BOT_TOKEN": os.getenv("BOT_TOKEN"),
     "ADMIN_COMMAND_ROLES": [
-        1127428607606796294,
-        1471844291595731016,
+        1127428607606796294, # Управляющий
+        1471844291595731016, # Sellers (бывший Control Diamond)
         1530822331188903966
     ],
     "ADMIN_USER_IDS": [1415191217179856967],
-    "REVIEW_MODERATION_ROLES": [1154757071330365490, 1127428607606796294, 1471844291595731016],
-    "TICKET_VIEW_ROLES": [1459249476236607498, 1154757071330365490, 1471844291595731016, 1127428607606796294],
-    "TICKET_MANAGE_ROLES": [1154757071330365490, 1471844291595731016, 1127428607606796294],
+    "REVIEW_MODERATION_ROLES": [1471844291595731016, 1127428607606796294],
+    "TICKET_VIEW_ROLES": [1459249476236607498, 1471844291595731016, 1127428607606796294],
+    "TICKET_MANAGE_ROLES": [1471844291595731016, 1127428607606796294],
     "LOG_CHANNEL_ID": 1462418981825810535,
     "LOG_CHANNEL_ID_PANEL": 1462418981825810535,
     "LOG_TICKET_CHANNEL_ID": 1530453871581855744,
@@ -65,7 +65,6 @@ CONFIG = {
     "PK_FILE_PATH": os.path.join(ADD_DIR, "pk.json"),
     "GUILD_ID": "1127428607606796288",
     "VOICE_CHANNEL_ID": 1464699044751478815,
-    "MANAGER_ROLE_ID": 1154757071330365490,
     "PAID_NOTIFY_CHANNEL_ID": 1462418981825810535,
     "ROLE_IDS": {
         "club": 1284697274655576186,
@@ -650,14 +649,8 @@ def add_closed_order(manager_id: int, channel_id: int):
                 (manager_id, channel_id, int(time.time())))
     db.commit()
 
-def get_closed_orders(manager_id: int) -> List[dict]:
-    rows = cur.execute("SELECT id, channel_id, closed_at FROM closed_orders WHERE manager_id = ? ORDER BY closed_at DESC",
-                       (manager_id,)).fetchall()
-    return [dict(row) for row in rows]
-
-def remove_closed_order(order_id: int):
-    cur.execute("DELETE FROM closed_orders WHERE id = ?", (order_id,))
-    db.commit()
+# 👇 УДАЛЕНО: get_closed_orders (по твоему запросу)
+# 👇 УДАЛЕНО: remove_closed_order (по твоему запросу)
 
 
 def save_ticket_review(channel_id: int, user_id: int, manager_id: int, rating: int):
