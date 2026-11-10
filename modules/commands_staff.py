@@ -26,7 +26,6 @@ from core.utils import (
     clean_embed_for_discohook, parse_emoji,
     get_promo_codes, add_promo_code, remove_promo_code, clear_promo_codes,
     reload_promo,
-    get_closed_orders, remove_closed_order,
     update_user_roles,
     DEPRECATED_ROLE_IDS,
 )
@@ -419,8 +418,7 @@ class GetJsonModal(Modal):
 class AdminSelect(disnake.ui.StringSelect):
     def __init__(self):
         options = [
-            disnake.SelectOption(label="・Списать заказ в таблице", description="Убрать заказ из статистики менеджера",
-                                 emoji="<:12ss1:1551641380307337216>", value="spisat"),
+            # 👇 УДАЛЕН ПУНКТ "Списать заказ в таблице"
             disnake.SelectOption(label="・Пересчёт отзывов и ролей", description="Применить актуальные роли и снять устаревшие",
                                  value="recalc_roles"),
             disnake.SelectOption(label="・Выгрузка JSON", description="Сообщение - Скрипт",
@@ -440,11 +438,7 @@ class AdminSelect(disnake.ui.StringSelect):
             color=0x00aaff
         )
         value = inter.data.values[0]
-        if value == "spisat":
-            if not has_admin_command_roles(inter.author):
-                return await inter.response.send_message("⛔ Списать заказ может только администратор.", ephemeral=True)
-            await inter.response.send_modal(SpisatZakazModal())
-        elif value == "recalc_roles":
+        if value == "recalc_roles":
             if not has_admin_command_roles(inter.author):
                 return await inter.response.send_message("⛔ Пересчёт доступен только администратору.", ephemeral=True)
             await inter.response.defer(ephemeral=True)
@@ -705,7 +699,7 @@ class WorkSelect(disnake.ui.StringSelect):
         options = [
             disnake.SelectOption(label="・Зарплата", description="О заработной плате работников",
                                  emoji="<:shopf:1541881304981966920>", value="salary"),
-            disnake.SelectOption(label="・Правила по тикетам", description="Строго для прочтения Sales-Manager-ам.",
+            disnake.SelectOption(label="・Правила по тикетам", description="Строго для прочтения Продавцам.",
                                  emoji="<:banne1:1538551829246513312>", value="tickets"),
         ]
         super().__init__(placeholder="Выберите раздел...", min_values=1, max_values=1,
@@ -771,64 +765,13 @@ async def send_work_panel():
     embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735374062129162/image.png?backend=b2&ex=6ac53e4b&is=6ac3eccb&hm=a6b5d66f108d62b6f54ca025140b223a5ffb0a9a7e3d730fa71a71b383d8fd51&")
     embed2 = disnake.Embed(
         title="Кодекс магазина",
-        description="> В данном разделе прописаны зарплаты сотрудников, рейтинг менеджеров, а также - устав, которому стоит придерживаться сотруднику по тикету.",
+        description="> В данном разделе прописаны зарплаты сотрудников, рейтинг продавцов, а также - устав, которому стоит придерживаться сотруднику по тикету.",
         color=6776679
     )
     embed2.set_image(url=IMG_STRIPE)
     await channel.send(embeds=[embed1, embed2], view=WorkView())
     await log_discord(title="📂 Панель «Кодекс магазина» отправлена",
                       description=f"> Сообщение отправлено в {channel.mention}", color=0x00ff00)
-
-
-# ============================================================
-# СПИСАНИЕ ЗАКАЗА
-# ============================================================
-class SpisatZakazModal(Modal):
-    def __init__(self):
-        components = [
-            TextInput(label="ID менеджера", placeholder="Введите ID менеджера",
-                      custom_id="manager_id", min_length=1, max_length=30),
-        ]
-        super().__init__(title="Списание заказа", components=components)
-
-    async def callback(self, inter: disnake.ModalInteraction):
-        if not has_admin_command_roles(inter.author):
-            return await inter.response.send_message("⛔ Нет прав.", ephemeral=True)
-        if not inter.text_values["manager_id"].strip().isdigit():
-            return await inter.response.send_message("❌ Введите ID цифрами.", ephemeral=True)
-        manager_id = int(inter.text_values["manager_id"].strip())
-        orders = get_closed_orders(manager_id)
-        if not orders:
-            return await inter.response.send_message("❌ У менеджера нет закрытых заказов.", ephemeral=True)
-
-        options = []
-        for order in orders:
-            closed_at = datetime.fromtimestamp(order["closed_at"]).strftime("%d.%m.%Y %H:%M")
-            label = f"Заказ #{order['id']} – {closed_at}"
-            if len(label) > 100:
-                label = label[:97] + "..."
-            options.append(SelectOption(label=label, value=str(order["id"]),
-                                        description=f"Канал: {order['channel_id']}"))
-        select = Select(placeholder="Выберите заказ для списания...",
-                        options=options, custom_id="spisat_order_select")
-        view = View(timeout=60)
-        view.add_item(select)
-
-        async def select_callback(inter2: disnake.MessageInteraction):
-            order_id = int(inter2.data.values[0])
-            remove_closed_order(order_id)
-            cur.execute("UPDATE manager_stats SET closed_tickets = MAX(closed_tickets - 1, 0) WHERE user_id = ?",
-                        (manager_id,))
-            db.commit()
-            await inter2.response.send_message("✅ Заказ списан. Статистика обновлена.", ephemeral=True)
-            await log_discord(
-                title="🗑️ Заказ списан",
-                description=f"> **Админ:** {inter2.author.mention}\n> **Менеджер:** <@{manager_id}>\n> **Заказ:** #{order_id}",
-                color=0xff6600
-            )
-
-        select.callback = select_callback
-        await inter.response.send_message("Выберите заказ:", ephemeral=True, view=view)
 
 
 # ============================================================
@@ -883,8 +826,7 @@ async def send_staff_panels():
     admin_embed = disnake.Embed(
         title="Панель управления сервером",
         description=(
-            "> Центральная панель: очистка сообщений, выгрузка JSON, пересчёт ролей, списание заказов, каталог Автозаказа.\n"
-            "> Заменила старые отдельные команды — всё в одном месте.\n"
+            "> Центральная панель: очистка сообщений, выгрузка JSON, пересчёт ролей, каталог Автозаказа.\n"
             "> Требует прав администратора, используй с умом."
         ),
         color=6776679
