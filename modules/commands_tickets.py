@@ -49,7 +49,7 @@ COLOR_GREY = 0x676767
 
 HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
 PAY_CONFIRM_DELAY_SECONDS = 60
-QUESTIONS_CATEGORY_ID = 1544363672128987196
+QUESTIONS_CATEGORY_ID = 1569979195369725973 # 👇 НОВЫЙ ID
 
 REVIEW_CHANNEL_ID = 1462074763437543435
 
@@ -639,14 +639,18 @@ class QuestionModal(Modal):
         await inter.response.defer(ephemeral=True)
         question = inter.text_values["question"]
         guild = inter.guild
+        
+        # 👇 ИСПОЛЬЗУЕМ НОВУЮ КАТЕГОРИЮ
         cat = guild.get_channel(QUESTIONS_CATEGORY_ID)
         if not cat: return await inter.edit_original_response(content="❌ Категория не найдена.")
+        
         channel_name = inter.author.display_name.lower().replace(" ", "-")[:80] or f"question-{inter.author.id}"
         overwrites = {guild.default_role: disnake.PermissionOverwrite(view_channel=False), inter.author: disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)}
         support_role = guild.get_role(1423360115335106570)
         if support_role: overwrites[support_role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         admin_role = guild.get_role(1127428607606796294)
         if admin_role: overwrites[admin_role] = disnake.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        
         ticket_channel = await cat.create_text_channel(name=channel_name, overwrites=overwrites)
         embed1 = disnake.Embed(color=6776679)
         embed1.set_image(url="https://cdn.discordapp.com/attachments/1527006158282555412/1556735388092203191/image.png?backend=b2&ex=6ac53e4f&is=6ac3eccf&hm=990684ba1d817e183ea64f7483e8ef0b3476bd86ff3f8645cab1b129fa492580&")
@@ -870,8 +874,6 @@ class TicketView(View):
                             return await inter.response.send_message("❌ Скидка уже применена.", ephemeral=True)
                     break
             item_value = discounts[discount_index]['value']
-            
-            # ТУТ МЫ УБРАЛИ УДАЛЕНИЕ! Теперь скидка удалится только при создании счёта или оплате
             
             async for msg in channel.history(limit=50):
                 if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
