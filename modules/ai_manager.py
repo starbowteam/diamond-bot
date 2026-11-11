@@ -572,7 +572,7 @@ async def _update_ticket_discount_embed(channel, discount_str: str):
     """Записывает текст скидки в эмбед заказа, чтобы менеджер видел."""
     try:
         async for msg in channel.history(limit=50):
-            if msg.author == bot.user and msg.embeds and len(msg.embeds) >= 2:
+            if msg.author.bot and msg.embeds and len(msg.embeds) >= 2:
                 embed_dict = msg.embeds[1].to_dict()
                 updated = False
                 for field in embed_dict.get("fields", []):
@@ -602,7 +602,6 @@ def _get_user_history_text(user_id: int) -> str:
         text = f"Баланс: {balance} DC.\n"
         
         if purchases:
-            # Разделяем на обычные товары и скидки
             unused_items = [p.get("value") for p in purchases if not p.get("used") and p.get("type") != "discounts"]
             unused_discounts = [p.get("value") for p in purchases if not p.get("used") and p.get("type") == "discounts"]
             
@@ -943,16 +942,17 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
                 product_display = ", ".join(receipt_names)
                 
-                # Если ИИ применил скидку (которой не было в эмбеде), обновляем эмбед
                 if final_discount > discount:
-                    # Ищем подходящую скидку в инвентаре, чтобы вписать её текст в эмбед
                     purchases = await get_user_purchases(author.id, only_unused=True)
+                    found_inv = False
                     for p in purchases:
                         if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
                             await _update_ticket_discount_embed(channel, p['value'])
+                            found_inv = True
                             break
+                    if not found_inv:
+                        await _update_ticket_discount_embed(channel, f"Скидка {final_discount}%")
 
-                # Удаляем скидку из инвентаря, если она была применена
                 if final_discount > 0:
                     purchases = await get_user_purchases(author.id, only_unused=True)
                     for p in purchases:
@@ -995,9 +995,8 @@ async def on_ready():
     count = auto_init()
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
     
+    # Регистрируем только постоянные View (без таймаута)
     bot.add_view(AdStartView())
-    bot.add_view(AdPreviewView(None, None, None, None, None, None))
-    bot.add_view(AdChannelNameView(None, None, None, None, None))
 
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
