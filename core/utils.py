@@ -341,6 +341,14 @@ CREATE TABLE IF NOT EXISTS ai_manager_user_prefs (
     user_id INTEGER PRIMARY KEY,
     enabled INTEGER DEFAULT 1
 );
+
+-- 👇 NEW: Очередь задач для обновления эмбедов (передача между ботами)
+CREATE TABLE IF NOT EXISTS pending_ticket_updates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER,
+    discount_text TEXT,
+    created_at INTEGER
+);
 """)
 db.commit()
 
@@ -648,10 +656,6 @@ def add_closed_order(manager_id: int, channel_id: int):
     cur.execute("INSERT INTO closed_orders (manager_id, channel_id, closed_at) VALUES (?, ?, ?)",
                 (manager_id, channel_id, int(time.time())))
     db.commit()
-
-# 👇 УДАЛЕНО: get_closed_orders (по твоему запросу)
-# 👇 УДАЛЕНО: remove_closed_order (по твоему запросу)
-
 
 def save_ticket_review(channel_id: int, user_id: int, manager_id: int, rating: int):
     cur.execute(
