@@ -579,6 +579,11 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - Для выставления счета ВСЕГДА бери **НАШУ ЦЕНУ**.
 - Пример: `4.99 $ | 219 ₽ [НАША ЦЕНА: 200₽]` -> выставляй счет на 200 рублей, а не на 219.
 
+ПРАВИЛА ДЛЯ ТОВАРОВ С КОЛИЧЕСТВОМ:
+- Если клиент покупает несколько штук (например, 120 звезд ТГ), умножь цену за 1 шт на количество и укажи ИТОГОВУЮ сумму в параметре `price`.
+- В параметре `item_name` укажи название и количество, например: "Звёзды Telegram (120 шт.)".
+- НЕ ИСПОЛЬЗУЙ параметр `quantity` при вызове функции `create_invoice`, бот сам поймет всё из названия.
+
 ГЛОБАЛЬНЫЕ ЗНАНИЯ И ИНТЕРНЕТ:
 - Если клиент спрашивает про условия подписки, сроки активации, работу товара вне нашего магазина (например, "Как работает Nitro?", "Что дает Roblox Plus?", "Сгорят ли звезды ТГ?", "В чем разница Full и Basic?"), используй СВОИ знания об этих сервисах.
 - Отвечай как эксперт, не зови продавца, если вопрос касается общедоступной информации о продукте.
@@ -624,9 +629,8 @@ TOOLS_OPENAI = [
                         "items": {
                             "type": "object",
                             "properties": {
-                                "item_name": {"type": "string", "description": "Название товара (для чека)"},
-                                "price": {"type": "number", "description": "Цена в рублях (НАША ЦЕНА, ОРИГИНАЛЬНАЯ, БЕЗ ВЫЧЕТА СКИДКИ)"},
-                                "quantity": {"type": "integer", "description": "Количество", "default": 1}
+                                "item_name": {"type": "string", "description": "Название товара (включая количество, если оно есть, например: 'Звёзды Telegram (120 шт.)')"},
+                                "price": {"type": "number", "description": "ИТОГОВАЯ цена за эту позицию в рублях (уже умноженная на количество)"}
                             },
                             "required": ["item_name", "price"]
                         }
@@ -880,11 +884,10 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 for itm in items_list:
                     item_name = itm.get("item_name", "Товар")
                     price = float(itm.get("price", 0))
-                    quantity = max(1, int(itm.get("quantity", 1)))
                     
-                    amount = int(price * quantity)
-                    total_amount += amount
-                    receipt_names.append(item_name if quantity == 1 else f"{item_name} × {quantity}")
+                    # Больше никакого умножения на quantity! Берем финальную цену
+                    total_amount += int(round(price))
+                    receipt_names.append(item_name)
 
                 product_display = ", ".join(receipt_names)
                 ok = await send_invoice(channel, product_display, total_amount, final_discount, author.display_name)
