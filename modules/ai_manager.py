@@ -193,7 +193,7 @@ def _ensure_col(table: str, column: str, ddl: str):
 init_ai_manager_tables()
 
 # ============================================================
-# СИСТЕМА РЕКЛАМЫ
+# СИСТЕМА РЕКЛАМЫ (ИСПРАВЛЕНА)
 # ============================================================
 def build_ad_embed(item_name: str) -> disnake.Embed:
     embed = disnake.Embed(
@@ -201,8 +201,7 @@ def build_ad_embed(item_name: str) -> disnake.Embed:
         description=(
             "> Нажмите на кнопку ниже, чтобы заполнить бриф.\n"
             "> Укажите заголовок, текст и при желании добавьте картинку.\n"
-            "> После отправки вы сможете проверить предпросмотр.\n\n"
-            "**Внимание:** кнопку можно нажать только 1 раз."
+            "> После отправки вы сможете проверить предпросмотр."
         ),
         color=0x2b2d31
     )
@@ -215,10 +214,6 @@ class AdStartView(ui.View):
 
     @ui.button(label="📝 Заполнить бриф", style=ButtonStyle.secondary, custom_id="ad_start_btn")
     async def start(self, button, inter: disnake.MessageInteraction):
-        button.disabled = True
-        try: await inter.message.edit(view=self)
-        except: pass
-
         item_name = "Реклама"
         if inter.message.embeds:
             embed_title = inter.message.embeds[0].title or ""
@@ -230,21 +225,40 @@ class AdStartView(ui.View):
                 if match:
                     item_name = match.group(1)
         
-        await inter.response.send_modal(AdTextViewModal(item_name=item_name))
+        # Ищем старый предпросмотр, чтобы подставить данные при редактировании
+        old_title, old_text, old_image = "", "", ""
+        async for msg in inter.channel.history(limit=20):
+            if msg.author == bot.user and msg.components and any(c.custom_id == "ad_pub_confirm" for row in msg.components for c in row.children):
+                if msg.embeds:
+                    old_title = msg.embeds[0].title or ""
+                    old_text = msg.embeds[0].description or ""
+                    if msg.embeds[0].image and msg.embeds[0].image.url:
+                        old_image = msg.embeds[0].image.url
+                break
+
+        await inter.response.send_modal(AdTextViewModal(item_name=item_name, title=old_title, text=old_text, image=old_image))
 
 class AdTextViewModal(Modal):
-    def __init__(self, item_name: str):
+    def __init__(self, item_name: str, title: str = "", text: str = "", image: str = ""):
         self.item_name = item_name
         super().__init__(title="Бриф рекламы", components=[
-            TextInput(label="Заголовок рекламы (жирный)", placeholder="Например: Мой крутой сервер", custom_id="ad_title", min_length=2, max_length=256),
-            TextInput(label="Текст рекламы", placeholder="Опишите проект, добавьте ссылки.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000),
-            TextInput(label="Ссылка на картинку (необязательно)", placeholder="https://...", custom_id="ad_image", required=False, max_length=512)
+            TextInput(label="Заголовок рекламы (жирный)", placeholder="Например: Мой крутой сервер", custom_id="ad_title", min_length=2, max_length=256, value=title[:256]),
+            TextInput(label="Текст рекламы", placeholder="Опишите проект, добавьте ссылки.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000, value=text[:2000]),
+            TextInput(label="Ссылка на картинку (необязательно)", placeholder="https://...", custom_id="ad_image", required=False, max_length=512, value=image[:512])
         ])
 
     async def callback(self, inter: disnake.ModalInteraction):
         title = inter.text_values["ad_title"]
         text = inter.text_values["ad_text"]
         image = inter.text_values.get("ad_image", "").strip()
+
+        # Удаляем старые предпросмотры в этом канале
+        try:
+            async for msg in inter.channel.history(limit=20):
+                if msg.author == bot.user and msg.components and any(c.custom_id == "ad_pub_confirm" for row in msg.components for c in row.children):
+                    await msg.delete()
+        except Exception:
+            pass
 
         ping = ""
         if "@everyone" in self.item_name: ping = "@everyone"
@@ -269,7 +283,7 @@ class AdTextViewModal(Modal):
             
             view = AdPreviewView(self.item_name, title, text, image, ping, is_24h)
             await inter.channel.send(content=f"> **Предпросмотр рекламы:**\n{ping}", embed=embed, view=view)
-            await inter.response.send_message("✅ Предпросмотр отправлен. Если что-то не так — нажмите «Заполнить заново» под ним.", ephemeral=True)
+            await inter.response.send_message("✅ Предпросмотр отправлен. Если что-то не так — измените бриф.", ephemeral=True)
 
 class AdPreviewView(ui.View):
     def __init__(self, item_name, title, text, image, ping, is_24h):
@@ -318,12 +332,6 @@ class AdPreviewView(ui.View):
 
         try: await inter.message.delete()
         except: pass
-
-    @ui.button(label="✏️ Заполнить заново", style=ButtonStyle.secondary, custom_id="ad_refill")
-    async def refill(self, button, inter: disnake.MessageInteraction):
-        try: await inter.message.delete()
-        except: pass
-        await inter.response.send_modal(AdTextViewModal(item_name=self.item_name))
 
 class AdChannelNameView(ui.View):
     def __init__(self, item_name, title, text, image, ping):
