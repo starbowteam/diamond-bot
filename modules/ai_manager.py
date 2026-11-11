@@ -568,6 +568,27 @@ async def get_ticket_discount(channel) -> int:
         pass
     return 0
 
+async def _update_ticket_discount_embed(channel, discount_str: str):
+    """Записывает текст скидки в эмбед заказа, чтобы менеджер видел."""
+    try:
+        async for msg in channel.history(limit=50):
+            if msg.author == bot.user and msg.embeds and len(msg.embeds) >= 2:
+                embed_dict = msg.embeds[1].to_dict()
+                updated = False
+                for field in embed_dict.get("fields", []):
+                    if "скидка" in field.get("name", "").lower():
+                        field["value"] = f"```{discount_str}```"
+                        updated = True
+                        break
+                if updated:
+                    embeds = list(msg.embeds)
+                    embeds[1] = disnake.Embed.from_dict(embed_dict)
+                    await msg.edit(embeds=embeds)
+                    ai_logger.info(f"✅ Эмбед заказа обновлен, скидка: {discount_str}")
+                    break
+    except Exception as e:
+        ai_logger.warning(f"Ошибка обновления эмбеда со скидкой: {e}")
+
 # ============================================================
 # ИСТОРИЯ КЛИЕНТА
 # ============================================================
@@ -581,9 +602,14 @@ def _get_user_history_text(user_id: int) -> str:
         text = f"Баланс: {balance} DC.\n"
         
         if purchases:
-            unused = [p.get("value") for p in purchases if not p.get("used") and p.get("type") != "discounts"]
-            if unused:
-                text += "Неиспользованные товары (напомни ему): " + ", ".join(unused[:5]) + "\n"
+            # Разделяем на обычные товары и скидки
+            unused_items = [p.get("value") for p in purchases if not p.get("used") and p.get("type") != "discounts"]
+            unused_discounts = [p.get("value") for p in purchases if not p.get("used") and p.get("type") == "discounts"]
+            
+            if unused_items:
+                text += "Неиспользованные товары (напомни): " + ", ".join(unused_items[:5]) + "\n"
+            if unused_discounts:
+                text += "Купленные скидки в инвентаре: " + ", ".join(unused_discounts[:3]) + "\n"
         
         if history:
             spends = [h for h in history if h.get("amount", 0) < 0 and "Покупка" in h.get("reason", "")]
@@ -622,6 +648,7 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 ИСТОРИЯ КЛИЕНТА:
 {user_history}
 - Если у клиента висят неиспользованные товары, деликатно напомни ему об этом.
+- Если у клиента есть купленная скидка, можешь предложить применить её: "У вас есть скидка 5%, применить её?".
 
 УМНЫЙ UPSELL:
 - Если сумма заказа превышает 750₽:
@@ -642,7 +669,7 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 
 контекст:
 - клиент: {user_name}
-- скидка в тикете: {discount}%
+- скидка в тикете (уже применена кнопкой): {discount}%
 """
 
 TOOLS_OPENAI = [
@@ -665,7 +692,7 @@ TOOLS_OPENAI = [
                             "required": ["item_name", "price"]
                         }
                     },
-                    "discount_percent": {"type": "integer", "description": "Процент скидки (UpSell)", "default": 0}
+                    "discount_percent": {"type": "integer", "description": "Процент скидки (UpSell или скидка из инвентаря)", "default": 0}
                 },
                 "required": ["items"]
             }
@@ -813,19 +840,6 @@ async def _auto_confirm_receipt(channel, message, sess):
     except Exception as e:
         ai_logger.warning(f"auto_confirm: seller perms failed: {e}")
 
-    # Удаляем скидку, если она была применена
-    discount = await get_ticket_discount(channel)
-    if discount > 0:
-        purchases = await get_user_purchases(user_id, only_unused=True)
-        for p in purchases:
-            if p.get("type") == "discounts" and str(discount) in p.get("value", ""):
-                full_purchases = await get_user_purchases(user_id, only_unused=False)
-                target_idx = next((idx for idx, fp in enumerate(full_purchases) if fp["value"] == p["value"] and fp["type"] == "discounts" and not fp.get("used")), None)
-                if target_idx is not None:
-                    await remove_purchase(user_id, target_idx)
-                    ai_logger.info(f"Скидка {p['value']} удалена из инвентаря {user_id} при оплате.")
-                    break
-
     update_session(
         channel.id, invoice_sent=0,
         receipt_url=message.attachments[0].url if message.attachments else "",
@@ -929,6 +943,15 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
                 product_display = ", ".join(receipt_names)
                 
+                # Если ИИ применил скидку (которой не было в эмбеде), обновляем эмбед
+                if final_discount > discount:
+                    # Ищем подходящую скидку в инвентаре, чтобы вписать её текст в эмбед
+                    purchases = await get_user_purchases(author.id, only_unused=True)
+                    for p in purchases:
+                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
+                            await _update_ticket_discount_embed(channel, p['value'])
+                            break
+
                 # Удаляем скидку из инвентаря, если она была применена
                 if final_discount > 0:
                     purchases = await get_user_purchases(author.id, only_unused=True)
@@ -1039,7 +1062,6 @@ async def on_guild_channel_create(channel):
         await channel.send(embed=embed)
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
         update_session(channel.id, escalated=1)
-    # ФИКС РЕКЛАМЫ (добавлены другие ключевые слова)
     elif any(x in item_name.lower() for x in ["реклама", "канал", "@everyone", "@here", "без пинга"]):
         embed = build_ad_embed(item_name)
         await channel.send(embed=embed, view=AdStartView())
