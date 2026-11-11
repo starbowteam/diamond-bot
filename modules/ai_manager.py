@@ -42,7 +42,7 @@ ABUSE_TIMEOUT = 10
 
 SELLER_ROLE = 1471844291595731016
 OWNER_IDS = [796293832751972352, 1168943921171288135]
-ANALYTICS_USER_ID = 796293832751972352 # Сюда будут лететь отчеты
+ANALYTICS_USER_ID = 796293832751972352
 LOG_CHANNEL = 1530453871581855744
 
 SESSION_MAX_MESSAGES = 20
@@ -80,23 +80,6 @@ ABUSE_WORDS = [
     "дебил", "дебилы", "мразь", "гандо", "пидо", "педик", "долбоеб", "мудак",
 ]
 
-CATALOG_SYNONYMS = {
-    "discord_nitro": ["нитро", "nitro", "нт", "дс нитро", "discord nitro", "дискорд нитро"],
-    "discord_nitro_basic": ["басик", "бейсик", "базовое", "basic", "нитро басик", "нитро бейсик", "дешевое нитро", "нитро базовое", "базовая подписка"],
-    "discord_nitro_gift": ["гифт", "gift", "подарочное", "подарок нитро", "нитро подарок"],
-    "discord_nitro_trial": ["триал", "trial", "пробное", "пробник", "триал нитро"],
-    "discord_nitro_activation": ["активация", "activation", "актив", "активировать"],
-    "discord_boosts": ["буст", "бусты", "boost", "boosts", "бустик", "буст сервер", "буст канал"],
-    "steam_region": ["регион steam", "смена региона", "сменить регион", "регион стим", "стим регион", "перенос региона"],
-    "steam_rub": ["стим пополнение", "пополнение стим", "steam пополн", "пополнить стим", "стим рубл", "рубли стим", "steam rub", "баланс стим"],
-    "tg_stars": ["звезды тг", "звёзды тг", "тг старс", "tg stars", "stars", "telegram stars", "телеграм звезды", "телеграм звёзды", "звезды телеграм", "звёзды телеграм", "тг звезды", "тг звёзды", "телега звезды", "телега звёзды", "звезда", "телега", "телеграм старс", "звезды", "звёзды"],
-    "tg_acc": ["акк тг", "акк телеграм", "телеграм аккаунт", "тг аккаунт", "tg account", "аккаунт телега", "акк телега"],
-    "roblox_robux": ["робукс", "robux", "рб робукс", "роблокс робукс", "робуксы", "роблокс", "рб"],
-    "roblox_plus": ["роблокс плюс", "roblox plus", "роблокс премиум", "рб плюс", "плюс роблокс"],
-    "spotify": ["споти", "спф", "spotify", "спотифай", "спот", "музыка споти", "спотифай подписка", "подписка музыка"],
-    "gift_marker": ["подарок", "подарочек", "подарить", "подари", "другу", "друг", "подруге", "подарок другу", "хочу подарить"],
-}
-
 # ============================================================
 # ЛОГГЕР
 # ============================================================
@@ -123,7 +106,7 @@ async def log_discord(title: str, description: str, color: int = 0x00ff00, chann
         ai_logger.warning(f"log_discord: {e}")
 
 # ============================================================
-# ПАРСЕР РЕАЛЬНОГО КАТАЛОГА (menu_*.json)
+# ПАРСЕР РЕАЛЬНОГО КАТАЛОГА
 # ============================================================
 def build_real_catalog_text():
     files = glob.glob(os.path.join(CATALOG_DIR, "menu_*.json"))
@@ -210,7 +193,7 @@ def _ensure_col(table: str, column: str, ddl: str):
 init_ai_manager_tables()
 
 # ============================================================
-# СИСТЕМА РЕКЛАМЫ (ОБНОВЛЕНА)
+# СИСТЕМА РЕКЛАМЫ
 # ============================================================
 def build_ad_embed(item_name: str) -> disnake.Embed:
     embed = disnake.Embed(
@@ -232,7 +215,6 @@ class AdStartView(ui.View):
 
     @ui.button(label="📝 Заполнить бриф", style=ButtonStyle.secondary, custom_id="ad_start_btn")
     async def start(self, button, inter: disnake.MessageInteraction):
-        # Отключаем кнопку навсегда (защита от второго клика)
         button.disabled = True
         try: await inter.message.edit(view=self)
         except: pass
@@ -254,7 +236,7 @@ class AdTextViewModal(Modal):
     def __init__(self, item_name: str):
         self.item_name = item_name
         super().__init__(title="Бриф рекламы", components=[
-            TextInput(label="Заголовок рекламы", placeholder="Например: Мой крутой сервер", custom_id="ad_title", min_length=2, max_length=256),
+            TextInput(label="Заголовок рекламы (жирный)", placeholder="Например: Мой крутой сервер", custom_id="ad_title", min_length=2, max_length=256),
             TextInput(label="Текст рекламы", placeholder="Опишите проект, добавьте ссылки.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000),
             TextInput(label="Ссылка на картинку (необязательно)", placeholder="https://...", custom_id="ad_image", required=False, max_length=512)
         ])
@@ -280,7 +262,7 @@ class AdTextViewModal(Modal):
             view = AdChannelNameView(self.item_name, title, text, image, ping)
             await inter.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
-            embed = disnake.Embed(title=title, description=text, color=0x2b2d31)
+            embed = disnake.Embed(title=f"**{title}**", description=text, color=0x2b2d31)
             if image: 
                 try: embed.set_image(url=image)
                 except: pass
@@ -301,9 +283,7 @@ class AdPreviewView(ui.View):
 
     @ui.button(label="✅ Опубликовать", style=ButtonStyle.secondary, custom_id="ad_pub_confirm")
     async def publish(self, button, inter: disnake.MessageInteraction):
-        # Отключаем кнопки
-        for child in self.children:
-            child.disabled = True
+        for child in self.children: child.disabled = True
         try: await inter.message.edit(view=self)
         except: pass
 
@@ -314,7 +294,7 @@ class AdPreviewView(ui.View):
         if not ad_channel: 
             return await inter.followup.send("❌ Канал для рекламы не найден.", ephemeral=True)
 
-        embed = disnake.Embed(title=self.title, description=self.text, color=0x2b2d31)
+        embed = disnake.Embed(title=f"**{self.title}**", description=self.text, color=0x2b2d31)
         if self.image:
             try: embed.set_image(url=self.image)
             except: pass
@@ -393,7 +373,7 @@ class AdChannelNameModal(Modal):
         except Exception as e:
             return await inter.followup.send(f"❌ Ошибка создания: {e}", ephemeral=True)
         
-        embed = disnake.Embed(title=self.title, description=self.text, color=0x2b2d31)
+        embed = disnake.Embed(title=f"**{self.title}**", description=self.text, color=0x2b2d31)
         if self.image:
             try: embed.set_image(url=self.image)
             except: pass
@@ -503,10 +483,6 @@ async def _debounce_flush(channel, user, gen: int, delay: float = DEBOUNCE_SEC):
     except asyncio.CancelledError: raise
     except Exception: ai_logger.exception("debounce_flush")
 
-def is_potential_abuse(text: str) -> bool:
-    t = (text or "").lower()
-    return any(w in t for w in ABUSE_WORDS)
-
 async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
     if not AI_MANAGER_API_KEY: return False, ""
     sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
@@ -593,25 +569,21 @@ async def get_ticket_discount(channel) -> int:
     return 0
 
 # ============================================================
-# ИСТОРИЯ КЛИЕНТА (ПОИСК ПО ИСТОРИИ)
+# ИСТОРИЯ КЛИЕНТА
 # ============================================================
 def _get_user_history_text(user_id: int) -> str:
-    """Собирает историю покупок и баланс для передачи ИИ."""
     try:
         dc = get_dc_cache(user_id)
         balance = dc.get("balance", 0)
         purchases = dc.get("purchases", [])
         history = dc.get("history", [])
 
-        if not purchases and not history:
-            return f"Баланс: {balance} DC. Покупок еще не было."
-
         text = f"Баланс: {balance} DC.\n"
         
         if purchases:
-            unused = [p.get("value") for p in purchases if not p.get("used")]
+            unused = [p.get("value") for p in purchases if not p.get("used") and p.get("type") != "discounts"]
             if unused:
-                text += "Неиспользованные товары (можно напомнить): " + ", ".join(unused[:5]) + "\n"
+                text += "Неиспользованные товары (напомни ему): " + ", ".join(unused[:5]) + "\n"
         
         if history:
             spends = [h for h in history if h.get("amount", 0) < 0 and "Покупка" in h.get("reason", "")]
@@ -641,42 +613,31 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 ГЛАВНОЕ ПРАВИЛО ПО ЦЕНАМ:
 - В каталоге ниже некоторые товары имеют ДВЕ цены: цена Discord (в скобках) и НАША ЦЕНА (указана как `[НАША ЦЕНА: XXX]`).
 - Для выставления счета ВСЕГДА бери **НАШУ ЦЕНУ**.
-- Пример: `4.99 $ | 219 ₽ [НАША ЦЕНА: 200₽]` -> выставляй счет на 200 рублей, а не на 219.
 
 ПРАВИЛА ДЛЯ ТОВАРОВ С КОЛИЧЕСТВОМ:
-- Если клиент покупает несколько штук (например, 120 звезд ТГ), умножь цену за 1 шт на количество и укажи ИТОГОВУЮ сумму в параметре `price`.
-- В параметре `item_name` укажи название и количество, например: "Звёзды Telegram (120 шт.)".
-- НЕ ИСПОЛЬЗУЙ параметр `quantity` при вызове функции `create_invoice`.
-
-ГЛОБАЛЬНЫЕ ЗНАНИЯ И ИНТЕРНЕТ:
-- Если клиент спрашивает про условия подписки, сроки активации, работу товара вне нашего магазина, используй СВОИ знания об этих сервисах.
-- Отвечай как эксперт, не зови продавца, если вопрос касается общедоступной информации о продукте.
+- Если клиент покупает несколько штук, умножь цену за 1 шт на количество и укажи ИТОГОВУЮ сумму в `price`.
+- В `item_name` укажи название и количество.
+- НЕ ИСПОЛЬЗУЙ параметр `quantity`.
 
 ИСТОРИЯ КЛИЕНТА:
 {user_history}
-- Если у клиента висят неиспользованные товары, можешь деликатно напомнить ему об этом (например: "Кстати, у вас в инвентаре висит Х, может быть, активируем его?").
-- Если клиент жалуется на нехватку денег, можешь использовать его историю покупок для контекста.
+- Если у клиента висят неиспользованные товары, деликатно напомни ему об этом.
 
-УМНЫЙ UPSELL (ДОПРОДАЖИ - ВАЖНО):
-- Перед тем как выставить счёт, проверь итоговую сумму.
+УМНЫЙ UPSELL:
 - Если сумма заказа превышает 750₽:
-  1. Предложи клиенту скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ сопутствующий товар.
-  2. Предлагай ЛОГИЧНЫЕ товары (если берет Ниро - предложи Бусты; если Робуксы - предложи Роблокс Плюс; если ТГ Звезды - предложи Аккаунт ТГ).
-  3. Если клиент соглашается, СНАЧАЛА добавь новый товар в корзину.
-  4. При вызове `create_invoice` передай параметр `discount_percent: 5`.
-  - ❗️ ВАЖНО: В поле `item_name` пиши ТОЛЬКО оригинальное название товара, НЕ ДОБАВЛЯЙ туда "(Combo Discount 5%)".
+  1. Предложи скидку 5% на ВСЮ корзину за добавление сопутствующего товара.
+  2. Если соглашается, при вызове `create_invoice` передай `discount_percent: 5`.
+  - ❗️ В поле `item_name` пиши ТОЛЬКО оригинальное название.
 
 ГЛАВНОЕ ПРАВИЛО ПЕРЕД СЧЁТОМ:
-- НИКОГДА не вызывай create_invoice сразу после того, как клиент назвал товар.
 - Сначала спроси: «Выставить счёт на <товар> за <цена>?»
-- Жди явного подтверждения: «да», «ок», «выставляй», «давай», «го», «+».
+- Жди явного подтверждения.
 - Только после подтверждения — вызывай create_invoice.
 
-ЗАПРЕТ НА DC (DIAMOND COINS):
-- В этом тикете ты продаешь ТОЛЬКО за реальные деньги (рубли).
-- Если клиент просит что-то купить за DC, ответь: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop). Здесь я оформляю только заказы за реальные деньги."
+ЗАПРЕТ НА DC:
+- Если просят купить за DC, скажи: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop)."
 
-КАТАЛОГ РЕАЛЬНЫХ ТОВАРОВ (ЦЕНЫ В РУБЛЯХ):
+КАТАЛОГ:
 {real_catalog}
 
 контекст:
@@ -695,17 +656,16 @@ TOOLS_OPENAI = [
                 "properties": {
                     "items": {
                         "type": "array",
-                        "description": "Список товаров для счёта",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "item_name": {"type": "string", "description": "Название товара (включая количество, если оно есть)"},
-                                "price": {"type": "number", "description": "ИТОГОВАЯ цена за эту позицию в рублях (уже умноженная на количество)"}
+                                "item_name": {"type": "string", "description": "Название товара"},
+                                "price": {"type": "number", "description": "ИТОГОВАЯ цена в рублях"}
                             },
                             "required": ["item_name", "price"]
                         }
                     },
-                    "discount_percent": {"type": "integer", "description": "Процент скидки (если была UpSell акция, укажи 5, иначе 0)", "default": 0}
+                    "discount_percent": {"type": "integer", "description": "Процент скидки (UpSell)", "default": 0}
                 },
                 "required": ["items"]
             }
@@ -715,11 +675,11 @@ TOOLS_OPENAI = [
         "type": "function",
         "function": {
             "name": "escalate_to_human",
-            "description": "Позвать продавца если не можешь понять или товара нет в каталоге.",
+            "description": "Позвать продавца.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "reason": {"type": "string", "description": "Почему эскалируешь."},
+                    "reason": {"type": "string"},
                 },
                 "required": ["reason"],
             },
@@ -801,9 +761,8 @@ async def send_invoice(channel, product_display: str, amount: int, discount: int
         clean_name = _clean_ticket_name(product_display, channel.id)
         try:
             await channel.edit(name=clean_name)
-            ai_logger.info(f"✅ Тикет переименован при выставлении счёта: {clean_name}")
         except Exception as e:
-            ai_logger.warning(f"Не удалось переименовать тикет при счёте: {e}")
+            ai_logger.warning(f"Не удалось переименовать: {e}")
 
         order_id = generate_receipt_id()
         buf = await asyncio.to_thread(
@@ -826,10 +785,8 @@ async def send_invoice(channel, product_display: str, amount: int, discount: int
 
 async def _auto_confirm_receipt(channel, message, sess):
     user_id = sess.get("user_id") or message.author.id
-    try: 
-        await message.add_reaction(YES_EMOJI)
-    except Exception: 
-        pass
+    try: await message.add_reaction(YES_EMOJI)
+    except Exception: pass
 
     sellers_ping = f"<@&{SELLER_ROLE}>"
     embed = disnake.Embed(
@@ -838,18 +795,16 @@ async def _auto_confirm_receipt(channel, message, sess):
         color=COLOR_GREEN
     )
     embed.set_image(url=IMG_STRIPE)
-    try: 
-        await channel.send(embed=embed)
-    except Exception as e: 
-        ai_logger.warning(f"auto_confirm: send msg failed: {e}")
+    try: await channel.send(embed=embed)
+    except Exception as e: ai_logger.warning(f"auto_confirm: send msg failed: {e}")
 
     paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
     if paid_cat:
         try:
             await channel.edit(category=paid_cat)
             ai_logger.info(f"✅ auto_confirm: {channel.id} перенесен в категорию {paid_cat.name}")
-        except disnake.HTTPException as e:
-            ai_logger.warning(f"⚠️ auto_confirm edit (cat) fail: {getattr(e, 'status', '?')} {str(e)[:200]}")
+        except Exception as e:
+            ai_logger.warning(f"⚠️ auto_confirm edit fail: {e}")
 
     try:
         seller_role = channel.guild.get_role(SELLER_ROLE)
@@ -857,6 +812,19 @@ async def _auto_confirm_receipt(channel, message, sess):
             await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
     except Exception as e:
         ai_logger.warning(f"auto_confirm: seller perms failed: {e}")
+
+    # Удаляем скидку, если она была применена
+    discount = await get_ticket_discount(channel)
+    if discount > 0:
+        purchases = await get_user_purchases(user_id, only_unused=True)
+        for p in purchases:
+            if p.get("type") == "discounts" and str(discount) in p.get("value", ""):
+                full_purchases = await get_user_purchases(user_id, only_unused=False)
+                target_idx = next((idx for idx, fp in enumerate(full_purchases) if fp["value"] == p["value"] and fp["type"] == "discounts" and not fp.get("used")), None)
+                if target_idx is not None:
+                    await remove_purchase(user_id, target_idx)
+                    ai_logger.info(f"Скидка {p['value']} удалена из инвентаря {user_id} при оплате.")
+                    break
 
     update_session(
         channel.id, invoice_sent=0,
@@ -956,11 +924,23 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 for itm in items_list:
                     item_name = itm.get("item_name", "Товар")
                     price = float(itm.get("price", 0))
-                    
                     total_amount += int(round(price))
                     receipt_names.append(item_name)
 
                 product_display = ", ".join(receipt_names)
+                
+                # Удаляем скидку из инвентаря, если она была применена
+                if final_discount > 0:
+                    purchases = await get_user_purchases(author.id, only_unused=True)
+                    for p in purchases:
+                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
+                            full_purchases = await get_user_purchases(author.id, only_unused=False)
+                            target_idx = next((idx for idx, fp in enumerate(full_purchases) if fp["value"] == p["value"] and fp["type"] == "discounts" and not fp.get("used")), None)
+                            if target_idx is not None:
+                                await remove_purchase(author.id, target_idx)
+                                ai_logger.info(f"Скидка {p['value']} удалена из инвентаря {author.id} (применена в счете).")
+                                break
+
                 ok = await send_invoice(channel, product_display, total_amount, final_discount, author.display_name)
                 if ok:
                     ai_logger.info(f"Счёт: {channel.id} → {product_display} ({total_amount} Р, скидка {final_discount}%)")
@@ -993,7 +973,7 @@ async def on_ready():
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
     
     bot.add_view(AdStartView())
-    bot.add_view(AdPreviewView(None, None, None, None, None, None)) # Регистрация для перезапуска
+    bot.add_view(AdPreviewView(None, None, None, None, None, None))
     bot.add_view(AdChannelNameView(None, None, None, None, None))
 
     if not _CLEANUP_STARTED:
@@ -1059,7 +1039,8 @@ async def on_guild_channel_create(channel):
         await channel.send(embed=embed)
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
         update_session(channel.id, escalated=1)
-    elif "реклама" in item_name.lower():
+    # ФИКС РЕКЛАМЫ (добавлены другие ключевые слова)
+    elif any(x in item_name.lower() for x in ["реклама", "канал", "@everyone", "@here", "без пинга"]):
         embed = build_ad_embed(item_name)
         await channel.send(embed=embed, view=AdStartView())
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
