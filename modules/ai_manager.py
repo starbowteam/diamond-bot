@@ -569,25 +569,16 @@ async def get_ticket_discount(channel) -> int:
     return 0
 
 async def _update_ticket_discount_embed(channel, discount_str: str):
-    """Записывает текст скидки в эмбед заказа, чтобы менеджер видел."""
+    """Отправляет задачу в БД, чтобы основной бот обновил эмбед."""
     try:
-        async for msg in channel.history(limit=50):
-            if msg.author.bot and msg.embeds and len(msg.embeds) >= 2:
-                embed_dict = msg.embeds[1].to_dict()
-                updated = False
-                for field in embed_dict.get("fields", []):
-                    if "скидка" in field.get("name", "").lower():
-                        field["value"] = f"```{discount_str}```"
-                        updated = True
-                        break
-                if updated:
-                    embeds = list(msg.embeds)
-                    embeds[1] = disnake.Embed.from_dict(embed_dict)
-                    await msg.edit(embeds=embeds)
-                    ai_logger.info(f"✅ Эмбед заказа обновлен, скидка: {discount_str}")
-                    break
+        cur.execute(
+            "INSERT INTO pending_ticket_updates (channel_id, discount_text, created_at) VALUES (?, ?, ?)",
+            (channel.id, discount_str, int(time.time()))
+        )
+        db.commit()
+        ai_logger.info(f"📝 Задача на обновление эмбеда со скидкой {discount_str} отправлена в БД.")
     except Exception as e:
-        ai_logger.warning(f"Ошибка обновления эмбеда со скидкой: {e}")
+        ai_logger.warning(f"Ошибка при создании задачи обновления эмбеда: {e}")
 
 # ============================================================
 # ИСТОРИЯ КЛИЕНТА
@@ -995,7 +986,6 @@ async def on_ready():
     count = auto_init()
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
     
-    # Регистрируем только постоянные View (без таймаута)
     bot.add_view(AdStartView())
 
     if not _CLEANUP_STARTED:
