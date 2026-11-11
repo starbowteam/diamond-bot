@@ -83,7 +83,6 @@ def load_salary_state() -> dict:
 def save_salary_state(state: dict):
     save_json(SALARY_STATE_FILE, state)
 
-# 👇 УДАЛЕНА РОЛЬ SALES MANAGER
 SALARY_ROLES = {
     1471844291595731016: {"advance": 1275, "salary": 2975},
     1513935883475226796: {"advance": 935,  "salary": 2125},
@@ -475,6 +474,40 @@ async def daily_activity_payout_task():
     except Exception as e:
         logger.exception(f"daily_activity_payout_task: {e}")
 
+# 👇 ТАСК ДЛЯ ОБНОВЛЕНИЯ ЭМБЕДОВ ОТ ОСНОВНОГО БОТА
+@tasks.loop(seconds=2)
+async def process_ticket_updates_task():
+    await bot.wait_until_ready()
+    try:
+        rows = cur.execute("SELECT id, channel_id, discount_text FROM pending_ticket_updates").fetchall()
+        if not rows:
+            return
+        for r in rows:
+            channel = bot.get_channel(r["channel_id"])
+            if channel:
+                async for msg in channel.history(limit=50):
+                    if msg.author == bot.user and msg.embeds and len(msg.embeds) >= 2:
+                        embed_dict = msg.embeds[1].to_dict()
+                        updated = False
+                        for field in embed_dict.get("fields", []):
+                            if "скидка" in field.get("name", "").lower():
+                                field["value"] = f"```{r['discount_text']}```"
+                                updated = True
+                                break
+                        if updated:
+                            embeds = list(msg.embeds)
+                            embeds[1] = disnake.Embed.from_dict(embed_dict)
+                            try:
+                                await msg.edit(embeds=embeds)
+                                logger.info(f"✅ Основной бот обновил скидку в эмбеде: {channel.id} -> {r['discount_text']}")
+                            except Exception as e:
+                                logger.warning(f"Не удалось обновить эмбед: {e}")
+                            break
+            cur.execute("DELETE FROM pending_ticket_updates WHERE id=?", (r["id"],))
+        db.commit()
+    except Exception as e:
+        logger.error(f"process_ticket_updates_task: {e}")
+
 @bot.event
 async def on_ready():
     try:
@@ -659,6 +692,8 @@ async def on_ready():
             unused_purchase_reminder_task.start()
         if not daily_activity_payout_task.is_running():
             daily_activity_payout_task.start()
+        if not process_ticket_updates_task.is_running():
+            process_ticket_updates_task.start()
 
         logger.info("%s is ready", bot.user)
         await log_discord(
@@ -1148,7 +1183,6 @@ async def on_message(message: disnake.Message):
         except Exception as e:
             logger.warning(f"clan review hook: {e}")
 
-        # 👇 ВЫПЛАТА ПРИЗОВ ЗА ШАБЛОННЫЕ РОЗЫГРЫШИ (после отзыва)
         try:
             from modules.giveaways import process_pending_payouts
             paid = await process_pending_payouts(bot, user_id)
