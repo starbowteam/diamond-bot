@@ -706,8 +706,27 @@ async def escalate(channel, reason: str):
     await channel.send(embed=embed)
     ai_logger.info(f"Эскалация: {channel.id} — {reason}")
 
+# ============================================================
+# ОБРАБОТКА СЧЁТА И ЧЕКА
+# ============================================================
+def _clean_ticket_name(text: str, user_id: int) -> str:
+    """Очищает название для канала Discord. Сохраняет кириллицу."""
+    if not text: return f"order-{user_id}"
+    clean = text.lower().replace(" ", "-")
+    clean = re.sub(r"[^a-zа-яё0-9\-_]", "", clean)
+    clean = clean.strip("- _")
+    return clean[:80] or f"order-{user_id}"
+
 async def send_invoice(channel, product_display: str, amount: int, discount: int, user_name: str) -> bool:
     try:
+        # ── ФИКС: Переименовываем ТИКЕТ ЗДЕСЬ, до отправки чека ──
+        clean_name = _clean_ticket_name(product_display, channel.id)
+        try:
+            await channel.edit(name=clean_name)
+            ai_logger.info(f"✅ Тикет переименован при выставлении счёта: {clean_name}")
+        except Exception as e:
+            ai_logger.warning(f"Не удалось переименовать тикет при счёте: {e}")
+
         order_id = generate_receipt_id()
         buf = await asyncio.to_thread(
             generate_receipt_png, manager_name="AI Manager", customer_name=user_name or "Клиент",
@@ -726,6 +745,50 @@ async def send_invoice(channel, product_display: str, amount: int, discount: int
     except Exception as e:
         ai_logger.exception(f"send_invoice: {e}")
         return False
+
+async def _auto_confirm_receipt(channel, message, sess):
+    user_id = sess.get("user_id") or message.author.id
+    try: 
+        await message.add_reaction(YES_EMOJI)
+    except Exception: 
+        pass
+
+    # ── 1. Сообщение об оплате (пока тикет в старой категории) ──
+    sellers_ping = f"<@&{SELLER_ROLE}>"
+    embed = disnake.Embed(
+        title="💚 Оплата принята.",
+        description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{sellers_ping} скоро подключатся и выдадут заказ! ",
+        color=COLOR_GREEN
+    )
+    embed.set_image(url=IMG_STRIPE)
+    try: 
+        await channel.send(embed=embed)
+    except Exception as e: 
+        ai_logger.warning(f"auto_confirm: send msg failed: {e}")
+
+    # ── 2. Переносим в категорию "Оплачено" ──
+    paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
+    if paid_cat:
+        try:
+            await channel.edit(category=paid_cat)
+            ai_logger.info(f"✅ auto_confirm: {channel.id} перенесен в категорию {paid_cat.name}")
+        except disnake.HTTPException as e:
+            ai_logger.warning(f"⚠️ auto_confirm edit (cat) fail: {getattr(e, 'status', '?')} {str(e)[:200]}")
+
+    # ── 3. Выдаем права продавцу ──
+    try:
+        seller_role = channel.guild.get_role(SELLER_ROLE)
+        if seller_role:
+            await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
+    except Exception as e:
+        ai_logger.warning(f"auto_confirm: seller perms failed: {e}")
+
+    # ── 4. Отключаем ИИ для этого тикета ──
+    update_session(
+        channel.id, invoice_sent=0,
+        receipt_url=message.attachments[0].url if message.attachments else "",
+        post_invoice_text_count=0, last_ai_response_ts=int(time.time()), escalated=1
+    )
 
 async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = False):
     if not user_text.strip() or _is_paid_category(channel) or _is_coins_category(channel): return
@@ -855,6 +918,11 @@ async def on_ready():
     count = auto_init()
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
     
+    # 👇 РЕГИСТРАЦИЯ КНОПОК РЕКЛАМЫ (чтобы не отваливались)
+    bot.add_view(AdStartView())
+    bot.add_view(AdPublishConfirmView())
+    # 👆
+
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
         asyncio.create_task(_cleanup_loop())
@@ -904,7 +972,6 @@ async def on_guild_channel_create(channel):
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
         update_session(channel.id, escalated=1)
     elif any(x in item_name.lower() for x in ["аватарка", "баннер", "персонаж", "логотип", "дизайн"]):
-        # 👇 НОВАЯ ЛОГИКА ДЛЯ ДИЗАЙНА
         embed = disnake.Embed(
             title="🎨 Оформление дизайна",
             description=(
@@ -917,6 +984,12 @@ async def on_guild_channel_create(channel):
         )
         embed.set_image(url=IMG_STRIPE)
         await channel.send(embed=embed)
+        create_session(channel.id, get_ticket_owner(channel.id) or 0)
+        update_session(channel.id, escalated=1)
+    # 👇 ФИКС РЕКЛАМЫ: Теперь она обрабатывается здесь!
+    elif "реклама" in item_name.lower():
+        embed = build_ad_embed(item_name)
+        await channel.send(embed=embed, view=AdStartView())
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
         update_session(channel.id, escalated=1)
 
@@ -976,56 +1049,6 @@ def get_user_ai_pref(user_id: int) -> bool:
 def set_user_ai_pref(user_id: int, enabled: bool):
     cur.execute("INSERT INTO ai_manager_user_prefs (user_id, enabled) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled", (user_id, 1 if enabled else 0))
     db.commit()
-
-async def _auto_confirm_receipt(channel, message, sess):
-    user_id = sess.get("user_id") or message.author.id
-    try: await message.add_reaction(YES_EMOJI)
-    except Exception: pass
-
-    item_name = "Товар"
-    async for msg in channel.history(limit=20):
-        if msg.author == bot.user and msg.embeds and "Счёт для оплаты" in (msg.embeds[0].title or ""):
-            for field in msg.embeds[0].fields:
-                if "Товары" in field.name:
-                    item_name = field.value
-                    break
-            break
-
-    # 1. Сначала переименовываем канал (пока он в старой категории)
-    try:
-        clean_name = item_name.lower()
-        clean_name = clean_name.replace("discord ", "").replace("нитро ", "nitro-")
-        clean_name = clean_name.replace(" month", "m").replace(" year", "y")
-        clean_name = clean_name.replace(" ", "-")
-        clean_name = re.sub(r"[^a-z0-9\-_]", "", clean_name)
-        
-        if clean_name:
-            await channel.edit(name=clean_name[:80])
-            ai_logger.info(f"✅ Тикет переименован в {clean_name}")
-            await asyncio.sleep(15) # Пауза чтобы Discord не выдал rate limit
-    except Exception as e:
-        ai_logger.warning(f"Rename error: {e}")
-
-    # 2. Затем меняем категорию на "Оплачено"
-    paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
-    if paid_cat:
-        try:
-            await channel.edit(category=paid_cat)
-            seller_role = channel.guild.get_role(SELLER_ROLE)
-            if seller_role: await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
-            await asyncio.sleep(15)
-        except Exception as e: 
-            ai_logger.warning(f"auto_confirm edit category: {e}")
-
-    # 3. Сбрасываем сессию
-    update_session(channel.id, invoice_sent=0, receipt_url=message.attachments[0].url if message.attachments else "", post_invoice_text_count=0, last_ai_response_ts=int(time.time()), escalated=1)
-
-    # 4. Отправляем сообщение об оплате
-    sellers_ping = f"<@&{SELLER_ROLE}>"
-    embed = disnake.Embed(title="💚 Оплата принята.", description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{sellers_ping} скоро подключатся и выдадут заказ! ", color=COLOR_GREEN)
-    embed.set_image(url=IMG_STRIPE)
-    try: await channel.send(embed=embed)
-    except Exception: pass
 
 # ============================================================
 # ФОНОВЫЕ ЗАДАЧИ
