@@ -18,7 +18,7 @@ from disnake.ext import commands, tasks
 
 from core.utils import (
     CONFIG, DATA_DIR, CATALOG_DIR, logger, db, cur,
-    load_json, save_json, now_ts,
+    load_json, save_json, now_ts, get_dc_cache,
     get_ticket_owner,
 )
 from core.catalog import load_catalog_from_db, auto_init
@@ -42,6 +42,7 @@ ABUSE_TIMEOUT = 10
 
 SELLER_ROLE = 1471844291595731016
 OWNER_IDS = [796293832751972352, 1168943921171288135]
+ANALYTICS_USER_ID = 796293832751972352 # Сюда будут лететь отчеты
 LOG_CHANNEL = 1530453871581855744
 
 SESSION_MAX_MESSAGES = 20
@@ -176,6 +177,15 @@ def init_ai_manager_tables():
         is_personal INTEGER DEFAULT 0,
         expires_at INTEGER
     );
+    
+    CREATE TABLE IF NOT EXISTS ai_escalations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        channel_id INTEGER,
+        question TEXT,
+        reason TEXT,
+        created_at INTEGER
+    );
     """)
     db.commit()
     
@@ -200,19 +210,18 @@ def _ensure_col(table: str, column: str, ddl: str):
 init_ai_manager_tables()
 
 # ============================================================
-# СИСТЕМА РЕКЛАМЫ
+# СИСТЕМА РЕКЛАМЫ (ОБНОВЛЕНА)
 # ============================================================
 def build_ad_embed(item_name: str) -> disnake.Embed:
     embed = disnake.Embed(
-        title="📢 Оформление рекламы",
+        title=f"📢 Оформление рекламы: {item_name}",
         description=(
-            f"Вы приобрели: **{item_name}**\n\n"
-            "Чтобы я подготовил пост, нажмите на кнопку ниже.\n\n"
-            "> 📝 Вам нужно будет отправить **только текст** вашей рекламы.\n"
-            "> ⚙️ Пинги и время размещения я настрою автоматически.\n"
-            "> 📺 Если это личный канал — я попрошу его название."
+            "> Нажмите на кнопку ниже, чтобы заполнить бриф.\n"
+            "> Укажите заголовок, текст и при желании добавьте картинку.\n"
+            "> После отправки вы сможете проверить предпросмотр.\n\n"
+            "**Внимание:** кнопку можно нажать только 1 раз."
         ),
-        color=0x676767
+        color=0x2b2d31
     )
     embed.set_image(url=IMG_STRIPE)
     return embed
@@ -221,27 +230,40 @@ class AdStartView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @ui.button(label="📝 Заполнить бриф", style=ButtonStyle.primary, custom_id="ad_start_btn")
+    @ui.button(label="📝 Заполнить бриф", style=ButtonStyle.secondary, custom_id="ad_start_btn")
     async def start(self, button, inter: disnake.MessageInteraction):
+        # Отключаем кнопку навсегда (защита от второго клика)
+        button.disabled = True
+        try: await inter.message.edit(view=self)
+        except: pass
+
         item_name = "Реклама"
         if inter.message.embeds:
-            desc = inter.message.embeds[0].description or ""
-            match = re.search(r"Вы приобрели:\s*\*\*(.+?)\*\*", desc)
-            if match:
-                item_name = match.group(1)
+            embed_title = inter.message.embeds[0].title or ""
+            if ":" in embed_title:
+                item_name = embed_title.split(":", 1)[1].strip()
+            else:
+                desc = inter.message.embeds[0].description or ""
+                match = re.search(r"Вы приобрели:\s*\*\*(.+?)\*\*", desc)
+                if match:
+                    item_name = match.group(1)
         
         await inter.response.send_modal(AdTextViewModal(item_name=item_name))
 
 class AdTextViewModal(Modal):
     def __init__(self, item_name: str):
         self.item_name = item_name
-        super().__init__(title="Текст рекламы", components=[
-            TextInput(label="Ваш рекламный текст", placeholder="Опишите проект, добавьте ссылки. Без пингов.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000)
+        super().__init__(title="Бриф рекламы", components=[
+            TextInput(label="Заголовок рекламы", placeholder="Например: Мой крутой сервер", custom_id="ad_title", min_length=2, max_length=256),
+            TextInput(label="Текст рекламы", placeholder="Опишите проект, добавьте ссылки.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000),
+            TextInput(label="Ссылка на картинку (необязательно)", placeholder="https://...", custom_id="ad_image", required=False, max_length=512)
         ])
 
     async def callback(self, inter: disnake.ModalInteraction):
+        title = inter.text_values["ad_title"]
         text = inter.text_values["ad_text"]
-        
+        image = inter.text_values.get("ad_image", "").strip()
+
         ping = ""
         if "@everyone" in self.item_name: ping = "@everyone"
         elif "@here" in self.item_name: ping = "@here"
@@ -252,32 +274,96 @@ class AdTextViewModal(Modal):
         if is_personal:
             embed = disnake.Embed(
                 title="Шаг 2: Название канала",
-                description="Текст принят! Нажмите на кнопку ниже, чтобы ввести название для вашего личного канала.",
-                color=0x676767
+                description="Бриф принят! Нажмите на кнопку ниже, чтобы ввести название для вашего личного канала.",
+                color=0x2b2d31
             )
-            view = AdChannelNameView(ad_text=text, ping=ping)
+            view = AdChannelNameView(self.item_name, title, text, image, ping)
             await inter.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
-            embed = disnake.Embed(description=text, color=0x676767)
-            embed.set_footer(text=f"item:{self.item_name}|24h:{1 if is_24h else 0}")
+            embed = disnake.Embed(title=title, description=text, color=0x2b2d31)
+            if image: 
+                try: embed.set_image(url=image)
+                except: pass
             
-            view = AdPublishConfirmView()
+            view = AdPreviewView(self.item_name, title, text, image, ping, is_24h)
             await inter.channel.send(content=f"> **Предпросмотр рекламы:**\n{ping}", embed=embed, view=view)
-            await inter.response.send_message("✅ Предпросмотр отправлен в чат.", ephemeral=True)
+            await inter.response.send_message("✅ Предпросмотр отправлен. Если что-то не так — нажмите «Заполнить заново» под ним.", ephemeral=True)
+
+class AdPreviewView(ui.View):
+    def __init__(self, item_name, title, text, image, ping, is_24h):
+        super().__init__(timeout=None)
+        self.item_name = item_name
+        self.title = title
+        self.text = text
+        self.image = image
+        self.ping = ping
+        self.is_24h = is_24h
+
+    @ui.button(label="✅ Опубликовать", style=ButtonStyle.secondary, custom_id="ad_pub_confirm")
+    async def publish(self, button, inter: disnake.MessageInteraction):
+        # Отключаем кнопки
+        for child in self.children:
+            child.disabled = True
+        try: await inter.message.edit(view=self)
+        except: pass
+
+        await inter.response.defer(ephemeral=True)
+        
+        guild = inter.guild
+        ad_channel = guild.get_channel(ADS_CHANNEL_ID)
+        if not ad_channel: 
+            return await inter.followup.send("❌ Канал для рекламы не найден.", ephemeral=True)
+
+        embed = disnake.Embed(title=self.title, description=self.text, color=0x2b2d31)
+        if self.image:
+            try: embed.set_image(url=self.image)
+            except: pass
+            
+        try:
+            msg = await ad_channel.send(content=self.ping, embed=embed)
+        except Exception as e:
+            return await inter.followup.send(f"❌ Ошибка публикации: {e}", ephemeral=True)
+        
+        expires = int(time.time()) + (24 * 3600) if self.is_24h else 0
+        cur.execute("INSERT INTO active_ads (user_id, channel_id, message_id, is_personal, expires_at) VALUES (?, ?, ?, ?, ?)", (inter.author.id, ad_channel.id, msg.id, 0, expires))
+        db.commit()
+
+        success_embed = disnake.Embed(
+            title="✅ Реклама успешно опубликована!",
+            description=f"Ваш пост отправлен в канал: {ad_channel.mention}\n> **Срок размещения:** {'24 часа' if self.is_24h else 'Навсегда'}.\n> Ссылка: [Клик]({msg.jump_url})",
+            color=0x2b2d31
+        )
+        success_embed.set_image(url=IMG_STRIPE)
+        await inter.channel.send(embed=success_embed)
+
+        try: await inter.message.delete()
+        except: pass
+
+    @ui.button(label="✏️ Заполнить заново", style=ButtonStyle.secondary, custom_id="ad_refill")
+    async def refill(self, button, inter: disnake.MessageInteraction):
+        try: await inter.message.delete()
+        except: pass
+        await inter.response.send_modal(AdTextViewModal(item_name=self.item_name))
 
 class AdChannelNameView(ui.View):
-    def __init__(self, ad_text: str, ping: str):
+    def __init__(self, item_name, title, text, image, ping):
         super().__init__(timeout=300)
-        self.ad_text = ad_text
+        self.item_name = item_name
+        self.title = title
+        self.text = text
+        self.image = image
         self.ping = ping
 
-    @ui.button(label="📝 Ввести название", style=ButtonStyle.primary, custom_id="ad_chan_name_btn")
+    @ui.button(label="📝 Ввести название канала", style=ButtonStyle.secondary, custom_id="ad_chan_name_btn")
     async def enter_name(self, button, inter: disnake.MessageInteraction):
-        await inter.response.send_modal(AdChannelNameModal(ad_text=self.ad_text, ping=self.ping))
+        await inter.response.send_modal(AdChannelNameModal(self.item_name, self.title, self.text, self.image, self.ping))
 
 class AdChannelNameModal(Modal):
-    def __init__(self, ad_text: str, ping: str):
-        self.ad_text = ad_text
+    def __init__(self, item_name, title, text, image, ping):
+        self.item_name = item_name
+        self.title = title
+        self.text = text
+        self.image = image
         self.ping = ping
         super().__init__(title="Название личного канала", components=[
             TextInput(label="Введите название канала", placeholder="Например: реклама-моего-сервера", custom_id="chan_name", min_length=2, max_length=90)
@@ -307,7 +393,11 @@ class AdChannelNameModal(Modal):
         except Exception as e:
             return await inter.followup.send(f"❌ Ошибка создания: {e}", ephemeral=True)
         
-        embed = disnake.Embed(description=self.ad_text, color=0x676767)
+        embed = disnake.Embed(title=self.title, description=self.text, color=0x2b2d31)
+        if self.image:
+            try: embed.set_image(url=self.image)
+            except: pass
+            
         msg = await new_channel.send(content=self.ping, embed=embed)
         
         expires = int(time.time()) + (7 * 24 * 3600)
@@ -317,7 +407,7 @@ class AdChannelNameModal(Modal):
         success_embed = disnake.Embed(
             title="✅ Реклама успешно опубликована!",
             description=f"Ваш личный канал создан: {new_channel.mention}\n> **Срок размещения:** 1 неделя.\n> После этого канал будет автоматически удален.",
-            color=0x676767
+            color=0x2b2d31
         )
         success_embed.set_image(url=IMG_STRIPE)
         
@@ -325,71 +415,13 @@ class AdChannelNameModal(Modal):
 
         try:
             async for msg_hist in inter.channel.history(limit=15):
-                if msg_hist.author.bot and msg_hist.embeds and msg_hist.embeds[0].title == "📢 Оформление рекламы":
+                if msg_hist.author.bot and msg_hist.embeds and msg_hist.embeds[0].title and "Оформление рекламы" in msg_hist.embeds[0].title:
                     await msg_hist.delete()
                     break
         except Exception:
             pass
 
         await inter.edit_original_response(content="Канал создан.")
-
-class AdPublishConfirmView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        
-    @ui.button(label="✅ Опубликовать", style=ButtonStyle.success, custom_id="ad_pub_confirm")
-    async def publish(self, button, inter: disnake.MessageInteraction):
-        button.disabled = True
-        try: await inter.message.edit(view=self)
-        except Exception: pass
-
-        await inter.response.defer(ephemeral=True)
-
-        try: await inter.message.delete()
-        except Exception: pass
-
-        text = inter.message.embeds[0].description or ""
-        footer = inter.message.embeds[0].footer.text or ""
-        
-        item_name = "Реклама"
-        is_24h = False
-        
-        if "item:" in footer and "|24h:" in footer:
-            parts = footer.split("|24h:")
-            item_name = parts[0].replace("item:", "")
-            is_24h = parts[1] == "1"
-            
-        ping = ""
-        if inter.message.content and "@everyone" in inter.message.content: ping = "@everyone"
-        elif inter.message.content and "@here" in inter.message.content: ping = "@here"
-
-        guild = inter.guild
-        ad_channel = guild.get_channel(ADS_CHANNEL_ID)
-        if not ad_channel: 
-            return await inter.followup.send("❌ Канал для рекламы не найден.", ephemeral=True)
-
-        embed = disnake.Embed(description=text, color=0x676767)
-        msg = await ad_channel.send(content=ping, embed=embed)
-        
-        expires = int(time.time()) + (24 * 3600) if is_24h else 0
-        cur.execute("INSERT INTO active_ads (user_id, channel_id, message_id, is_personal, expires_at) VALUES (?, ?, ?, ?, ?)", (inter.author.id, ad_channel.id, msg.id, 0, expires))
-        db.commit()
-
-        success_embed = disnake.Embed(
-            title="✅ Реклама успешно опубликована!",
-            description=f"Ваш пост отправлен в канал: {ad_channel.mention}\n> **Срок размещения:** {'24 часа' if is_24h else 'Навсегда'}.\n> Ссылка на пост: [Клик]({msg.jump_url})",
-            color=0x676767
-        )
-        success_embed.set_image(url=IMG_STRIPE)
-        await inter.channel.send(embed=success_embed)
-
-        try:
-            async for msg_hist in inter.channel.history(limit=15):
-                if msg_hist.author.bot and msg_hist.embeds and msg_hist.embeds[0].title == "📢 Оформление рекламы":
-                    await msg_hist.delete()
-                    break
-        except Exception:
-            pass
 
 # ============================================================
 # ФУНКЦИИ РАБОТЫ С СЕССИЯМИ
@@ -561,6 +593,38 @@ async def get_ticket_discount(channel) -> int:
     return 0
 
 # ============================================================
+# ИСТОРИЯ КЛИЕНТА (ПОИСК ПО ИСТОРИИ)
+# ============================================================
+def _get_user_history_text(user_id: int) -> str:
+    """Собирает историю покупок и баланс для передачи ИИ."""
+    try:
+        dc = get_dc_cache(user_id)
+        balance = dc.get("balance", 0)
+        purchases = dc.get("purchases", [])
+        history = dc.get("history", [])
+
+        if not purchases and not history:
+            return f"Баланс: {balance} DC. Покупок еще не было."
+
+        text = f"Баланс: {balance} DC.\n"
+        
+        if purchases:
+            unused = [p.get("value") for p in purchases if not p.get("used")]
+            if unused:
+                text += "Неиспользованные товары (можно напомнить): " + ", ".join(unused[:5]) + "\n"
+        
+        if history:
+            spends = [h for h in history if h.get("amount", 0) < 0 and "Покупка" in h.get("reason", "")]
+            if spends:
+                last_buys = [h.get("reason", "").replace("Покупка: ", "") for h in spends[-3:]]
+                text += "Последние покупки: " + ", ".join(last_buys) + "\n"
+
+        return text.strip()
+    except Exception as e:
+        ai_logger.warning(f"_get_user_history_text: {e}")
+        return "История недоступна."
+
+# ============================================================
 # СИСТЕМНЫЙ ПРОМПТ
 # ============================================================
 REAL_CATALOG_TEXT = build_real_catalog_text()
@@ -582,19 +646,25 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 ПРАВИЛА ДЛЯ ТОВАРОВ С КОЛИЧЕСТВОМ:
 - Если клиент покупает несколько штук (например, 120 звезд ТГ), умножь цену за 1 шт на количество и укажи ИТОГОВУЮ сумму в параметре `price`.
 - В параметре `item_name` укажи название и количество, например: "Звёзды Telegram (120 шт.)".
-- НЕ ИСПОЛЬЗУЙ параметр `quantity` при вызове функции `create_invoice`, бот сам поймет всё из названия.
+- НЕ ИСПОЛЬЗУЙ параметр `quantity` при вызове функции `create_invoice`.
 
 ГЛОБАЛЬНЫЕ ЗНАНИЯ И ИНТЕРНЕТ:
-- Если клиент спрашивает про условия подписки, сроки активации, работу товара вне нашего магазина (например, "Как работает Nitro?", "Что дает Roblox Plus?", "Сгорят ли звезды ТГ?", "В чем разница Full и Basic?"), используй СВОИ знания об этих сервисах.
+- Если клиент спрашивает про условия подписки, сроки активации, работу товара вне нашего магазина, используй СВОИ знания об этих сервисах.
 - Отвечай как эксперт, не зови продавца, если вопрос касается общедоступной информации о продукте.
 
-UPSELL (ДОПРОДАЖИ - ВАЖНО):
+ИСТОРИЯ КЛИЕНТА:
+{user_history}
+- Если у клиента висят неиспользованные товары, можешь деликатно напомнить ему об этом (например: "Кстати, у вас в инвентаре висит Х, может быть, активируем его?").
+- Если клиент жалуется на нехватку денег, можешь использовать его историю покупок для контекста.
+
+УМНЫЙ UPSELL (ДОПРОДАЖИ - ВАЖНО):
 - Перед тем как выставить счёт, проверь итоговую сумму.
-- Если сумма заказа превышает 500₽:
-  1. Предложи клиенту крутую скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ другой товар из каталога (предложи 1-2 интересных варианта).
-  2. Если клиент соглашается, СНАЧАЛА добавь новый товар в корзину.
-  3. При вызове `create_invoice` передай параметр `discount_percent: 5`.
-  - ❗️ ВАЖНО: В поле `item_name` пиши ТОЛЬКО оригинальное название товара (например, "Discord Nitro 12 Month"), НЕ ДОБАВЛЯЙ туда "(Combo Discount 5%)" или другие пометки. Скидка передается ТОЛЬКО через параметр `discount_percent`.
+- Если сумма заказа превышает 750₽:
+  1. Предложи клиенту скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ сопутствующий товар.
+  2. Предлагай ЛОГИЧНЫЕ товары (если берет Ниро - предложи Бусты; если Робуксы - предложи Роблокс Плюс; если ТГ Звезды - предложи Аккаунт ТГ).
+  3. Если клиент соглашается, СНАЧАЛА добавь новый товар в корзину.
+  4. При вызове `create_invoice` передай параметр `discount_percent: 5`.
+  - ❗️ ВАЖНО: В поле `item_name` пиши ТОЛЬКО оригинальное название товара, НЕ ДОБАВЛЯЙ туда "(Combo Discount 5%)".
 
 ГЛАВНОЕ ПРАВИЛО ПЕРЕД СЧЁТОМ:
 - НИКОГДА не вызывай create_invoice сразу после того, как клиент назвал товар.
@@ -629,7 +699,7 @@ TOOLS_OPENAI = [
                         "items": {
                             "type": "object",
                             "properties": {
-                                "item_name": {"type": "string", "description": "Название товара (включая количество, если оно есть, например: 'Звёзды Telegram (120 шт.)')"},
+                                "item_name": {"type": "string", "description": "Название товара (включая количество, если оно есть)"},
                                 "price": {"type": "number", "description": "ИТОГОВАЯ цена за эту позицию в рублях (уже умноженная на количество)"}
                             },
                             "required": ["item_name", "price"]
@@ -696,15 +766,21 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
             return res
     return None
 
-async def escalate(channel, reason: str):
+async def escalate(channel, reason: str, user_question: str = ""):
     if _is_paid_category(channel): return
     sess = get_session(channel.id)
     if sess is None: create_session(channel.id, 0)
     elif sess.get("escalated"): return
     update_session(channel.id, escalated=1)
     
+    user_id = sess.get("user_id") or 0
+    cur.execute(
+        "INSERT INTO ai_escalations (user_id, channel_id, question, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, channel.id, user_question[:500], reason[:500], int(time.time()))
+    )
+    db.commit()
+
     ping = f"<@&{SELLER_ROLE}>"
-    
     embed = disnake.Embed(title="⚠️ Требуется помощь продавца", description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}", color=COLOR_GREY)
     embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=embed)
@@ -714,7 +790,6 @@ async def escalate(channel, reason: str):
 # ОБРАБОТКА СЧЁТА И ЧЕКА
 # ============================================================
 def _clean_ticket_name(text: str, user_id: int) -> str:
-    """Очищает название для канала Discord. Сохраняет кириллицу."""
     if not text: return f"order-{user_id}"
     clean = text.lower().replace(" ", "-")
     clean = re.sub(r"[^a-zа-яё0-9\-_]", "", clean)
@@ -723,7 +798,6 @@ def _clean_ticket_name(text: str, user_id: int) -> str:
 
 async def send_invoice(channel, product_display: str, amount: int, discount: int, user_name: str) -> bool:
     try:
-        # ── ФИКС: Переименовываем ТИКЕТ ЗДЕСЬ, до отправки чека ──
         clean_name = _clean_ticket_name(product_display, channel.id)
         try:
             await channel.edit(name=clean_name)
@@ -757,7 +831,6 @@ async def _auto_confirm_receipt(channel, message, sess):
     except Exception: 
         pass
 
-    # ── 1. Сообщение об оплате (пока тикет в старой категории) ──
     sellers_ping = f"<@&{SELLER_ROLE}>"
     embed = disnake.Embed(
         title="💚 Оплата принята.",
@@ -770,7 +843,6 @@ async def _auto_confirm_receipt(channel, message, sess):
     except Exception as e: 
         ai_logger.warning(f"auto_confirm: send msg failed: {e}")
 
-    # ── 2. Переносим в категорию "Оплачено" ──
     paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
     if paid_cat:
         try:
@@ -779,7 +851,6 @@ async def _auto_confirm_receipt(channel, message, sess):
         except disnake.HTTPException as e:
             ai_logger.warning(f"⚠️ auto_confirm edit (cat) fail: {getattr(e, 'status', '?')} {str(e)[:200]}")
 
-    # ── 3. Выдаем права продавцу ──
     try:
         seller_role = channel.guild.get_role(SELLER_ROLE)
         if seller_role:
@@ -787,7 +858,6 @@ async def _auto_confirm_receipt(channel, message, sess):
     except Exception as e:
         ai_logger.warning(f"auto_confirm: seller perms failed: {e}")
 
-    # ── 4. Отключаем ИИ для этого тикета ──
     update_session(
         channel.id, invoice_sent=0,
         receipt_url=message.attachments[0].url if message.attachments else "",
@@ -814,18 +884,20 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         except Exception: pass
         if is_ai_muted(channel.id): return
         if sess["message_count"] >= SESSION_MAX_MESSAGES:
-            await escalate(channel, "исчерпан лимит сообщений")
+            await escalate(channel, "исчерпан лимит сообщений", user_text)
             return
 
         update_session(channel.id, message_count=(sess["message_count"] or 0) + 1)
         hist_append(channel.id, "user", user_text)
 
         discount = await get_ticket_discount(channel)
+        user_history = _get_user_history_text(user_id)
         
         system_prompt = SYSTEM_PROMPT.format(
             real_catalog=REAL_CATALOG_TEXT,
             user_name=author.display_name, 
-            discount=discount
+            discount=discount,
+            user_history=user_history
         )
         
         history = hist_load(channel.id)
@@ -837,7 +909,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
             new_fails = (sess["fail_count"] or 0) + 1
             update_session(channel.id, fail_count=new_fails)
             if new_fails >= SESSION_MAX_FAILS:
-                await escalate(channel, "сбой LLM")
+                await escalate(channel, "сбой LLM", user_text)
             else:
                 try: await channel.send("⏳ Секунду, уточняю информацию…")
                 except Exception: pass
@@ -852,7 +924,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
             except Exception: pass
             touch_ai_response(channel.id)
             update_session(channel.id, escalated=1)
-            await escalate(channel, "Товар не найден / нужен продавец")
+            await escalate(channel, "Товар не найден / нужен продавец", user_text)
             return
 
         if text and not funcs:
@@ -885,7 +957,6 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                     item_name = itm.get("item_name", "Товар")
                     price = float(itm.get("price", 0))
                     
-                    # Больше никакого умножения на quantity! Берем финальную цену
                     total_amount += int(round(price))
                     receipt_names.append(item_name)
 
@@ -899,7 +970,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                     touch_ai_response(channel.id)
 
             elif name == "escalate_to_human":
-                await escalate(channel, args.get("reason", "Товар не найден"))
+                await escalate(channel, args.get("reason", "Товар не найден"), user_text)
                 update_session(channel.id, escalated=1)
                 touch_ai_response(channel.id)
 
@@ -921,10 +992,9 @@ async def on_ready():
     count = auto_init()
     ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
     
-    # 👇 РЕГИСТРАЦИЯ КНОПОК РЕКЛАМЫ (чтобы не отваливались)
     bot.add_view(AdStartView())
-    bot.add_view(AdPublishConfirmView())
-    # 👆
+    bot.add_view(AdPreviewView(None, None, None, None, None, None)) # Регистрация для перезапуска
+    bot.add_view(AdChannelNameView(None, None, None, None, None))
 
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
@@ -932,6 +1002,7 @@ async def on_ready():
         if not fallback_task.is_running(): fallback_task.start()
         if not activity_ping_task.is_running(): activity_ping_task.start()
         if not ads_cleanup_task.is_running(): ads_cleanup_task.start()
+        if not analytics_task.is_running(): analytics_task.start()
 
 @bot.event
 async def on_guild_channel_create(channel):
@@ -940,7 +1011,6 @@ async def on_guild_channel_create(channel):
     if channel.category_id != CONFIG.get("COINS_CATEGORY_ID"):
         return
     
-    # Ищем сообщение до 10 секунд (5 попыток по 2 сек)
     item_name = None
     for _ in range(5):
         async for msg in channel.history(limit=10):
@@ -989,7 +1059,6 @@ async def on_guild_channel_create(channel):
         await channel.send(embed=embed)
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
         update_session(channel.id, escalated=1)
-    # 👇 ФИКС РЕКЛАМЫ: Теперь она обрабатывается здесь!
     elif "реклама" in item_name.lower():
         embed = build_ad_embed(item_name)
         await channel.send(embed=embed, view=AdStartView())
@@ -1162,6 +1231,47 @@ async def _cleanup_loop():
             ai_logger.info("Cleanup: старые сессии/история удалены")
         except Exception:
             ai_logger.exception("cleanup")
+
+@tasks.loop(hours=24)
+async def analytics_task():
+    await bot.wait_until_ready()
+    try:
+        week_ago = int(time.time()) - 7 * 86400
+        rows = cur.execute(
+            "SELECT question, reason FROM ai_escalations WHERE created_at > ?", 
+            (week_ago,)
+        ).fetchall()
+
+        if not rows:
+            return
+
+        questions = {}
+        for r in rows:
+            q = r["question"].strip().lower()
+            if not q: q = "[Пустой вопрос/сбой]"
+            questions[q] = questions.get(q, 0) + 1
+
+        top_q = sorted(questions.items(), key=lambda x: -x[1])[:10]
+
+        text = "📊 **Аналитика ИИ-менеджера за неделю**\n\n"
+        text += f"Всего эскалаций (ИИ сдался): **{len(rows)}**\n\n"
+        text += "**Топ вопросов, на которые ИИ не смог ответить:**\n"
+        
+        for i, (q, count) in enumerate(top_q, 1):
+            text += f"{i}. {q} (встречался {count} раз)\n"
+            
+        text += "\n_Возможно, стоит добавить эти товары в каталог или обновить промпт._"
+
+        user = bot.get_user(ANALYTICS_USER_ID)
+        if not user:
+            user = await bot.fetch_user(ANALYTICS_USER_ID)
+            
+        if user:
+            await user.send(text)
+            ai_logger.info("📊 Аналитика ИИ-менеджера отправлена в ЛС.")
+            
+    except Exception as e:
+        ai_logger.exception(f"Ошибка в analytics_task: {e}")
 
 def run_ai_manager():
     if not AI_MANAGER_TOKEN or not AI_MANAGER_API_KEY:
