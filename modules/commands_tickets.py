@@ -53,7 +53,6 @@ QUESTIONS_CATEGORY_ID = 1544363672128987196
 
 REVIEW_CHANNEL_ID = 1462074763437543435
 
-# 👇 НОВАЯ РОЛЬ (бывший Control Diamond)
 SELLER_ROLE = 1471844291595731016
 OWNER_IDS = [796293832751972352, 1168943921171288135]
 
@@ -372,7 +371,6 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # Загружаем стандартный шаблон
     try:
         with open(CONFIG["COINS_INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -385,7 +383,6 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     embed_order_info.add_field(name="> Нужный товар", value=f"```{item_name}```", inline=False)
     embed_order_info.description = f"Статус - Оформляется\n> Ожидайте оформление, а после - выдачу от продавца.\n> Время: <t:{int(_time.time())}:f>"
 
-    # 1. ОТПРАВЛЯЕМ СТАНДАРТНЫЙ ЭМБЕД + КНОПКИ (ВСЕГДА)
     view = CoinsTicketButtons()
     await ticket_channel.send(
         content=f"> Добрый день, {user.mention}, ваш тикет на категорию **DC** — создан.\n> Ожидайте оформление, а после - выдачу от продавца.",
@@ -393,15 +390,11 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         view=view
     )
 
-    # ❗️ УБРАЛИ ОТСЮДА ВСЮ ЛОГИКУ РЕКЛАМЫ И КАСТОМНЫХ РОЛЕЙ.
-    # ТЕПЕРЬ ЭТИМ ЗАНИМАЕТСЯ ИИ-МЕНЕДЖЕР В on_guild_channel_create
-
     await inter.edit_original_response(content=f"> {user.mention}, тикет создан: {ticket_channel.mention}")
 
 # ============================================================
-# КАСТОМНЫЕ РОЛИ (Для ИИ-Менеджера)
+# КАСТОМНЫЕ РОЛИ
 # ============================================================
-
 def hex_to_rgb(hex_str: str) -> tuple:
     hex_str = hex_str.lstrip('#')
     return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
@@ -714,7 +707,6 @@ class SelectView(View):
 
     @disnake.ui.button(label="Счёт на оплату", style=ButtonStyle.gray, custom_id="ticket_action:requisites", emoji=PartialEmoji(name="Rekvi", id=1539656975091105892), row=0)
     async def requisites_btn(self, button: Button, inter: disnake.MessageInteraction):
-        # 👇 ТЕПЕРЬ ДОСТУПНО ТОЛЬКО ПРОДАВЦАМ И ВЛАДЕЛЬЦАМ
         if inter.author.id not in OWNER_IDS and not any(r.id == SELLER_ROLE for r in inter.author.roles):
             return await inter.response.send_message("⛔ Кнопка доступна только продавцам.", ephemeral=True)
         await inter.response.send_modal(InvoiceModal())
@@ -878,10 +870,9 @@ class TicketView(View):
                             return await inter.response.send_message("❌ Скидка уже применена.", ephemeral=True)
                     break
             item_value = discounts[discount_index]['value']
-            full_purchases = await get_user_purchases(inter.author.id, only_unused=False)
-            target_index = next((i for i, p in enumerate(full_purchases) if p['value'] == item_value and p.get('type') == 'discounts' and not p.get('used')), None)
-            if target_index is None: return await inter.response.send_message("❌ Скидка не найдена.", ephemeral=True)
-            if not await remove_purchase(inter.author.id, target_index): return await inter.response.send_message("❌ Ошибка применения скидки.", ephemeral=True)
+            
+            # ТУТ МЫ УБРАЛИ УДАЛЕНИЕ! Теперь скидка удалится только при создании счёта или оплате
+            
             async for msg in channel.history(limit=50):
                 if msg.author == inter.bot.user and msg.embeds and len(msg.embeds) >= 2:
                     embed_dict = msg.embeds[1].to_dict()
