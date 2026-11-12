@@ -21,24 +21,17 @@ from modules.dc import (
 )
 from modules.shop import state
 from modules.shop import render as shop_render
-from modules.shop.views import (
-    ShopMainView, ShopProductsView, ShopDetailView,
-    ShopPurchasesView, ShopDealView, ShopHistoryView,
-    ShopSuccessView,
-)
-
+from modules.shop.views import ShopUniversalView, ShopGiftModal
 
 DAILY_DEAL_REFRESH_HOURS = 25
 PAGE_SIZE = 6
 
 REVIEW_CHANNEL_ID = CONFIG.get("REVIEW_COUNT_CHANNEL", 1462074763437543435)
 
-
 # ============================================================
 # ЗАЩИТА ОТ ДВОЙНОГО НАЖАТИЯ
 # ============================================================
 _BUY_LOCKS: dict = {}
-
 
 def _prune_locks(now: float):
     if len(_BUY_LOCKS) > 200:
@@ -83,7 +76,6 @@ def _strip_emoji(s: str) -> str:
 _LABEL_OVERRIDES = {
     "casino": "Казино",
 }
-
 
 def _default_cat_description(key: str) -> str:
     return {
@@ -281,7 +273,7 @@ async def open_shop(inter: disnake.MessageInteraction):
         categories=categories,
         total_items=total_items,
     )
-    view = ShopMainView(categories, active="")
+    view = ShopUniversalView("categories", {"categories": categories})
     await _send_screen(inter, buf=buf, view=view)
 
 
@@ -302,7 +294,7 @@ async def goto_categories(inter: disnake.MessageInteraction):
         categories=categories,
         total_items=total_items,
     )
-    view = ShopMainView(categories, active="")
+    view = ShopUniversalView("categories", {"categories": categories})
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -315,9 +307,8 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: i
     catalog = load_shop_catalog()
     cat = catalog.get(cat_key)
     if not cat:
-        return await inter.response.send_message(
-            "Категория не найдена.", ephemeral=True
-        )
+        return await inter.response.send_message("Категория не найдена.", ephemeral=True)
+    
     cat_label = _strip_emoji(_LABEL_OVERRIDES.get(cat_key, cat.get("label", cat_key)))
     all_items = _get_items_for_category(cat_key, member)
 
@@ -343,7 +334,13 @@ async def goto_products(inter: disnake.MessageInteraction, cat_key: str, page: i
         available_count=available_count,
         is_roles_category=cat_key.startswith("roles"),
     )
-    view = ShopProductsView(cat_key, all_items, balance, page, total_pages)
+    ctx = {
+        "cat_key": cat_key,
+        "items": page_items,
+        "page": page,
+        "total_pages": total_pages
+    }
+    view = ShopUniversalView("products", ctx)
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -388,13 +385,12 @@ async def goto_detail(inter: disnake.MessageInteraction, cat_key: str, item_key:
         item=item_view,
     )
 
-    if owned:
-        from modules.shop.views import ShopDetailOwnedView
-        view = ShopDetailOwnedView(cat_key)
-    else:
-        from modules.shop.views import ShopDetailView
-        view = ShopDetailView(cat_key, item_key, item_view["price"])
-
+    ctx = {
+        "cat_key": cat_key,
+        "item_key": item_key,
+        "price": item_view["price"]
+    }
+    view = ShopUniversalView("detail", ctx)
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -411,7 +407,7 @@ async def goto_purchases(inter: disnake.MessageInteraction):
         total_spent=total_spent,
         purchases=filtered,
     )
-    view = ShopPurchasesView()
+    view = ShopUniversalView("purchases")
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -434,14 +430,10 @@ async def goto_daily(inter: disnake.MessageInteraction):
         deal=deal,
         hours_left=hours_left,
     )
+    ctx = {}
     if deal:
-        view = ShopDealView(
-            deal.get("cat_key", ""),
-            deal.get("item_key", ""),
-            deal.get("new_price", 0),
-        )
-    else:
-        view = ShopDealView()
+        ctx = {"cat_key": deal.get("cat_key", ""), "item_key": deal.get("item_key", ""), "price": deal.get("new_price", 0)}
+    view = ShopUniversalView("deal", ctx)
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -460,7 +452,7 @@ async def goto_history(inter: disnake.MessageInteraction):
         total_spent=total_spent,
         history=history,
     )
-    view = ShopHistoryView()
+    view = ShopUniversalView("history")
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -713,7 +705,8 @@ async def goto_success(inter, user_id: int,
         total_spent=total_spent,
         outcome=outcome,
     )
-    view = ShopSuccessView(show_review=outcome.get("show_review", False))
+    ctx = {"show_review": outcome.get("show_review", False)}
+    view = ShopUniversalView("success", ctx)
     await _edit_screen(inter, buf=buf, view=view)
 
 
@@ -901,9 +894,11 @@ async def handle_gift(inter: disnake.ModalInteraction,
         file = disnake.File(buf, filename=fname)
         embed = disnake.Embed(color=shop_render.EMBED_COLOR)
         embed.set_image(url=f"attachment://{fname}")
+        
+        view = ShopUniversalView("success", {"show_review": False})
         await inter.edit_original_response(
             content=None, embed=embed, file=file, attachments=[],
-            view=ShopSuccessView(show_review=False),
+            view=view,
         )
     except Exception as e:
         logger.warning(f"gift success screen {user_id}: {e}")
