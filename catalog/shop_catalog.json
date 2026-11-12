@@ -48,27 +48,27 @@
     "label": " Реклама навсегда",
     "description": "Ваша реклама останется в канале навсегда",
     "items": {
-      "ads_everyone_forever": {"name": "Реклама @everyone (Навсегда)", "price": 2000, "description": "Реклама с пингом @everyone на постоянной основе"},
-      "ads_here_forever":     {"name": "Реклама @here (Навсегда)",     "price": 1000, "description": "Реклама с пингом @here на постоянной основе"},
-      "ads_noping_forever":   {"name": "Реклама без пинга (Навсегда)", "price": 500,  "description": "Реклама без пингов на постоянной основе"}
+      "ads_everyone_forever": {"name": "Реклама @everyone (Навсегда)", "price": 3200, "description": "Реклама с пингом @everyone на постоянной основе"},
+      "ads_here_forever":     {"name": "Реклама @here (Навсегда)",     "price": 1600, "description": "Реклама с пингом @here на постоянной основе"},
+      "ads_noping_forever":   {"name": "Реклама без пинга (Навсегда)", "price": 800,  "description": "Реклама без пингов на постоянной основе"}
     }
   },
   "ads_24h": {
     "label": " Реклама на 24 часа",
     "description": "Ваша реклама провисит в канале ровно сутки",
     "items": {
-      "ads_everyone_24h": {"name": "Реклама @everyone (24ч)", "price": 500, "description": "Реклама с пингом @everyone на 24 часа"},
-      "ads_here_24h":     {"name": "Реклама @here (24ч)",     "price": 350, "description": "Реклама с пингом @here на 24 часа"},
-      "ads_noping_24h":   {"name": "Реклама без пинга (24ч)", "price": 200, "description": "Реклама без пингов на 24 часа"}
+      "ads_everyone_24h": {"name": "Реклама @everyone (24ч)", "price": 800, "description": "Реклама с пингом @everyone на 24 часа"},
+      "ads_here_24h":     {"name": "Реклама @here (24ч)",     "price": 600, "description": "Реклама с пингом @here на 24 часа"},
+      "ads_noping_24h":   {"name": "Реклама без пинга (24ч)", "price": 350, "description": "Реклама без пингов на 24 часа"}
     }
   },
   "ads_personal": {
     "label": " Личный канал",
     "description": "Выделенный канал с вашей рекламой на 1 неделю",
     "items": {
-      "ads_everyone_personal": {"name": "Личный канал @everyone (1 нед)", "price": 1800, "description": "Личный канал с возможностью пинга @everyone на неделю"},
-      "ads_here_personal":     {"name": "Личный канал @here (1 нед)",     "price": 1000, "description": "Личный канал с возможностью пинга @here на неделю"},
-      "ads_noping_personal":   {"name": "Личный канал без пинга (1 нед)", "price": 700,  "description": "Личный канал без возможности пингов на неделю"}
+      "ads_everyone_personal": {"name": "Личный канал @everyone (1 нед)", "price": 2900, "description": "Личный канал с возможностью пинга @everyone на неделю"},
+      "ads_here_personal":     {"name": "Личный канал @here (1 нед)",     "price": 1600, "description": "Личный канал с возможностью пинга @here на неделю"},
+      "ads_noping_personal":   {"name": "Личный канал без пинга (1 нед)", "price": 1200, "description": "Личный канал без возможности пингов на неделю"}
     }
   }
 }
