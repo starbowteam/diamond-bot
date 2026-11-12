@@ -49,7 +49,7 @@ COLOR_GREY = 0x676767
 
 HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
 PAY_CONFIRM_DELAY_SECONDS = 60
-QUESTIONS_CATEGORY_ID = 1569979195369725973 # 👇 НОВЫЙ ID
+QUESTIONS_CATEGORY_ID = 1569979195369725973 # Новый ID
 
 REVIEW_CHANNEL_ID = 1462074763437543435
 
@@ -640,7 +640,6 @@ class QuestionModal(Modal):
         question = inter.text_values["question"]
         guild = inter.guild
         
-        # 👇 ИСПОЛЬЗУЕМ НОВУЮ КАТЕГОРИЮ
         cat = guild.get_channel(QUESTIONS_CATEGORY_ID)
         if not cat: return await inter.edit_original_response(content="❌ Категория не найдена.")
         
@@ -931,7 +930,7 @@ class CatalogTypeSelect(disnake.ui.StringSelect):
             embed.set_image(url=_IMG_STRIPE)
             await inter.response.edit_message(content=None, embeds=[embed], view=CatalogView())
         elif value == "coins":
-            from modules.shop import open_shop
+            from modules.shop.handlers import open_shop
             await open_shop(inter)
 
 class CatalogTypeView(disnake.ui.View):
