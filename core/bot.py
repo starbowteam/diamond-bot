@@ -25,6 +25,7 @@ from modules.dc import (
     daily_bonus, check_unused_purchases, daily_activity_payout,
     CLAN_SHARE,
 )
+from modules.tg_bot import start_tg_bot # 👈 ИМПОРТ TG БОТА
 
 intents = disnake.Intents.default()
 intents.members = True
@@ -474,7 +475,6 @@ async def daily_activity_payout_task():
     except Exception as e:
         logger.exception(f"daily_activity_payout_task: {e}")
 
-# 👇 ТАСК ДЛЯ ОБНОВЛЕНИЯ ЭМБЕДОВ ОТ ОСНОВНОГО БОТА
 @tasks.loop(seconds=2)
 async def process_ticket_updates_task():
     await bot.wait_until_ready()
@@ -695,6 +695,9 @@ async def on_ready():
         if not process_ticket_updates_task.is_running():
             process_ticket_updates_task.start()
 
+        # 👇 ЗАПУСК ТЕЛЕГРАМ БОТА
+        start_tg_bot()
+        
         logger.info("%s is ready", bot.user)
         await log_discord(
             title="✅ Бот запустился",
