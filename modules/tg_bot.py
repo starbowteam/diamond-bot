@@ -26,57 +26,87 @@ async def send_tg_message(chat_id, text: str):
     }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as resp:
+            async with session.post(url, json=payload, timeout=10) as resp:
                 if resp.status != 200:
-                    logger.warning(f"TG send error: {await resp.text()}")
+                    err = await resp.text()
+                    logger.warning(f"TG send error: {err}")
     except Exception as e:
         logger.error(f"TG send exception: {e}")
 
 async def send_tg_notification(text: str):
-    """Отправляет уведомление сохраненному админу"""
     chat_id = get_saved_chat_id()
     if chat_id:
         await send_tg_message(chat_id, text)
+
+async def clear_webhook():
+    """Сбрасывает вебхук, иначе getUpdates не работает"""
+    if not TG_BOT_TOKEN: return
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    logger.info("TG Бот: Вебхук успешно сброшен.")
+                else:
+                    logger.warning(f"TG Бот: Ошибка сброса вебхука {await resp.text()}")
+    except Exception as e:
+        logger.warning(f"TG Бот: Не удалось сбросить вебхук (возможно, блокировка сети): {e}")
 
 async def tg_polling_task():
     if not TG_BOT_TOKEN:
         logger.warning("TG_BOT_TOKEN не задан. Telegram-бот отключен.")
         return
 
-    logger.info("🤖 Telegram-бот для уведомлений запущен.")
+    # 1. Сбрасываем вебхук при старте
+    await clear_webhook()
+    
+    logger.info("🤖 Telegram-бот для уведомлений запущен. Начинаю слушать сообщения...")
     offset = 0
+    
     while True:
         try:
             url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates?offset={offset}&timeout=30"
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
+                async with session.get(url, timeout=35) as resp:
                     if resp.status != 200:
+                        err_text = await resp.text()
+                        logger.error(f"❌ TG getUpdates error {resp.status}: {err_text}")
                         await asyncio.sleep(5)
                         continue
+                    
                     data = await resp.json()
-                    if data.get("ok"):
-                        for update in data["result"]:
-                            offset = update["update_id"] + 1
-                            msg = update.get("message")
-                            if not msg: continue
-                            
-                            chat_id = msg["chat"]["id"]
-                            text = msg.get("text", "").strip()
-                            
-                            if text == "/start":
-                                await send_tg_message(chat_id, "👋 Привет! Введи код доступа, чтобы получать уведомления о новых тикетах.")
-                            elif text == ACCESS_CODE:
-                                save_chat_id(chat_id)
-                                await send_tg_message(chat_id, "✅ Код верный! Теперь я буду присылать уведомления о новых тикетах сюда.")
-                                logger.info(f"TG Бот: авторизован новый Chat ID {chat_id}")
-                            else:
-                                saved = get_saved_chat_id()
-                                if str(chat_id) != saved:
-                                    await send_tg_message(chat_id, "❌ Неверный код. Попробуй еще раз или нажми /start")
+                    if not data.get("ok"):
+                        logger.error(f"❌ TG API error: {data}")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    for update in data.get("result", []):
+                        offset = update["update_id"] + 1
+                        msg = update.get("message")
+                        if not msg: continue
+                        
+                        chat_id = msg["chat"]["id"]
+                        text = msg.get("text", "").strip()
+                        
+                        if text == "/start":
+                            await send_tg_message(chat_id, "👋 Привет! Введи код доступа, чтобы получать уведомления о новых тикетах.")
+                        elif text == ACCESS_CODE:
+                            save_chat_id(chat_id)
+                            await send_tg_message(chat_id, "✅ Код верный! Теперь я буду присылать уведомления о новых тикетах сюда.")
+                            logger.info(f"✅ TG Бот: авторизован новый Chat ID {chat_id}")
+                        else:
+                            saved = get_saved_chat_id()
+                            if str(chat_id) != saved:
+                                await send_tg_message(chat_id, "❌ Неверный код. Попробуй еще раз или нажми /start")
+                                
+        except asyncio.TimeoutError:
+            # Это нормально, если за 35 секунд никто не написал
+            pass
         except Exception as e:
-            logger.error(f"TG polling error: {e}")
+            logger.error(f"❌ TG polling exception: {e}")
+            await asyncio.sleep(5)
         
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
 def start_tg_bot():
     if TG_BOT_TOKEN:
