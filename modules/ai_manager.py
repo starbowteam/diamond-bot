@@ -193,7 +193,7 @@ def _ensure_col(table: str, column: str, ddl: str):
 init_ai_manager_tables()
 
 # ============================================================
-# СИСТЕМА РЕКЛАМЫ (ИСПРАВЛЕНА)
+# СИСТЕМА РЕКЛАМЫ
 # ============================================================
 def build_ad_embed(item_name: str) -> disnake.Embed:
     embed = disnake.Embed(
@@ -225,7 +225,6 @@ class AdStartView(ui.View):
                 if match:
                     item_name = match.group(1)
         
-        # Ищем старый предпросмотр, чтобы подставить данные при редактировании
         old_title, old_text, old_image = "", "", ""
         async for msg in inter.channel.history(limit=20):
             if msg.author == bot.user and msg.components and any(c.custom_id == "ad_pub_confirm" for row in msg.components for c in row.children):
@@ -252,7 +251,6 @@ class AdTextViewModal(Modal):
         text = inter.text_values["ad_text"]
         image = inter.text_values.get("ad_image", "").strip()
 
-        # Удаляем старые предпросмотры в этом канале
         try:
             async for msg in inter.channel.history(limit=20):
                 if msg.author == bot.user and msg.components and any(c.custom_id == "ad_pub_confirm" for row in msg.components for c in row.children):
@@ -491,6 +489,10 @@ async def _debounce_flush(channel, user, gen: int, delay: float = DEBOUNCE_SEC):
     except asyncio.CancelledError: raise
     except Exception: ai_logger.exception("debounce_flush")
 
+def is_potential_abuse(text: str) -> bool:
+    t = (text or "").lower()
+    return any(w in t for w in ABUSE_WORDS)
+
 async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
     if not AI_MANAGER_API_KEY: return False, ""
     sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
@@ -552,10 +554,14 @@ def _is_coins_category(channel) -> bool:
 def _is_real_category(channel) -> bool:
     return channel.category and channel.category.id == CONFIG.get("TICKET_CATEGORY_ID")
 
+def _is_questions_category(channel) -> bool:
+    return channel.category and channel.category.id == 1569979195369725973
+
 def _is_ai_ticket(channel) -> bool:
     if _is_paid_category(channel): return False
     if _is_coins_category(channel): return False
     if _is_real_category(channel): return True
+    if _is_questions_category(channel): return True
     return bool(get_ticket_owner(channel.id))
 
 def _is_manager(member) -> bool:
@@ -577,7 +583,6 @@ async def get_ticket_discount(channel) -> int:
     return 0
 
 async def _update_ticket_discount_embed(channel, discount_str: str):
-    """Отправляет задачу в БД, чтобы основной бот обновил эмбед."""
     try:
         cur.execute(
             "INSERT INTO pending_ticket_updates (channel_id, discount_text, created_at) VALUES (?, ?, ?)",
@@ -621,7 +626,7 @@ def _get_user_history_text(user_id: int) -> str:
         return "История недоступна."
 
 # ============================================================
-# СИСТЕМНЫЙ ПРОМПТ
+# СИСТЕМНЫЙ ПРОМПТ (УМНЫЙ UPSELL, АНАЛИЗ ТОНАЛЬНОСТИ, DC ВМЕСТО СКИДКИ)
 # ============================================================
 REAL_CATALOG_TEXT = build_real_catalog_text()
 
@@ -648,19 +653,34 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - Если у клиента висят неиспользованные товары, деликатно напомни ему об этом.
 - Если у клиента есть купленная скидка, можешь предложить применить её: "У вас есть скидка 5%, применить её?".
 
-УМНЫЙ UPSELL:
+АНАЛИЗ ТОНАЛЬНОСТИ:
+- Если клиент пишет капсом, оскорбляет или явно злится — НЕ ШУТИ, ответь сухо и СРАЗУ вызови продавца функцией `escalate_to_human`.
+- Если клиент пишет с эмодзи и дружелюбно — можешь ответить чуть теплее и пошутить.
+
+УМНЫЙ UPSELL (ДОПРОДАЖИ):
 - Если сумма заказа превышает 750₽:
-  1. Предложи скидку 5% на ВСЮ корзину за добавление сопутствующего товара.
-  2. Если соглашается, при вызове `create_invoice` передай `discount_percent: 5`.
-  - ❗️ В поле `item_name` пиши ТОЛЬКО оригинальное название.
+  1. Предложи клиенту скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ сопутствующий товар.
+  2. Предлагай ЛОГИЧНЫЕ товары: если берет Нитро — предложи Бусты; если Робуксы — предложи Роблокс Плюс; если ТГ Звезды — предложи Аккаунт ТГ.
+  3. Если клиент соглашается, СНАЧАЛА добавь новый товар в корзину.
+  4. При вызове `create_invoice` передай параметр `discount_percent: 5`.
+
+ТОРГ (СКИДКИ В РУБЛЯХ ЗАПРЕЩЕНЫ):
+- Если клиент просит скидку в рублях, которую ты не можешь дать, или торгуется:
+  - Предложи ему альтернативу: "Я не могу снизить цену в рублях, но могу начислить вам 200 DC на баланс за эту покупку. Устроит?"
+  - Если да — применяй стандартную цену (без `discount_percent`), а в поле `item_name` добавь пометку (DC кэшбек).
+  - (Бот сам вычтет DC из копилки и начислит юзеру, тебе не нужно вызывать функции для DC, просто напиши это в тексте).
 
 ГЛАВНОЕ ПРАВИЛО ПЕРЕД СЧЁТОМ:
 - Сначала спроси: «Выставить счёт на <товар> за <цена>?»
 - Жди явного подтверждения.
 - Только после подтверждения — вызывай create_invoice.
 
-ЗАПРЕТ НА DC:
-- Если просят купить за DC, скажи: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop)."
+ЗАПРЕТ НА DC (В ТИКЕТАХ ЗА РЕАЛ):
+- В этом тикете ты продаешь ТОЛЬКО за реальные деньги (рубли).
+- Если клиент просит что-то купить за DC, скажи: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop). Здесь я оформляю только заказы за реальные деньги."
+
+FAQ-РЕЖИМ (ЕСЛИ ТИКЕТ ВОПРОСОВ):
+- Если клиент задает вопрос (например, "как работает нитро", "что дает роблокс плюс") — отвечай своими знаниями, не выставляй счет.
 
 КАТАЛОГ:
 {real_catalog}
@@ -869,6 +889,12 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
         update_session(channel.id, message_count=(sess["message_count"] or 0) + 1)
         hist_append(channel.id, "user", user_text)
+
+        # Анализ капса (агрессия)
+        caps_ratio = sum(1 for c in user_text if c.isupper()) / max(len(user_text), 1)
+        if caps_ratio > 0.6 and len(user_text) > 10:
+            await escalate(channel, "Клиент злится (капс)", user_text)
+            return
 
         discount = await get_ticket_discount(channel)
         user_history = _get_user_history_text(user_id)
