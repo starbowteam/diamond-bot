@@ -35,6 +35,7 @@ from modules.tickets import (
     show_policy,
     ReceiptView,
 )
+from modules.tg_bot import send_tg_notification # 👈 ИМПОРТ
 
 try:
     cur.execute("ALTER TABLE ai_manager_user_prefs ADD COLUMN reward_claimed INTEGER DEFAULT 0")
@@ -49,7 +50,7 @@ COLOR_GREY = 0x676767
 
 HIDDEN_FROM_TICKETS_ROLE_ID = 1513935883475226796
 PAY_CONFIRM_DELAY_SECONDS = 60
-QUESTIONS_CATEGORY_ID = 1569979195369725973 # Новый ID
+QUESTIONS_CATEGORY_ID = 1569979195369725973
 
 REVIEW_CHANNEL_ID = 1462074763437543435
 
@@ -331,6 +332,20 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
+    # 👇 ОТПРАВКА В ТГ
+    try:
+        ticket_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
+        tg_msg = (
+            f"🎫 <b>Новый тикет (Реал)</b>\n\n"
+            f"👤 <b>Кто:</b> {user.mention} (<code>{user.id}</code>)\n"
+            f"📁 <b>Канал:</b> #{ticket_channel.name}\n\n"
+            f"🔗 <a href='{ticket_url}'>Перейти в тикет</a>"
+        )
+        await send_tg_notification(tg_msg)
+    except Exception as e:
+        logger.warning(f"TG notify err: {e}")
+    # 👆
+
     try:
         await inter.edit_original_response(content=f"> {user.mention}   ᶻ 𝘇 𐰁, тикет создан — {ticket_channel.mention}")
     except Exception:
@@ -370,6 +385,21 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
     except Exception as e: logger.warning(f"Не удалось удалить покупку: {e}")
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
+
+    # 👇 ОТПРАВКА В ТГ
+    try:
+        ticket_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
+        tg_msg = (
+            f"🎫 <b>Новый тикет (DC)</b>\n\n"
+            f"👤 <b>Кто:</b> {user.mention} (<code>{user.id}</code>)\n"
+            f"📦 <b>Товар:</b> {item_name}\n"
+            f"📁 <b>Канал:</b> #{ticket_channel.name}\n\n"
+            f"🔗 <a href='{ticket_url}'>Перейти в тикет</a>"
+        )
+        await send_tg_notification(tg_msg)
+    except Exception as e:
+        logger.warning(f"TG notify err: {e}")
+    # 👆
 
     try:
         with open(CONFIG["COINS_INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
