@@ -332,7 +332,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # 👇 ОТПРАВКА В ТГ (УБРАН MENTION)
     try:
         ticket_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
         tg_msg = (
@@ -344,7 +343,6 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
         await send_tg_notification(tg_msg)
     except Exception as e:
         logger.warning(f"TG notify err: {e}")
-    # 👆
 
     try:
         await inter.edit_original_response(content=f"> {user.mention}   ᶻ 𝘇 𐰁, тикет создан — {ticket_channel.mention}")
@@ -386,7 +384,6 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # 👇 ОТПРАВКА В ТГ (УБРАН MENTION)
     try:
         ticket_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
         tg_msg = (
@@ -399,7 +396,6 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
         await send_tg_notification(tg_msg)
     except Exception as e:
         logger.warning(f"TG notify err: {e}")
-    # 👆
 
     try:
         with open(CONFIG["COINS_INFO_TEMPLATE_PATH"], "r", encoding="utf-8") as f:
