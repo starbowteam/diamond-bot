@@ -25,7 +25,7 @@ from modules.dc import (
     daily_bonus, check_unused_purchases, daily_activity_payout,
     CLAN_SHARE,
 )
-from modules.tg_bot import start_tg_bot # 👈 ИМПОРТ TG БОТА
+from modules.tg_bot import start_tg_bot
 
 intents = disnake.Intents.default()
 intents.members = True
@@ -475,8 +475,9 @@ async def daily_activity_payout_task():
     except Exception as e:
         logger.exception(f"daily_activity_payout_task: {e}")
 
+# 👇 ИСПРАВЛЕННЫЙ ТАСК (ДОБАВЛЕН bot)
 @tasks.loop(seconds=2)
-async def process_ticket_updates_task():
+async def process_ticket_updates_task(bot):
     await bot.wait_until_ready()
     try:
         rows = cur.execute("SELECT id, channel_id, discount_text FROM pending_ticket_updates").fetchall()
@@ -507,6 +508,44 @@ async def process_ticket_updates_task():
         db.commit()
     except Exception as e:
         logger.error(f"process_ticket_updates_task: {e}")
+
+# 👇 НОВЫЙ ТАСК ДЛЯ СПАСЕНИЯ БРОШЕННЫХ КОРЗИН
+@tasks.loop(minutes=10)
+async def abandoned_carts_task(bot):
+    await bot.wait_until_ready()
+    try:
+        now = int(time.time())
+        # Ищем сессии, где счет был отправлен более 2 часов назад и клиент не оплатил
+        rows = cur.execute(
+            "SELECT channel_id, user_id FROM ai_manager_sessions "
+            "WHERE invoice_sent=1 AND escalated=0 AND (last_client_msg_ts < ?)",
+            (now - 7200,)
+        ).fetchall()
+        
+        for r in rows:
+            channel = bot.get_channel(r["channel_id"])
+            if channel:
+                try:
+                    user = bot.get_user(r["user_id"])
+                    if not user:
+                        user = await bot.fetch_user(r["user_id"])
+                    
+                    if user:
+                        # Даем бонус 3% или просто напоминаем
+                        await user.send(
+                            f"👋 **Привет! Заметил, что ты хотел сделать заказ в магазине, но не оплатил.**\n\n"
+                            f"> Если у тебя возникли вопросы по оплате, дай знать.\n"
+                            f"> Если надумаешь — мы здесь! 😉"
+                        )
+                        logger.info(f"Отправлено напоминание о брошенной корзине {r['user_id']}")
+                except Exception as e:
+                    logger.warning(f"abandoned_cart DM {r['user_id']}: {e}")
+                
+                # Ставим escalated=1, чтобы не спамить
+                cur.execute("UPDATE ai_manager_sessions SET escalated=1 WHERE channel_id=?", (r["channel_id"],))
+                db.commit()
+    except Exception as e:
+        logger.exception(f"abandoned_carts_task: {e}")
 
 
 @bot.event
@@ -693,10 +732,13 @@ async def on_ready():
             unused_purchase_reminder_task.start()
         if not daily_activity_payout_task.is_running():
             daily_activity_payout_task.start()
+            
         if not process_ticket_updates_task.is_running():
-            process_ticket_updates_task.start()
+            process_ticket_updates_task.start(bot)
+            
+        if not abandoned_carts_task.is_running():
+            abandoned_carts_task.start(bot)
 
-        # 👇 ЗАПУСК ТЕЛЕГРАМ БОТА
         start_tg_bot()
 
         logger.info("%s is ready", bot.user)
@@ -1286,9 +1328,6 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                     logger.debug(f"pet xp voice: {e}")
 
 
-# ============================================================
-# ФУНКЦИЯ ДЛЯ ТЕЛЕГРАМ-БОТА (ПЕРЕЗАПУСК ТАСКОВ)
-# ============================================================
 async def restart_all_tasks():
     tasks_to_restart = [
         review_counter_task, daily_bonus_task, daily_deal_task,
