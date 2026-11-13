@@ -5,13 +5,13 @@ import aiohttp
 import json
 import time
 from datetime import datetime
-from core.utils import logger, db, cur, CONFIG, get_dc_cache
+from core.utils import logger, db, cur, CONFIG, get_dc_cache, BASE_DIR
 
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 ACCESS_CODE = "stopapupa"
 
 # ============================================================
-# БАЗА ДАННЫХ (АВТОРИЗАЦИЯ)
+# БАЗА ДАННЫХ
 # ============================================================
 def init_tg_tables():
     cur.executescript("""
@@ -23,6 +23,9 @@ def init_tg_tables():
     """)
     db.commit()
 
+init_tg_tables()
+PENDING_BC = {}
+
 def is_tg_admin(chat_id: int) -> bool:
     row = cur.execute("SELECT 1 FROM tg_admins WHERE chat_id=?", (chat_id,)).fetchone()
     return bool(row)
@@ -31,8 +34,15 @@ def add_tg_admin(chat_id: int, username: str):
     cur.execute("INSERT OR REPLACE INTO tg_admins (chat_id, username, added_at) VALUES (?, ?, ?)", (chat_id, username, int(time.time())))
     db.commit()
 
+def remove_tg_admin(chat_id: int):
+    cur.execute("DELETE FROM tg_admins WHERE chat_id=?", (chat_id,))
+    db.commit()
+
+def get_all_admins():
+    return cur.execute("SELECT chat_id FROM tg_admins").fetchall()
+
 # ============================================================
-# УТИЛИТЫ ОТПРАВКИ (HTML ЭКРАНИРОВАНИЕ)
+# УТИЛИТЫ
 # ============================================================
 def esc(text: str) -> str:
     if not text: return ""
@@ -52,7 +62,7 @@ async def tg_api(method: str, payload: dict = None) -> dict:
 async def send_tg_message(chat_id, text: str, reply_markup: dict = None):
     payload = {
         "chat_id": chat_id, 
-        "text": text, 
+        "text": text[:4000], 
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
@@ -61,7 +71,6 @@ async def send_tg_message(chat_id, text: str, reply_markup: dict = None):
     
     resp = await tg_api("sendMessage", payload)
     if not resp.get("ok"):
-        # Fallback если HTML битый
         payload.pop("parse_mode", None)
         await tg_api("sendMessage", payload)
 
@@ -69,7 +78,7 @@ async def edit_tg_message(chat_id, message_id, text: str, reply_markup: dict = N
     payload = {
         "chat_id": chat_id, 
         "message_id": message_id,
-        "text": text, 
+        "text": text[:4000], 
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
@@ -78,9 +87,7 @@ async def edit_tg_message(chat_id, message_id, text: str, reply_markup: dict = N
     await tg_api("editMessageText", payload)
 
 async def send_tg_notification(text: str):
-    """Рассылка всем авторизованным админам"""
-    rows = cur.execute("SELECT chat_id FROM tg_admins").fetchall()
-    for r in rows:
+    for r in get_all_admins():
         await send_tg_message(r["chat_id"], text)
 
 # ============================================================
@@ -90,223 +97,445 @@ def get_main_menu():
     return {
         "keyboard": [
             [{"text": "🎫 Тикеты"}, {"text": "❓ Вопросы"}],
-            [{"text": "📊 Экономика"}, {"text": "⚙️ Действия"}],
+            [{"text": "📊 Экономика"}, {"text": "🏰 Кланы"}],
+            [{"text": "👥 Юзеры"}, {"text": "⚙️ Действия"}],
+            [{"text": "🔧 Утилиты"}],
         ],
         "resize_keyboard": True,
         "is_persistent": True
     }
 
-def get_back_button(callback_data: str = "menu"):
-    return {
-        "inline_keyboard": [[{"text": "🔙 Назад в меню", "callback_data": callback_data}]]
-    }
+def btn(text, data):
+    return {"text": text, "callback_data": data}
+
+def back_btn(data="menu", text="🔙 Назад"):
+    return {"inline_keyboard": [[btn(text, data)]]}
 
 # ============================================================
-# ЛОГИКА ОБРАБОТКИ СООБЩЕНИЙ И КНОПОК
+# ОБРАБОТКА ТЕКСТА
 # ============================================================
-async def process_message(chat_id: int, text: str):
+async def process_message(chat_id: int, text: str, username: str = ""):
     if text == "/start":
         if is_tg_admin(chat_id):
-            await send_tg_message(chat_id, "👑 С возвращением, Шеф! Панель управления активирована.", get_main_menu())
+            await send_tg_message(chat_id, "👑 <b>С возвращением, Шеф!</b>\n\nВыбери раздел:", get_main_menu())
         else:
-            await send_tg_message(chat_id, "👋 Привет! Введи код доступа, чтобы получить права администратора.")
+            await send_tg_message(chat_id, "👋 Привет! Это приватная админ-панель.\n\nВведи кодовое слово для доступа:")
         return
 
     if text == ACCESS_CODE:
         if not is_tg_admin(chat_id):
-            add_tg_admin(chat_id, "admin")
-            await send_tg_message(chat_id, "✅ Код верный! Теперь ты в системе. Используй кнопки ниже.", get_main_menu())
-            logger.info(f"TG: Авторизован новый админ {chat_id}")
+            add_tg_admin(chat_id, username or "admin")
+            await send_tg_message(chat_id, "✅ <b>Доступ разрешен!</b>\n\nДобро пожаловать, Шеф. Используй меню ниже:", get_main_menu())
+            logger.info(f"TG: авторизован админ {chat_id} ({username})")
         else:
             await send_tg_message(chat_id, "Ты уже авторизован.", get_main_menu())
         return
 
-    if not is_tg_admin(chat_id):
-        await send_tg_message(chat_id, "⛔ Доступ запрещен. Введи код доступа.")
+    if text == "/logout":
+        remove_tg_admin(chat_id)
+        await send_tg_message(chat_id, "👋 Ты вышел из системы.")
         return
 
-    if text == "🎫 Тикеты":
-        await show_tickets(chat_id)
-    elif text == "❓ Вопросы":
-        await show_questions(chat_id)
-    elif text == "📊 Экономика":
-        await show_economy(chat_id)
-    elif text == "⚙️ Действия":
-        await show_actions(chat_id)
-
-async def process_callback(chat_id: int, message_id: int, data: str):
     if not is_tg_admin(chat_id):
+        await send_tg_message(chat_id, "⛔ Доступ запрещён. Введи кодовое слово.")
         return
-    
-    if data == "menu":
-        await edit_tg_message(chat_id, message_id, "👑 Главное меню:", get_main_menu())
-    
-    # ЭКОНОМИКА
-    elif data == "econ_basic":
-        total_dc = cur.execute("SELECT SUM(balance) FROM dc_cache").fetchone()[0] or 0
-        users = cur.execute("SELECT COUNT(*) FROM dc_cache").fetchone()[0]
-        text = f"📊 <b>Базовая экономика</b>\n\n💰 Всего DC в обороте: <code>{total_dc:,}</code>\n👥 Кошельков: <code>{users}</code>\n📈 Средний чек: <code>{total_dc // max(users, 1):,}</code>"
-        await edit_tg_message(chat_id, message_id, text, get_back_button("econ_menu"))
-        
-    elif data == "econ_top":
-        rows = cur.execute("SELECT user_id, balance FROM dc_cache ORDER BY balance DESC LIMIT 10").fetchall()
-        text = "🏆 <b>Топ-10 богачей</b>\n\n"
-        for i, r in enumerate(rows, 1):
-            text += f"{i}. <a href='tg://user?id={r['user_id']}'>{r['user_id']}</a> — <code>{r['balance']:,} DC</code>\n"
-        await edit_tg_message(chat_id, message_id, text, get_back_button("econ_menu"))
-        
-    elif data == "econ_inflation":
-        # Грубый подсчет инфляции из истории
-        rows = cur.execute("SELECT history FROM dc_cache").fetchall()
-        minted, burned = 0, 0
-        for r in rows:
+
+    if text.startswith("/give "):
+        parts = text.split(maxsplit=3)
+        if len(parts) >= 3:
             try:
-                hist = json.loads(r["history"] or "[]")
-                for h in hist:
-                    amt = h.get("amount", 0)
-                    if amt > 0: minted += amt
-                    else: burned += abs(amt)
-            except: pass
-        text = f"🔥 <b>Инфляция (Эмиссия/Сжигание)</b>\n\n🟢 Напечатано (Minted): <code>{minted:,} DC</code>\n🔴 Сожжено (Burned): <code>{burned:,} DC</code>\n📉 Чистая эмиссия: <code>{minted - burned:,} DC</code>"
-        await edit_tg_message(chat_id, message_id, text, get_back_button("econ_menu"))
+                uid = int(parts[1])
+                amount = int(parts[2])
+                reason = parts[3] if len(parts) > 3 else "Выдано администратором"
+                from modules.dc import add_dc
+                await add_dc(uid, amount, reason, notify=True, log=True)
+                await send_tg_message(chat_id, f"✅ Выдано <code>{amount} DC</code> юзеру <code>{uid}</code>")
+            except ValueError:
+                await send_tg_message(chat_id, "❌ Формат: <code>/give id amount reason</code>")
+        return
 
-    # ТИКЕТЫ
-    elif data.startswith("ticket_view_"):
-        ch_id = int(data.split("_")[2])
-        await show_ticket_history(chat_id, message_id, ch_id)
+    if text.startswith("/take "):
+        parts = text.split(maxsplit=3)
+        if len(parts) >= 3:
+            try:
+                uid = int(parts[1])
+                amount = int(parts[2])
+                reason = parts[3] if len(parts) > 3 else "Списано администратором"
+                from modules.dc import remove_dc
+                ok = await remove_dc(uid, amount, reason, notify=True, log=True)
+                if ok: await send_tg_message(chat_id, f"✅ Списано <code>{amount} DC</code> у <code>{uid}</code>")
+                else: await send_tg_message(chat_id, f"❌ Недостаточно DC у <code>{uid}</code>")
+            except ValueError:
+                await send_tg_message(chat_id, "❌ Формат: <code>/take id amount reason</code>")
+        return
 
-    elif data.startswith("ticket_close_"):
-        ch_id = int(data.split("_")[2])
+    if text.startswith("/user "):
         try:
-            from core.bot import bot
-            channel = bot.get_channel(ch_id)
-            if channel:
-                await channel.delete(reason="Закрыто из TG")
-                await edit_tg_message(chat_id, message_id, "✅ Тикет успешно закрыт и удален.")
-            else:
-                await edit_tg_message(chat_id, message_id, "❌ Канал не найден на сервере.")
-        except Exception as e:
-            await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {e}")
-            
-    # ДЕЙСТВИЯ
-    elif data == "action_recalc":
-        await edit_tg_message(chat_id, message_id, "⏳ Запускаю пересчет ролей...")
-        try:
-            from modules.commands_staff import recalc_all_roles
-            from core.bot import bot
-            guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
-            if guild:
-                await recalc_all_roles(guild)
-                await edit_tg_message(chat_id, message_id, "✅ Пересчет ролей завершен.")
-        except Exception as e:
-            await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {e}")
+            uid = int(text.split()[1])
+            await show_user_info(chat_id, uid)
+        except: await send_tg_message(chat_id, "❌ Формат: <code>/user id</code>")
+        return
 
-    elif data == "action_payout":
-        await edit_tg_message(chat_id, message_id, "⏳ Запускаю выплату за активность...")
+    if text.startswith("/close "):
         try:
-            from modules.dc import daily_activity_payout
-            await daily_activity_payout()
-            await edit_tg_message(chat_id, message_id, "✅ Выплата за активность выполнена.")
-        except Exception as e:
-            await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {e}")
+            ch_id = int(text.split()[1])
+            await close_ticket_by_id(chat_id, ch_id)
+        except: await send_tg_message(chat_id, "❌ Формат: <code>/close channel_id</code>")
+        return
+
+    if text.startswith("/bc "):
+        msg = text[4:].strip()
+        if msg:
+            PENDING_BC[chat_id] = msg
+            keyboard = {"inline_keyboard": [[btn("✅ Отправить", "bc_send"), btn("❌ Отмена", "bc_cancel")]]}
+            await send_tg_message(chat_id, f"📢 <b>Предпросмотр:</b>\n\n{esc(msg)}\n\nОтправить в Discord?", keyboard)
+        return
+
+    if text == "🎫 Тикеты": await show_tickets(chat_id, "real")
+    elif text == "❓ Вопросы": await show_tickets(chat_id, "questions")
+    elif text == "📊 Экономика": await show_economy_menu(chat_id)
+    elif text == "🏰 Кланы": await show_clans(chat_id)
+    elif text == "👥 Юзеры": await show_users_help(chat_id)
+    elif text == "⚙️ Действия": await show_actions_menu(chat_id)
+    elif text == "🔧 Утилиты": await show_utils_menu(chat_id)
+    else: await send_tg_message(chat_id, "Используй кнопки меню ниже.", get_main_menu())
 
 # ============================================================
 # ЭКРАНЫ
 # ============================================================
-async def show_tickets(chat_id: int):
-    rows = cur.execute("SELECT channel_id, user_id, category_id FROM ticket_owners").fetchall()
+async def show_tickets(chat_id: int, kind: str = "real", page: int = 0):
+    try:
+        from core.bot import bot
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+    except: guild = None
+
+    if kind == "real":
+        title = "🎫 <b>Тикеты (Реал)</b>"
+        rows = cur.execute("SELECT channel_id, user_id FROM ticket_owners WHERE category_id=?", (CONFIG.get("TICKET_CATEGORY_ID"),)).fetchall()
+    elif kind == "coins":
+        title = "🎫 <b>Тикеты (DC)</b>"
+        rows = cur.execute("SELECT channel_id, user_id FROM ticket_owners WHERE category_id=?", (CONFIG.get("COINS_CATEGORY_ID"),)).fetchall()
+    else:
+        title = "❓ <b>Вопросы</b>"
+        rows = []
+        if guild:
+            cat = guild.get_channel(1569979195369725973)
+            if cat:
+                for ch in cat.text_channels:
+                    rows.append({"channel_id": ch.id, "user_id": 0})
+    
     if not rows:
-        await send_tg_message(chat_id, "🎫 Активных тикетов нет.", get_back_button())
+        await send_tg_message(chat_id, f"{title}\n\n<i>Активных нет.</i>", back_btn("menu"))
         return
 
+    per_page = 8
+    total_pages = max(1, (len(rows) + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+    start = page * per_page
+    chunk = rows[start:start + per_page]
+
     keyboard = []
-    text = "🎫 <b>Активные тикеты:</b>\n\n"
-    for r in rows[:10]: # Максимум 10 для красоты
-        ch_id = r["channel_id"]
-        u_id = r["user_id"]
-        cat = "Реал" if r["category_id"] == CONFIG["TICKET_CATEGORY_ID"] else "DC"
-        text += f"• <code>{u_id}</code> [{cat}]\n"
-        keyboard.append([{"text": f"Посмотреть {u_id} ({cat})", "callback_data": f"ticket_view_{ch_id}"}])
+    for r in chunk:
+        keyboard.append([btn(f"👤 {r['user_id']} (ID: {r['channel_id']})", f"tview_{r['channel_id']}")])
     
-    keyboard.append([{"text": "🔙 Назад в меню", "callback_data": "menu"}])
+    nav = []
+    if page > 0: nav.append(btn("◀ Назад", f"tlist_{kind}_{page-1}"))
+    if page < total_pages - 1: nav.append(btn("Вперёд ▶", f"tlist_{kind}_{page+1}"))
+    if nav: keyboard.append(nav)
+    keyboard.append([btn("🔙 В меню", "menu")])
+    
+    text = f"{title}\n\nВсего: <b>{len(rows)}</b> | Стр. {page+1}/{total_pages}"
     await send_tg_message(chat_id, text, {"inline_keyboard": keyboard})
 
 async def show_ticket_history(chat_id: int, message_id: int, ch_id: int):
-    await edit_tg_message(chat_id, message_id, "⏳ Загружаю историю переписки...")
+    try:
+        from core.bot import bot
+        channel = bot.get_channel(ch_id)
+    except: channel = None
+
+    if not channel:
+        await edit_tg_message(chat_id, message_id, "❌ Канал не найден.", back_btn("menu"))
+        return
+
+    text = f"📜 <b>#{esc(channel.name)}</b>\n\n"
+    try:
+        async for msg in channel.history(limit=12, oldest_first=False):
+            author = esc(msg.author.display_name)
+            content = esc(msg.content or "[Медиа]")
+            if len(content) > 100: content = content[:97] + "..."
+            text += f"<b>{author}:</b> {content}\n\n"
+    except Exception as e:
+        text += f"<i>Ошибка: {esc(str(e))}</i>"
+
+    keyboard = {
+        "inline_keyboard": [
+            [btn("🔴 Закрыть тикет", f"tclose_{ch_id}")],
+            [btn("🔙 В меню", "menu")]
+        ]
+    }
+    await edit_tg_message(chat_id, message_id, text, keyboard)
+
+async def close_ticket_by_id(chat_id: int, ch_id: int):
     try:
         from core.bot import bot
         channel = bot.get_channel(ch_id)
         if not channel:
-            return await edit_tg_message(chat_id, message_id, "❌ Канал не найден.")
-
-        text = f"📜 <b>История тикета:</b> #{channel.name}\n\n"
-        count = 0
-        async for msg in channel.history(limit=15, oldest_first=False):
-            author = esc(msg.author.display_name)
-            content = esc(msg.content or "[Медиа/Эмбед]")
-            if len(content) > 150: content = content[:147] + "..."
-            text += f"👤 <b>{author}:</b> {content}\n\n"
-            count += 1
-            
-        keyboard = {
-            "inline_keyboard": [
-                [{"text": "🔴 Закрыть тикет", "callback_data": f"ticket_close_{ch_id}"}],
-                [{"text": "🔙 К списку", "callback_data": "ticket_list"}, {"text": "🏠 В меню", "callback_data": "menu"}]
-            ]
-        }
-        await edit_tg_message(chat_id, message_id, text, keyboard)
+            await send_tg_message(chat_id, f"❌ Канал <code>{ch_id}</code> не найден.")
+            return
+        name = channel.name
+        await channel.delete(reason="Закрыто через Telegram")
+        await send_tg_message(chat_id, f"✅ Тикет <b>#{esc(name)}</b> закрыт.")
     except Exception as e:
-        await edit_tg_message(chat_id, message_id, f"❌ Ошибка загрузки: {e}")
+        await send_tg_message(chat_id, f"❌ Ошибка: {esc(str(e))}")
 
-async def show_questions(chat_id: int):
-    # Ищем каналы в категории вопросов
-    q_cat = CONFIG.get("QUESTIONS_CATEGORY_ID", 1569979195369725973)
-    rows = cur.execute("SELECT channel_id, user_id FROM ticket_owners WHERE category_id=?", (q_cat,)).fetchall()
-    
-    if not rows:
-        await send_tg_message(chat_id, "❓ Вопросов нет.", get_back_button())
-        return
-
-    keyboard = []
-    for r in rows[:10]:
-        keyboard.append([{"text": f"Вопрос от {r['user_id']}", "callback_data": f"ticket_view_{r['channel_id']}"}])
-    keyboard.append([{"text": "🔙 Назад в меню", "callback_data": "menu"}])
-    
-    await send_tg_message(chat_id, "❓ <b>Открытые вопросы:</b>", {"inline_keyboard": keyboard})
-
-async def show_economy(chat_id: int):
+async def show_economy_menu(chat_id: int):
     keyboard = {
         "inline_keyboard": [
-            [{"text": "💰 Общая сводка", "callback_data": "econ_basic"}],
-            [{"text": "🏆 Топ богачей", "callback_data": "econ_top"}],
-            [{"text": "🔥 Инфляция (Эмиссия)", "callback_data": "econ_inflation"}],
-            [{"text": "🔙 Назад в меню", "callback_data": "menu"}]
+            [btn("💰 Общая сводка", "econ_basic")],
+            [btn("🏆 Топ-10 богачей", "econ_top")],
+            [btn("🔥 Инфляция", "econ_infl")],
+            [btn("🔙 В меню", "menu")]
         ]
     }
-    await send_tg_message(chat_id, "📊 <b>Раздел Экономики</b>\nВыберите параметр:", keyboard)
+    await send_tg_message(chat_id, "📊 <b>Экономика</b>\n\nВыбери раздел:", keyboard)
 
-async def show_actions(chat_id: int):
+async def show_econ_basic(chat_id: int, message_id: int):
+    total = cur.execute("SELECT SUM(balance) FROM dc_cache").fetchone()[0] or 0
+    users = cur.execute("SELECT COUNT(*) FROM dc_cache").fetchone()[0]
+    today = int(time.time()) - 86400
+    active = cur.execute("SELECT COUNT(*) FROM dc_cache WHERE last_active_ts > ?", (today,)).fetchone()[0]
+    
+    text = (
+        f"📊 <b>Общая экономика</b>\n\n"
+        f"💰 Всего DC: <code>{total:,}</code>\n"
+        f"👥 Кошельков: <code>{users:,}</code>\n"
+        f"📈 Средний чек: <code>{total // max(users, 1):,} DC</code>\n"
+        f"🟢 Активных за 24ч: <code>{active}</code>"
+    )
+    await edit_tg_message(chat_id, message_id, text, {
+        "inline_keyboard": [[btn("🔙 Назад", "econ_menu"), btn("🏠 В меню", "menu")]]
+    })
+
+async def show_econ_top(chat_id: int, message_id: int):
+    rows = cur.execute("SELECT user_id, balance FROM dc_cache ORDER BY balance DESC LIMIT 10").fetchall()
+    text = "🏆 <b>Топ-10 богачей</b>\n\n"
+    for i, r in enumerate(rows, 1):
+        text += f"{i}. <code>{r['user_id']}</code> — <b>{r['balance']:,} DC</b>\n"
+    await edit_tg_message(chat_id, message_id, text, {
+        "inline_keyboard": [[btn("🔙 Назад", "econ_menu"), btn("🏠 В меню", "menu")]]
+    })
+
+async def show_econ_inflation(chat_id: int, message_id: int):
+    rows = cur.execute("SELECT history FROM dc_cache").fetchall()
+    minted, burned = 0, 0
+    for r in rows:
+        try:
+            hist = json.loads(r["history"] or "[]")
+            for h in hist:
+                amt = h.get("amount", 0)
+                if amt > 0: minted += amt
+                elif amt < 0: burned += abs(amt)
+        except: pass
+    net = minted - burned
+    text = (
+        f"🔥 <b>Инфляция</b>\n\n"
+        f"🟢 Напечатано: <code>{minted:,} DC</code>\n"
+        f"🔴 Сожжено: <code>{burned:,} DC</code>\n"
+        f"📉 Эмиссия: <code>{net:,} DC</code>"
+    )
+    await edit_tg_message(chat_id, message_id, text, {
+        "inline_keyboard": [[btn("🔙 Назад", "econ_menu"), btn("🏠 В меню", "menu")]]
+    })
+
+async def show_clans(chat_id: int):
+    try:
+        from clan.core import get_all_clans, get_clan_bank, get_clan_members_count
+        clans = get_all_clans()
+        text = "🏰 <b>Кланы</b>\n\n"
+        for c in clans:
+            bank = get_clan_bank(c["id"])
+            members = get_clan_members_count(c["id"])
+            text += f"{c['emoji']} <b>{esc(c['name'])}</b>\n"
+            text += f"   💰 Банк: <code>{bank:,} DC</code>\n"
+            text += f"   👥 Людей: <code>{members}</code>\n\n"
+        await send_tg_message(chat_id, text, back_btn("menu"))
+    except Exception as e:
+        await send_tg_message(chat_id, f"❌ Ошибка: {esc(str(e))}")
+
+async def show_users_help(chat_id: int):
+    text = (
+        "👥 <b>Работа с юзерами</b>\n\n"
+        "Команды:\n"
+        "<code>/user id</code> — профиль юзера\n"
+        "<code>/give id amount [reason]</code> — выдать DC\n"
+        "<code>/take id amount [reason]</code> — списать DC\n"
+    )
+    await send_tg_message(chat_id, text, back_btn("menu"))
+
+async def show_user_info(chat_id: int, uid: int):
+    try:
+        dc = get_dc_cache(uid)
+        balance = dc.get("balance", 0)
+        purchases = dc.get("purchases", [])
+        unused = [p for p in purchases if not p.get("used")]
+        
+        text = f"👤 <b>Юзер</b> <code>{uid}</code>\n\n"
+        text += f"💰 Баланс: <b>{balance:,} DC</b>\n"
+        text += f"📦 Покупок: {len(purchases)} (не исп.: {len(unused)})\n"
+        
+        try:
+            from clan.core import get_user_clan, get_user_contribution
+            clan = get_user_clan(uid)
+            if clan:
+                contrib = get_user_contribution(uid)
+                text += f"🏰 Клан: {esc(clan['name'])} (вклад: {contrib:,})\n"
+        except: pass
+        
+        await send_tg_message(chat_id, text, back_btn("menu"))
+    except Exception as e:
+        await send_tg_message(chat_id, f"❌ Ошибка: {esc(str(e))}")
+
+async def show_actions_menu(chat_id: int):
     keyboard = {
         "inline_keyboard": [
-            [{"text": "🔄 Пересчитать роли", "callback_data": "action_recalc"}],
-            [{"text": "💸 Выплатить активность", "callback_data": "action_payout"}],
-            [{"text": "🔙 Назад в меню", "callback_data": "menu"}]
+            [btn("🔄 Пересчёт ролей", "act_recalc")],
+            [btn("💸 Выплата за активность", "act_payout")],
+            [btn("🖼 Обновить панели", "act_panels")],
+            [btn("🔁 Перезапустить таски", "act_tasks")],
+            [btn("🔙 В меню", "menu")]
         ]
     }
-    await send_tg_message(chat_id, "⚙️ <b>Ручные действия</b>\nБудь осторожен, это влияет на всех:", keyboard)
+    await send_tg_message(chat_id, "⚙️ <b>Действия</b>\n\nБудь осторожен:", keyboard)
+
+async def show_utils_menu(chat_id: int):
+    keyboard = {
+        "inline_keyboard": [
+            [btn("📜 Показать логи (20 строк)", "util_logs")],
+            [btn("📢 Рассылка в Discord", "util_bc")],
+            [btn("👋 Выйти из системы", "util_logout")],
+            [btn("🔙 В меню", "menu")]
+        ]
+    }
+    await send_tg_message(chat_id, "🔧 <b>Утилиты</b>", keyboard)
+
+async def run_recalc_roles(chat_id: int, message_id: int):
+    await edit_tg_message(chat_id, message_id, "⏳ Пересчитываю роли...")
+    try:
+        from core.bot import bot
+        from core.utils import load_json, FILES, update_user_roles
+        import asyncio as _asyncio
+        guild = bot.get_guild(int(CONFIG["GUILD_ID"]))
+        if not guild: return await edit_tg_message(chat_id, message_id, "❌ Guild не найден.")
+        
+        counts = load_json(FILES["review_counts"], {})
+        ok, err = 0, 0
+        for member in guild.members:
+            if member.bot: continue
+            try:
+                await update_user_roles(member, int(counts.get(str(member.id), 0) or 0), keep_pka=True)
+                ok += 1
+                await _asyncio.sleep(0.05)
+            except: err += 1
+        
+        await edit_tg_message(chat_id, message_id, f"✅ Готово!\n\nОбновлено: <b>{ok}</b>\nОшибок: <b>{err}</b>", back_btn("menu"))
+    except Exception as e:
+        await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {esc(str(e))}", back_btn("menu"))
+
+async def run_payout(chat_id: int, message_id: int):
+    await edit_tg_message(chat_id, message_id, "⏳ Выплачиваю за активность...")
+    try:
+        from modules.dc import daily_activity_payout
+        await daily_activity_payout()
+        await edit_tg_message(chat_id, message_id, "✅ Выплата за активность выполнена!", back_btn("menu"))
+    except Exception as e:
+        await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {esc(str(e))}", back_btn("menu"))
+
+async def run_update_panels(chat_id: int, message_id: int):
+    await edit_tg_message(chat_id, message_id, "⏳ Обновляю панели...")
+    try:
+        from core.bot import bot
+        from clan.panels import update_clan_pool_embed
+        await update_clan_pool_embed(bot)
+        await edit_tg_message(chat_id, message_id, "✅ Панели обновлены!", back_btn("menu"))
+    except Exception as e:
+        await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {esc(str(e))}", back_btn("menu"))
+
+async def run_restart_tasks(chat_id: int, message_id: int):
+    await edit_tg_message(chat_id, message_id, "⏳ Перезапускаю таски...")
+    try:
+        from core.bot import restart_all_tasks
+        n = await restart_all_tasks()
+        await edit_tg_message(chat_id, message_id, f"✅ Перезапущено {n} тасков.", back_btn("menu"))
+    except Exception as e:
+        await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {esc(str(e))}", back_btn("menu"))
+
+async def show_logs(chat_id: int, message_id: int):
+    try:
+        log_path = os.path.join(BASE_DIR, "bot.log")
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()[-20:]
+        text = "<b>📜 Последние 20 строк:</b>\n\n<pre>" + esc("".join(lines)) + "</pre>"
+        await edit_tg_message(chat_id, message_id, text[:4000], back_btn("utils_menu"))
+    except Exception as e:
+        await edit_tg_message(chat_id, message_id, f"❌ {esc(str(e))}", back_btn("utils_menu"))
+
+async def send_broadcast(chat_id, message_id, text_msg):
+    try:
+        from core.bot import bot
+        import disnake
+        channel = bot.get_channel(CONFIG["LOG_CHANNEL_ID"])
+        if not channel: return await edit_tg_message(chat_id, message_id, "❌ Канал не найден.")
+        
+        embed = disnake.Embed(title="📢 Объявление от администрации", description=text_msg, color=0x2b2d31)
+        await channel.send(embed=embed)
+        await edit_tg_message(chat_id, message_id, "✅ Рассылка отправлена в #логи.")
+    except Exception as e:
+        await edit_tg_message(chat_id, message_id, f"❌ Ошибка: {esc(str(e))}")
 
 # ============================================================
-# СЛУШАТЕЛЬ (POLLING)
+# ОБРАБОТКА CALLBACK
+# ============================================================
+async def process_callback(chat_id: int, message_id: int, data: str):
+    if not is_tg_admin(chat_id): return
+    
+    if data == "menu": await edit_tg_message(chat_id, message_id, "👑 <b>Главное меню</b>", get_main_menu())
+    elif data == "econ_menu": await show_economy_menu(chat_id)
+    elif data == "econ_basic": await show_econ_basic(chat_id, message_id)
+    elif data == "econ_top": await show_econ_top(chat_id, message_id)
+    elif data == "econ_infl": await show_econ_inflation(chat_id, message_id)
+    elif data.startswith("tlist_"):
+        _, kind, page = data.split("_", 2)
+        await tg_api("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+        await show_tickets(chat_id, kind, int(page))
+    elif data.startswith("tview_"):
+        await show_ticket_history(chat_id, message_id, int(data.split("_")[1]))
+    elif data.startswith("tclose_"):
+        await close_ticket_by_id(chat_id, int(data.split("_")[1]))
+        await edit_tg_message(chat_id, message_id, "✅ Тикет закрыт.", back_btn("menu"))
+    elif data == "act_recalc": await run_recalc_roles(chat_id, message_id)
+    elif data == "act_payout": await run_payout(chat_id, message_id)
+    elif data == "act_panels": await run_update_panels(chat_id, message_id)
+    elif data == "act_tasks": await run_restart_tasks(chat_id, message_id)
+    elif data == "utils_menu": await show_utils_menu(chat_id)
+    elif data == "util_logs": await show_logs(chat_id, message_id)
+    elif data == "util_bc": await edit_tg_message(chat_id, message_id, "📢 Введи текст рассылки командой:\n<code>/bc твой текст</code>", back_btn("utils_menu"))
+    elif data == "util_logout":
+        remove_tg_admin(chat_id)
+        await edit_tg_message(chat_id, message_id, "👋 Ты вышел из системы.")
+    elif data == "bc_send":
+        text = PENDING_BC.pop(chat_id, None)
+        if text: await send_broadcast(chat_id, message_id, text)
+    elif data == "bc_cancel":
+        PENDING_BC.pop(chat_id, None)
+        await edit_tg_message(chat_id, message_id, "❌ Рассылка отменена.", back_btn("menu"))
+
+# ============================================================
+# POLLING
 # ============================================================
 async def tg_polling_task():
-    if not TG_BOT_TOKEN:
-        return
-
-    init_tg_tables()
-    
-    # Сброс вебхука
+    if not TG_BOT_TOKEN: return
     await tg_api("deleteWebhook", {"drop_pending_updates": True})
-    logger.info("🤖 TG Admin Panel запущена.")
+    logger.info("🤖 TG Command Center запущен.")
     
     offset = 0
     while True:
@@ -318,38 +547,30 @@ async def tg_polling_task():
                         await asyncio.sleep(5)
                         continue
                     data = await resp.json()
-                    if not data.get("ok"): continue
+                    if not data.get("ok"): 
+                        await asyncio.sleep(5)
+                        continue
                     
                     for update in data.get("result", []):
                         offset = update["update_id"] + 1
                         
-                        # Текстовые сообщения
                         if "message" in update:
                             msg = update["message"]
                             chat_id = msg["chat"]["id"]
                             text = msg.get("text", "").strip()
-                            if text:
-                                await process_message(chat_id, text)
+                            username = msg["from"].get("username", "") or msg["from"].get("first_name", "")
+                            if text: await process_message(chat_id, text, username)
                                 
-                        # Нажатия на inline-кнопки
                         elif "callback_query" in update:
                             cb = update["callback_query"]
                             chat_id = cb["message"]["chat"]["id"]
                             msg_id = cb["message"]["message_id"]
                             data_str = cb["data"]
                             
-                            # Отвечаем Telegram, чтобы убрать часики на кнопке
                             await tg_api("answerCallbackQuery", {"callback_query_id": cb["id"]})
-                            
-                            if data_str == "ticket_list":
-                                await show_tickets(chat_id)
-                            elif data_str == "econ_menu":
-                                await show_economy(chat_id)
-                            else:
-                                await process_callback(chat_id, msg_id, data_str)
+                            await process_callback(chat_id, msg_id, data_str)
                                 
-        except asyncio.TimeoutError:
-            pass
+        except asyncio.TimeoutError: pass
         except Exception as e:
             logger.error(f"TG polling error: {e}")
             await asyncio.sleep(3)
