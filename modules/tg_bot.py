@@ -8,6 +8,7 @@ from datetime import datetime
 from core.utils import logger, db, cur, CONFIG, get_dc_cache, BASE_DIR
 
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
+TG_PROXY_URL = os.getenv("TG_PROXY_URL")
 ACCESS_CODE = "stopapupa"
 
 # ============================================================
@@ -51,9 +52,18 @@ def esc(text: str) -> str:
 async def tg_api(method: str, payload: dict = None) -> dict:
     if not TG_BOT_TOKEN: return {}
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/{method}"
+    
+    connector = None
+    if TG_PROXY_URL:
+        try:
+            from aiohttp_socks import ProxyConnector
+            connector = ProxyConnector.from_url(TG_PROXY_URL)
+        except Exception:
+            pass
+
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=15) as resp:
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.post(url, json=payload, timeout=20) as resp:
                 return await resp.json()
     except Exception as e:
         logger.error(f"TG API error {method}: {e}")
@@ -210,8 +220,21 @@ async def show_tickets(chat_id: int, kind: str = "real", page: int = 0):
     except: guild = None
 
     if kind == "real":
-        title = "🎫 <b>Тикеты (Реал)</b>"
-        rows = cur.execute("SELECT channel_id, user_id FROM ticket_owners WHERE category_id=?", (CONFIG.get("TICKET_CATEGORY_ID"),)).fetchall()
+        title = "🎫 <b>Актуальные Тикеты (Реал)</b>"
+        # Сортируем по ID (новые сверху), берем только те, что созданы недавно (например, за последние 7 дней)
+        week_ago = int(time.time()) - 7 * 86400
+        rows = cur.execute(
+            "SELECT channel_id, user_id FROM ticket_owners WHERE category_id=?",
+            (CONFIG.get("TICKET_CATEGORY_ID"),)
+        ).fetchall()
+        # Фильтруем по дате создания канала
+        filtered_rows = []
+        if guild:
+            for r in rows:
+                ch = guild.get_channel(r["channel_id"])
+                if ch and ch.created_at.timestamp() > week_ago:
+                    filtered_rows.append(r)
+        rows = filtered_rows
     elif kind == "coins":
         title = "🎫 <b>Тикеты (DC)</b>"
         rows = cur.execute("SELECT channel_id, user_id FROM ticket_owners WHERE category_id=?", (CONFIG.get("COINS_CATEGORY_ID"),)).fetchall()
@@ -541,7 +564,13 @@ async def tg_polling_task():
     while True:
         try:
             url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates?offset={offset}&timeout=30"
-            async with aiohttp.ClientSession() as session:
+            
+            connector = None
+            if TG_PROXY_URL:
+                from aiohttp_socks import ProxyConnector
+                connector = ProxyConnector.from_url(TG_PROXY_URL)
+
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(url, timeout=35) as resp:
                     if resp.status != 200:
                         await asyncio.sleep(5)
