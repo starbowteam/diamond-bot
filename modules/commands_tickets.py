@@ -35,7 +35,7 @@ from modules.tickets import (
     show_policy,
     ReceiptView,
 )
-from modules.tg_bot import send_tg_notification # 👈 ИМПОРТ
+from modules.tg_bot import send_tg_notification
 
 try:
     cur.execute("ALTER TABLE ai_manager_user_prefs ADD COLUMN reward_claimed INTEGER DEFAULT 0")
@@ -332,12 +332,12 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # 👇 ОТПРАВКА В ТГ
+    # 👇 ОТПРАВКА В ТГ (УБРАН MENTION)
     try:
         ticket_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
         tg_msg = (
             f"🎫 <b>Новый тикет (Реал)</b>\n\n"
-            f"👤 <b>Кто:</b> {user.mention} (<code>{user.id}</code>)\n"
+            f"👤 <b>Кто:</b> {user.name} (<code>{user.id}</code>)\n"
             f"📁 <b>Канал:</b> #{ticket_channel.name}\n\n"
             f"🔗 <a href='{ticket_url}'>Перейти в тикет</a>"
         )
@@ -386,12 +386,12 @@ async def create_coins_ticket(inter: disnake.MessageInteraction, purchase: dict,
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
 
-    # 👇 ОТПРАВКА В ТГ
+    # 👇 ОТПРАВКА В ТГ (УБРАН MENTION)
     try:
         ticket_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
         tg_msg = (
             f"🎫 <b>Новый тикет (DC)</b>\n\n"
-            f"👤 <b>Кто:</b> {user.mention} (<code>{user.id}</code>)\n"
+            f"👤 <b>Кто:</b> {user.name} (<code>{user.id}</code>)\n"
             f"📦 <b>Товар:</b> {item_name}\n"
             f"📁 <b>Канал:</b> #{ticket_channel.name}\n\n"
             f"🔗 <a href='{ticket_url}'>Перейти в тикет</a>"
