@@ -508,6 +508,7 @@ async def process_ticket_updates_task():
     except Exception as e:
         logger.error(f"process_ticket_updates_task: {e}")
 
+
 @bot.event
 async def on_ready():
     try:
@@ -697,7 +698,7 @@ async def on_ready():
 
         # 👇 ЗАПУСК ТЕЛЕГРАМ БОТА
         start_tg_bot()
-        
+
         logger.info("%s is ready", bot.user)
         await log_discord(
             title="✅ Бот запустился",
@@ -1283,3 +1284,27 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                     await add_pet_xp(user_id, 5 * hours, "voice")
                 except Exception as e:
                     logger.debug(f"pet xp voice: {e}")
+
+
+# ============================================================
+# ФУНКЦИЯ ДЛЯ ТЕЛЕГРАМ-БОТА (ПЕРЕЗАПУСК ТАСКОВ)
+# ============================================================
+async def restart_all_tasks():
+    tasks_to_restart = [
+        review_counter_task, daily_bonus_task, daily_deal_task,
+        salary_advance_task, salary_main_task, unused_purchase_reminder_task,
+        daily_activity_payout_task, process_ticket_updates_task
+    ]
+    for task in tasks_to_restart:
+        if task.is_running():
+            task.stop()
+    
+    await asyncio.sleep(1)
+    
+    for task in tasks_to_restart:
+        if not task.is_running():
+            try:
+                task.start(bot)
+            except Exception as e:
+                logger.warning(f"restart task {task}: {e}")
+    return len(tasks_to_restart)
