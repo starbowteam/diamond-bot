@@ -62,6 +62,15 @@ _BUY_LOCK_TIMEOUT = 15
 
 _TEMP_CUSTOM_ROLE = {}
 
+P = "\u3164"
+
+def _btn_pad(text: str, total: int) -> str:
+    base = len(text)
+    extra = max(0, total - base)
+    left = extra // 2
+    right = extra - left
+    return f"{P * left}{text}{P * right}"
+
 def _acquire_buy_lock(uid: int) -> bool:
     now = _time.time()
     if uid in _BUY_LOCKS and now - _BUY_LOCKS[uid] < _BUY_LOCK_TIMEOUT:
@@ -588,20 +597,14 @@ class BuySelect(disnake.ui.StringSelect):
         options = [
             SelectOption(label="Реальные деньги", description="Оплата в рублях, USDT и т.д.", emoji="<:realmomne:1539649281575620618>", value="real"),
             SelectOption(label="Diamond Coins", description="Бонусная валюта сервера", emoji="<:coins:1539649259245408340>", value="coins"),
-            SelectOption(label="Задать вопрос", description="Узнать о нужном товаре", emoji="<:questi:1544371841118773328>", value="question"),
         ]
         super().__init__(
-            placeholder="Выберите способ оплаты или задайте вопрос...",
+            placeholder="Выберите способ оплаты...",
             min_values=1, max_values=1, options=options, custom_id="buy_type_select"
         )
 
     async def callback(self, inter: disnake.MessageInteraction):
         value = inter.data.values[0] if inter.data.values else ""
-        if value == "question":
-            try: await inter.response.send_modal(QuestionModal())
-            except disnake.InteractionResponded: pass
-            except disnake.NotFound as e: logger.warning(f"BuySelect: модалка не отправлена — {e}")
-            return
         if not await _ack(inter): return
         _spawn(log_discord(title="🛒 Выбор типа покупки", description=f"> **Пользователь:** {inter.author.mention}\n> **Выбрано:** `{value}`", color=0x00aaff, channel_id=CONFIG["LOG_TICKET_CHANNEL_ID"]))
         if value == "real": await create_real_ticket(inter)
@@ -1035,13 +1038,17 @@ class TicketPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @disnake.ui.button(label="ㅤㅤㅤㅤКупитьㅤㅤㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:buy", emoji=PartialEmoji(name="shopg", id=1539646815530651718))
+    @disnake.ui.button(label=_btn_pad("Купить", 13), style=disnake.ButtonStyle.gray, custom_id="panel:buy", emoji=PartialEmoji(name="shopg", id=1539646815530651718))
     async def buy(self, button: disnake.Button, inter: disnake.MessageInteraction):
-        embed = disnake.Embed(color=6776679, title="Выбор категории по оплате", description="В какой валюте вы хотите купить товар? Если у вас есть вопрос, вы можете его задать, выбрав соответствующий пункт ниже.")
+        embed = disnake.Embed(color=6776679, title="Выбор категории по оплате", description="В какой валюте вы хотите купить товар?")
         embed.set_image(url=_IMG_STRIPE)
         await inter.response.send_message(embed=embed, view=BuyTypeView(), ephemeral=True)
 
-    @disnake.ui.button(label="ㅤㅤㅤㅤКаталогㅤㅤㅤㅤㅤ", style=disnake.ButtonStyle.gray, custom_id="panel:catalog", emoji=PartialEmoji(name="catal", id=1539646769053306980))
+    @disnake.ui.button(label=_btn_pad("Вопросы", 13), style=disnake.ButtonStyle.gray, custom_id="panel:question", emoji=PartialEmoji(name="q23s1", id=1571224406527836210))
+    async def questions(self, button: disnake.Button, inter: disnake.MessageInteraction):
+        await inter.response.send_modal(QuestionModal())
+
+    @disnake.ui.button(label=_btn_pad("Каталог", 13), style=disnake.ButtonStyle.gray, custom_id="panel:catalog", emoji=PartialEmoji(name="catal", id=1539646769053306980))
     async def catalog(self, button: disnake.Button, inter: disnake.MessageInteraction):
         embed = disnake.Embed(title="Выбор категории товаров", description="В чем представлен ваш товар? Выберите метод ниже.", color=6776679)
         embed.set_image(url=_IMG_STRIPE)
