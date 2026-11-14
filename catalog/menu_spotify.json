@@ -8,16 +8,155 @@
       }
     },
     {
-      "title": "Spotify",
-      "description": "> Получи свой доступ на безграничный мир красочной музыки без рекламы, почувствуй это!",
+      "title": "Spotify Premium",
+      "description": "> Получи свой доступ на безграничный мир красочной музыки без рекламы, почувствуй это! Данная подписка разделяется на несколько планов, и о каждом плане по цене - ниже.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6af9d523&is=6af883a3&hm=e0e65fd555b560fdf5701f26babf151563cbd6c2161af6c1d9bb12a90eac7494&"
+      },
+      "fields": []
+    },
+    {
+      "title": "Individual",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6af9d523&is=6af883a3&hm=e0e65fd555b560fdf5701f26babf151563cbd6c2161af6c1d9bb12a90eac7494&"
       },
       "fields": [
         {
-          "name": "> **Individual**",
-          "value": "```270₽ | 1430₸```",
+          "name": "> **1 Month**",
+          "value": "```210₽```",
+          "inline": true
+        },
+        {
+          "name": "> **3 Month**",
+          "value": "```480₽```",
+          "inline": true
+        },
+        {
+          "name": "> **6 Months**",
+          "value": "```1100₽```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Year**",
+          "value": "```1600₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Duo",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6af9d523&is=6af883a3&hm=e0e65fd555b560fdf5701f26babf151563cbd6c2161af6c1d9bb12a90eac7494&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Month**",
+          "value": "```300₽```",
+          "inline": true
+        },
+        {
+          "name": "> **3 Month**",
+          "value": "```780₽```",
+          "inline": true
+        },
+        {
+          "name": "> **6 Months**",
+          "value": "```1500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Year**",
+          "value": "```2850₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Family",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6af9d523&is=6af883a3&hm=e0e65fd555b560fdf5701f26babf151563cbd6c2161af6c1d9bb12a90eac7494&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Month**",
+          "value": "```350₽```",
+          "inline": true
+        },
+        {
+          "name": "> **3 Month**",
+          "value": "```1050₽```",
+          "inline": true
+        },
+        {
+          "name": "> **6 Months**",
+          "value": "```1950₽```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Year**",
+          "value": "```3700₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Student",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6af9d523&is=6af883a3&hm=e0e65fd555b560fdf5701f26babf151563cbd6c2161af6c1d9bb12a90eac7494&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Month**",
+          "value": "```330₽```",
+          "inline": true
+        },
+        {
+          "name": "> **3 Month**",
+          "value": "```840₽```",
+          "inline": true
+        },
+        {
+          "name": "> **6 Months**",
+          "value": "```1580₽```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Year**",
+          "value": "```2550₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Platinum",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6af9d523&is=6af883a3&hm=e0e65fd555b560fdf5701f26babf151563cbd6c2161af6c1d9bb12a90eac7494&"
+      },
+      "fields": [
+        {
+          "name": "> **1 Month**",
+          "value": "```490₽```",
+          "inline": true
+        },
+        {
+          "name": "> **3 Month**",
+          "value": "```1400₽```",
+          "inline": true
+        },
+        {
+          "name": "> **6 Months**",
+          "value": "```1970₽```",
+          "inline": true
+        },
+        {
+          "name": "> **1 Year**",
+          "value": "```5400₽```",
           "inline": true
         }
       ]
