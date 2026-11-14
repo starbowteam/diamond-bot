@@ -9,25 +9,25 @@
     },
     {
       "title": "Робуксы",
-      "description": "> Валюта в всей любимой игре. Отличная валюта для покупок геймпассов, дополнений игр либо одежды на персонажа.",
+      "description": "> Валюта в всей любимой игре. Отличная валюта для покупок геймпассов, дополнений игр либо одежды на персонажа. Цена указана за 1R.",
       "color": 6776679,
       "image": {
         "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
       },
       "fields": [
         {
-          "name": "> **1 Robux**",
-          "value": "```0.82₽ | 4.88₸```",
+          "name": "> GamePass [ 5 дн. ]",
+          "value": "```0.90₽```",
           "inline": true
         },
         {
-          "name": "> **Донат-Паки**",
-          "value": "```Узнавать цену в тикете```",
+          "name": "> По RB PLUS [ Акк 16+ ]",
+          "value": "```1.07₽```",
           "inline": true
         },
         {
-          "name": "> **Подарочные карты**",
-          "value": "```Узнавать цену в тикете```",
+          "name": "> Приватный Сервер [ 5 дн. ]",
+          "value": "```0.93₽```",
           "inline": true
         }
       ]
@@ -42,20 +42,38 @@
       "fields": [
         {
           "name": "> **Trial**",
-          "value": "```90₽ | 540₸```",
+          "value": "```90₽```",
           "inline": true
         },
         {
           "name": "> **Plus +500**",
-          "value": "```1300₽ | 7740₸```",
+          "value": "```1300₽```",
           "inline": true
         },
         {
           "name": "> **Plus +1000**",
-          "value": "```1700₽ | 10210₸```",
+          "value": "```1700₽```",
           "inline": true
         }
       ]
+    },
+    {
+      "title": "Донат-Паки",
+      "description": "> Советуем уточнять цены в вопросах, либо сразу в тикете, цены нестабильные и курс меняется очень часто, подберем.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+      },
+      "fields": []
+    },
+    {
+      "title": " Подарочные карты",
+      "description": "> Советуем уточнять цены в вопросах, либо сразу в тикете, цены нестабильные и курс меняется очень часто, подберем.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+      },
+      "fields": []
     }
   ],
   "attachments": [],
