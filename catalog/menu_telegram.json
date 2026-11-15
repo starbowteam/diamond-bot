@@ -4,61 +4,428 @@
     {
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1556726987198955651/image.png?backend=b2&ex=6ac5367c&is=6ac3e4fc&hm=4284ae4a401c74a58e044e3c55ac7fb87eb51baba0b1b168de71456f95c80b65&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1556726987198955651/image.png"
       }
     },
     {
       "title": "Звёзды Telegram",
-      "description": "> Отличная валюта для покупки подарков, сообщений, или иных приспособлений в Telegram",
+      "description": "> Отличная валюта для покупки подарков, сообщений, платного контента и поддержки любимых авторов.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
       },
       "fields": [
         {
           "name": "> **1 ★**",
-          "value": "```1.58₽ | 11₸  ```",
+          "value": "```1.52₽```",
+          "inline": true
+        },
+        {
+          "name": "> **13 ★**",
+          "value": "```19.76₽```",
+          "inline": true
+        },
+        {
+          "name": "> **21 ★**",
+          "value": "```31.92₽```",
+          "inline": true
+        },
+        {
+          "name": "> **43 ★**",
+          "value": "```65.36₽```",
+          "inline": true
+        },
+        {
+          "name": "> **50 ★**",
+          "value": "```76₽```",
+          "inline": true
+        },
+        {
+          "name": "> **75 ★**",
+          "value": "```114₽```",
+          "inline": true
+        },
+        {
+          "name": "> **85 ★**",
+          "value": "```129.20₽```",
+          "inline": true
+        },
+        {
+          "name": "> **100 ★**",
+          "value": "```152₽```",
+          "inline": true
+        },
+        {
+          "name": "> **150 ★**",
+          "value": "```228₽```",
+          "inline": true
+        },
+        {
+          "name": "> **200 ★**",
+          "value": "```304₽```",
+          "inline": true
+        },
+        {
+          "name": "> **250 ★**",
+          "value": "```380₽```",
+          "inline": true
+        },
+        {
+          "name": "> **300 ★**",
+          "value": "```456₽```",
+          "inline": true
+        },
+        {
+          "name": "> **350 ★**",
+          "value": "```532₽```",
+          "inline": true
+        },
+        {
+          "name": "> **500 ★**",
+          "value": "```760₽```",
+          "inline": true
+        },
+        {
+          "name": "> **1000 ★**",
+          "value": "```1520₽```",
+          "inline": true
+        },
+        {
+          "name": "> **2500 ★**",
+          "value": "```3800₽```",
           "inline": true
         }
       ]
     },
     {
       "title": "Аккаунты Telegram",
-      "description": "> Для личных целей, для работы, или как запасной аккаунт - отличный вариант!",
+      "description": "> Для личных целей, работы или как запасной аккаунт. Быстрая выдача и разные варианты состояния аккаунтов.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
       },
       "fields": [
         {
-          "name": "> **Любой - Без спам-блока**",
-          "value": "```250₽ | 1640₸```",
+          "name": "> **Любой аккаунт — без спам-блока**",
+          "value": "```260₽```",
           "inline": true
         },
         {
-          "name": "> **Любой - Спам-блок**",
-          "value": "```190₽ | 1250₸```",
+          "name": "> **Любой аккаунт — со спам-блоком**",
+          "value": "```200₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Аккаунт с виртуальным номером**",
+          "value": "```230₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Аккаунт с историей использования**",
+          "value": "```300₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Старый аккаунт**",
+          "value": "```350₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Аккаунт с гарантией**",
+          "value": "```450₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Каналы Telegram",
+      "description": "> Готовые Telegram-каналы для личных проектов, бизнеса, блогов и продвижения. Подбор варианта производится в тикете.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
+      },
+      "fields": [
+        {
+          "name": "> **Канал до 1 000 подписчиков**",
+          "value": "```850₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Канал до 2 500 подписчиков**",
+          "value": "```6200₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Канал до 5 000 подписчиков**",
+          "value": "```8500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Канал до 10 000 подписчиков**",
+          "value": "```12500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Канал с тематикой**",
+          "value": "```от 850₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Канал с активной аудиторией**",
+          "value": "```от 2500₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Подарки Telegram",
+      "description": "> Красивые подарки Telegram для профиля, коллекции или отправки другому пользователю. Доступность и стоимость уточняются перед заказом.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
+      },
+      "fields": [
+        {
+          "name": "> **Обычный подарок**",
+          "value": "```от 150₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Редкий подарок**",
+          "value": "```от 350₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Коллекционный подарок**",
+          "value": "```от 750₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Подарок с улучшением**",
+          "value": "```от 1100₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Лимитированный подарок**",
+          "value": "```от 1800₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Редкий коллекционный подарок**",
+          "value": "```от 3000₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Услуги Telegram",
+      "description": "> Поможем с продвижением, оформлением и настройкой Telegram. Стоимость зависит от объёма работы.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
+      },
+      "fields": [
+        {
+          "name": "> **Продвижение канала**",
+          "value": "```от 300₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Публикация рекламы**",
+          "value": "```от 250₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Оформление канала**",
+          "value": "```от 500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Настройка бота**",
+          "value": "```от 700₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Создание бота**",
+          "value": "```от 1500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Комплексное оформление**",
+          "value": "```от 1200₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Telegram Premium",
+      "description": "> Подписка Telegram Premium для доступа к дополнительным функциям, увеличенным лимитам и эксклюзивным возможностям.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
+      },
+      "fields": [
+        {
+          "name": "> **Premium на 1 месяц**",
+          "value": "```650₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Premium на 3 месяца**",
+          "value": "```1650₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Premium на 6 месяцев**",
+          "value": "```3000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Premium на 12 месяцев**",
+          "value": "```5500₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Юзернеймы Telegram",
+      "description": "> Юзернеймы для личного профиля, канала или проекта. Доступность конкретного варианта проверяется перед покупкой.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
+      },
+      "fields": [
+        {
+          "name": "> **Обычный юзернейм**",
+          "value": "```от 350₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Красивый юзернейм**",
+          "value": "```от 1000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Короткий юзернейм**",
+          "value": "```от 2500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Редкий юзернейм**",
+          "value": "```от 5000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Юзернейм для канала**",
+          "value": "```от 1500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Премиальный юзернейм**",
+          "value": "```от 10000₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Стикеры Telegram",
+      "description": "> Наборы и отдельные стикеры для Telegram. Подберём вариант под нужную тематику.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
+      },
+      "fields": [
+        {
+          "name": "> **Обычный набор стикеров**",
+          "value": "```150₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Авторский набор**",
+          "value": "```350₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Премиальный набор**",
+          "value": "```750₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Создание стикерпака**",
+          "value": "```от 1000₽```",
           "inline": true
         }
       ]
     },
     {
       "title": "Прокси Telegram",
-      "description": "> Напишите нам в тикет, выдадим вам список качественных - а главное рабочих прокси-серверов.",
+      "description": "> Напишите нам в тикет, выдадим список качественных и рабочих прокси-серверов.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
       },
-      "fields": []
+      "fields": [
+        {
+          "name": "> **Прокси на 1 день**",
+          "value": "```50₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Прокси на 7 дней**",
+          "value": "```180₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Прокси на 30 дней**",
+          "value": "```450₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Прокси для нескольких аккаунтов**",
+          "value": "```от 700₽```",
+          "inline": true
+        }
+      ]
     },
     {
-      "title": "Подарки Telegram",
-      "description": "> Напишите нам в тикете, и мы подберем нужное вам украшение - по красивой цене!\n\n> Также есть возможность продажи подарков нам, цена также обсуждается в тикете.",
+      "title": "Прочее Telegram",
+      "description": "> Дополнительные товары и услуги для Telegram. Если нужной позиции нет в меню, напишите нам в тикет.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png"
       },
-      "fields": []
+      "fields": [
+        {
+          "name": "> **Реакции на посты**",
+          "value": "```от 100₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Просмотры постов**",
+          "value": "```от 100₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Подписчики на канал**",
+          "value": "```от 150₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Комментарии к постам**",
+          "value": "```от 200₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Автоматизация Telegram**",
+          "value": "```от 1000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Индивидуальный заказ**",
+          "value": "```цена обсуждается```",
+          "inline": true
+        }
+      ]
     }
   ],
   "attachments": [],
