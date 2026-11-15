@@ -12,7 +12,7 @@
       "description": "> Валюта в всей любимой игре. Отличная валюта для покупок геймпассов, дополнений игр либо одежды на персонажа. Цена указана за 1R.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
       },
       "fields": [
         {
@@ -33,11 +33,11 @@
       ]
     },
     {
-      "title": " Подарочные карты",
-      "description": "> Удобная активация через сайт https://www.roblox.com/redeem.  Быстрое погашение подарочной карты. Представлены не все карты, а самые релевантные. О других - в тикет либо в вопрос. ",
+      "title": "Подарочные карты",
+      "description": "> Удобная активация через сайт https://www.roblox.com/redeem. Быстрое погашение подарочной карты. Другие номиналы можно уточнить в тикете.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
       },
       "fields": [
         {
@@ -66,18 +66,48 @@
           "inline": true
         },
         {
+          "name": "> **800R**",
+          "value": "```880₽```",
+          "inline": true
+        },
+        {
           "name": "> **1000R**",
           "value": "```1050₽```",
+          "inline": true
+        },
+        {
+          "name": "> **1500R**",
+          "value": "```1550₽```",
+          "inline": true
+        },
+        {
+          "name": "> **2000R**",
+          "value": "```2050₽```",
+          "inline": true
+        },
+        {
+          "name": "> **2500R**",
+          "value": "```2550₽```",
+          "inline": true
+        },
+        {
+          "name": "> **3000R**",
+          "value": "```3050₽```",
+          "inline": true
+        },
+        {
+          "name": "> **5000R**",
+          "value": "```5050₽```",
           "inline": true
         }
       ]
     },
     {
       "title": "Roblox Plus",
-      "description": "> Ежемесячная подписка от Roblox, дающая преймущество в играх, тег, и начисление робуксов в течении месяца.",
+      "description": "> Ежемесячная подписка от Roblox, дающая преимущество в играх, тег и начисление робуксов в течение месяца.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
       },
       "fields": [
         {
@@ -98,13 +128,209 @@
       ]
     },
     {
-      "title": "Донат-Паки",
-      "description": "> Советуем уточнять цены в вопросах, либо сразу в тикете, цены нестабильные и курс меняется очень часто, подберем.",
+      "title": "Донат-паки",
+      "description": "> Пополнение робуксов через официальный магазин Roblox. Подходит для аккаунтов с возможностью покупки доната. Перед заказом уточните доступность нужного пака.",
       "color": 6776679,
       "image": {
-        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6ac51923&is=6ac3c7a3&hm=83ddc5247ae7044e0e98f86a18132cd6ac2cdd16a57fd72de6a97075ee15aa5c&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex=6a8e62e3&"
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
       },
-      "fields": []
+      "fields": [
+        {
+          "name": "> **Донат-пак 80R**",
+          "value": "```от 150₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Донат-пак 160R**",
+          "value": "```от 280₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Донат-пак 400R**",
+          "value": "```от 650₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Донат-пак 800R**",
+          "value": "```от 1250₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Донат-пак 1700R**",
+          "value": "```от 2500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Донат-пак 4500R**",
+          "value": "```от 6200₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Донат-пак 10000R**",
+          "value": "```от 12500₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Аккаунты Roblox",
+      "description": "> Аккаунты Roblox для игры, доната и личного использования. Характеристики и наличие конкретного варианта уточняйте перед покупкой.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
+      },
+      "fields": [
+        {
+          "name": "> **Новый аккаунт**",
+          "value": "```от 150₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Аккаунт с почтой**",
+          "value": "```от 250₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Аккаунт с робуксами**",
+          "value": "```от 500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Аккаунт с донатом**",
+          "value": "```от 1000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Старый аккаунт**",
+          "value": "```от 700₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Аккаунт с редкими предметами**",
+          "value": "```от 1500₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Limiteds Roblox",
+      "description": "> Лимитированные предметы и аксессуары Roblox. Цена зависит от редкости и текущей стоимости предмета.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
+      },
+      "fields": [
+        {
+          "name": "> **Limited до 1 000R**",
+          "value": "```от 1200₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Limited до 5 000R**",
+          "value": "```от 2500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Limited до 10 000R**",
+          "value": "```от 5000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Limited до 50 000R**",
+          "value": "```от 12000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Редкий Limited**",
+          "value": "```от 25000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Подбор Limited под бюджет**",
+          "value": "```цена обсуждается```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Roblox Studio",
+      "description": "> Помощь с Roblox Studio: создание карт, настройка объектов, скрипты и базовая разработка игровых проектов.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
+      },
+      "fields": [
+        {
+          "name": "> **Настройка карты**",
+          "value": "```от 500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Создание простой карты**",
+          "value": "```от 1000₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Создание карты под заказ**",
+          "value": "```от 2500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Настройка GamePass**",
+          "value": "```от 300₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Скрипты для игры**",
+          "value": "```от 700₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Разработка проекта**",
+          "value": "```от 3000₽```",
+          "inline": true
+        }
+      ]
+    },
+    {
+      "title": "Twitch Drops и промо Roblox",
+      "description": "> Промокоды, Twitch Drops и другие временные бонусы для Roblox. Наличие зависит от текущих акций.",
+      "color": 6776679,
+      "image": {
+        "url": "https://cdn.discordapp.com/attachments/1527006158282555412/1537851307757539390/image.png?ex=6afb26a3&is=6af9d523&hm=3aea96656436177f455b772f65c841d63ca174ef22f8f6cb3e944521f854e159&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1527006158282555412%2F1537851307757539390%2Fimage.png%3Fex%3D6af9d523&"
+      },
+      "fields": [
+        {
+          "name": "> **Обычный промокод**",
+          "value": "```от 100₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Редкий промокод**",
+          "value": "```от 300₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Twitch Drop**",
+          "value": "```от 250₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Набор промокодов**",
+          "value": "```от 500₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Эксклюзивный предмет**",
+          "value": "```от 700₽```",
+          "inline": true
+        },
+        {
+          "name": "> **Индивидуальный поиск**",
+          "value": "```цена обсуждается```",
+          "inline": true
+        }
+      ]
     }
   ],
   "attachments": [],
