@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Единая точка входа. Запускает ТРИ бота в одном процессе:
+Единая точка входа. Запускает ДВА бота в одном процессе:
   · Основной (BOT_TOKEN)
-  · AI-консультант (AI_TOKEN)
   · AI-менеджер (AI_MANAGER_TOKEN)
 """
 import os
@@ -53,18 +52,7 @@ async def start_all():
     tasks.append(main_bot.start(CONFIG["BOT_TOKEN"]))
     print("⏳ Запуск основного бота...")
 
-    # 2. AI-консультант
-    try:
-        from modules.ai import bot as ai_bot, AI_TOKEN
-        if ai_bot and AI_TOKEN:
-            tasks.append(ai_bot.start(AI_TOKEN))
-            print("⏳ Запуск AI-консультанта...")
-        else:
-            print("⚠️ AI_TOKEN не установлен — AI-консультант не запущен")
-    except ImportError as e:
-        logger.error(f"Ошибка импорта AI: {e}")
-
-    # 3. AI-менеджер
+    # 2. AI-менеджер (тикеты)
     try:
         from modules.ai_manager import bot as ai_manager_bot, AI_MANAGER_TOKEN, AI_MANAGER_API_KEY
         if ai_manager_bot and AI_MANAGER_TOKEN and AI_MANAGER_API_KEY:
