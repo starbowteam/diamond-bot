@@ -34,8 +34,27 @@ AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
 
-DIAMOND_AI_MODEL = "google/gemini-3-flash-preview"
-LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"
+DIAMOND_AI_MODEL = os.getenv("AI_MANAGER_MODEL", "google/gemini-3-flash-preview")
+LAST_RESORT_MODEL = os.getenv("AI_MANAGER_LAST_RESORT_MODEL", "qwen/qwen-2.5-72b-instruct")
+
+# Zveno model names can change by catalog. Override with AI_MANAGER_MODELS.
+DEFAULT_AI_MODELS = [
+    "google/gemini-2.0-flash-exp:free",
+    "google/gemini-2.5-flash-lite-preview-09-2025:free",
+    "qwen/qwen3-4b:free",
+    "meta-llama/llama-3.3-8b-instruct:free",
+    DIAMOND_AI_MODEL,
+    LAST_RESORT_MODEL,
+]
+AI_MODELS = list(dict.fromkeys(
+    x.strip() for x in os.getenv("AI_MANAGER_MODELS", ",".join(DEFAULT_AI_MODELS)).split(",") if x.strip()
+))
+VISION_MODELS = list(dict.fromkeys(
+    x.strip() for x in os.getenv(
+        "AI_MANAGER_VISION_MODELS",
+        ",".join(["google/gemini-2.0-flash-exp:free", "google/gemini-2.5-flash-lite-preview-09-2025:free", DIAMOND_AI_MODEL, LAST_RESORT_MODEL])
+    ).split(",") if x.strip()
+))
 
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
@@ -143,7 +162,8 @@ def init_ai_manager_tables():
         invoice_sent INTEGER DEFAULT 0, last_client_msg_ts INTEGER DEFAULT 0,
         last_manager_msg_ts INTEGER DEFAULT 0, last_ai_response_ts INTEGER DEFAULT 0,
         last_abuse_check_ts INTEGER DEFAULT 0, abuse_closed INTEGER DEFAULT 0,
-        post_invoice_text_count INTEGER DEFAULT 0
+        post_invoice_text_count INTEGER DEFAULT 0,
+        abandoned_notified INTEGER DEFAULT 0, close_requested_at INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS ai_manager_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id INTEGER NOT NULL,
@@ -169,6 +189,19 @@ def init_ai_manager_tables():
         reason TEXT,
         created_at INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS ai_manager_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_id INTEGER,
+        user_id INTEGER,
+        event_type TEXT NOT NULL,
+        payload TEXT,
+        model TEXT,
+        latency_ms INTEGER,
+        success INTEGER DEFAULT 1,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_events_channel ON ai_manager_events(channel_id, id);
     """)
     db.commit()
     
@@ -180,6 +213,8 @@ def init_ai_manager_tables():
     _ensure_col("ai_manager_sessions", "last_abuse_check_ts", "last_abuse_check_ts INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "abuse_closed", "abuse_closed INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "post_invoice_text_count", "post_invoice_text_count INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "abandoned_notified", "abandoned_notified INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "close_requested_at", "close_requested_at INTEGER DEFAULT 0")
 
 def _ensure_col(table: str, column: str, ddl: str):
     try:
@@ -191,6 +226,48 @@ def _ensure_col(table: str, column: str, ddl: str):
         ai_logger.warning(f"Миграция {table}.{column}: {e}")
 
 init_ai_manager_tables()
+
+def log_ai_event(event_type: str, channel_id: int = 0, user_id: int = 0,
+                 payload: Optional[dict] = None, model: str = "",
+                 latency_ms: int = 0, success: bool = True):
+    try:
+        cur.execute(
+            "INSERT INTO ai_manager_events "
+            "(channel_id, user_id, event_type, payload, model, latency_ms, success, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (channel_id, user_id, event_type, json.dumps(payload or {}, ensure_ascii=False)[:4000],
+             model[:200], int(latency_ms), 1 if success else 0, 1 if success else 0, int(time.time()))
+        )
+        db.commit()
+    except Exception as e:
+        ai_logger.debug(f"log_ai_event: {e}")
+
+
+def _extract_confidence(text: str) -> Tuple[str, Optional[int]]:
+    if not text:
+        return text, None
+    match = re.search(r"<confidence>\s*(\d{1,3})\s*</confidence>", text, re.I)
+    if not match:
+        return text, 0
+    score = max(0, min(100, int(match.group(1))))
+    cleaned = re.sub(r"\s*<confidence>.*?</confidence>\s*", "", text, flags=re.I | re.S).strip()
+    return cleaned, score
+
+
+async def notify_low_confidence(channel, user_id: int, answer: str, score: int):
+    if score >= 70:
+        return
+    try:
+        user = bot.get_user(ANALYTICS_USER_ID) or await bot.fetch_user(ANALYTICS_USER_ID)
+        if user:
+            await user.send(
+                f"⚠️ Низкая уверенность AI: **{score}%**\n"
+                f"Канал: <#{channel.id}>\nПользователь: {user_id}\n"
+                f"Ответ: {answer[:1700]}"
+            )
+    except Exception as e:
+        ai_logger.warning(f"notify_low_confidence: {e}")
+
 
 # ============================================================
 # СИСТЕМА РЕКЛАМЫ
@@ -419,7 +496,7 @@ def get_session(channel_id: int) -> Optional[dict]:
 def create_session(channel_id: int, user_id: int):
     now = int(time.time())
     cur.execute(
-        "INSERT OR IGNORE INTO ai_manager_sessions (channel_id, user_id, message_count, fail_count, started_at, escalated, receipt_url, created_at, stub_sent, invoice_sent, last_client_msg_ts, last_manager_msg_ts, last_ai_response_ts, post_invoice_text_count) VALUES (?, ?, 0, 0, ?, 0, '', ?, 0, 0, 0, 0, 0, 0)",
+        "INSERT OR IGNORE INTO ai_manager_sessions (channel_id, user_id, message_count, fail_count, started_at, escalated, receipt_url, created_at, stub_sent, invoice_sent, last_client_msg_ts, last_manager_msg_ts, last_ai_response_ts, post_invoice_text_count, abandoned_notified, close_requested_at) VALUES (?, ?, 0, 0, ?, 0, '', ?, 0, 0, 0, 0, 0, 0, 0, 0)",
         (channel_id, user_id, now, now),
     )
     db.commit()
@@ -482,10 +559,11 @@ async def _debounce_flush(channel, user, gen: int, delay: float = DEBOUNCE_SEC):
         state = DEBOUNCE.get(channel.id)
         if not state or state.get("gen") != gen: return
         msgs = state.get("messages", [])
+        image_urls = state.get("images", [])
         DEBOUNCE.pop(channel.id, None)
-        combined = "\n".join(m for m in msgs if m).strip()
-        if not combined: return
-        await _handle_dialog(channel, user, combined)
+        combined = "\n".join(m if isinstance(m, str) else str(m) for m in msgs if m).strip()
+        if not combined and not image_urls: return
+        await _handle_dialog(channel, user, combined, image_urls=image_urls)
     except asyncio.CancelledError: raise
     except Exception: ai_logger.exception("debounce_flush")
 
@@ -633,11 +711,15 @@ REAL_CATALOG_TEXT = build_real_catalog_text()
 SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете. задача — помочь клиенту оформить заказ, как живой помощник.
 
 ПРАВИЛА ОБЩЕНИЯ:
-- Пиши коротко, по делу, как живой менеджер. Без эмодзи.
-- Форматирование Discord: **жирный**, *курсив*, > цитаты, `код`.
+- В конце каждого обычного ответа добавь скрытую метку строго в формате `<confidence>ЧИСЛО</confidence>`, где ЧИСЛО от 0 до 100. Это не показывается клиенту.
+- Если не уверен, задай уточняющий вопрос или вызови `escalate_to_human`.
+- Не подтверждай оплату по изображению или тексту клиента; только распознай данные и передай продавцу на проверку.
 - Товары оформляй блоком:
   > **Название** — 460 ₽
 - Если клиент просит категорию без уточнений — покажи ВСЕ варианты с ценами.
+- В вопросных тикетах отвечай на вопрос и не предлагай счёт без явного намерения купить.
+- Счёт создаётся только после отдельного явного подтверждения клиентом показанной суммы.
+- Инструменты check_user_balance, check_past_purchases и check_promo_code используют фактические данные; не выдумывай их результаты.
 
 ГЛАВНОЕ ПРАВИЛО ПО ЦЕНАМ:
 - В каталоге ниже некоторые товары имеют ДВЕ цены: цена Discord (в скобках) и НАША ЦЕНА (указана как `[НАША ЦЕНА: XXX]`).
@@ -719,30 +801,65 @@ TOOLS_OPENAI = [
     {
         "type": "function",
         "function": {
+            "name": "check_user_balance",
+            "description": "Получить баланс DC текущего клиента.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_past_purchases",
+            "description": "Получить последние покупки текущего клиента.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_promo_code",
+            "description": "Проверить промокод без автоматического применения.",
+            "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "escalate_to_human",
             "description": "Позвать продавца.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "reason": {"type": "string"},
-                },
-                "required": ["reason"],
-            },
-        },
-    },
+                "properties": {"reason": {"type": "string"}},
+                "required": ["reason"]
+            }
+        }
+    }
 ]
 
-async def _call_single_model(model: str, system_prompt: str, messages: list) -> Optional[dict]:
-    payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}] + messages, "tools": TOOLS_OPENAI, "tool_choice": "auto", "temperature": 0.1, "max_tokens": 800}
+async def _call_single_model(model: str, system_prompt: str, messages: list,
+                             tools=None, max_tokens: int = 800) -> Optional[dict]:
+    payload = {
+        "model": model,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
+    started = time.monotonic()
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT)) as resp:
-                if resp.status != 200: return {"error": f"HTTP {resp.status}"}
+                if resp.status != 200:
+                    log_ai_event("llm_error", payload={}, model=model, latency_ms=int((time.monotonic() - started) * 1000), success=False)
+                    return {"error": f"HTTP {resp.status}"}
                 data = await resp.json()
                 choices = data.get("choices", [])
-                if not choices: return None
+                if not choices:
+                    return None
                 msg = choices[0].get("message", {})
                 text = (msg.get("content") or "").strip()
                 tool_calls = msg.get("tool_calls") or []
@@ -750,26 +867,67 @@ async def _call_single_model(model: str, system_prompt: str, messages: list) -> 
                 for tc in tool_calls:
                     fn = tc.get("function", {})
                     raw_args = fn.get("arguments", "{}")
-                    try: args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                    except Exception: args = {}
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except Exception:
+                        args = {}
                     funcs.append({"name": fn.get("name"), "args": args})
-                return {"text": text, "funcs": funcs}
+                result = {"text": text, "funcs": funcs, "model": model}
+                log_ai_event("llm_response", payload={"has_text": bool(text), "tools": [f["name"] for f in funcs]}, model=model, latency_ms=int((time.monotonic() - started) * 1000))
+                return result
     except Exception as e:
+        log_ai_event("llm_exception", payload={"error": str(e)}, model=model, latency_ms=int((time.monotonic() - started) * 1000), success=False)
         return {"error": str(e)}
 
-async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional[dict]:
-    if not AI_MANAGER_API_KEY: return None
+
+async def call_vision_model(prompt: str, image_urls: list) -> Optional[dict]:
+    if not AI_MANAGER_API_KEY or not image_urls:
+        return None
+    content = [{"type": "text", "text": prompt}]
+    content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls[:4])
+    messages = [{"role": "user", "content": content}]
+    for model in VISION_MODELS:
+        result = await _call_single_model(
+            model,
+            "Ты аккуратный помощник магазина. Не выдумывай данные на изображении.",
+            messages,
+            tools=None,
+            max_tokens=500,
+        )
+        if result and "error" not in result:
+            return result
+    return None
+
+
+async def call_llm(system_prompt: str, history: list, user_msg: str, image_urls: Optional[list] = None) -> Optional[dict]:
+    if not AI_MANAGER_API_KEY:
+        return None
     messages = []
     for role, text in history[-HISTORY_MAX_MSG:]:
         messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
-    messages.append({"role": "user", "content": user_msg})
-    
-    models_to_try = [DIAMOND_AI_MODEL, LAST_RESORT_MODEL]
-    for model in models_to_try:
-        res = await _call_single_model(model, system_prompt, messages)
+    if image_urls:
+        content = [{"type": "text", "text": user_msg or "Проанализируй приложенное изображение."}]
+        content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls[:4])
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": user_msg})
+
+    for model in (VISION_MODELS if image_urls else AI_MODELS):
+        res = await _call_single_model(model, system_prompt, messages, tools=(None if image_urls else TOOLS_OPENAI))
         if res and "error" not in res:
             return res
     return None
+
+
+async def generate_escalation_summary(channel, user_question: str) -> str:
+    history = hist_load(channel.id, limit=20)
+    compact = "\n".join(f"{role}: {text}" for role, text in history[-20:])
+    prompt = "Сделай краткое резюме продавцу: запрос, товары/цена, что сделано, причина и следующий шаг. Не выдумывай.\n" + compact + "\nПоследнее: " + user_question[:800]
+    for model in AI_MODELS:
+        result = await _call_single_model(model, "Краткий помощник оператора.", [{"role": "user", "content": prompt}], tools=None, max_tokens=200)
+        if result and "error" not in result and result.get("text"):
+            return result["text"][:1500]
+    return "Откройте историю тикета для контекста."
 
 async def escalate(channel, reason: str, user_question: str = ""):
     if _is_paid_category(channel): return
@@ -785,10 +943,16 @@ async def escalate(channel, reason: str, user_question: str = ""):
     )
     db.commit()
 
+    summary = await generate_escalation_summary(channel, user_question)
     ping = f"<@&{SELLER_ROLE}>"
-    embed = disnake.Embed(title="⚠️ Требуется помощь продавца", description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}", color=COLOR_GREY)
+    embed = disnake.Embed(
+        title="⚠️ Требуется помощь продавца",
+        description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}\n\n**Краткое резюме:**\n{summary}",
+        color=COLOR_GREY,
+    )
     embed.set_image(url=IMG_STRIPE)
     await channel.send(embed=embed)
+    log_ai_event("escalated", channel.id, user_id, {"reason": reason, "summary": summary})
     ai_logger.info(f"Эскалация: {channel.id} — {reason}")
 
 # ============================================================
@@ -829,42 +993,16 @@ async def send_invoice(channel, product_display: str, amount: int, discount: int
         return False
 
 async def _auto_confirm_receipt(channel, message, sess):
-    user_id = sess.get("user_id") or message.author.id
-    try: await message.add_reaction(YES_EMOJI)
-    except Exception: pass
-
-    sellers_ping = f"<@&{SELLER_ROLE}>"
-    embed = disnake.Embed(
-        title="💚 Оплата принята.",
-        description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{sellers_ping} скоро подключатся и выдадут заказ! ",
-        color=COLOR_GREEN
-    )
-    embed.set_image(url=IMG_STRIPE)
-    try: await channel.send(embed=embed)
-    except Exception as e: ai_logger.warning(f"auto_confirm: send msg failed: {e}")
-
-    paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
-    if paid_cat:
-        try:
-            await channel.edit(category=paid_cat)
-            ai_logger.info(f"✅ auto_confirm: {channel.id} перенесен в категорию {paid_cat.name}")
-        except Exception as e:
-            ai_logger.warning(f"⚠️ auto_confirm edit fail: {e}")
-
+    """Legacy compatibility: never treat an uploaded image as proof of payment."""
+    names = ", ".join(a.filename for a in message.attachments) or "attachment"
     try:
-        seller_role = channel.guild.get_role(SELLER_ROLE)
-        if seller_role:
-            await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
+        await channel.send("Вложение получено и передано продавцу для проверки. Автоматически подтвердить оплату по скриншоту я не могу.")
+        await log_discord("Attachment review", f"Channel: {channel.id} | User: {message.author.id} | Files: {names}", channel_id=LOG_CHANNEL)
     except Exception as e:
-        ai_logger.warning(f"auto_confirm: seller perms failed: {e}")
+        ai_logger.warning(f"receipt review handoff: {e}")
 
-    update_session(
-        channel.id, invoice_sent=0,
-        receipt_url=message.attachments[0].url if message.attachments else "",
-        post_invoice_text_count=0, last_ai_response_ts=int(time.time()), escalated=1
-    )
 
-async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = False):
+async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = False, image_urls: Optional[list] = None):
     if not user_text.strip() or _is_paid_category(channel) or _is_coins_category(channel): return
     user_id = author.id
     
@@ -899,17 +1037,18 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         discount = await get_ticket_discount(channel)
         user_history = _get_user_history_text(user_id)
         
+        ticket_mode = "вопросы — не оформляй счёт" if _is_questions_category(channel) else "заказ"
         system_prompt = SYSTEM_PROMPT.format(
             real_catalog=REAL_CATALOG_TEXT,
-            user_name=author.display_name, 
+            user_name=author.display_name,
             discount=discount,
-            user_history=user_history
+            user_history=user_history,
         )
         
         history = hist_load(channel.id)
         
         async with channel.typing():
-            result = await call_llm(system_prompt, history, user_text)
+            result = await call_llm(system_prompt, history, user_text, image_urls=image_urls)
             
         if not result:
             new_fails = (sess["fail_count"] or 0) + 1
@@ -923,6 +1062,10 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
         update_session(channel.id, fail_count=0)
         text = (result.get("text") or "").strip()
+        text, confidence = _extract_confidence(text)
+        if confidence is not None:
+            log_ai_event("confidence", channel.id, user_id, {"score": confidence, "answer": text})
+            asyncio.create_task(notify_low_confidence(channel, user_id, text, confidence))
         funcs = result.get("funcs") or []
 
         if text and "Зову продавцов" in text:
@@ -942,65 +1085,80 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
         if funcs:
             fc = funcs[0]
-            name = fc["name"]
+            name = fc.get("name")
             args = fc.get("args", {})
+
+            if name == "check_user_balance":
+                balance = await get_user_balance(user_id)
+                result_text = f"Баланс клиента: {balance} DC."
+                hist_append(channel.id, "ai", f"[система: {result_text}]")
+                await channel.send(result_text)
+                log_ai_event("tool_balance", channel.id, user_id, {"balance": balance})
+                return
+
+            if name == "check_past_purchases":
+                dc_data = get_dc_cache(user_id)
+                purchases = [h.get("reason", "") for h in (dc_data.get("history") or []) if h.get("amount", 0) < 0 and "Покупка" in h.get("reason", "")][-5:]
+                result_text = "Последние покупки: " + (", ".join(purchases) if purchases else "покупок не найдено")
+                hist_append(channel.id, "ai", f"[система: {result_text}]")
+                await channel.send(result_text)
+                log_ai_event("tool_purchases", channel.id, user_id, {"count": len(purchases)})
+                return
+
+            if name == "check_promo_code":
+                code = str(args.get("code", "")).strip()
+                row = cur.execute("SELECT value FROM promo_codes WHERE lower(code)=lower(?)", (code,)).fetchone() if code else None
+                result_text = f"Промокод найден: {row['value']}" if row else "Промокод не найден."
+                hist_append(channel.id, "ai", f"[система: {result_text}]")
+                await channel.send(result_text)
+                log_ai_event("tool_promo", channel.id, user_id, {"found": bool(row)})
+                return
 
             if name == "create_invoice":
                 fresh_sess = get_session(channel.id)
-                if fresh_sess and fresh_sess.get("invoice_sent"): return
-                    
+                if fresh_sess and fresh_sess.get("invoice_sent"):
+                    return
+                # Fail-closed: до выставления счета клиент обязан явно подтвердить цену.
+                recent_dialog = hist_load(channel.id, limit=8)
+                last_client_turn = next((t for r, t in reversed(recent_dialog) if r == "user"), "")
+                previous_turns = " ".join(t for r, t in recent_dialog[:-1] if r == "ai")
+                offered = bool(re.search(r"(выставить сч[её]т|оформить заказ).{0,100}(?:за|итого|сумма).{0,30}\d", previous_turns.lower()))
+                explicit = bool(re.search(r"(да|подтверждаю|согласен|оформляй|выставляй|оплачиваю)", last_client_turn.lower()))
+                if not (offered and explicit):
+                    await channel.send("Подтвердите, пожалуйста, что оформляем заказ по указанной выше сумме.")
+                    return
                 items_list = args.get("items", [])
                 if not items_list:
-                    await channel.send("⚠️ Не удалось распознать товар.")
+                    await channel.send("Не удалось определить товары. Позову продавца.")
+                    await escalate(channel, "Пустая корзина при создании счёта", user_text)
                     return
-                    
-                upsell_discount = int(args.get("discount_percent", 0))
-                final_discount = max(discount, upsell_discount)
-                
                 total_amount = 0
-                receipt_names = []
-                for itm in items_list:
-                    item_name = itm.get("item_name", "Товар")
-                    price = float(itm.get("price", 0))
+                names = []
+                for item in items_list:
+                    name_item = str(item.get("item_name", "Товар"))[:120]
+                    price = float(item.get("price", 0))
+                    if price <= 0 or price > 1000000:
+                        await channel.send("Не могу безопасно проверить сумму. Позову продавца.")
+                        await escalate(channel, "Некорректная цена в запросе счёта", user_text)
+                        return
+                    names.append(name_item)
                     total_amount += int(round(price))
-                    receipt_names.append(item_name)
-
-                product_display = ", ".join(receipt_names)
-                
-                if final_discount > discount:
-                    purchases = await get_user_purchases(author.id, only_unused=True)
-                    found_inv = False
-                    for p in purchases:
-                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
-                            await _update_ticket_discount_embed(channel, p['value'])
-                            found_inv = True
-                            break
-                    if not found_inv:
-                        await _update_ticket_discount_embed(channel, f"Скидка {final_discount}%")
-
-                if final_discount > 0:
-                    purchases = await get_user_purchases(author.id, only_unused=True)
-                    for p in purchases:
-                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
-                            full_purchases = await get_user_purchases(author.id, only_unused=False)
-                            target_idx = next((idx for idx, fp in enumerate(full_purchases) if fp["value"] == p["value"] and fp["type"] == "discounts" and not fp.get("used")), None)
-                            if target_idx is not None:
-                                await remove_purchase(author.id, target_idx)
-                                ai_logger.info(f"Скидка {p['value']} удалена из инвентаря {author.id} (применена в счете).")
-                                break
-
-                ok = await send_invoice(channel, product_display, total_amount, final_discount, author.display_name)
+                discount = min(10, max(0, int(args.get("discount_percent", 0)), discount))
+                ok = await send_invoice(channel, ", ".join(names), total_amount, discount, author.display_name)
                 if ok:
-                    ai_logger.info(f"Счёт: {channel.id} → {product_display} ({total_amount} Р, скидка {final_discount}%)")
                     hist_clear(channel.id)
-                    hist_append(channel.id, "ai", f"[счёт выставлен: {product_display}]")
-                    update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0)
-                    touch_ai_response(channel.id)
+                    hist_append(channel.id, "ai", f"[счёт выставлен: {', '.join(names)}]")
+                    update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0, abandoned_notified=0)
+                    log_ai_event("invoice_created", channel.id, user_id, {"items": names, "amount": total_amount, "discount": discount})
+                return
 
-            elif name == "escalate_to_human":
-                await escalate(channel, args.get("reason", "Товар не найден"), user_text)
-                update_session(channel.id, escalated=1)
-                touch_ai_response(channel.id)
+            if name == "escalate_to_human":
+                await escalate(channel, args.get("reason", "Нужен продавец"), user_text)
+                return
+
+        if text:
+            await channel.send(text)
+            hist_append(channel.id, "ai", text)
 
 # ============================================================
 # БОТ И СОБЫТИЯ
@@ -1029,6 +1187,7 @@ async def on_ready():
         if not activity_ping_task.is_running(): activity_ping_task.start()
         if not ads_cleanup_task.is_running(): ads_cleanup_task.start()
         if not analytics_task.is_running(): analytics_task.start()
+        if not abandoned_carts_task.is_running(): abandoned_carts_task.start()
 
 @bot.event
 async def on_guild_channel_create(channel):
@@ -1097,11 +1256,9 @@ async def on_message(message: disnake.Message):
     channel = message.channel
 
     if _is_paid_category(channel):
-        touch_ai_response(channel.id)
+        # Do not auto-accept payment proof; only send the upload to seller review.
         if message.attachments:
-            try: await message.add_reaction(YES_EMOJI)
-            except Exception: pass
-            ai_logger.info(f"Доплата принята (файл): {channel.id} {message.attachments[0].filename}")
+            await _auto_confirm_receipt(channel, message, get_session(channel.id) or {})
         return
 
     if _is_coins_category(channel): return
@@ -1127,15 +1284,25 @@ async def on_message(message: disnake.Message):
 
     if message.attachments:
         sess = get_session(channel.id)
+        image_urls = [a.url for a in message.attachments if (a.content_type or "").startswith("image/") or a.filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
         if sess and sess.get("invoice_sent"):
-            await _auto_confirm_receipt(channel, message, sess)
+            names = ", ".join(a.filename for a in message.attachments)
+            await channel.send(f"{YES_EMOJI} Вложение получил и передал продавцу для проверки. Оплату автоматически не подтверждаю.")
+            await log_discord("📎 Вложение после счёта", f"Канал: <#{channel.id}>\nКлиент: <@{message.author.id}>\nФайлы: {names}\n" + "\n".join(image_urls), channel_id=LOG_CHANNEL)
             return
-        else: return
+        if image_urls:
+            text = (message.content or "").strip() or "Проанализируй изображение: опиши видимый текст/ошибку/товар. Если это чек, извлеки видимые данные, пометь их непроверенными и не подтверждай оплату."
+            state = DEBOUNCE.setdefault(channel.id, {"messages": [], "gen": 0, "images": []})
+            state["messages"].append(text)
+            state["images"].extend(image_urls[:4])
+            state["gen"] += 1
+            asyncio.create_task(_debounce_flush(channel, message.author, state["gen"]))
+        return
 
     text = (message.content or "").strip()
     if not text: return
 
-    state = DEBOUNCE.setdefault(channel.id, {"messages": [], "gen": 0})
+    state = DEBOUNCE.setdefault(channel.id, {"messages": [], "gen": 0, "images": []})
     state["messages"].append(text)
     state["gen"] += 1
     asyncio.create_task(_debounce_flush(channel, message.author, state["gen"]))
@@ -1151,6 +1318,44 @@ def set_user_ai_pref(user_id: int, enabled: bool):
 # ============================================================
 # ФОНОВЫЕ ЗАДАЧИ
 # ============================================================
+@tasks.loop(minutes=10)
+async def abandoned_carts_task():
+    """Через 2 часа тишины мягко возвращает клиента к обсуждавшемуся заказу."""
+    await bot.wait_until_ready()
+    now = int(time.time())
+    rows = cur.execute(
+        "SELECT channel_id, user_id FROM ai_manager_sessions "
+        "WHERE last_client_msg_ts > 0 AND invoice_sent=0 AND escalated=0 "
+        "AND abuse_closed=0 AND abandoned_notified=0 AND last_manager_msg_ts < ?",
+        (now - 7200,),
+    ).fetchall()
+    for row in rows:
+        channel = bot.get_channel(row["channel_id"])
+        if not channel or not _is_ai_ticket(channel):
+            continue
+        history = hist_load(channel.id, limit=12)
+        dialog = "\n".join(f"{r}: {t}" for r, t in history[-12:])
+        prompt = (
+            "Напиши одно короткое ненавязчивое сообщение клиенту, который перестал отвечать в магазине. "
+            "Не выдумывай скидки, наличие, цены или акции; не дави. Если из переписки нельзя понять заказ, "
+            "спроси, нужна ли ещё помощь.\n" + dialog
+        )
+        text = None
+        for model in AI_MODELS:
+            out = await _call_single_model(model, "Ты вежливый менеджер магазина.", [{"role": "user", "content": prompt}], tools=None, max_tokens=120)
+            if out and "error" not in out and out.get("text"):
+                text = out["text"][:700]
+                break
+        if not text:
+            text = "Если заказ ещё актуален, напишите — помогу продолжить оформление."
+        try:
+            await channel.send(f"<@{row['user_id']}> {text}")
+            update_session(channel.id, abandoned_notified=1)
+            log_ai_event("abandoned_cart_followup", channel.id, row["user_id"], {"text": text})
+        except Exception as e:
+            ai_logger.warning(f"abandoned cart follow-up {channel.id}: {e}")
+
+
 @tasks.loop(minutes=1)
 async def ads_cleanup_task():
     try:
