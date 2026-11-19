@@ -33,13 +33,14 @@ from modules.commands_tickets import (
 # ============================================================
 AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
-AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
+AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://token-shop.online/v1").rstrip("/")
 
+AI_PRIMARY_MODEL = "grok-4.7"          # читает картинки, для чеков
 GEMINI_MODELS_PRIORITY = [
-    "google/gemini-2.0-flash-001",
-    "google/gemini-2.5-flash-preview",
-    "google/gemini-1.5-flash",
+    "grok-4.7",
+    "deepseek-v4-flash",               # запасная, дешёвая
 ]
+
 
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
