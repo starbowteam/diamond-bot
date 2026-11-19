@@ -29,18 +29,18 @@ from modules.commands_tickets import (
 )
 
 # ============================================================
-# КОНСТАНТЫ (БЕСПЛАТНЫЕ МОДЕЛИ)
+# КОНСТАНТЫ (МОДЕЛИ)
 # ============================================================
 AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://token-shop.online/v1").rstrip("/")
 
-AI_PRIMARY_MODEL = "grok-4.7"          # читает картинки, для чеков
+# Первая модель — основная (читает картинки, для чеков).
+# Следующие — запасные, пробуются по порядку при сбое.
 GEMINI_MODELS_PRIORITY = [
     "grok-4.7",
-    "deepseek-v4-flash",               # запасная, дешёвая
+    "deepseek-v4-flash",
 ]
-
 
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
@@ -163,7 +163,7 @@ def init_ai_manager_tables():
     );
     """)
     db.commit()
-    
+
     _ensure_col("ai_manager_sessions", "stub_sent", "stub_sent INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "invoice_sent", "invoice_sent INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "last_client_msg_ts", "last_client_msg_ts INTEGER DEFAULT 0")
@@ -172,6 +172,7 @@ def init_ai_manager_tables():
     _ensure_col("ai_manager_sessions", "last_abuse_check_ts", "last_abuse_check_ts INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "abuse_closed", "abuse_closed INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "post_invoice_text_count", "post_invoice_text_count INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_user_prefs", "reward_claimed", "reward_claimed INTEGER DEFAULT 0")
 
 def _ensure_col(table: str, column: str, ddl: str):
     try:
@@ -276,7 +277,9 @@ async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=ABUSE_TIMEOUT)) as resp:
-                if resp.status != 200: return False, ""
+                if resp.status != 200:
+                    ai_logger.error(f"check_abuse_llm HTTP {resp.status}: {(await resp.text())[:300]}")
+                    return False, ""
                 data = await resp.json()
                 choices = data.get("choices", [])
                 if not choices: return False, ""
@@ -372,14 +375,14 @@ def _get_user_history_text(user_id: int) -> str:
         history = dc.get("history", [])
 
         text = f"Баланс: {balance} DC.\n"
-        
+
         if purchases:
             unused_items = [p.get("value") for p in purchases if not p.get("used") and p.get("type") != "discounts"]
             unused_discounts = [p.get("value") for p in purchases if not p.get("used") and p.get("type") == "discounts"]
-            
+
             if unused_items: text += "Неиспользованные товары (напомни): " + ", ".join(unused_items[:5]) + "\n"
             if unused_discounts: text += "Купленные скидки в инвентаре: " + ", ".join(unused_discounts[:3]) + "\n"
-        
+
         if history:
             spends = [h for h in history if h.get("amount", 0) < 0 and "Покупка" in h.get("reason", "")]
             if spends:
@@ -415,7 +418,7 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - НЕ ИСПОЛЬЗУЙ параметр `quantity`.
 
 АНАЛИЗ КАРТИНОК (VISION):
-- Если клиент прислал картинку (скриншот), ты можешь ее видеть. 
+- Если клиент прислал картинку (скриншот), ты можешь ее видеть.
 - Если это чек об оплате — подтверди, что видишь сумму и скажи "Оплата принята".
 - Если это ошибка — попробуй понять, в чем проблема, и предложи решение.
 - Если это просто скриншот товара — используй его для контекста.
@@ -553,10 +556,15 @@ async def _call_single_model(model: str, system_prompt: str, messages: list) -> 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT)) as resp:
-                if resp.status != 200: return {"error": f"HTTP {resp.status}"}
+                if resp.status != 200:
+                    body = await resp.text()
+                    ai_logger.error(f"LLM {model} HTTP {resp.status}: {body[:300]}")
+                    return {"error": f"HTTP {resp.status}"}
                 data = await resp.json()
                 choices = data.get("choices", [])
-                if not choices: return None
+                if not choices:
+                    ai_logger.error(f"LLM {model}: пустой choices: {str(data)[:300]}")
+                    return None
                 msg = choices[0].get("message", {})
                 text = (msg.get("content") or "").strip()
                 tool_calls = msg.get("tool_calls") or []
@@ -569,14 +577,17 @@ async def _call_single_model(model: str, system_prompt: str, messages: list) -> 
                     funcs.append({"name": fn.get("name"), "args": args})
                 return {"text": text, "funcs": funcs}
     except Exception as e:
+        ai_logger.error(f"LLM {model} exception: {e}")
         return {"error": str(e)}
 
 async def call_llm(system_prompt: str, history: list, user_msg: str, image_url: str = None) -> Optional[dict]:
-    if not AI_MANAGER_API_KEY: return None
+    if not AI_MANAGER_API_KEY:
+        ai_logger.error("AI_MANAGER_API_KEY не задан")
+        return None
     messages = []
     for role, text in history[-HISTORY_MAX_MSG:]:
         messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
-    
+
     if image_url:
         content = [
             {"type": "text", "text": user_msg},
@@ -585,7 +596,7 @@ async def call_llm(system_prompt: str, history: list, user_msg: str, image_url: 
         messages.append({"role": "user", "content": content})
     else:
         messages.append({"role": "user", "content": user_msg})
-    
+
     for model in GEMINI_MODELS_PRIORITY:
         res = await _call_single_model(model, system_prompt, messages)
         if res and "error" not in res:
@@ -599,21 +610,21 @@ async def execute_tool(channel, user_id: int, name: str, args: dict) -> str:
     if name == "check_user_balance":
         dc = get_dc_cache(user_id)
         return f"Баланс: {dc.get('balance', 0)} DC"
-        
+
     elif name == "check_promo_code":
         code = args.get("code", "").upper()
         codes = get_promo_codes()
         if code in codes:
             return f"Промокод {code} действителен, скидка: {codes[code]}"
         return f"Промокод {code} не найден."
-        
+
     elif name == "check_past_purchases":
         purchases = await get_user_purchases(user_id, only_unused=False)
         if not purchases:
             return "Покупок не было."
         last = purchases[-3:]
         return "Последние покупки: " + ", ".join([p.get("value", "") for p in last])
-        
+
     elif name == "close_ticket":
         reason = args.get("reason", "Закрыто по просьбе клиента")
         await channel.send(f"🤖 **Тикет закрывается.**\n> Причина: {reason}")
@@ -622,7 +633,7 @@ async def execute_tool(channel, user_id: int, name: str, args: dict) -> str:
             await channel.delete()
         except Exception: pass
         return "Тикет закрыт."
-        
+
     return "Неизвестная функция."
 
 # ============================================================
@@ -631,11 +642,14 @@ async def execute_tool(channel, user_id: int, name: str, args: dict) -> str:
 async def escalate(channel, reason: str, user_question: str = ""):
     if _is_paid_category(channel): return
     sess = get_session(channel.id)
-    if sess is None: create_session(channel.id, 0)
-    elif sess.get("escalated"): return
+    if sess is None:
+        create_session(channel.id, 0)
+        sess = get_session(channel.id)
+    elif sess.get("escalated"):
+        return
     update_session(channel.id, escalated=1)
-    
-    user_id = sess.get("user_id") or 0
+
+    user_id = (sess or {}).get("user_id") or 0
     cur.execute(
         "INSERT INTO ai_escalations (user_id, channel_id, question, reason, created_at) VALUES (?, ?, ?, ?, ?)",
         (user_id, channel.id, user_question[:500], reason[:500], int(time.time()))
@@ -738,7 +752,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
     if not user_text.strip() and not image_url: return
     if _is_paid_category(channel) or _is_coins_category(channel): return
     user_id = author.id
-    
+
     lock = get_lock(channel.id)
     if lock.locked(): return
 
@@ -747,7 +761,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
         if not sess:
             create_session(channel.id, user_id)
             sess = get_session(channel.id)
-        
+
         if sess.get("escalated") or sess.get("abuse_closed") or sess.get("invoice_sent"): return
 
         try:
@@ -769,19 +783,19 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
 
         discount = await get_ticket_discount(channel)
         user_history = _get_user_history_text(user_id)
-        
+
         system_prompt = SYSTEM_PROMPT.format(
             real_catalog=REAL_CATALOG_TEXT,
-            user_name=author.display_name, 
+            user_name=author.display_name,
             discount=discount,
             user_history=user_history
         )
-        
+
         history = hist_load(channel.id)
-        
+
         async with channel.typing():
             result = await call_llm(system_prompt, history, user_text, image_url=image_url)
-            
+
         if not result:
             new_fails = (sess["fail_count"] or 0) + 1
             update_session(channel.id, fail_count=new_fails)
@@ -833,15 +847,15 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
             if name == "create_invoice":
                 fresh_sess = get_session(channel.id)
                 if fresh_sess and fresh_sess.get("invoice_sent"): return
-                    
+
                 items_list = args.get("items", [])
                 if not items_list:
                     await channel.send("⚠️ Не удалось распознать товар.")
                     return
-                    
+
                 upsell_discount = int(args.get("discount_percent", 0))
                 final_discount = max(discount, upsell_discount)
-                
+
                 total_amount = 0
                 receipt_names = []
                 for itm in items_list:
@@ -851,7 +865,7 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                     receipt_names.append(item_name)
 
                 product_display = ", ".join(receipt_names)
-                
+
                 if final_discount > discount:
                     purchases = await get_user_purchases(author.id, only_unused=True)
                     found_inv = False
@@ -886,14 +900,14 @@ async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = Fa
                 await escalate(channel, args.get("reason", "Товар не найден"), user_text)
                 update_session(channel.id, escalated=1)
                 touch_ai_response(channel.id)
-                
+
             else:
                 res_text = await execute_tool(channel, author.id, name, args)
                 await channel.send(f"🤖 {res_text}")
                 touch_ai_response(channel.id)
 
 # ============================================================
-# UI И МОДАЛКИ (ПОЛНЫЙ КОД)
+# UI И МОДАЛКИ
 # ============================================================
 def build_ad_embed(item_name: str) -> disnake.Embed:
     embed = disnake.Embed(
@@ -924,7 +938,7 @@ class AdStartView(ui.View):
                 match = re.search(r"Вы приобрели:\s*\*\*(.+?)\*\*", desc)
                 if match:
                     item_name = match.group(1)
-        
+
         old_title, old_text, old_image = "", "", ""
         async for msg in inter.channel.history(limit=20):
             if msg.author == bot.user and msg.components and any(c.custom_id == "ad_pub_confirm" for row in msg.components for c in row.children):
@@ -961,10 +975,10 @@ class AdTextViewModal(Modal):
         ping = ""
         if "@everyone" in self.item_name: ping = "@everyone"
         elif "@here" in self.item_name: ping = "@here"
-        
+
         is_personal = "Личный канал" in self.item_name
         is_24h = "24ч" in self.item_name
-        
+
         if is_personal:
             embed = disnake.Embed(
                 title="Шаг 2: Название канала",
@@ -975,10 +989,10 @@ class AdTextViewModal(Modal):
             await inter.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
             embed = disnake.Embed(title=f"**{title}**", description=text, color=0x2b2d31)
-            if image: 
+            if image:
                 try: embed.set_image(url=image)
                 except: pass
-            
+
             view = AdPreviewView(self.item_name, title, text, image, ping, is_24h)
             await inter.channel.send(content=f"> **Предпросмотр рекламы:**\n{ping}", embed=embed, view=view)
             await inter.response.send_message("✅ Предпросмотр отправлен. Если что-то не так — измените бриф.", ephemeral=True)
@@ -1000,22 +1014,22 @@ class AdPreviewView(ui.View):
         except: pass
 
         await inter.response.defer(ephemeral=True)
-        
+
         guild = inter.guild
         ad_channel = guild.get_channel(ADS_CHANNEL_ID)
-        if not ad_channel: 
+        if not ad_channel:
             return await inter.followup.send("❌ Канал для рекламы не найден.", ephemeral=True)
 
         embed = disnake.Embed(title=f"**{self.title}**", description=self.text, color=0x2b2d31)
         if self.image:
             try: embed.set_image(url=self.image)
             except: pass
-            
+
         try:
             msg = await ad_channel.send(content=self.ping, embed=embed)
         except Exception as e:
             return await inter.followup.send(f"❌ Ошибка публикации: {e}", ephemeral=True)
-        
+
         expires = int(time.time()) + (24 * 3600) if self.is_24h else 0
         cur.execute("INSERT INTO active_ads (user_id, channel_id, message_id, is_personal, expires_at) VALUES (?, ?, ?, ?, ?)", (inter.author.id, ad_channel.id, msg.id, 0, expires))
         db.commit()
@@ -1057,35 +1071,35 @@ class AdChannelNameModal(Modal):
 
     async def callback(self, inter: disnake.ModalInteraction):
         await inter.response.defer(ephemeral=True)
-        
+
         raw_name = inter.text_values["chan_name"].lower().replace(" ", "-")
         clean_name = re.sub(r"[^a-zа-яё0-9\-_]", "", raw_name)
-        channel_name = f"├┃📚・{clean_name}"[:100] 
-        
+        channel_name = f"├┃📚・{clean_name}"[:100]
+
         if not clean_name: channel_name = f"├┃📚・ad-{inter.author.id}"
-        
+
         guild = inter.guild
         category = guild.get_channel(ADS_CATEGORY_ID)
-        if not category: 
+        if not category:
             return await inter.followup.send("❌ Категория не найдена.", ephemeral=True)
 
         overwrites = {
             guild.default_role: disnake.PermissionOverwrite(read_messages=True, send_messages=False),
             guild.me: disnake.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
         }
-        
+
         try:
             new_channel = await category.create_text_channel(name=channel_name, overwrites=overwrites)
         except Exception as e:
             return await inter.followup.send(f"❌ Ошибка создания: {e}", ephemeral=True)
-        
+
         embed = disnake.Embed(title=f"**{self.title}**", description=self.text, color=0x2b2d31)
         if self.image:
             try: embed.set_image(url=self.image)
             except: pass
-            
+
         msg = await new_channel.send(content=self.ping, embed=embed)
-        
+
         expires = int(time.time()) + (7 * 24 * 3600)
         cur.execute("INSERT INTO active_ads (user_id, channel_id, message_id, is_personal, expires_at) VALUES (?, ?, ?, ?, ?)", (inter.author.id, new_channel.id, msg.id, 1, expires))
         db.commit()
@@ -1096,7 +1110,7 @@ class AdChannelNameModal(Modal):
             color=0x2b2d31
         )
         success_embed.set_image(url=IMG_STRIPE)
-        
+
         await inter.channel.send(embed=success_embed)
 
         try:
@@ -1109,6 +1123,28 @@ class AdChannelNameModal(Modal):
 
         await inter.edit_original_response(content="Канал создан.")
 
+class AIManagerPrefView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @ui.button(label="Изменить состояние", style=ButtonStyle.gray, custom_id="ai_pref:toggle", emoji="🔁", row=0)
+    async def toggle(self, button, inter: disnake.MessageInteraction):
+        await inter.response.defer()
+        new_pref = not get_user_ai_pref(inter.author.id)
+        set_user_ai_pref(inter.author.id, new_pref)
+        embeds = build_ai_pref_embeds(new_pref)
+        if new_pref:
+            row = cur.execute("SELECT reward_claimed FROM ai_manager_user_prefs WHERE user_id=?", (inter.author.id,)).fetchone()
+            if not (row and row["reward_claimed"]):
+                try:
+                    cur.execute("UPDATE ai_manager_user_prefs SET reward_claimed=1 WHERE user_id=?", (inter.author.id,))
+                    db.commit()
+                    await add_dc(inter.author.id, 400, "Бонус за включение AI-Менеджера", notify=False, log=False)
+                    await inter.followup.send("✅ AI-Менеджер включен. **+400 DC** на баланс!", ephemeral=True)
+                except Exception as e:
+                    ai_logger.error(f"Ошибка выдачи бонуса: {e}")
+        await inter.edit_original_response(embeds=embeds, view=AIManagerPrefView())
+        await log_discord(title="🤖 AI Manager: смена состояния", description=f"> **Пользователь:** {inter.author.mention}\n> **Новое состояние:** {'✅ ВКЛ' if new_pref else '❌ ВЫКЛ'}", color=0x00aaff, channel_id=LOG_CHANNEL)
 
 # ============================================================
 # БОТ И СОБЫТИЯ
@@ -1126,9 +1162,10 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v4.0 (FREE MODELS) запущен. Каталог: {count}")
-    
+    ai_logger.info(f"AI Manager v4.0 запущен. Каталог: {count}. Модели: {GEMINI_MODELS_PRIORITY}")
+
     bot.add_view(AdStartView())
+    bot.add_view(AIManagerPrefView())
 
     if not _CLEANUP_STARTED:
         _CLEANUP_STARTED = True
@@ -1159,7 +1196,7 @@ async def on_message(message: disnake.Message):
 
     if isinstance(message.author, disnake.Member) and _is_manager(message.author) and not is_ticket_owner:
         if _is_ai_ticket(channel):
-            if get_user_ai_pref(owner_id) and not _is_paid_category(channel):
+            if owner_id and get_user_ai_pref(owner_id) and not _is_paid_category(channel):
                 return
             else:
                 sess = get_session(channel.id)
@@ -1201,7 +1238,7 @@ async def on_guild_channel_create(channel):
         return
     if channel.category_id != CONFIG.get("COINS_CATEGORY_ID"):
         return
-    
+
     item_name = None
     for _ in range(5):
         async for msg in channel.history(limit=10):
@@ -1214,7 +1251,7 @@ async def on_guild_channel_create(channel):
                 if item_name: break
         if item_name: break
         await asyncio.sleep(2)
-            
+
     if not item_name:
         return
 
@@ -1264,12 +1301,12 @@ async def ads_cleanup_task():
     try:
         now = int(time.time())
         rows = cur.execute("SELECT id, channel_id, message_id, is_personal FROM active_ads WHERE expires_at > 0 AND expires_at <= ?", (now,)).fetchall()
-        
+
         for r in rows:
             cid = r["channel_id"]
             mid = r["message_id"]
             is_personal = r["is_personal"]
-            
+
             ch = bot.get_channel(cid)
             if ch:
                 try:
@@ -1280,11 +1317,11 @@ async def ads_cleanup_task():
                         await msg.delete()
                 except Exception as e:
                     ai_logger.warning(f"Не удалось удалить рекламу (ch={cid}): {e}")
-            
+
             cur.execute("DELETE FROM active_ads WHERE id=?", (r["id"],))
             db.commit()
             ai_logger.info(f"🧹 Удалена истекшая реклама ID={r['id']} (personal={is_personal})")
-            
+
     except Exception as e:
         ai_logger.exception(f"Ошибка в ads_cleanup_task: {e}")
 
@@ -1305,10 +1342,10 @@ async def fallback_task():
         if r["last_manager_msg_ts"] and (now - r["last_manager_msg_ts"]) < MANAGER_SILENCE_SEC: continue
         if (now - (r["last_client_msg_ts"] or 0)) > CLIENT_MAX_SILENCE_SEC: continue
         if not get_user_ai_pref(r["user_id"]) and (now - (r["last_client_msg_ts"] or 0)) < FALLBACK_WAIT_SEC: continue
-        
+
         channel = bot.get_channel(channel_id)
         if not channel or not _is_ai_ticket(channel): continue
-            
+
         fresh_sess = get_session(channel_id)
         if fresh_sess and (fresh_sess.get("invoice_sent") or fresh_sess.get("escalated") or fresh_sess.get("abuse_closed")): continue
 
@@ -1318,7 +1355,7 @@ async def fallback_task():
 
         last_text = hist_last_client_msg(channel_id)
         if not last_text: continue
-            
+
         try:
             member = channel.guild.get_member(r["user_id"])
             if member: await _handle_dialog(channel, member, last_text, is_fallback=True)
@@ -1372,7 +1409,7 @@ async def analytics_task():
     try:
         week_ago = int(time.time()) - 7 * 86400
         rows = cur.execute(
-            "SELECT question, reason FROM ai_escalations WHERE created_at > ?", 
+            "SELECT question, reason FROM ai_escalations WHERE created_at > ?",
             (week_ago,)
         ).fetchall()
 
@@ -1390,20 +1427,20 @@ async def analytics_task():
         text = "📊 **Аналитика ИИ-менеджера за неделю**\n\n"
         text += f"Всего эскалаций (ИИ сдался): **{len(rows)}**\n\n"
         text += "**Топ вопросов, на которые ИИ не смог ответить:**\n"
-        
+
         for i, (q, count) in enumerate(top_q, 1):
             text += f"{i}. {q} (встречался {count} раз)\n"
-            
+
         text += "\n_Возможно, стоит добавить эти товары в каталог или обновить промпт._"
 
         user = bot.get_user(ANALYTICS_USER_ID)
         if not user:
             user = await bot.fetch_user(ANALYTICS_USER_ID)
-            
+
         if user:
             await user.send(text)
             ai_logger.info("📊 Аналитика ИИ-менеджера отправлена в ЛС.")
-            
+
     except Exception as e:
         ai_logger.exception(f"Ошибка в analytics_task: {e}")
 
@@ -1417,7 +1454,7 @@ async def abandoned_carts_task():
             "WHERE invoice_sent=1 AND escalated=0 AND (last_client_msg_ts < ?)",
             (now - 7200,)
         ).fetchall()
-        
+
         for r in rows:
             channel = bot.get_channel(r["channel_id"])
             if channel:
@@ -1425,17 +1462,17 @@ async def abandoned_carts_task():
                     user = bot.get_user(r["user_id"])
                     if not user:
                         user = await bot.fetch_user(r["user_id"])
-                    
+
                     if user:
                         prompt = "Напиши короткое дружелюбное сообщение клиенту, который хотел купить товар в магазине, но не оплатил счет. Предложи помощь, если возникли вопросы. Без навязчивости."
                         res = await call_llm("Ты — вежливый менеджер магазина.", [], prompt)
                         msg_text = res.get("text", "Привет! Заметил, что ты хотел сделать заказ, но не оплатил. Если нужна помощь — я здесь!") if res else "Привет! Заметил, что ты хотел сделать заказ, но не оплатил. Если нужна помощь — я здесь!"
-                        
+
                         await user.send(f"👋 **{msg_text}**")
                         ai_logger.info(f"Отправлено умное напоминание о брошенной корзине {r['user_id']}")
                 except Exception as e:
                     ai_logger.warning(f"abandoned_cart DM {r['user_id']}: {e}")
-                
+
                 cur.execute("UPDATE ai_manager_sessions SET escalated=1 WHERE channel_id=?", (r["channel_id"],))
                 db.commit()
     except Exception as e:
