@@ -42,6 +42,8 @@ AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1"
 # Пул моделей живёт в scripts/models.py (там же env-переопределения и каталог провайдера).
 DIAMOND_AI_MODEL = DIALOG_MODELS[0]  # только для анализа на мат/спам
 
+INITIAL_GREETING_TEXT = "Привет, я буду твоим консультантом по данному тикету, что вы хотели приобрести?"
+
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
 
@@ -326,7 +328,8 @@ def init_ai_manager_tables():
         last_abuse_check_ts INTEGER DEFAULT 0, abuse_closed INTEGER DEFAULT 0,
         post_invoice_text_count INTEGER DEFAULT 0, invoice_amount INTEGER DEFAULT 0,
         invoice_order_id TEXT DEFAULT '', invoice_items TEXT DEFAULT '',
-        invoice_created_at INTEGER DEFAULT 0, receipt_attempts INTEGER DEFAULT 0
+        invoice_created_at INTEGER DEFAULT 0, receipt_attempts INTEGER DEFAULT 0,
+        greeting_sent INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS ai_manager_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id INTEGER NOT NULL,
@@ -368,6 +371,7 @@ def init_ai_manager_tables():
     _ensure_col("ai_manager_sessions", "invoice_items", "invoice_items TEXT DEFAULT ''")
     _ensure_col("ai_manager_sessions", "invoice_created_at", "invoice_created_at INTEGER DEFAULT 0")
     _ensure_col("ai_manager_sessions", "receipt_attempts", "receipt_attempts INTEGER DEFAULT 0")
+    _ensure_col("ai_manager_sessions", "greeting_sent", "greeting_sent INTEGER DEFAULT 0")
 
 def _ensure_col(table: str, column: str, ddl: str):
     try:
@@ -639,6 +643,48 @@ def touch_manager_msg(channel_id: int):
 def touch_ai_response(channel_id: int):
     update_session(channel_id, last_ai_response_ts=int(time.time()))
 
+async def send_initial_greeting(channel_id: int, user_id: int) -> bool:
+    """Отправляет первое сообщение AI-менеджера третьим в новом тикете."""
+    try:
+        sess = get_session(channel_id)
+        if sess and (sess.get("greeting_sent") or sess.get("stub_sent")):
+            return False
+
+        if not bot.is_ready():
+            try:
+                await asyncio.wait_for(bot.wait_until_ready(), timeout=15)
+            except asyncio.TimeoutError:
+                ai_logger.warning(f"initial greeting: AI-менеджер не подключился за 15с ({channel_id})")
+                return False
+
+        channel = bot.get_channel(channel_id)
+        if channel is None:
+            return False
+
+        async with get_lock(channel_id):
+            sess = get_session(channel_id)
+            if sess and (sess.get("greeting_sent") or sess.get("stub_sent")):
+                return False
+
+            create_session(channel_id, user_id)
+            try:
+                await channel.send(INITIAL_GREETING_TEXT)
+            except Exception as e:
+                ai_logger.warning(f"initial greeting send: {e}")
+                return False
+
+            update_session(
+                channel_id,
+                greeting_sent=1,
+                stub_sent=1,
+                last_ai_response_ts=int(time.time()),
+            )
+            hist_append(channel_id, "ai", INITIAL_GREETING_TEXT)
+        return True
+    except Exception as e:
+        ai_logger.warning(f"initial greeting: {e}")
+        return False
+
 def is_ai_muted(channel_id: int) -> bool:
     sess = get_session(channel_id)
     if not sess: return False
@@ -833,6 +879,7 @@ SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в
 - Товары оформляй блоком:
   > **Название** — 460 ₽
 - Если клиент просит категорию без уточнений — покажи ВСЕ варианты с ценами.
+- Приветствие при открытии тикета уже отправлено ботом. Не повторяй его, сразу отвечай на запрос клиента.
 
 ГЛАВНОЕ ПРАВИЛО ПО ЦЕНАМ:
 - Единственный источник цен — КАТАЛОГ ниже.
@@ -1530,6 +1577,10 @@ _CLEANUP_STARTED = False
 @bot.event
 async def on_ready():
     global _CLEANUP_STARTED
+    try:
+        await bot.change_presence(activity=disnake.Game(name="Работаю над заказами!"))
+    except Exception as e:
+        ai_logger.warning(f"presence: {e}")
     count = auto_init()
     ai_logger.info(f"AI Manager v3.1 запущен (pid={os.getpid()}). Каталог: {count}")
     

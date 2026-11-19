@@ -274,6 +274,14 @@ async def _do_close_ticket(inter: disnake.MessageInteraction, check_reviews: boo
     except Exception as e:
         logger.error(f"Ошибка закрытия тикета: {e}")
 
+async def _send_ai_manager_greeting(channel_id: int, user_id: int):
+    """Планирует приветствие AI-менеджера после служебных сообщений тикета."""
+    try:
+        from modules.ai_manager import send_initial_greeting
+        await send_initial_greeting(channel_id, user_id)
+    except Exception as e:
+        logger.warning(f"AI manager greeting: {e}")
+
 async def create_real_ticket(inter: disnake.MessageInteraction):
     user = inter.author
     guild = inter.guild
@@ -340,6 +348,7 @@ async def create_real_ticket(inter: disnake.MessageInteraction):
     await ticket_channel.send(embed=select_embed, view=SelectView())
 
     add_ticket_owner(ticket_channel.id, user.id, cat.id)
+    asyncio.create_task(_send_ai_manager_greeting(ticket_channel.id, user.id))
 
     try:
         ticket_url = f"https://discord.com/channels/{guild.id}/{ticket_channel.id}"
