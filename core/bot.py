@@ -551,7 +551,7 @@ async def abandoned_carts_task(bot):
 @bot.event
 async def on_ready():
     try:
-        await bot.change_presence(activity=disnake.Game(name="Работаю над заказами!"))
+        await bot.change_presence(activity=disnake.Game(name="Магазин и Экономика"))
 
         try:
             from modules.giveaways import setup_giveaways
