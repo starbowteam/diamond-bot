@@ -26,7 +26,6 @@ from modules.dc import (
     CLAN_SHARE,
 )
 from modules.tg_bot import start_tg_bot
-from modules.ai_manager import abandoned_carts_task # 👈 ИМПОРТ ТАСКА
 
 intents = disnake.Intents.default()
 intents.members = True
@@ -476,6 +475,7 @@ async def daily_activity_payout_task():
     except Exception as e:
         logger.exception(f"daily_activity_payout_task: {e}")
 
+# 👇 ИСПРАВЛЕННЫЙ ТАСК (ДОБАВЛЕН bot)
 @tasks.loop(seconds=2)
 async def process_ticket_updates_task(bot):
     await bot.wait_until_ready()
@@ -508,6 +508,45 @@ async def process_ticket_updates_task(bot):
         db.commit()
     except Exception as e:
         logger.error(f"process_ticket_updates_task: {e}")
+
+# 👇 НОВЫЙ ТАСК ДЛЯ СПАСЕНИЯ БРОШЕННЫХ КОРЗИН
+@tasks.loop(minutes=10)
+async def abandoned_carts_task(bot):
+    await bot.wait_until_ready()
+    try:
+        now = int(time.time())
+        # Ищем сессии, где счет был отправлен более 2 часов назад и клиент не оплатил
+        rows = cur.execute(
+            "SELECT channel_id, user_id FROM ai_manager_sessions "
+            "WHERE invoice_sent=1 AND escalated=0 AND (last_client_msg_ts < ?)",
+            (now - 7200,)
+        ).fetchall()
+        
+        for r in rows:
+            channel = bot.get_channel(r["channel_id"])
+            if channel:
+                try:
+                    user = bot.get_user(r["user_id"])
+                    if not user:
+                        user = await bot.fetch_user(r["user_id"])
+                    
+                    if user:
+                        # Даем бонус 3% или просто напоминаем
+                        await user.send(
+                            f"👋 **Привет! Заметил, что ты хотел сделать заказ в магазине, но не оплатил.**\n\n"
+                            f"> Если у тебя возникли вопросы по оплате, дай знать.\n"
+                            f"> Если надумаешь — мы здесь! 😉"
+                        )
+                        logger.info(f"Отправлено напоминание о брошенной корзине {r['user_id']}")
+                except Exception as e:
+                    logger.warning(f"abandoned_cart DM {r['user_id']}: {e}")
+                
+                # Ставим escalated=1, чтобы не спамить
+                cur.execute("UPDATE ai_manager_sessions SET escalated=1 WHERE channel_id=?", (r["channel_id"],))
+                db.commit()
+    except Exception as e:
+        logger.exception(f"abandoned_carts_task: {e}")
+
 
 @bot.event
 async def on_ready():
@@ -1287,6 +1326,7 @@ async def on_voice_state_update(member: disnake.Member, before: disnake.VoiceSta
                     await add_pet_xp(user_id, 5 * hours, "voice")
                 except Exception as e:
                     logger.debug(f"pet xp voice: {e}")
+
 
 async def restart_all_tasks():
     tasks_to_restart = [
