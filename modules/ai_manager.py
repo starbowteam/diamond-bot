@@ -1108,27 +1108,6 @@ class AdChannelNameModal(Modal):
 
         await inter.edit_original_response(content="Канал создан.")
 
-class AIManagerPrefView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @disnake.ui.button(label="Изменить состояние", style=ButtonStyle.gray, custom_id="ai_pref:toggle", emoji="🔁", row=0)
-    async def toggle(self, button, inter: disnake.MessageInteraction):
-        await inter.response.defer()
-        new_pref = not get_user_ai_pref(inter.author.id)
-        set_user_ai_pref(inter.author.id, new_pref)
-        embeds = build_ai_pref_embeds(new_pref)
-        if new_pref:
-            row = cur.execute("SELECT reward_claimed FROM ai_manager_user_prefs WHERE user_id=?", (inter.author.id,)).fetchone()
-            if not (row and "reward_claimed" in row.keys() and row["reward_claimed"]):
-                try:
-                    cur.execute("UPDATE ai_manager_user_prefs SET reward_claimed=1 WHERE user_id=?", (inter.author.id,))
-                    db.commit()
-                    await add_dc(inter.author.id, 400, "Бонус за включение AI-Менеджера", notify=False, log=False)
-                    await inter.followup.send("✅ AI-Менеджер включен. **+400 DC** на баланс!", ephemeral=True)
-                except Exception as e: ai_logger.error(f"Ошибка выдачи бонуса: {e}")
-        await inter.edit_original_response(embeds=embeds, view=AIManagerPrefView())
-        await log_discord(title="🤖 AI Manager: смена состояния", description=f"> **Пользователь:** {inter.author.mention}\n> **Новое состояние:** {'✅ ВКЛ' if new_pref else '❌ ВЫКЛ'}", color=0x00aaff, channel_id=LOG_CHANNEL)
 
 # ============================================================
 # БОТ И СОБЫТИЯ
