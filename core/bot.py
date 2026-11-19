@@ -228,7 +228,7 @@ async def update_review_counter(silent: bool = False):
         if not text_ch:
             logger.warning("update_review_counter: review channel not found")
             return
-        count = 1431
+        count = 1459
         async for m in text_ch.history(limit=None):
             count += 1
         logger.info("Review count: %s", count)
