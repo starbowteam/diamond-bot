@@ -161,6 +161,10 @@ def init_ai_manager_tables():
         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, channel_id INTEGER,
         question TEXT, reason TEXT, created_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS pending_ticket_updates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id INTEGER,
+        discount_text TEXT, created_at INTEGER
+    );
     """)
     db.commit()
 
@@ -1297,7 +1301,7 @@ async def on_guild_channel_create(channel):
 # ТАСКИ
 # ============================================================
 @tasks.loop(minutes=1)
-async def ads_cleanup_task():
+async def ads_cleanup_task(*_):
     try:
         now = int(time.time())
         rows = cur.execute("SELECT id, channel_id, message_id, is_personal FROM active_ads WHERE expires_at > 0 AND expires_at <= ?", (now,)).fetchall()
@@ -1326,7 +1330,7 @@ async def ads_cleanup_task():
         ai_logger.exception(f"Ошибка в ads_cleanup_task: {e}")
 
 @tasks.loop(minutes=1)
-async def fallback_task():
+async def fallback_task(*_):
     await bot.wait_until_ready()
     now = int(time.time())
     rows = cur.execute("""
@@ -1363,7 +1367,7 @@ async def fallback_task():
             ai_logger.exception(f"fallback dialog: {e}")
 
 @tasks.loop(minutes=1)
-async def activity_ping_task():
+async def activity_ping_task(*_):
     await bot.wait_until_ready()
     targets = [CONFIG.get("TICKET_CATEGORY_ID"), CONFIG.get("PAID_CATEGORY_ID")]
     for cat_id in targets:
@@ -1404,7 +1408,7 @@ async def _cleanup_loop():
             ai_logger.exception("cleanup")
 
 @tasks.loop(hours=24)
-async def analytics_task():
+async def analytics_task(*_):
     await bot.wait_until_ready()
     try:
         week_ago = int(time.time()) - 7 * 86400
@@ -1445,7 +1449,7 @@ async def analytics_task():
         ai_logger.exception(f"Ошибка в analytics_task: {e}")
 
 @tasks.loop(minutes=10)
-async def abandoned_carts_task():
+async def abandoned_carts_task(*_):
     await bot.wait_until_ready()
     try:
         now = int(time.time())
