@@ -4,14 +4,19 @@
 
 | Файл | Что делает |
 |---|---|
-| `models.py` | единый список моделей: `DIALOG_MODELS`, `VISION_MODELS`, `CHEAP_MODELS`, `PREMIUM_MODELS`, `ALL_MODELS` |
+| `models.py` | единый список моделей: `DIALOG_MODELS`, `OCR_MODELS`, `CHEAP_MODELS`, `PREMIUM_MODELS`, `ALL_MODELS` |
 | `test_models.py` | проверяет модели по трём тестам: диалог, tool call, чтение чека |
+| `test_model_config.py` | офлайн-тесты пулов: весь каталог в диалоге, OCR отдельно, чек читается OCR-пулом |
 | `apply_model_pools.py` | патчит уже развёрнутый `modules/ai_manager.py`: константы → пулы из `models.py` |
 | `shop_analytics.py` | собирает HTML-отчёт по магазину (heatmap, выручка, чеки, клиенты, цены) |
 | `model_report.json` / `.md` | отчёты последнего прогона (создаются скриптом) |
 
-Бот (`modules/ai_manager.py`) импортирует `DIALOG_MODELS` и `VISION_MODELS` отсюда,
+Бот (`modules/ai_manager.py`) импортирует `DIALOG_MODELS` и `OCR_MODELS` отсюда,
 поэтому менять модели нужно **только в `models.py`** (или через env).
+
+`DIALOG_MODELS` по умолчанию содержит **весь каталог** провайдера (17 моделей):
+первая рабочая отвечает, остальные — фолбэки. `OCR_MODELS` — отдельный пул для
+проверки чеков; переключение на него происходит молча, клиент его не видит.
 
 ## Настройка
 
@@ -26,7 +31,8 @@ AI_MANAGER_BASE_URL=https://api.zveno.ai/v1
 
 ```env
 DIALOG_MODELS="google/gemini-2.0-flash-001,deepseek/deepseek-v4.1-flash"
-VISION_MODELS="google/gemini-3-flash-preview,google/gemini-2.0-flash-001"
+OCR_MODELS="google/gemini-3-flash-preview,google/gemini-2.0-flash-001"
+# VISION_MODELS="..." — старое имя, тоже поддерживается
 ```
 
 ## Запуск тестов
@@ -34,11 +40,16 @@ VISION_MODELS="google/gemini-3-flash-preview,google/gemini-2.0-flash-001"
 ```bash
 cd diamond-bot-main
 
-# все дешёвые модели (free + лёгкие платные), все три теста
+# проверка конфигурации без API-ключа
+python scripts/test_model_config.py
+python scripts/test_models.py --check-config
+
+# весь каталог моделей (17 шт.), все три теста
 python scripts/test_models.py
 
-# только чековые модели
-python scripts/test_models.py --pool vision --tests vision
+# только диалоговый пул или только OCR-пул
+python scripts/test_models.py --pool dialog
+python scripts/test_models.py --pool ocr --tests vision
 
 # конкретные модели
 python scripts/test_models.py --models "qwen/qwen3-4b:free,google/gemini-2.0-flash-001"
@@ -97,7 +108,8 @@ python scripts/apply_model_pools.py --root /app --apply
 1. создаёт `scripts/models.py`, если его нет (существующий не трогает);
 2. заменяет `DIAMOND_AI_MODEL = "..."` на `DIAMOND_AI_MODEL = DIALOG_MODELS[0]`;
 3. удаляет `LAST_RESORT_MODEL` и переключает `call_llm()` на `for model in DIALOG_MODELS`;
-4. проверяет синтаксис и только потом пишет файл, сохранив `ai_manager.py.bak-<дата>`.
+4. импортирует `OCR_MODELS` для отдельной проверки чеков;
+5. проверяет синтаксис и только потом пишет файл, сохранив `ai_manager.py.bak-<дата>`.
 
 Повторный запуск безопасен: если патч уже применён, скрипт так и скажет.
 
@@ -138,8 +150,8 @@ python scripts/shop_analytics.py --months 6 --out report.html
 
 ## Практика
 
-- Free-модели (`:free`) часто отвечают `429` — это нормально, для бота они стоят
-  фолбэками, а не основными.
-- Модель без `vision` в `VISION_MODELS` ставить бессмысленно: чек уйдёт продавцу.
-- После проверки скопируй рабочие ID в `DIALOG_MODELS` / `VISION_MODELS`
+- Free-модели (`:free`) часто отвечают `429` — это нормально, бот автоматически
+  переходит к следующей модели из `DIALOG_MODELS`.
+- Модель без `vision` в `OCR_MODELS` ставить бессмысленно: чек уйдёт продавцу.
+- После проверки скопируй рабочие ID в `DIALOG_MODELS` / `OCR_MODELS`
   в `models.py` — бот подхватит их при следующем старте.

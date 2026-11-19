@@ -7,8 +7,9 @@
   vision — чтение суммы с синтетического чека об оплате.
 
 Запуск (из корня проекта):
-    python scripts/test_models.py                     # дешёвые модели, все тесты
-    python scripts/test_models.py --pool vision       # только чековые модели
+    python scripts/test_models.py                     # все доступные модели, все тесты
+    python scripts/test_models.py --pool dialog       # весь диалоговый пул
+    python scripts/test_models.py --pool ocr          # только чековые OCR/vision-модели
     python scripts/test_models.py --models "qwen/qwen3-4b:free,google/gemini-2.0-flash-001"
     python scripts/test_models.py --tests vision --concurrency 1
     python scripts/test_models.py --dump-receipt receipt_test.png
@@ -57,7 +58,7 @@ def _load_dotenv(path: Path) -> None:
 
 _load_dotenv(ROOT / ".env")
 
-from scripts.models import CHEAP_MODELS, DIALOG_MODELS, VISION_MODELS, pool  # noqa: E402
+from scripts.models import ALL_MODELS, CHEAP_MODELS, DIALOG_MODELS, OCR_MODELS, pool  # noqa: E402
 
 BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
 API_KEY = os.getenv("AI_MANAGER_API_KEY", "").strip()
@@ -447,9 +448,40 @@ def write_md_report(path: Path, results: Dict[str, dict], tests: List[str], pool
 # ============================================================
 # CLI
 # ============================================================
+def check_config() -> int:
+    """Проверяет пулы без запросов к API: весь каталог в диалоге, OCR отдельно."""
+    ok = True
+    print(f"Каталог провайдера: {len(ALL_MODELS)} моделей")
+    print(f"DIALOG_MODELS: {len(DIALOG_MODELS)} моделей")
+    print(f"OCR_MODELS: {len(OCR_MODELS)} моделей")
+
+    missing = [m for m in ALL_MODELS if m not in DIALOG_MODELS]
+    if missing:
+        ok = False
+        print("❌ В DIALOG_MODELS не хватает:")
+        for model in missing:
+            print("   - " + model)
+    else:
+        print("✅ Все модели каталога задействованы в DIALOG_MODELS")
+
+    if not OCR_MODELS:
+        ok = False
+        print("❌ OCR_MODELS пуст — проверка чеков не сможет работать")
+    else:
+        print("✅ OCR_MODELS задан: " + ", ".join(OCR_MODELS))
+
+    if DIALOG_MODELS == OCR_MODELS:
+        ok = False
+        print("❌ DIALOG_MODELS и OCR_MODELS совпадают — отдельного OCR-пула нет")
+    else:
+        print("✅ OCR-пул отдельный от диалогового")
+
+    return 0 if ok else 1
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Проверка моделей AI-менеджера")
-    parser.add_argument("--pool", default="cheap", help="cheap | dialog | vision | premium | all (по умолчанию cheap)")
+    parser.add_argument("--pool", default="all", help="cheap | dialog | ocr | vision | premium | all (по умолчанию all)")
     parser.add_argument("--models", default="", help="свой список через запятую (перекрывает --pool)")
     parser.add_argument("--tests", default="chat,tools,vision", help="chat,tools,vision (по умолчанию все)")
     parser.add_argument("--timeout", type=float, default=60.0, help="таймаут одного запроса, сек")
@@ -458,6 +490,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--md-out", default=str(ROOT / "scripts" / "model_report.md"))
     parser.add_argument("--no-report", action="store_true", help="не писать файлы отчётов")
     parser.add_argument("--dump-receipt", default="", help="сохранить тестовый чек по указанному пути и выйти")
+    parser.add_argument("--check-config", action="store_true", help="проверить пулы моделей без запросов к API")
     return parser.parse_args()
 
 
@@ -511,6 +544,9 @@ def main() -> int:
         build_receipt_image().save(path)
         print(f"Тестовый чек сохранён: {path}")
         return 0
+
+    if args.check_config:
+        return check_config()
 
     if args.models.strip():
         models = [m.strip() for m in args.models.split(",") if m.strip()]

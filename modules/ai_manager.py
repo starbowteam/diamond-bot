@@ -30,7 +30,7 @@ from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_
 from modules.commands_tickets import (
     CustomRoleSetupView, get_user_purchases, remove_purchase
 )
-from scripts.models import DIALOG_MODELS, VISION_MODELS
+from scripts.models import DIALOG_MODELS, OCR_MODELS
 
 # ============================================================
 # КОНСТАНТЫ
@@ -1266,7 +1266,8 @@ async def read_receipt(attachment) -> dict:
         return {"error": "no_key"}
 
     errors = []
-    for model in VISION_MODELS:
+    # Проверка чека всегда идёт через отдельный OCR-пул, а не через DIALOG_MODELS.
+    for model in OCR_MODELS:
         data = await _vision_call(model, b64)
         if not data.get("error"):
             data["model"] = model
