@@ -22,7 +22,7 @@ from disnake.ext import commands, tasks
 
 from core.utils import (
     CONFIG, DATA_DIR, CATALOG_DIR, logger, db, cur,
-    load_json, save_json, now_ts, get_dc_cache, 
+    load_json, save_json, now_ts, get_dc_cache,
     get_ticket_owner,
 )
 from core.catalog import load_catalog_from_db, auto_init
@@ -30,6 +30,7 @@ from modules.tickets import ReceiptView, generate_receipt_png, generate_receipt_
 from modules.commands_tickets import (
     CustomRoleSetupView, get_user_purchases, remove_purchase
 )
+from scripts.models import DIALOG_MODELS, VISION_MODELS
 
 # ============================================================
 # КОНСТАНТЫ
@@ -38,8 +39,8 @@ AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
 
-DIAMOND_AI_MODEL = "google/gemini-3-flash-preview"
-LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"
+# Пул моделей живёт в scripts/models.py (там же env-переопределения и каталог провайдера).
+DIAMOND_AI_MODEL = DIALOG_MODELS[0]  # только для анализа на мат/спам
 
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
@@ -427,10 +428,17 @@ class AdStartView(ui.View):
 class AdTextViewModal(Modal):
     def __init__(self, item_name: str, title: str = "", text: str = "", image: str = ""):
         self.item_name = item_name
+
+        # Discord отклоняет value короче min_length (50035 Invalid Form Body),
+        # поэтому пустые/слишком короткие префиллы не передаём вовсе.
+        title_value = title[:256] if len(title.strip()) >= 2 else None
+        text_value = text[:2000] if len(text.strip()) >= 5 else None
+        image_value = image[:512].strip() or None
+
         super().__init__(title="Бриф рекламы", components=[
-            TextInput(label="Заголовок рекламы (жирный)", placeholder="Например: Мой крутой сервер", custom_id="ad_title", min_length=2, max_length=256, value=title[:256]),
-            TextInput(label="Текст рекламы", placeholder="Опишите проект, добавьте ссылки.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000, value=text[:2000]),
-            TextInput(label="Ссылка на картинку (необязательно)", placeholder="https://...", custom_id="ad_image", required=False, max_length=512, value=image[:512])
+            TextInput(label="Заголовок рекламы (жирный)", placeholder="Например: Мой крутой сервер", custom_id="ad_title", min_length=2, max_length=256, value=title_value),
+            TextInput(label="Текст рекламы", placeholder="Опишите проект, добавьте ссылки.", style=TextInputStyle.paragraph, custom_id="ad_text", min_length=5, max_length=2000, value=text_value),
+            TextInput(label="Ссылка на картинку (необязательно)", placeholder="https://...", custom_id="ad_image", required=False, max_length=512, value=image_value)
         ])
 
     async def callback(self, inter: disnake.ModalInteraction):
@@ -956,11 +964,11 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
         messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
     messages.append({"role": "user", "content": user_msg})
     
-    models_to_try = [DIAMOND_AI_MODEL, LAST_RESORT_MODEL]
-    for model in models_to_try:
+    for model in DIALOG_MODELS:
         res = await _call_single_model(model, system_prompt, messages)
         if res and "error" not in res:
             return res
+        ai_logger.warning(f"LLM {model}: {(res or {}).get('error', 'empty')}")
     return None
 
 async def escalate(channel, reason: str, user_question: str = ""):
@@ -1063,7 +1071,6 @@ async def _auto_confirm_receipt(channel, message, sess, receipt_att=None):
 RECEIPT_TOLERANCE = 1          # допуск в рублях
 RECEIPT_MAX_BYTES = 8 * 1024 * 1024
 RECEIPT_MAX_ATTEMPTS = 3
-RECEIPT_VISION_MODEL = os.getenv("RECEIPT_VISION_MODEL", DIAMOND_AI_MODEL)
 
 RECEIPT_SYSTEM_PROMPT = """Ты читаешь скриншот или PDF из банковского приложения.
 Верни ТОЛЬКО JSON, без markdown и пояснений:
@@ -1143,33 +1150,10 @@ def _fmt_amount(value) -> str:
     return f"{a:.2f}"
 
 
-async def read_receipt(attachment) -> dict:
-    """Отдаёт картинку/PDF vision-модели. Возвращает {doc_type, amount} или {error}."""
-    kind = _media_kind(attachment)
-    if not kind:
-        return {"error": "unsupported"}
-    try:
-        if (attachment.size or 0) > RECEIPT_MAX_BYTES:
-            return {"error": "too_big"}
-        raw = await attachment.read()
-    except Exception as e:
-        return {"error": f"download: {e}"}
-
-    if kind == "image":
-        try:
-            b64 = _to_jpeg_b64(Image.open(io.BytesIO(raw)))
-        except Exception as e:
-            return {"error": f"decode: {e}"}
-    else:
-        b64 = _pdf_first_page_b64(raw)
-        if not b64:
-            return {"error": "pdf"}
-
-    if not AI_MANAGER_API_KEY:
-        return {"error": "no_key"}
-
+async def _vision_call(model: str, b64: str) -> dict:
+    """Один запрос к vision-модели. Возвращает распознанный JSON или {error}."""
     payload = {
-        "model": RECEIPT_VISION_MODEL,  # qwen текстовый — фолбэк на него для картинок запрещён
+        "model": model,
         "messages": [
             {"role": "system", "content": RECEIPT_SYSTEM_PROMPT},
             {"role": "user", "content": [
@@ -1207,6 +1191,43 @@ async def read_receipt(attachment) -> dict:
             return {"error": "bad_json"}
         return parsed if isinstance(parsed, dict) else {"error": "bad_json"}
     return {"error": "request"}
+
+
+async def read_receipt(attachment) -> dict:
+    """Отдаёт картинку/PDF vision-модели. Возвращает {doc_type, amount, model} или {error}."""
+    kind = _media_kind(attachment)
+    if not kind:
+        return {"error": "unsupported"}
+    try:
+        if (attachment.size or 0) > RECEIPT_MAX_BYTES:
+            return {"error": "too_big"}
+        raw = await attachment.read()
+    except Exception as e:
+        return {"error": f"download: {e}"}
+
+    if kind == "image":
+        try:
+            b64 = _to_jpeg_b64(Image.open(io.BytesIO(raw)))
+        except Exception as e:
+            return {"error": f"decode: {e}"}
+    else:
+        b64 = _pdf_first_page_b64(raw)
+        if not b64:
+            return {"error": "pdf"}
+
+    if not AI_MANAGER_API_KEY:
+        return {"error": "no_key"}
+
+    errors = []
+    for model in VISION_MODELS:
+        data = await _vision_call(model, b64)
+        if not data.get("error"):
+            data["model"] = model
+            return data
+        errors.append(f"{model}: {data.get('error')}")
+        ai_logger.warning(f"vision {model}: {data.get('error')}")
+
+    return {"error": "; ".join(errors)[:200] or "vision_failed"}
 
 
 def check_receipt_amount(data: dict, expected: int) -> str:
@@ -1285,7 +1306,7 @@ async def _process_receipt(channel, message, sess):
     ai_logger.info(
         f"Чек {channel.id}: verdict={verdict}, ожидалось={expected}, "
         f"распознано={data.get('amount')} ({data.get('doc_type')}), "
-        f"файл={att.filename}, ошибка={data.get('error')}"
+        f"модель={data.get('model')}, файл={att.filename}, ошибка={data.get('error')}"
     )
 
     if verdict == "ok":
@@ -1510,7 +1531,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v3.1 запущен (pid={os.getpid()}). Каталог: {count}")
     
     bot.add_view(AdStartView())
 
@@ -1750,17 +1771,43 @@ async def _cleanup_loop():
         except Exception:
             ai_logger.exception("cleanup")
 
+ANALYTICS_INTERVAL_SEC = 24 * 3600
+ANALYTICS_LAST_KEY = "ai_analytics_last_ts"
+
+
+def _claim_analytics(now: int) -> bool:
+    """Атомарно ставит метку отправки. True — можно отправлять (прошло >= 24 ч)."""
+    try:
+        cur.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value "
+            "WHERE CAST(settings.value AS INTEGER) <= ?",
+            (ANALYTICS_LAST_KEY, str(now), now - ANALYTICS_INTERVAL_SEC),
+        )
+        db.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        ai_logger.warning(f"analytics claim: {e}")
+        return False
+
+
 @tasks.loop(hours=24)
 async def analytics_task():
-    await bot.wait_until_ready()
     try:
-        week_ago = int(time.time()) - 7 * 86400
+        await bot.wait_until_ready()
+
         rows = cur.execute(
-            "SELECT question, reason FROM ai_escalations WHERE created_at > ?", 
-            (week_ago,)
+            "SELECT question, reason FROM ai_escalations WHERE created_at > ?",
+            (int(time.time()) - 7 * 86400,)
         ).fetchall()
 
         if not rows:
+            return
+
+        # Защита от спама при рестартах: отправляем не чаще одного раза в 24 ч.
+        now = int(time.time())
+        if not _claim_analytics(now):
+            ai_logger.info("📊 Аналитика пропущена: отправляли менее 24 ч назад")
             return
 
         questions = {}
