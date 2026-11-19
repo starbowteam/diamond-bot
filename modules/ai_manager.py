@@ -75,6 +75,72 @@ YES_EMOJI = "<:Yes:1540361827295170722>"
 ADS_CATEGORY_ID = 1568673531900727407
 ADS_CHANNEL_ID = 1553694881564590143
 
+# ── КАРАНТИН МОДЕЛЕЙ ──
+# Провайдер иногда отвечает 404/400 на конкретную модель (её удалили, переименовали
+# или нет доступа). Без карантина бот на КАЖДОЕ сообщение сначала бьётся в мёртвую
+# модель, ждёт ответ и только потом идёт к рабочей. Помеченные модели пропускаем
+# и перепроверяем позже.
+COOLDOWN_MODEL_MISSING = 6 * 60 * 60   # 404/400 — модель недоступна
+COOLDOWN_RATE_LIMIT = 60               # 429 — лимит запросов
+COOLDOWN_TEMP = 120                    # таймаут, 5xx, сеть
+_MODEL_COOLDOWN: Dict[str, float] = {}
+_LAST_GOOD_MODEL: Optional[str] = None
+
+
+def model_cooldown_left(model: str) -> int:
+    """Сколько секунд модель ещё в карантине (0 — можно пробовать)."""
+    until = _MODEL_COOLDOWN.get(model)
+    if not until:
+        return 0
+    left = int(until - time.monotonic())
+    if left <= 0:
+        _MODEL_COOLDOWN.pop(model, None)
+        return 0
+    return left
+
+
+def _cooldown_for_error(error: str) -> int:
+    err = (error or "").lower()
+    if any(k in err for k in ("404", "not found", "no such model", "unknown model",
+                              "model_not_found", "does not exist")):
+        return COOLDOWN_MODEL_MISSING
+    if any(k in err for k in ("400", "unsupported", "invalid model")):
+        return COOLDOWN_MODEL_MISSING
+    if any(k in err for k in ("429", "rate limit", "too many")):
+        return COOLDOWN_RATE_LIMIT
+    return COOLDOWN_TEMP
+
+
+def mark_model_failed(model: str, error: str) -> None:
+    """Ставит модель в карантин, чтобы не дёргать её на каждом сообщении."""
+    if model_cooldown_left(model):
+        return
+    sec = _cooldown_for_error(error)
+    _MODEL_COOLDOWN[model] = time.monotonic() + sec
+    if sec == COOLDOWN_MODEL_MISSING:
+        hint = "модели нет у провайдера — пропускаю"
+    elif sec == COOLDOWN_RATE_LIMIT:
+        hint = "лимит запросов"
+    else:
+        hint = "временная ошибка"
+    ai_logger.warning(f"LLM {model}: {error} ({hint}, пауза {max(1, sec // 60)} мин)")
+
+
+def mark_model_ok(model: str) -> None:
+    """Снимает карантин и один раз пишет в лог, какая модель реально отвечает."""
+    global _LAST_GOOD_MODEL
+    _MODEL_COOLDOWN.pop(model, None)
+    if _LAST_GOOD_MODEL != model:
+        _LAST_GOOD_MODEL = model
+        ai_logger.info(f"LLM отвечает моделью: {model}")
+
+
+def active_models(models: List[str]) -> List[str]:
+    """Пул без моделей в карантине. Если в карантине все — пробуем весь пул."""
+    live = [m for m in models if not model_cooldown_left(m)]
+    return live or list(models)
+
+
 CHANNEL_LOCKS = {}
 def get_lock(channel_id: int) -> asyncio.Lock:
     if channel_id not in CHANNEL_LOCKS:
@@ -734,28 +800,44 @@ def is_potential_abuse(text: str) -> bool:
     t = (text or "").lower()
     return any(w in t for w in ABUSE_WORDS)
 
-async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
-    if not AI_MANAGER_API_KEY: return False, ""
-    sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
-    prompt = f"Проанализируй последние сообщения клиента:\n{sample}\n\nОтветь РОВНО ОДНИМ словом:\n- ABUSE — мат, оскорбления\n- SPAM — флуд\n- NORMAL — нормальный клиент\n"
-    payload = {"model": DIAMOND_AI_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 10}
+async def _simple_call(model: str, prompt: str, max_tokens: int = 10,
+                       timeout: Optional[int] = None) -> dict:
+    """Мини-запрос без тулов (анализ на мат/спам). Возвращает {text} или {error}."""
+    payload = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": max_tokens}
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=ABUSE_TIMEOUT)) as resp:
-                if resp.status != 200: return False, ""
+            async with session.post(url, json=payload, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=timeout or ABUSE_TIMEOUT)) as resp:
+                if resp.status != 200:
+                    return {"error": f"HTTP {resp.status}"}
                 data = await resp.json()
-                choices = data.get("choices", [])
-                if not choices: return False, ""
-                text = (choices[0].get("message", {}).get("content") or "").strip().upper()
-                text = re.sub(r"[^A-Z]", "", text)
-                if "ABUSE" in text: return True, "abuse"
-                if "SPAM" in text: return True, "spam"
-                return False, ""
     except Exception as e:
-        ai_logger.warning(f"check_abuse_llm: {e}")
+        return {"error": str(e)}
+    choices = data.get("choices") or []
+    if not choices:
+        return {"error": "empty"}
+    text = (choices[0].get("message", {}).get("content") or "").strip()
+    return {"text": text}
+
+
+async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
+    if not AI_MANAGER_API_KEY: return False, ""
+    sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
+    prompt = f"Проанализируй последние сообщения клиента:\n{sample}\n\nОтветь РОВНО ОДНИМ словом:\n- ABUSE — мат, оскорбления\n- SPAM — флуд\n- NORMAL — нормальный клиент\n"
+    for model in active_models(DIALOG_MODELS):
+        res = await _simple_call(model, prompt, max_tokens=10)
+        if res.get("error"):
+            mark_model_failed(model, res["error"])
+            continue
+        mark_model_ok(model)
+        text = (res.get("text") or "").upper()
+        text = re.sub(r"[^A-Z]", "", text)
+        if "ABUSE" in text: return True, "abuse"
+        if "SPAM" in text: return True, "spam"
         return False, ""
+    return False, ""
 
 async def _check_and_close_abuse(channel, user_id: int) -> bool:
     sess = get_session(channel.id)
@@ -1011,11 +1093,12 @@ async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional
         messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
     messages.append({"role": "user", "content": user_msg})
     
-    for model in DIALOG_MODELS:
+    for model in active_models(DIALOG_MODELS):
         res = await _call_single_model(model, system_prompt, messages)
         if res and "error" not in res:
+            mark_model_ok(model)
             return res
-        ai_logger.warning(f"LLM {model}: {(res or {}).get('error', 'empty')}")
+        mark_model_failed(model, (res or {}).get("error", "empty"))
     return None
 
 async def escalate(channel, reason: str, user_question: str = ""):
@@ -1267,13 +1350,14 @@ async def read_receipt(attachment) -> dict:
 
     errors = []
     # Проверка чека всегда идёт через отдельный OCR-пул, а не через DIALOG_MODELS.
-    for model in OCR_MODELS:
+    for model in active_models(OCR_MODELS):
         data = await _vision_call(model, b64)
         if not data.get("error"):
+            _MODEL_COOLDOWN.pop(model, None)
             data["model"] = model
             return data
         errors.append(f"{model}: {data.get('error')}")
-        ai_logger.warning(f"vision {model}: {data.get('error')}")
+        mark_model_failed(model, f"vision: {data.get('error')}")
 
     return {"error": "; ".join(errors)[:200] or "vision_failed"}
 

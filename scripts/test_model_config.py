@@ -73,14 +73,19 @@ class ModelPoolsTest(unittest.TestCase):
         read_receipt = self.source.split("async def read_receipt", 1)[1].split(
             "async def check_receipt_amount", 1
         )[0]
-        self.assertIn("for model in OCR_MODELS:", read_receipt)
-        self.assertNotIn("for model in DIALOG_MODELS:", read_receipt)
+        self.assertIn("active_models(OCR_MODELS)", read_receipt)
+        self.assertNotIn("active_models(DIALOG_MODELS)", read_receipt)
 
     def test_dialog_uses_dialog_pool(self):
         call_llm = self.source.split("async def call_llm", 1)[1].split(
             "async def escalate", 1
         )[0]
-        self.assertIn("for model in DIALOG_MODELS:", call_llm)
+        self.assertIn("active_models(DIALOG_MODELS)", call_llm)
+
+    def test_dead_models_are_quarantined(self):
+        self.assertIn("def mark_model_failed", self.source)
+        self.assertIn("def active_models", self.source)
+        self.assertIn("COOLDOWN_MODEL_MISSING", self.source)
 
     def test_last_resort_constant_removed(self):
         self.assertNotIn("LAST_RESORT_MODEL", self.source)
