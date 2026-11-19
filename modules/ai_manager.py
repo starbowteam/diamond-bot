@@ -35,14 +35,25 @@ AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://token-shop.online/v1").rstrip("/")
 
-# Первая модель — основная (читает картинки, для чеков).
-# Следующие — запасные, пробуются по порядку при сбое.
-GEMINI_MODELS_PRIORITY = [
-    "grok-4.7",
+# Порядок важен: первая модель основная, остальные пробуются при сбое.
+# Дорогие модели (claude-opus/sonnet/fable, gpt-5.5, gpt-6-*) не включены.
+# Чтобы добавить их как последний резерв, допишите в конец списка.
+LLM_MODELS = [
+    "grok-4.7",                 # читает картинки, для чеков
     "deepseek-v4-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gpt-5.4-mini",
+    "claude-haiku-4-5-20251001",
+    "glm-5.3",
+    "gpt-oss-120b",
 ]
+GEMINI_MODELS_PRIORITY = LLM_MODELS  # алиас для совместимости с остальным кодом
 
-LLM_TIMEOUT = 30
+LLM_TIMEOUT = 20
+LLM_MAX_TOKENS = 400           # низкие настройки: короткие ответы, дешевле
+LLM_TEMPERATURE = 0.1
+LLM_RETRY_ON_5XX = 1           # повтор той же модели при 502/503/504/429
 ABUSE_TIMEOUT = 10
 
 SELLER_ROLE = 1471844291595731016
@@ -275,26 +286,30 @@ async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
     if not AI_MANAGER_API_KEY: return False, ""
     sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
     prompt = f"Проанализируй последние сообщения клиента:\n{sample}\n\nОтветь РОВНО ОДНИМ словом:\n- ABUSE — мат, оскорбления\n- SPAM — флуд\n- NORMAL — нормальный клиент\n"
-    payload = {"model": GEMINI_MODELS_PRIORITY[0], "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 10}
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=ABUSE_TIMEOUT)) as resp:
-                if resp.status != 200:
-                    ai_logger.error(f"check_abuse_llm HTTP {resp.status}: {(await resp.text())[:300]}")
+
+    # Проверка короткая, поэтому пробуем несколько дешёвых моделей по очереди
+    for model in LLM_MODELS[:3]:
+        payload = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 10}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=ABUSE_TIMEOUT)) as resp:
+                    if resp.status != 200:
+                        ai_logger.error(f"check_abuse_llm {model} HTTP {resp.status}: {(await resp.text())[:300]}")
+                        continue
+                    data = await resp.json()
+                    choices = data.get("choices", [])
+                    if not choices: continue
+                    text = (choices[0].get("message", {}).get("content") or "").strip().upper()
+                    text = re.sub(r"[^A-Z]", "", text)
+                    if "ABUSE" in text: return True, "abuse"
+                    if "SPAM" in text: return True, "spam"
                     return False, ""
-                data = await resp.json()
-                choices = data.get("choices", [])
-                if not choices: return False, ""
-                text = (choices[0].get("message", {}).get("content") or "").strip().upper()
-                text = re.sub(r"[^A-Z]", "", text)
-                if "ABUSE" in text: return True, "abuse"
-                if "SPAM" in text: return True, "spam"
-                return False, ""
-    except Exception as e:
-        ai_logger.warning(f"check_abuse_llm: {e}")
-        return False, ""
+        except Exception as e:
+            ai_logger.warning(f"check_abuse_llm {model}: {e}")
+            continue
+    return False, ""
 
 async def _check_and_close_abuse(channel, user_id: int) -> bool:
     sess = get_session(channel.id)
@@ -554,7 +569,14 @@ TOOLS_OPENAI = [
 ]
 
 async def _call_single_model(model: str, system_prompt: str, messages: list) -> Optional[dict]:
-    payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}] + messages, "tools": TOOLS_OPENAI, "tool_choice": "auto", "temperature": 0.1, "max_tokens": 800}
+    payload = {
+        "model": model,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "tools": TOOLS_OPENAI,
+        "tool_choice": "auto",
+        "temperature": LLM_TEMPERATURE,
+        "max_tokens": LLM_MAX_TOKENS,
+    }
     url = f"{AI_MANAGER_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
     try:
@@ -568,7 +590,7 @@ async def _call_single_model(model: str, system_prompt: str, messages: list) -> 
                 choices = data.get("choices", [])
                 if not choices:
                     ai_logger.error(f"LLM {model}: пустой choices: {str(data)[:300]}")
-                    return None
+                    return {"error": "empty_choices"}
                 msg = choices[0].get("message", {})
                 text = (msg.get("content") or "").strip()
                 tool_calls = msg.get("tool_calls") or []
@@ -579,10 +601,24 @@ async def _call_single_model(model: str, system_prompt: str, messages: list) -> 
                     try: args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     except Exception: args = {}
                     funcs.append({"name": fn.get("name"), "args": args})
-                return {"text": text, "funcs": funcs}
+                return {"text": text, "funcs": funcs, "model": model}
     except Exception as e:
         ai_logger.error(f"LLM {model} exception: {e}")
         return {"error": str(e)}
+
+async def _call_model_with_retry(model: str, system_prompt: str, messages: list) -> Optional[dict]:
+    res = None
+    for attempt in range(LLM_RETRY_ON_5XX + 1):
+        res = await _call_single_model(model, system_prompt, messages)
+        if res and "error" not in res:
+            return res
+        err = str((res or {}).get("error", ""))
+        # Повторяем только на временные ошибки апстрима; 4xx и прочее — сразу дальше
+        if not (err.startswith("HTTP 5") or err.startswith("HTTP 429")):
+            break
+        if attempt < LLM_RETRY_ON_5XX:
+            await asyncio.sleep(1.5)
+    return res
 
 async def call_llm(system_prompt: str, history: list, user_msg: str, image_url: str = None) -> Optional[dict]:
     if not AI_MANAGER_API_KEY:
@@ -601,10 +637,11 @@ async def call_llm(system_prompt: str, history: list, user_msg: str, image_url: 
     else:
         messages.append({"role": "user", "content": user_msg})
 
-    for model in GEMINI_MODELS_PRIORITY:
-        res = await _call_single_model(model, system_prompt, messages)
+    for model in LLM_MODELS:
+        res = await _call_model_with_retry(model, system_prompt, messages)
         if res and "error" not in res:
             return res
+    ai_logger.error("Все модели недоступны, ответа нет")
     return None
 
 # ============================================================
@@ -1166,7 +1203,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v4.0 запущен. Каталог: {count}. Модели: {GEMINI_MODELS_PRIORITY}")
+    ai_logger.info(f"AI Manager v4.0 запущен. Каталог: {count}. Модели: {LLM_MODELS}")
 
     bot.add_view(AdStartView())
     bot.add_view(AIManagerPrefView())
