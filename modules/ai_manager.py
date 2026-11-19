@@ -3,6 +3,7 @@ import os
 import re
 import json
 import time
+import base64
 import math
 import asyncio
 import logging
@@ -28,14 +29,17 @@ from modules.commands_tickets import (
 )
 
 # ============================================================
-# КОНСТАНТЫ
+# КОНСТАНТЫ (БЕСПЛАТНЫЕ МОДЕЛИ)
 # ============================================================
 AI_MANAGER_TOKEN = os.getenv("AI_MANAGER_TOKEN")
 AI_MANAGER_API_KEY = os.getenv("AI_MANAGER_API_KEY")
 AI_MANAGER_BASE_URL = os.getenv("AI_MANAGER_BASE_URL", "https://api.zveno.ai/v1").rstrip("/")
 
-DIAMOND_AI_MODEL = "google/gemini-3-flash-preview"
-LAST_RESORT_MODEL = "qwen/qwen-2.5-72b-instruct"
+GEMINI_MODELS_PRIORITY = [
+    "google/gemini-2.0-flash-001",
+    "google/gemini-2.5-flash-preview",
+    "google/gemini-1.5-flash",
+]
 
 LLM_TIMEOUT = 30
 ABUSE_TIMEOUT = 10
@@ -106,32 +110,29 @@ async def log_discord(title: str, description: str, color: int = 0x00ff00, chann
         ai_logger.warning(f"log_discord: {e}")
 
 # ============================================================
-# ПАРСЕР РЕАЛЬНОГО КАТАЛОГА
+# ПАРСЕР КАТАЛОГА
 # ============================================================
 def build_real_catalog_text():
     files = glob.glob(os.path.join(CATALOG_DIR, "menu_*.json"))
     lines = []
     for f in files:
-        if "shop_catalog" in f: 
-            continue
+        if "shop_catalog" in f: continue
         try:
             with open(f, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
             for e in data.get("embeds", []):
                 title = e.get("title", "")
-                if title: 
-                    lines.append(f"\n--- {title} ---")
+                if title: lines.append(f"\n--- {title} ---")
                 for field in e.get("fields", []):
                     name = field.get("name", "").replace("*", "").replace(">", "").strip()
                     value = field.get("value", "").replace("`", "").strip()
                     if name and value:
                         lines.append(f"  • {name} [НАША ЦЕНА: {value}]")
-        except Exception:
-            pass
+        except Exception: pass
     return "\n".join(lines)
 
 # ============================================================
-# БД И МИГРАЦИИ
+# БД И СЕССИИ
 # ============================================================
 def init_ai_manager_tables():
     cur.executescript("""
@@ -151,23 +152,13 @@ def init_ai_manager_tables():
     );
     CREATE INDEX IF NOT EXISTS idx_ai_hist_channel ON ai_manager_history(channel_id, id);
     CREATE TABLE IF NOT EXISTS ai_manager_user_prefs (user_id INTEGER PRIMARY KEY, enabled INTEGER DEFAULT 1);
-    
     CREATE TABLE IF NOT EXISTS active_ads (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        channel_id INTEGER,
-        message_id INTEGER,
-        is_personal INTEGER DEFAULT 0,
-        expires_at INTEGER
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, channel_id INTEGER,
+        message_id INTEGER, is_personal INTEGER DEFAULT 0, expires_at INTEGER
     );
-    
     CREATE TABLE IF NOT EXISTS ai_escalations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        channel_id INTEGER,
-        question TEXT,
-        reason TEXT,
-        created_at INTEGER
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, channel_id INTEGER,
+        question TEXT, reason TEXT, created_at INTEGER
     );
     """)
     db.commit()
@@ -192,8 +183,716 @@ def _ensure_col(table: str, column: str, ddl: str):
 
 init_ai_manager_tables()
 
+def get_session(channel_id: int) -> Optional[dict]:
+    row = cur.execute("SELECT * FROM ai_manager_sessions WHERE channel_id=?", (channel_id,)).fetchone()
+    return dict(row) if row else None
+
+def create_session(channel_id: int, user_id: int):
+    now = int(time.time())
+    cur.execute(
+        "INSERT OR IGNORE INTO ai_manager_sessions (channel_id, user_id, message_count, fail_count, started_at, escalated, receipt_url, created_at, stub_sent, invoice_sent, last_client_msg_ts, last_manager_msg_ts, last_ai_response_ts, post_invoice_text_count) VALUES (?, ?, 0, 0, ?, 0, '', ?, 0, 0, 0, 0, 0, 0)",
+        (channel_id, user_id, now, now),
+    )
+    db.commit()
+
+def update_session(channel_id: int, **kwargs):
+    if not kwargs: return
+    fields = ", ".join(f"{k}=?" for k in kwargs.keys())
+    values = list(kwargs.values()) + [channel_id]
+    cur.execute(f"UPDATE ai_manager_sessions SET {fields} WHERE channel_id=?", values)
+    db.commit()
+
+def touch_client_msg(channel_id: int, user_id: int):
+    sess = get_session(channel_id)
+    if not sess: create_session(channel_id, user_id)
+    update_session(channel_id, last_client_msg_ts=int(time.time()))
+
+def touch_manager_msg(channel_id: int):
+    sess = get_session(channel_id)
+    if not sess: return
+    update_session(channel_id, last_manager_msg_ts=int(time.time()))
+
+def touch_ai_response(channel_id: int):
+    update_session(channel_id, last_ai_response_ts=int(time.time()))
+
+def is_ai_muted(channel_id: int) -> bool:
+    sess = get_session(channel_id)
+    if not sess: return False
+    lmt = sess.get("last_manager_msg_ts") or 0
+    if not lmt: return False
+    return (int(time.time()) - lmt) < MANAGER_SILENCE_SEC
+
+def hist_load(channel_id: int, ttl_sec: int = HISTORY_TTL_SEC, limit: int = HISTORY_MAX_MSG):
+    cutoff = int(time.time()) - ttl_sec
+    rows = cur.execute("SELECT role, content, created_at FROM ai_manager_history WHERE channel_id=? AND created_at >= ? ORDER BY id DESC LIMIT ?", (channel_id, cutoff, limit)).fetchall()
+    return [(r["role"], r["content"]) for r in reversed(rows)]
+
+def hist_append(channel_id: int, role: str, content: str):
+    if not content: return
+    cur.execute("INSERT INTO ai_manager_history (channel_id, role, content, created_at) VALUES (?,?,?,?)", (channel_id, role, content[:2000], int(time.time())))
+    db.commit()
+
+def hist_clear(channel_id: int):
+    cur.execute("DELETE FROM ai_manager_history WHERE channel_id=?", (channel_id,))
+    db.commit()
+
+def hist_last_client_msg(channel_id: int) -> Optional[str]:
+    row = cur.execute("SELECT content FROM ai_manager_history WHERE channel_id=? AND role='user' ORDER BY id DESC LIMIT 1", (channel_id,)).fetchone()
+    return row["content"] if row else None
+
+def hist_recent_user(channel_id: int, window_sec: int = SPAM_WINDOW_SEC, limit: int = 10) -> List[str]:
+    cutoff = int(time.time()) - window_sec
+    rows = cur.execute("SELECT content FROM ai_manager_history WHERE channel_id=? AND role='user' AND created_at > ? ORDER BY id DESC LIMIT ?", (channel_id, cutoff, limit)).fetchall()
+    return [r["content"] for r in rows]
+
+DEBOUNCE: Dict[int, dict] = {}
+
+async def _debounce_flush(channel, user, gen: int, delay: float = DEBOUNCE_SEC):
+    try:
+        await asyncio.sleep(delay)
+        state = DEBOUNCE.get(channel.id)
+        if not state or state.get("gen") != gen: return
+        msgs = state.get("messages", [])
+        image = state.get("image")
+        DEBOUNCE.pop(channel.id, None)
+        combined = "\n".join(m for m in msgs if m).strip()
+        if not combined and not image: return
+        await _handle_dialog(channel, user, combined, image_url=image)
+    except asyncio.CancelledError: raise
+    except Exception: ai_logger.exception("debounce_flush")
+
+def is_potential_abuse(text: str) -> bool:
+    t = (text or "").lower()
+    return any(w in t for w in ABUSE_WORDS)
+
+async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
+    if not AI_MANAGER_API_KEY: return False, ""
+    sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
+    prompt = f"Проанализируй последние сообщения клиента:\n{sample}\n\nОтветь РОВНО ОДНИМ словом:\n- ABUSE — мат, оскорбления\n- SPAM — флуд\n- NORMAL — нормальный клиент\n"
+    payload = {"model": GEMINI_MODELS_PRIORITY[0], "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 10}
+    url = f"{AI_MANAGER_BASE_URL}/chat/completions"
+    headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=ABUSE_TIMEOUT)) as resp:
+                if resp.status != 200: return False, ""
+                data = await resp.json()
+                choices = data.get("choices", [])
+                if not choices: return False, ""
+                text = (choices[0].get("message", {}).get("content") or "").strip().upper()
+                text = re.sub(r"[^A-Z]", "", text)
+                if "ABUSE" in text: return True, "abuse"
+                if "SPAM" in text: return True, "spam"
+                return False, ""
+    except Exception as e:
+        ai_logger.warning(f"check_abuse_llm: {e}")
+        return False, ""
+
+async def _check_and_close_abuse(channel, user_id: int) -> bool:
+    sess = get_session(channel.id)
+    if not sess or sess.get("abuse_closed"): return False
+    last_check = sess.get("last_abuse_check_ts") or 0
+    now = int(time.time())
+    if now - last_check < ABUSE_COOLDOWN_SEC: return False
+    texts = hist_recent_user(channel.id, window_sec=SPAM_WINDOW_SEC, limit=10)
+    if not texts: return False
+    has_abuse_word = any(is_potential_abuse(t) for t in texts)
+    many_short = (len(texts) >= SPAM_SHORT_COUNT and all(len(t.strip()) < 15 for t in texts[:SPAM_SHORT_COUNT]))
+    if not (has_abuse_word or many_short): return False
+    update_session(channel.id, last_abuse_check_ts=now)
+    is_abuse, reason = await check_abuse_llm(texts)
+    if not is_abuse: return False
+    update_session(channel.id, abuse_closed=1)
+    await close_ticket_abuse(channel, reason, user_id)
+    return True
+
+async def close_ticket_abuse(channel, reason: str, user_id: int):
+    try:
+        embed = disnake.Embed(title="🚫 Тикет закрыт автоматически", description=f"> **Причина:** {'неадекватное поведение' if reason == 'abuse' else 'спам / флуд'}", color=0xed4245)
+        await channel.send(embed=embed)
+        await asyncio.sleep(5)
+        await channel.delete(reason=f"AI: {reason}")
+        ai_logger.warning(f"🤖 AI закрыл тикет {channel.id} по причине {reason}")
+        await log_discord(title=f"🚫 AI закрыл тикет ({reason})", description=f"> **Канал:** `{channel.name}` (`{channel.id}`)\n> **Клиент:** <@{user_id}>", color=0xed4245, channel_id=LOG_CHANNEL)
+    except Exception as e:
+        ai_logger.exception(f"close_ticket_abuse: {e}")
+
+def _is_paid_category(channel) -> bool:
+    return channel.category and channel.category.id == CONFIG.get("PAID_CATEGORY_ID")
+
+def _is_coins_category(channel) -> bool:
+    return channel.category and channel.category.id == CONFIG.get("COINS_CATEGORY_ID")
+
+def _is_real_category(channel) -> bool:
+    return channel.category and channel.category.id == CONFIG.get("TICKET_CATEGORY_ID")
+
+def _is_ai_ticket(channel) -> bool:
+    if _is_paid_category(channel): return False
+    if _is_coins_category(channel): return False
+    if _is_real_category(channel): return True
+    return bool(get_ticket_owner(channel.id))
+
+def _is_manager(member) -> bool:
+    return member.id in OWNER_IDS or any(r.id == SELLER_ROLE for r in getattr(member, "roles", []))
+
+async def get_ticket_discount(channel) -> int:
+    try:
+        async for msg in channel.history(limit=50):
+            if msg.author.bot and msg.embeds and len(msg.embeds) >= 2:
+                for field in msg.embeds[1].fields:
+                    if "скидка" in field.name.lower():
+                        val = field.value.strip("`\n ")
+                        if val in ("", "Не активирована", "Не введён", "Не активирован"):
+                            return 0
+                        m = re.search(r"(\d+)", val)
+                        return int(m.group(1)) if m else 10
+    except Exception: pass
+    return 0
+
+async def _update_ticket_discount_embed(channel, discount_str: str):
+    try:
+        cur.execute(
+            "INSERT INTO pending_ticket_updates (channel_id, discount_text, created_at) VALUES (?, ?, ?)",
+            (channel.id, discount_str, int(time.time()))
+        )
+        db.commit()
+        ai_logger.info(f"📝 Задача на обновление эмбеда со скидкой {discount_str} отправлена в БД.")
+    except Exception as e:
+        ai_logger.warning(f"Ошибка при создании задачи обновления эмбеда: {e}")
+
 # ============================================================
-# СИСТЕМА РЕКЛАМЫ
+# ИСТОРИЯ КЛИЕНТА
+# ============================================================
+def _get_user_history_text(user_id: int) -> str:
+    try:
+        dc = get_dc_cache(user_id)
+        balance = dc.get("balance", 0)
+        purchases = dc.get("purchases", [])
+        history = dc.get("history", [])
+
+        text = f"Баланс: {balance} DC.\n"
+        
+        if purchases:
+            unused_items = [p.get("value") for p in purchases if not p.get("used") and p.get("type") != "discounts"]
+            unused_discounts = [p.get("value") for p in purchases if not p.get("used") and p.get("type") == "discounts"]
+            
+            if unused_items: text += "Неиспользованные товары (напомни): " + ", ".join(unused_items[:5]) + "\n"
+            if unused_discounts: text += "Купленные скидки в инвентаре: " + ", ".join(unused_discounts[:3]) + "\n"
+        
+        if history:
+            spends = [h for h in history if h.get("amount", 0) < 0 and "Покупка" in h.get("reason", "")]
+            if spends:
+                last_buys = [h.get("reason", "").replace("Покупка: ", "") for h in spends[-3:]]
+                text += "Последние покупки: " + ", ".join(last_buys) + "\n"
+
+        return text.strip()
+    except Exception as e:
+        ai_logger.warning(f"_get_user_history_text: {e}")
+        return "История недоступна."
+
+# ============================================================
+# СИСТЕМНЫЙ ПРОМПТ
+# ============================================================
+REAL_CATALOG_TEXT = build_real_catalog_text()
+
+SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете. задача — помочь клиенту оформить заказ, как живой помощник.
+
+ПРАВИЛА ОБЩЕНИЯ:
+- Пиши коротко, по делу, как живой менеджер. Без эмодзи.
+- Форматирование Discord: **жирный**, *курсив*, > цитаты, `код`.
+- Товары оформляй блоком:
+  > **Название** — 460 ₽
+- Если клиент просит категорию без уточнений — покажи ВСЕ варианты с ценами.
+
+ГЛАВНОЕ ПРАВИЛО ПО ЦЕНАМ:
+- В каталоге ниже некоторые товары имеют ДВЕ цены: цена Discord (в скобках) и НАША ЦЕНА (указана как `[НАША ЦЕНА: XXX]`).
+- Для выставления счета ВСЕГДА бери **НАШУ ЦЕНУ**.
+
+ПРАВИЛА ДЛЯ ТОВАРОВ С КОЛИЧЕСТВОМ:
+- Если клиент покупает несколько штук, умножь цену за 1 шт на количество и укажи ИТОГОВУЮ сумму в `price`.
+- В `item_name` укажи название и количество.
+- НЕ ИСПОЛЬЗУЙ параметр `quantity`.
+
+АНАЛИЗ КАРТИНОК (VISION):
+- Если клиент прислал картинку (скриншот), ты можешь ее видеть. 
+- Если это чек об оплате — подтверди, что видишь сумму и скажи "Оплата принята".
+- Если это ошибка — попробуй понять, в чем проблема, и предложи решение.
+- Если это просто скриншот товара — используй его для контекста.
+
+ИСТОРИЯ КЛИЕНТА:
+{user_history}
+- Если у клиента висят неиспользованные товары, деликатно напомни ему об этом.
+- Если у клиента есть купленная скидка, можешь предложить применить её.
+
+ИНСТРУМЕНТЫ (FUNCTION CALLING):
+- Ты можешь использовать инструменты, чтобы проверить баланс, промокод или историю покупок.
+- Если клиент говорит "У меня есть промокод", используй `check_promo_code`.
+- Если клиент спрашивает "Сколько у меня DC?", используй `check_user_balance`.
+- Если хочешь узнать, что клиент покупал раньше, используй `check_past_purchases`.
+- Если клиент согласен закрыть тикет (все вопросы решены), можешь использовать `close_ticket`.
+
+УМНЫЙ UPSELL:
+- Если сумма заказа превышает 750₽:
+  1. Предложи клиенту скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ сопутствующий товар.
+  2. Предлагай ЛОГИЧНЫЕ товары (если берет Нитро — предложи Бусты; если Робуксы — предложи Роблокс Плюс).
+  3. Если клиент соглашается, СНАЧАЛА добавь новый товар в корзину.
+  4. При вызове `create_invoice` передай параметр `discount_percent: 5`.
+
+ГЛАВНОЕ ПРАВИЛО ПЕРЕД СЧЁТОМ:
+- Сначала спроси: «Выставить счёт на <товар> за <цена>?»
+- Жди явного подтверждения.
+- Только после подтверждения — вызывай create_invoice.
+
+ОЦЕНКА УВЕРЕННОСТИ:
+- В КОНЦЕ КАЖДОГО своего ответа добавляй строку `[CONFIDENCE: XX%]` (где XX — твоя уверенность от 0 до 100).
+- Если ты не уверен в ответе, ставь низкую уверенность.
+
+ЗАПРЕТ НА DC (В ТИКЕТАХ ЗА РЕАЛ):
+- В этом тикете ты продаешь ТОЛЬКО за реальные деньги (рубли).
+- Если клиент просит что-то купить за DC, скажи: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop)."
+
+КАТАЛОГ:
+{real_catalog}
+
+контекст:
+- клиент: {user_name}
+- скидка в тикете (уже применена кнопкой): {discount}%
+"""
+
+TOOLS_OPENAI = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_invoice",
+            "description": "Выставить счёт. Можно передать ОДИН ИЛИ НЕСКОЛЬКО товаров в массиве items.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "item_name": {"type": "string", "description": "Название товара"},
+                                "price": {"type": "number", "description": "ИТОГОВАЯ цена в рублях"}
+                            },
+                            "required": ["item_name", "price"]
+                        }
+                    },
+                    "discount_percent": {"type": "integer", "description": "Процент скидки (UpSell или скидка из инвентаря)", "default": 0}
+                },
+                "required": ["items"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_user_balance",
+            "description": "Проверить баланс DC клиента.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_promo_code",
+            "description": "Проверить промокод и получить размер скидки.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Промокод"}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_past_purchases",
+            "description": "Посмотреть последние покупки клиента.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "escalate_to_human",
+            "description": "Позвать продавца.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string"}
+                },
+                "required": ["reason"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "close_ticket",
+            "description": "Закрыть тикет, если клиент согласен.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string"}
+                },
+                "required": ["reason"]
+            }
+        }
+    }
+]
+
+async def _call_single_model(model: str, system_prompt: str, messages: list) -> Optional[dict]:
+    payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}] + messages, "tools": TOOLS_OPENAI, "tool_choice": "auto", "temperature": 0.1, "max_tokens": 800}
+    url = f"{AI_MANAGER_BASE_URL}/chat/completions"
+    headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT)) as resp:
+                if resp.status != 200: return {"error": f"HTTP {resp.status}"}
+                data = await resp.json()
+                choices = data.get("choices", [])
+                if not choices: return None
+                msg = choices[0].get("message", {})
+                text = (msg.get("content") or "").strip()
+                tool_calls = msg.get("tool_calls") or []
+                funcs = []
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    raw_args = fn.get("arguments", "{}")
+                    try: args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except Exception: args = {}
+                    funcs.append({"name": fn.get("name"), "args": args})
+                return {"text": text, "funcs": funcs}
+    except Exception as e:
+        return {"error": str(e)}
+
+async def call_llm(system_prompt: str, history: list, user_msg: str, image_url: str = None) -> Optional[dict]:
+    if not AI_MANAGER_API_KEY: return None
+    messages = []
+    for role, text in history[-HISTORY_MAX_MSG:]:
+        messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
+    
+    if image_url:
+        content = [
+            {"type": "text", "text": user_msg},
+            {"type": "image_url", "image_url": {"url": image_url}}
+        ]
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": user_msg})
+    
+    for model in GEMINI_MODELS_PRIORITY:
+        res = await _call_single_model(model, system_prompt, messages)
+        if res and "error" not in res:
+            return res
+    return None
+
+# ============================================================
+# ИНСТРУМЕНТЫ (ВЫПОЛНЕНИЕ)
+# ============================================================
+async def execute_tool(channel, user_id: int, name: str, args: dict) -> str:
+    if name == "check_user_balance":
+        dc = get_dc_cache(user_id)
+        return f"Баланс: {dc.get('balance', 0)} DC"
+        
+    elif name == "check_promo_code":
+        code = args.get("code", "").upper()
+        codes = get_promo_codes()
+        if code in codes:
+            return f"Промокод {code} действителен, скидка: {codes[code]}"
+        return f"Промокод {code} не найден."
+        
+    elif name == "check_past_purchases":
+        purchases = await get_user_purchases(user_id, only_unused=False)
+        if not purchases:
+            return "Покупок не было."
+        last = purchases[-3:]
+        return "Последние покупки: " + ", ".join([p.get("value", "") for p in last])
+        
+    elif name == "close_ticket":
+        reason = args.get("reason", "Закрыто по просьбе клиента")
+        await channel.send(f"🤖 **Тикет закрывается.**\n> Причина: {reason}")
+        await asyncio.sleep(3)
+        try:
+            await channel.delete()
+        except Exception: pass
+        return "Тикет закрыт."
+        
+    return "Неизвестная функция."
+
+# ============================================================
+# ЭСКАЛАЦИЯ (С САММАРИ)
+# ============================================================
+async def escalate(channel, reason: str, user_question: str = ""):
+    if _is_paid_category(channel): return
+    sess = get_session(channel.id)
+    if sess is None: create_session(channel.id, 0)
+    elif sess.get("escalated"): return
+    update_session(channel.id, escalated=1)
+    
+    user_id = sess.get("user_id") or 0
+    cur.execute(
+        "INSERT INTO ai_escalations (user_id, channel_id, question, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, channel.id, user_question[:500], reason[:500], int(time.time()))
+    )
+    db.commit()
+
+    summary = "Диалог слишком короткий для саммари."
+    history = hist_load(channel.id, limit=10)
+    if history:
+        hist_text = "\n".join([f"{'Клиент' if r=='user' else 'ИИ'}: {c}" for r, c in history])
+        prompt = f"Сделай краткое саммари этого диалога с клиентом в 2-3 предложениях. Выдели суть запроса и на чем остановились.\n\n{hist_text}"
+        res = await call_llm("Ты — помощник. Сделай краткое саммари.", [], prompt)
+        if res and res.get("text"):
+            summary = res["text"].strip()
+
+    ping = f"<@&{SELLER_ROLE}>"
+    embed = disnake.Embed(
+        title="⚠️ Требуется помощь продавца",
+        description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}\n\n**Саммари диалога:**\n{summary}",
+        color=COLOR_GREY
+    )
+    embed.set_image(url=IMG_STRIPE)
+    await channel.send(embed=embed)
+    ai_logger.info(f"Эскалация: {channel.id} — {reason} (Саммари: {summary[:100]}...)")
+
+# ============================================================
+# ОБРАБОТКА СЧЁТА И ЧЕКА
+# ============================================================
+def _clean_ticket_name(text: str, user_id: int) -> str:
+    if not text: return f"order-{user_id}"
+    clean = text.lower().replace(" ", "-")
+    clean = re.sub(r"[^a-zа-яё0-9\-_]", "", clean)
+    clean = clean.strip("- _")
+    return clean[:80] or f"order-{user_id}"
+
+async def send_invoice(channel, product_display: str, amount: int, discount: int, user_name: str) -> bool:
+    try:
+        clean_name = _clean_ticket_name(product_display, channel.id)
+        try:
+            await channel.edit(name=clean_name)
+        except Exception as e:
+            ai_logger.warning(f"Не удалось переименовать: {e}")
+
+        order_id = generate_receipt_id()
+        buf = await asyncio.to_thread(
+            generate_receipt_png, manager_name="AI Manager", customer_name=user_name or "Клиент",
+            product_name=product_display, amount=amount, discount_percent=int(discount), order_id=order_id,
+        )
+        file = disnake.File(buf, filename=f"receipt_{order_id}.png")
+        total = amount - int(amount * discount / 100)
+        embed = disnake.Embed(
+            title=f"Счёт для оплаты: к оплате {total} ₽",
+            description=f"> **Товары:** {product_display}\n> **Сумма:** `{amount} ₽`" + (f"\n> **Скидка:** `{discount}%`" if discount else "") + "\n\n> Проверьте реквизиты и пришлите чек в этот канал.",
+            color=COLOR_GREY,
+        )
+        embed.set_image(url=f"attachment://receipt_{order_id}.png")
+        await channel.send(embed=embed, file=file, view=ReceiptView())
+        return True
+    except Exception as e:
+        ai_logger.exception(f"send_invoice: {e}")
+        return False
+
+async def _auto_confirm_receipt(channel, message, sess):
+    user_id = sess.get("user_id") or message.author.id
+    try: await message.add_reaction(YES_EMOJI)
+    except Exception: pass
+
+    sellers_ping = f"<@&{SELLER_ROLE}>"
+    embed = disnake.Embed(
+        title="💚 Оплата принята.",
+        description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{sellers_ping} скоро подключатся и выдадут заказ! ",
+        color=COLOR_GREEN
+    )
+    embed.set_image(url=IMG_STRIPE)
+    try: await channel.send(embed=embed)
+    except Exception as e: ai_logger.warning(f"auto_confirm: send msg failed: {e}")
+
+    paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
+    if paid_cat:
+        try:
+            await channel.edit(category=paid_cat)
+            ai_logger.info(f"✅ auto_confirm: {channel.id} перенесен в категорию {paid_cat.name}")
+        except Exception as e:
+            ai_logger.warning(f"⚠️ auto_confirm edit fail: {e}")
+
+    try:
+        seller_role = channel.guild.get_role(SELLER_ROLE)
+        if seller_role:
+            await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
+    except Exception as e:
+        ai_logger.warning(f"auto_confirm: seller perms failed: {e}")
+
+    update_session(
+        channel.id, invoice_sent=0,
+        receipt_url=message.attachments[0].url if message.attachments else "",
+        post_invoice_text_count=0, last_ai_response_ts=int(time.time()), escalated=1
+    )
+
+async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = False, image_url: str = None):
+    if not user_text.strip() and not image_url: return
+    if _is_paid_category(channel) or _is_coins_category(channel): return
+    user_id = author.id
+    
+    lock = get_lock(channel.id)
+    if lock.locked(): return
+
+    async with lock:
+        sess = get_session(channel.id)
+        if not sess:
+            create_session(channel.id, user_id)
+            sess = get_session(channel.id)
+        
+        if sess.get("escalated") or sess.get("abuse_closed") or sess.get("invoice_sent"): return
+
+        try:
+            if await _check_and_close_abuse(channel, user_id): return
+        except Exception: pass
+        if is_ai_muted(channel.id): return
+        if sess["message_count"] >= SESSION_MAX_MESSAGES:
+            await escalate(channel, "исчерпан лимит сообщений", user_text)
+            return
+
+        update_session(channel.id, message_count=(sess["message_count"] or 0) + 1)
+        if user_text:
+            hist_append(channel.id, "user", user_text)
+
+        caps_ratio = sum(1 for c in user_text if c.isupper()) / max(len(user_text), 1)
+        if caps_ratio > 0.6 and len(user_text) > 10:
+            await escalate(channel, "Клиент злится (капс)", user_text)
+            return
+
+        discount = await get_ticket_discount(channel)
+        user_history = _get_user_history_text(user_id)
+        
+        system_prompt = SYSTEM_PROMPT.format(
+            real_catalog=REAL_CATALOG_TEXT,
+            user_name=author.display_name, 
+            discount=discount,
+            user_history=user_history
+        )
+        
+        history = hist_load(channel.id)
+        
+        async with channel.typing():
+            result = await call_llm(system_prompt, history, user_text, image_url=image_url)
+            
+        if not result:
+            new_fails = (sess["fail_count"] or 0) + 1
+            update_session(channel.id, fail_count=new_fails)
+            if new_fails >= SESSION_MAX_FAILS:
+                await escalate(channel, "сбой LLM", user_text)
+            else:
+                try: await channel.send("⏳ Секунду, уточняю информацию…")
+                except Exception: pass
+            return
+
+        update_session(channel.id, fail_count=0)
+        raw_text = (result.get("text") or "").strip()
+        funcs = result.get("funcs") or []
+
+        confidence = 100
+        conf_match = re.search(r"\[CONFIDENCE:\s*(\d+)%\]", raw_text)
+        if conf_match:
+            confidence = int(conf_match.group(1))
+            raw_text = re.sub(r"\[CONFIDENCE:\s*\d+%\]", "", raw_text).strip()
+
+        if confidence < 70:
+            asyncio.create_task(log_discord(
+                title="🤔 ИИ не уверен в ответе",
+                description=f"> **Уверенность:** `{confidence}%`\n> **Вопрос:** {user_text[:200]}\n> **Ответ:** {raw_text[:300]}",
+                color=0xffaa00,
+                channel_id=LOG_CHANNEL
+            ))
+
+        if raw_text and "Зову продавцов" in raw_text:
+            try: await channel.send(raw_text)
+            except Exception: pass
+            touch_ai_response(channel.id)
+            update_session(channel.id, escalated=1)
+            await escalate(channel, "Товар не найден / нужен продавец", user_text)
+            return
+
+        if raw_text and not funcs:
+            try: await channel.send(raw_text)
+            except Exception: pass
+            hist_append(channel.id, "ai", raw_text)
+
+        touch_ai_response(channel.id)
+
+        if funcs:
+            fc = funcs[0]
+            name = fc["name"]
+            args = fc.get("args", {})
+
+            if name == "create_invoice":
+                fresh_sess = get_session(channel.id)
+                if fresh_sess and fresh_sess.get("invoice_sent"): return
+                    
+                items_list = args.get("items", [])
+                if not items_list:
+                    await channel.send("⚠️ Не удалось распознать товар.")
+                    return
+                    
+                upsell_discount = int(args.get("discount_percent", 0))
+                final_discount = max(discount, upsell_discount)
+                
+                total_amount = 0
+                receipt_names = []
+                for itm in items_list:
+                    item_name = itm.get("item_name", "Товар")
+                    price = float(itm.get("price", 0))
+                    total_amount += int(round(price))
+                    receipt_names.append(item_name)
+
+                product_display = ", ".join(receipt_names)
+                
+                if final_discount > discount:
+                    purchases = await get_user_purchases(author.id, only_unused=True)
+                    found_inv = False
+                    for p in purchases:
+                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
+                            await _update_ticket_discount_embed(channel, p['value'])
+                            found_inv = True
+                            break
+                    if not found_inv:
+                        await _update_ticket_discount_embed(channel, f"Скидка {final_discount}%")
+
+                if final_discount > 0:
+                    purchases = await get_user_purchases(author.id, only_unused=True)
+                    for p in purchases:
+                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
+                            full_purchases = await get_user_purchases(author.id, only_unused=False)
+                            target_idx = next((idx for idx, fp in enumerate(full_purchases) if fp["value"] == p["value"] and fp["type"] == "discounts" and not fp.get("used")), None)
+                            if target_idx is not None:
+                                await remove_purchase(author.id, target_idx)
+                                ai_logger.info(f"Скидка {p['value']} удалена из инвентаря {author.id} (применена в счете).")
+                                break
+
+                ok = await send_invoice(channel, product_display, total_amount, final_discount, author.display_name)
+                if ok:
+                    ai_logger.info(f"Счёт: {channel.id} → {product_display} ({total_amount} Р, скидка {final_discount}%)")
+                    hist_clear(channel.id)
+                    hist_append(channel.id, "ai", f"[счёт выставлен: {product_display}]")
+                    update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0)
+                    touch_ai_response(channel.id)
+
+            elif name == "escalate_to_human":
+                await escalate(channel, args.get("reason", "Товар не найден"), user_text)
+                update_session(channel.id, escalated=1)
+                touch_ai_response(channel.id)
+                
+            else:
+                res_text = await execute_tool(channel, author.id, name, args)
+                await channel.send(f"🤖 {res_text}")
+                touch_ai_response(channel.id)
+
+# ============================================================
+# UI И МОДАЛКИ (ПОЛНЫЙ КОД)
 # ============================================================
 def build_ad_embed(item_name: str) -> disnake.Embed:
     embed = disnake.Embed(
@@ -409,598 +1108,27 @@ class AdChannelNameModal(Modal):
 
         await inter.edit_original_response(content="Канал создан.")
 
-# ============================================================
-# ФУНКЦИИ РАБОТЫ С СЕССИЯМИ
-# ============================================================
-def get_session(channel_id: int) -> Optional[dict]:
-    row = cur.execute("SELECT * FROM ai_manager_sessions WHERE channel_id=?", (channel_id,)).fetchone()
-    return dict(row) if row else None
-
-def create_session(channel_id: int, user_id: int):
-    now = int(time.time())
-    cur.execute(
-        "INSERT OR IGNORE INTO ai_manager_sessions (channel_id, user_id, message_count, fail_count, started_at, escalated, receipt_url, created_at, stub_sent, invoice_sent, last_client_msg_ts, last_manager_msg_ts, last_ai_response_ts, post_invoice_text_count) VALUES (?, ?, 0, 0, ?, 0, '', ?, 0, 0, 0, 0, 0, 0)",
-        (channel_id, user_id, now, now),
-    )
-    db.commit()
-
-def update_session(channel_id: int, **kwargs):
-    if not kwargs: return
-    fields = ", ".join(f"{k}=?" for k in kwargs.keys())
-    values = list(kwargs.values()) + [channel_id]
-    cur.execute(f"UPDATE ai_manager_sessions SET {fields} WHERE channel_id=?", values)
-    db.commit()
-
-def touch_client_msg(channel_id: int, user_id: int):
-    sess = get_session(channel_id)
-    if not sess: create_session(channel_id, user_id)
-    update_session(channel_id, last_client_msg_ts=int(time.time()))
-
-def touch_manager_msg(channel_id: int):
-    sess = get_session(channel_id)
-    if not sess: return
-    update_session(channel_id, last_manager_msg_ts=int(time.time()))
-
-def touch_ai_response(channel_id: int):
-    update_session(channel_id, last_ai_response_ts=int(time.time()))
-
-def is_ai_muted(channel_id: int) -> bool:
-    sess = get_session(channel_id)
-    if not sess: return False
-    lmt = sess.get("last_manager_msg_ts") or 0
-    if not lmt: return False
-    return (int(time.time()) - lmt) < MANAGER_SILENCE_SEC
-
-def hist_load(channel_id: int, ttl_sec: int = HISTORY_TTL_SEC, limit: int = HISTORY_MAX_MSG):
-    cutoff = int(time.time()) - ttl_sec
-    rows = cur.execute("SELECT role, content, created_at FROM ai_manager_history WHERE channel_id=? AND created_at >= ? ORDER BY id DESC LIMIT ?", (channel_id, cutoff, limit)).fetchall()
-    return [(r["role"], r["content"]) for r in reversed(rows)]
-
-def hist_append(channel_id: int, role: str, content: str):
-    if not content: return
-    cur.execute("INSERT INTO ai_manager_history (channel_id, role, content, created_at) VALUES (?,?,?,?)", (channel_id, role, content[:2000], int(time.time())))
-    db.commit()
-
-def hist_clear(channel_id: int):
-    cur.execute("DELETE FROM ai_manager_history WHERE channel_id=?", (channel_id,))
-    db.commit()
-
-def hist_last_client_msg(channel_id: int) -> Optional[str]:
-    row = cur.execute("SELECT content FROM ai_manager_history WHERE channel_id=? AND role='user' ORDER BY id DESC LIMIT 1", (channel_id,)).fetchone()
-    return row["content"] if row else None
-
-def hist_recent_user(channel_id: int, window_sec: int = SPAM_WINDOW_SEC, limit: int = 10) -> List[str]:
-    cutoff = int(time.time()) - window_sec
-    rows = cur.execute("SELECT content FROM ai_manager_history WHERE channel_id=? AND role='user' AND created_at > ? ORDER BY id DESC LIMIT ?", (channel_id, cutoff, limit)).fetchall()
-    return [r["content"] for r in rows]
-
-DEBOUNCE: Dict[int, dict] = {}
-
-async def _debounce_flush(channel, user, gen: int, delay: float = DEBOUNCE_SEC):
-    try:
-        await asyncio.sleep(delay)
-        state = DEBOUNCE.get(channel.id)
-        if not state or state.get("gen") != gen: return
-        msgs = state.get("messages", [])
-        DEBOUNCE.pop(channel.id, None)
-        combined = "\n".join(m for m in msgs if m).strip()
-        if not combined: return
-        await _handle_dialog(channel, user, combined)
-    except asyncio.CancelledError: raise
-    except Exception: ai_logger.exception("debounce_flush")
-
-def is_potential_abuse(text: str) -> bool:
-    t = (text or "").lower()
-    return any(w in t for w in ABUSE_WORDS)
-
-async def check_abuse_llm(messages: List[str]) -> Tuple[bool, str]:
-    if not AI_MANAGER_API_KEY: return False, ""
-    sample = "\n".join(f"- {m[:200]}" for m in messages[:5])
-    prompt = f"Проанализируй последние сообщения клиента:\n{sample}\n\nОтветь РОВНО ОДНИМ словом:\n- ABUSE — мат, оскорбления\n- SPAM — флуд\n- NORMAL — нормальный клиент\n"
-    payload = {"model": DIAMOND_AI_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 10}
-    url = f"{AI_MANAGER_BASE_URL}/chat/completions"
-    headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=ABUSE_TIMEOUT)) as resp:
-                if resp.status != 200: return False, ""
-                data = await resp.json()
-                choices = data.get("choices", [])
-                if not choices: return False, ""
-                text = (choices[0].get("message", {}).get("content") or "").strip().upper()
-                text = re.sub(r"[^A-Z]", "", text)
-                if "ABUSE" in text: return True, "abuse"
-                if "SPAM" in text: return True, "spam"
-                return False, ""
-    except Exception as e:
-        ai_logger.warning(f"check_abuse_llm: {e}")
-        return False, ""
-
-async def _check_and_close_abuse(channel, user_id: int) -> bool:
-    sess = get_session(channel.id)
-    if not sess or sess.get("abuse_closed"): return False
-    last_check = sess.get("last_abuse_check_ts") or 0
-    now = int(time.time())
-    if now - last_check < ABUSE_COOLDOWN_SEC: return False
-    texts = hist_recent_user(channel.id, window_sec=SPAM_WINDOW_SEC, limit=10)
-    if not texts: return False
-    has_abuse_word = any(is_potential_abuse(t) for t in texts)
-    many_short = (len(texts) >= SPAM_SHORT_COUNT and all(len(t.strip()) < 15 for t in texts[:SPAM_SHORT_COUNT]))
-    if not (has_abuse_word or many_short): return False
-    update_session(channel.id, last_abuse_check_ts=now)
-    is_abuse, reason = await check_abuse_llm(texts)
-    if not is_abuse: return False
-    update_session(channel.id, abuse_closed=1)
-    await close_ticket_abuse(channel, reason, user_id)
-    return True
-
-async def close_ticket_abuse(channel, reason: str, user_id: int):
-    try:
-        embed = disnake.Embed(title="🚫 Тикет закрыт автоматически", description=f"> **Причина:** {'неадекватное поведение' if reason == 'abuse' else 'спам / флуд'}", color=0xed4245)
-        await channel.send(embed=embed)
-        await asyncio.sleep(5)
-        await channel.delete(reason=f"AI: {reason}")
-        ai_logger.warning(f"🤖 AI закрыл тикет {channel.id} по причине {reason}")
-        await log_discord(title=f"🚫 AI закрыл тикет ({reason})", description=f"> **Канал:** `{channel.name}` (`{channel.id}`)\n> **Клиент:** <@{user_id}>", color=0xed4245, channel_id=LOG_CHANNEL)
-    except Exception as e:
-        ai_logger.exception(f"close_ticket_abuse: {e}")
-
-def _is_paid_category(channel) -> bool:
-    return channel.category and channel.category.id == CONFIG.get("PAID_CATEGORY_ID")
-
-def _is_coins_category(channel) -> bool:
-    return channel.category and channel.category.id == CONFIG.get("COINS_CATEGORY_ID")
-
-def _is_real_category(channel) -> bool:
-    return channel.category and channel.category.id == CONFIG.get("TICKET_CATEGORY_ID")
-
-def _is_questions_category(channel) -> bool:
-    return channel.category and channel.category.id == 1569979195369725973
-
-def _is_ai_ticket(channel) -> bool:
-    if _is_paid_category(channel): return False
-    if _is_coins_category(channel): return False
-    if _is_real_category(channel): return True
-    if _is_questions_category(channel): return True
-    return bool(get_ticket_owner(channel.id))
-
-def _is_manager(member) -> bool:
-    return member.id in OWNER_IDS or any(r.id == SELLER_ROLE for r in getattr(member, "roles", []))
-
-async def get_ticket_discount(channel) -> int:
-    try:
-        async for msg in channel.history(limit=50):
-            if msg.author.bot and msg.embeds and len(msg.embeds) >= 2:
-                for field in msg.embeds[1].fields:
-                    if "скидка" in field.name.lower():
-                        val = field.value.strip("`\n ")
-                        if val in ("", "Не активирована", "Не введён", "Не активирован"):
-                            return 0
-                        m = re.search(r"(\d+)", val)
-                        return int(m.group(1)) if m else 10
-    except Exception:
-        pass
-    return 0
-
-async def _update_ticket_discount_embed(channel, discount_str: str):
-    try:
-        cur.execute(
-            "INSERT INTO pending_ticket_updates (channel_id, discount_text, created_at) VALUES (?, ?, ?)",
-            (channel.id, discount_str, int(time.time()))
-        )
-        db.commit()
-        ai_logger.info(f"📝 Задача на обновление эмбеда со скидкой {discount_str} отправлена в БД.")
-    except Exception as e:
-        ai_logger.warning(f"Ошибка при создании задачи обновления эмбеда: {e}")
-
-# ============================================================
-# ИСТОРИЯ КЛИЕНТА
-# ============================================================
-def _get_user_history_text(user_id: int) -> str:
-    try:
-        dc = get_dc_cache(user_id)
-        balance = dc.get("balance", 0)
-        purchases = dc.get("purchases", [])
-        history = dc.get("history", [])
-
-        text = f"Баланс: {balance} DC.\n"
-        
-        if purchases:
-            unused_items = [p.get("value") for p in purchases if not p.get("used") and p.get("type") != "discounts"]
-            unused_discounts = [p.get("value") for p in purchases if not p.get("used") and p.get("type") == "discounts"]
-            
-            if unused_items:
-                text += "Неиспользованные товары (напомни): " + ", ".join(unused_items[:5]) + "\n"
-            if unused_discounts:
-                text += "Купленные скидки в инвентаре: " + ", ".join(unused_discounts[:3]) + "\n"
-        
-        if history:
-            spends = [h for h in history if h.get("amount", 0) < 0 and "Покупка" in h.get("reason", "")]
-            if spends:
-                last_buys = [h.get("reason", "").replace("Покупка: ", "") for h in spends[-3:]]
-                text += "Последние покупки: " + ", ".join(last_buys) + "\n"
-
-        return text.strip()
-    except Exception as e:
-        ai_logger.warning(f"_get_user_history_text: {e}")
-        return "История недоступна."
-
-# ============================================================
-# СИСТЕМНЫЙ ПРОМПТ (УМНЫЙ UPSELL, АНАЛИЗ ТОНАЛЬНОСТИ, DC ВМЕСТО СКИДКИ)
-# ============================================================
-REAL_CATALOG_TEXT = build_real_catalog_text()
-
-SYSTEM_PROMPT = """ты — ai-менеджер магазина diamond shop в discord-тикете. задача — помочь клиенту оформить заказ, как живой помощник.
-
-ПРАВИЛА ОБЩЕНИЯ:
-- Пиши коротко, по делу, как живой менеджер. Без эмодзи.
-- Форматирование Discord: **жирный**, *курсив*, > цитаты, `код`.
-- Товары оформляй блоком:
-  > **Название** — 460 ₽
-- Если клиент просит категорию без уточнений — покажи ВСЕ варианты с ценами.
-
-ГЛАВНОЕ ПРАВИЛО ПО ЦЕНАМ:
-- В каталоге ниже некоторые товары имеют ДВЕ цены: цена Discord (в скобках) и НАША ЦЕНА (указана как `[НАША ЦЕНА: XXX]`).
-- Для выставления счета ВСЕГДА бери **НАШУ ЦЕНУ**.
-
-ПРАВИЛА ДЛЯ ТОВАРОВ С КОЛИЧЕСТВОМ:
-- Если клиент покупает несколько штук, умножь цену за 1 шт на количество и укажи ИТОГОВУЮ сумму в `price`.
-- В `item_name` укажи название и количество.
-- НЕ ИСПОЛЬЗУЙ параметр `quantity`.
-
-ИСТОРИЯ КЛИЕНТА:
-{user_history}
-- Если у клиента висят неиспользованные товары, деликатно напомни ему об этом.
-- Если у клиента есть купленная скидка, можешь предложить применить её: "У вас есть скидка 5%, применить её?".
-
-АНАЛИЗ ТОНАЛЬНОСТИ:
-- Если клиент пишет капсом, оскорбляет или явно злится — НЕ ШУТИ, ответь сухо и СРАЗУ вызови продавца функцией `escalate_to_human`.
-- Если клиент пишет с эмодзи и дружелюбно — можешь ответить чуть теплее и пошутить.
-
-УМНЫЙ UPSELL (ДОПРОДАЖИ):
-- Если сумма заказа превышает 750₽:
-  1. Предложи клиенту скидку 5% на ВСЮ корзину, если он добавит ЛЮБОЙ сопутствующий товар.
-  2. Предлагай ЛОГИЧНЫЕ товары: если берет Нитро — предложи Бусты; если Робуксы — предложи Роблокс Плюс; если ТГ Звезды — предложи Аккаунт ТГ.
-  3. Если клиент соглашается, СНАЧАЛА добавь новый товар в корзину.
-  4. При вызове `create_invoice` передай параметр `discount_percent: 5`.
-
-ТОРГ (СКИДКИ В РУБЛЯХ ЗАПРЕЩЕНЫ):
-- Если клиент просит скидку в рублях, которую ты не можешь дать, или торгуется:
-  - Предложи ему альтернативу: "Я не могу снизить цену в рублях, но могу начислить вам 200 DC на баланс за эту покупку. Устроит?"
-  - Если да — применяй стандартную цену (без `discount_percent`), а в поле `item_name` добавь пометку (DC кэшбек).
-  - (Бот сам вычтет DC из копилки и начислит юзеру, тебе не нужно вызывать функции для DC, просто напиши это в тексте).
-
-ГЛАВНОЕ ПРАВИЛО ПЕРЕД СЧЁТОМ:
-- Сначала спроси: «Выставить счёт на <товар> за <цена>?»
-- Жди явного подтверждения.
-- Только после подтверждения — вызывай create_invoice.
-
-ЗАПРЕТ НА DC (В ТИКЕТАХ ЗА РЕАЛ):
-- В этом тикете ты продаешь ТОЛЬКО за реальные деньги (рубли).
-- Если клиент просит что-то купить за DC, скажи: "Покупка за Diamond Coins происходит в канале витрины <#1462136361711829053> (DC-Shop). Здесь я оформляю только заказы за реальные деньги."
-
-FAQ-РЕЖИМ (ЕСЛИ ТИКЕТ ВОПРОСОВ):
-- Если клиент задает вопрос (например, "как работает нитро", "что дает роблокс плюс") — отвечай своими знаниями, не выставляй счет.
-
-КАТАЛОГ:
-{real_catalog}
-
-контекст:
-- клиент: {user_name}
-- скидка в тикете (уже применена кнопкой): {discount}%
-"""
-
-TOOLS_OPENAI = [
-    {
-        "type": "function",
-        "function": {
-            "name": "create_invoice",
-            "description": "Выставить счёт. Можно передать ОДИН ИЛИ НЕСКОЛЬКО товаров в массиве items.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "items": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "item_name": {"type": "string", "description": "Название товара"},
-                                "price": {"type": "number", "description": "ИТОГОВАЯ цена в рублях"}
-                            },
-                            "required": ["item_name", "price"]
-                        }
-                    },
-                    "discount_percent": {"type": "integer", "description": "Процент скидки (UpSell или скидка из инвентаря)", "default": 0}
-                },
-                "required": ["items"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "escalate_to_human",
-            "description": "Позвать продавца.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {"type": "string"},
-                },
-                "required": ["reason"],
-            },
-        },
-    },
-]
-
-async def _call_single_model(model: str, system_prompt: str, messages: list) -> Optional[dict]:
-    payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}] + messages, "tools": TOOLS_OPENAI, "tool_choice": "auto", "temperature": 0.1, "max_tokens": 800}
-    url = f"{AI_MANAGER_BASE_URL}/chat/completions"
-    headers = {"Authorization": f"Bearer {AI_MANAGER_API_KEY}", "Content-Type": "application/json"}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=LLM_TIMEOUT)) as resp:
-                if resp.status != 200: return {"error": f"HTTP {resp.status}"}
-                data = await resp.json()
-                choices = data.get("choices", [])
-                if not choices: return None
-                msg = choices[0].get("message", {})
-                text = (msg.get("content") or "").strip()
-                tool_calls = msg.get("tool_calls") or []
-                funcs = []
-                for tc in tool_calls:
-                    fn = tc.get("function", {})
-                    raw_args = fn.get("arguments", "{}")
-                    try: args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                    except Exception: args = {}
-                    funcs.append({"name": fn.get("name"), "args": args})
-                return {"text": text, "funcs": funcs}
-    except Exception as e:
-        return {"error": str(e)}
-
-async def call_llm(system_prompt: str, history: list, user_msg: str) -> Optional[dict]:
-    if not AI_MANAGER_API_KEY: return None
-    messages = []
-    for role, text in history[-HISTORY_MAX_MSG:]:
-        messages.append({"role": "assistant" if role == "ai" else "user", "content": text})
-    messages.append({"role": "user", "content": user_msg})
-    
-    models_to_try = [DIAMOND_AI_MODEL, LAST_RESORT_MODEL]
-    for model in models_to_try:
-        res = await _call_single_model(model, system_prompt, messages)
-        if res and "error" not in res:
-            return res
-    return None
-
-async def escalate(channel, reason: str, user_question: str = ""):
-    if _is_paid_category(channel): return
-    sess = get_session(channel.id)
-    if sess is None: create_session(channel.id, 0)
-    elif sess.get("escalated"): return
-    update_session(channel.id, escalated=1)
-    
-    user_id = sess.get("user_id") or 0
-    cur.execute(
-        "INSERT INTO ai_escalations (user_id, channel_id, question, reason, created_at) VALUES (?, ?, ?, ?, ?)",
-        (user_id, channel.id, user_question[:500], reason[:500], int(time.time()))
-    )
-    db.commit()
-
-    ping = f"<@&{SELLER_ROLE}>"
-    embed = disnake.Embed(title="⚠️ Требуется помощь продавца", description=f"> {ping}, клиент ждёт ответа.\n> **Причина:** {reason}", color=COLOR_GREY)
-    embed.set_image(url=IMG_STRIPE)
-    await channel.send(embed=embed)
-    ai_logger.info(f"Эскалация: {channel.id} — {reason}")
-
-# ============================================================
-# ОБРАБОТКА СЧЁТА И ЧЕКА
-# ============================================================
-def _clean_ticket_name(text: str, user_id: int) -> str:
-    if not text: return f"order-{user_id}"
-    clean = text.lower().replace(" ", "-")
-    clean = re.sub(r"[^a-zа-яё0-9\-_]", "", clean)
-    clean = clean.strip("- _")
-    return clean[:80] or f"order-{user_id}"
-
-async def send_invoice(channel, product_display: str, amount: int, discount: int, user_name: str) -> bool:
-    try:
-        clean_name = _clean_ticket_name(product_display, channel.id)
-        try:
-            await channel.edit(name=clean_name)
-        except Exception as e:
-            ai_logger.warning(f"Не удалось переименовать: {e}")
-
-        order_id = generate_receipt_id()
-        buf = await asyncio.to_thread(
-            generate_receipt_png, manager_name="AI Manager", customer_name=user_name or "Клиент",
-            product_name=product_display, amount=amount, discount_percent=int(discount), order_id=order_id,
-        )
-        file = disnake.File(buf, filename=f"receipt_{order_id}.png")
-        total = amount - int(amount * discount / 100)
-        embed = disnake.Embed(
-            title=f"Счёт для оплаты: к оплате {total} ₽",
-            description=f"> **Товары:** {product_display}\n> **Сумма:** `{amount} ₽`" + (f"\n> **Скидка:** `{discount}%`" if discount else "") + "\n\n> Проверьте реквизиты и пришлите чек в этот канал.",
-            color=COLOR_GREY,
-        )
-        embed.set_image(url=f"attachment://receipt_{order_id}.png")
-        await channel.send(embed=embed, file=file, view=ReceiptView())
-        return True
-    except Exception as e:
-        ai_logger.exception(f"send_invoice: {e}")
-        return False
-
-async def _auto_confirm_receipt(channel, message, sess):
-    user_id = sess.get("user_id") or message.author.id
-    try: await message.add_reaction(YES_EMOJI)
-    except Exception: pass
-
-    sellers_ping = f"<@&{SELLER_ROLE}>"
-    embed = disnake.Embed(
-        title="💚 Оплата принята.",
-        description=f">>> Чек у меня, все проверил. Спасибо что выбираете нас!\n\n{sellers_ping} скоро подключатся и выдадут заказ! ",
-        color=COLOR_GREEN
-    )
-    embed.set_image(url=IMG_STRIPE)
-    try: await channel.send(embed=embed)
-    except Exception as e: ai_logger.warning(f"auto_confirm: send msg failed: {e}")
-
-    paid_cat = bot.get_channel(CONFIG.get("PAID_CATEGORY_ID"))
-    if paid_cat:
-        try:
-            await channel.edit(category=paid_cat)
-            ai_logger.info(f"✅ auto_confirm: {channel.id} перенесен в категорию {paid_cat.name}")
-        except Exception as e:
-            ai_logger.warning(f"⚠️ auto_confirm edit fail: {e}")
-
-    try:
-        seller_role = channel.guild.get_role(SELLER_ROLE)
-        if seller_role:
-            await channel.set_permissions(seller_role, send_messages=True, view_channel=True)
-    except Exception as e:
-        ai_logger.warning(f"auto_confirm: seller perms failed: {e}")
-
-    update_session(
-        channel.id, invoice_sent=0,
-        receipt_url=message.attachments[0].url if message.attachments else "",
-        post_invoice_text_count=0, last_ai_response_ts=int(time.time()), escalated=1
-    )
-
-async def _handle_dialog(channel, author, user_text: str, is_fallback: bool = False):
-    if not user_text.strip() or _is_paid_category(channel) or _is_coins_category(channel): return
-    user_id = author.id
-    
-    lock = get_lock(channel.id)
-    if lock.locked(): return
-
-    async with lock:
-        sess = get_session(channel.id)
-        if not sess:
-            create_session(channel.id, user_id)
-            sess = get_session(channel.id)
-        
-        if sess.get("escalated") or sess.get("abuse_closed") or sess.get("invoice_sent"): return
-
-        try:
-            if await _check_and_close_abuse(channel, user_id): return
-        except Exception: pass
-        if is_ai_muted(channel.id): return
-        if sess["message_count"] >= SESSION_MAX_MESSAGES:
-            await escalate(channel, "исчерпан лимит сообщений", user_text)
-            return
-
-        update_session(channel.id, message_count=(sess["message_count"] or 0) + 1)
-        hist_append(channel.id, "user", user_text)
-
-        # Анализ капса (агрессия)
-        caps_ratio = sum(1 for c in user_text if c.isupper()) / max(len(user_text), 1)
-        if caps_ratio > 0.6 and len(user_text) > 10:
-            await escalate(channel, "Клиент злится (капс)", user_text)
-            return
-
-        discount = await get_ticket_discount(channel)
-        user_history = _get_user_history_text(user_id)
-        
-        system_prompt = SYSTEM_PROMPT.format(
-            real_catalog=REAL_CATALOG_TEXT,
-            user_name=author.display_name, 
-            discount=discount,
-            user_history=user_history
-        )
-        
-        history = hist_load(channel.id)
-        
-        async with channel.typing():
-            result = await call_llm(system_prompt, history, user_text)
-            
-        if not result:
-            new_fails = (sess["fail_count"] or 0) + 1
-            update_session(channel.id, fail_count=new_fails)
-            if new_fails >= SESSION_MAX_FAILS:
-                await escalate(channel, "сбой LLM", user_text)
-            else:
-                try: await channel.send("⏳ Секунду, уточняю информацию…")
-                except Exception: pass
-            return
-
-        update_session(channel.id, fail_count=0)
-        text = (result.get("text") or "").strip()
-        funcs = result.get("funcs") or []
-
-        if text and "Зову продавцов" in text:
-            try: await channel.send(text)
-            except Exception: pass
-            touch_ai_response(channel.id)
-            update_session(channel.id, escalated=1)
-            await escalate(channel, "Товар не найден / нужен продавец", user_text)
-            return
-
-        if text and not funcs:
-            try: await channel.send(text)
-            except Exception: pass
-            hist_append(channel.id, "ai", text)
-
-        touch_ai_response(channel.id)
-
-        if funcs:
-            fc = funcs[0]
-            name = fc["name"]
-            args = fc.get("args", {})
-
-            if name == "create_invoice":
-                fresh_sess = get_session(channel.id)
-                if fresh_sess and fresh_sess.get("invoice_sent"): return
-                    
-                items_list = args.get("items", [])
-                if not items_list:
-                    await channel.send("⚠️ Не удалось распознать товар.")
-                    return
-                    
-                upsell_discount = int(args.get("discount_percent", 0))
-                final_discount = max(discount, upsell_discount)
-                
-                total_amount = 0
-                receipt_names = []
-                for itm in items_list:
-                    item_name = itm.get("item_name", "Товар")
-                    price = float(itm.get("price", 0))
-                    total_amount += int(round(price))
-                    receipt_names.append(item_name)
-
-                product_display = ", ".join(receipt_names)
-                
-                if final_discount > discount:
-                    purchases = await get_user_purchases(author.id, only_unused=True)
-                    found_inv = False
-                    for p in purchases:
-                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
-                            await _update_ticket_discount_embed(channel, p['value'])
-                            found_inv = True
-                            break
-                    if not found_inv:
-                        await _update_ticket_discount_embed(channel, f"Скидка {final_discount}%")
-
-                if final_discount > 0:
-                    purchases = await get_user_purchases(author.id, only_unused=True)
-                    for p in purchases:
-                        if p.get("type") == "discounts" and str(final_discount) in p.get("value", ""):
-                            full_purchases = await get_user_purchases(author.id, only_unused=False)
-                            target_idx = next((idx for idx, fp in enumerate(full_purchases) if fp["value"] == p["value"] and fp["type"] == "discounts" and not fp.get("used")), None)
-                            if target_idx is not None:
-                                await remove_purchase(author.id, target_idx)
-                                ai_logger.info(f"Скидка {p['value']} удалена из инвентаря {author.id} (применена в счете).")
-                                break
-
-                ok = await send_invoice(channel, product_display, total_amount, final_discount, author.display_name)
-                if ok:
-                    ai_logger.info(f"Счёт: {channel.id} → {product_display} ({total_amount} Р, скидка {final_discount}%)")
-                    hist_clear(channel.id)
-                    hist_append(channel.id, "ai", f"[счёт выставлен: {product_display}]")
-                    update_session(channel.id, invoice_sent=1, message_count=0, fail_count=0)
-                    touch_ai_response(channel.id)
-
-            elif name == "escalate_to_human":
-                await escalate(channel, args.get("reason", "Товар не найден"), user_text)
-                update_session(channel.id, escalated=1)
-                touch_ai_response(channel.id)
+class AIManagerPrefView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @disnake.ui.button(label="Изменить состояние", style=ButtonStyle.gray, custom_id="ai_pref:toggle", emoji="🔁", row=0)
+    async def toggle(self, button, inter: disnake.MessageInteraction):
+        await inter.response.defer()
+        new_pref = not get_user_ai_pref(inter.author.id)
+        set_user_ai_pref(inter.author.id, new_pref)
+        embeds = build_ai_pref_embeds(new_pref)
+        if new_pref:
+            row = cur.execute("SELECT reward_claimed FROM ai_manager_user_prefs WHERE user_id=?", (inter.author.id,)).fetchone()
+            if not (row and "reward_claimed" in row.keys() and row["reward_claimed"]):
+                try:
+                    cur.execute("UPDATE ai_manager_user_prefs SET reward_claimed=1 WHERE user_id=?", (inter.author.id,))
+                    db.commit()
+                    await add_dc(inter.author.id, 400, "Бонус за включение AI-Менеджера", notify=False, log=False)
+                    await inter.followup.send("✅ AI-Менеджер включен. **+400 DC** на баланс!", ephemeral=True)
+                except Exception as e: ai_logger.error(f"Ошибка выдачи бонуса: {e}")
+        await inter.edit_original_response(embeds=embeds, view=AIManagerPrefView())
+        await log_discord(title="🤖 AI Manager: смена состояния", description=f"> **Пользователь:** {inter.author.mention}\n> **Новое состояние:** {'✅ ВКЛ' if new_pref else '❌ ВЫКЛ'}", color=0x00aaff, channel_id=LOG_CHANNEL)
 
 # ============================================================
 # БОТ И СОБЫТИЯ
@@ -1018,7 +1146,7 @@ _CLEANUP_STARTED = False
 async def on_ready():
     global _CLEANUP_STARTED
     count = auto_init()
-    ai_logger.info(f"AI Manager v3.1 запущен. Каталог: {count}")
+    ai_logger.info(f"AI Manager v4.0 (FREE MODELS) запущен. Каталог: {count}")
     
     bot.add_view(AdStartView())
 
@@ -1029,6 +1157,63 @@ async def on_ready():
         if not activity_ping_task.is_running(): activity_ping_task.start()
         if not ads_cleanup_task.is_running(): ads_cleanup_task.start()
         if not analytics_task.is_running(): analytics_task.start()
+        if not abandoned_carts_task.is_running(): abandoned_carts_task.start()
+
+@bot.event
+async def on_message(message: disnake.Message):
+    if message.author.bot or not isinstance(message.channel, disnake.TextChannel): return
+    channel = message.channel
+
+    if _is_paid_category(channel):
+        touch_ai_response(channel.id)
+        if message.attachments:
+            try: await message.add_reaction(YES_EMOJI)
+            except Exception: pass
+            ai_logger.info(f"Доплата принята (файл): {channel.id} {message.attachments[0].filename}")
+        return
+
+    if _is_coins_category(channel): return
+
+    owner_id = get_ticket_owner(channel.id)
+    is_ticket_owner = (owner_id is not None and message.author.id == owner_id)
+
+    if isinstance(message.author, disnake.Member) and _is_manager(message.author) and not is_ticket_owner:
+        if _is_ai_ticket(channel):
+            if get_user_ai_pref(owner_id) and not _is_paid_category(channel):
+                return
+            else:
+                sess = get_session(channel.id)
+                if sess is None: create_session(channel.id, message.author.id)
+                touch_manager_msg(channel.id)
+                DEBOUNCE.pop(channel.id, None)
+        return
+
+    if not _is_ai_ticket(channel): return
+    if owner_id and not is_ticket_owner: return
+
+    touch_client_msg(channel.id, message.author.id)
+
+    image_url = None
+    if message.attachments:
+        for att in message.attachments:
+            if att.content_type and att.content_type.startswith("image/"):
+                image_url = att.url
+                break
+
+    if message.attachments and not image_url:
+        sess = get_session(channel.id)
+        if sess and sess.get("invoice_sent"):
+            await _auto_confirm_receipt(channel, message, sess)
+            return
+
+    text = (message.content or "").strip()
+    if not text and not image_url: return
+
+    state = DEBOUNCE.setdefault(channel.id, {"messages": [], "gen": 0, "image": None})
+    if text: state["messages"].append(text)
+    if image_url: state["image"] = image_url
+    state["gen"] += 1
+    asyncio.create_task(_debounce_flush(channel, message.author, state["gen"]))
 
 @bot.event
 async def on_guild_channel_create(channel):
@@ -1091,65 +1276,8 @@ async def on_guild_channel_create(channel):
         create_session(channel.id, get_ticket_owner(channel.id) or 0)
         update_session(channel.id, escalated=1)
 
-@bot.event
-async def on_message(message: disnake.Message):
-    if message.author.bot or not isinstance(message.channel, disnake.TextChannel): return
-    channel = message.channel
-
-    if _is_paid_category(channel):
-        touch_ai_response(channel.id)
-        if message.attachments:
-            try: await message.add_reaction(YES_EMOJI)
-            except Exception: pass
-            ai_logger.info(f"Доплата принята (файл): {channel.id} {message.attachments[0].filename}")
-        return
-
-    if _is_coins_category(channel): return
-
-    owner_id = get_ticket_owner(channel.id)
-    is_ticket_owner = (owner_id is not None and message.author.id == owner_id)
-
-    if isinstance(message.author, disnake.Member) and _is_manager(message.author) and not is_ticket_owner:
-        if _is_ai_ticket(channel):
-            if get_user_ai_pref(owner_id) and not _is_paid_category(channel):
-                return
-            else:
-                sess = get_session(channel.id)
-                if sess is None: create_session(channel.id, message.author.id)
-                touch_manager_msg(channel.id)
-                DEBOUNCE.pop(channel.id, None)
-        return
-
-    if not _is_ai_ticket(channel): return
-    if owner_id and not is_ticket_owner: return
-
-    touch_client_msg(channel.id, message.author.id)
-
-    if message.attachments:
-        sess = get_session(channel.id)
-        if sess and sess.get("invoice_sent"):
-            await _auto_confirm_receipt(channel, message, sess)
-            return
-        else: return
-
-    text = (message.content or "").strip()
-    if not text: return
-
-    state = DEBOUNCE.setdefault(channel.id, {"messages": [], "gen": 0})
-    state["messages"].append(text)
-    state["gen"] += 1
-    asyncio.create_task(_debounce_flush(channel, message.author, state["gen"]))
-
-def get_user_ai_pref(user_id: int) -> bool:
-    row = cur.execute("SELECT enabled FROM ai_manager_user_prefs WHERE user_id=?", (user_id,)).fetchone()
-    return bool(row["enabled"]) if row else True
-
-def set_user_ai_pref(user_id: int, enabled: bool):
-    cur.execute("INSERT INTO ai_manager_user_prefs (user_id, enabled) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled", (user_id, 1 if enabled else 0))
-    db.commit()
-
 # ============================================================
-# ФОНОВЫЕ ЗАДАЧИ
+# ТАСКИ
 # ============================================================
 @tasks.loop(minutes=1)
 async def ads_cleanup_task():
@@ -1299,6 +1427,43 @@ async def analytics_task():
     except Exception as e:
         ai_logger.exception(f"Ошибка в analytics_task: {e}")
 
+@tasks.loop(minutes=10)
+async def abandoned_carts_task():
+    await bot.wait_until_ready()
+    try:
+        now = int(time.time())
+        rows = cur.execute(
+            "SELECT channel_id, user_id FROM ai_manager_sessions "
+            "WHERE invoice_sent=1 AND escalated=0 AND (last_client_msg_ts < ?)",
+            (now - 7200,)
+        ).fetchall()
+        
+        for r in rows:
+            channel = bot.get_channel(r["channel_id"])
+            if channel:
+                try:
+                    user = bot.get_user(r["user_id"])
+                    if not user:
+                        user = await bot.fetch_user(r["user_id"])
+                    
+                    if user:
+                        prompt = "Напиши короткое дружелюбное сообщение клиенту, который хотел купить товар в магазине, но не оплатил счет. Предложи помощь, если возникли вопросы. Без навязчивости."
+                        res = await call_llm("Ты — вежливый менеджер магазина.", [], prompt)
+                        msg_text = res.get("text", "Привет! Заметил, что ты хотел сделать заказ, но не оплатил. Если нужна помощь — я здесь!") if res else "Привет! Заметил, что ты хотел сделать заказ, но не оплатил. Если нужна помощь — я здесь!"
+                        
+                        await user.send(f"👋 **{msg_text}**")
+                        ai_logger.info(f"Отправлено умное напоминание о брошенной корзине {r['user_id']}")
+                except Exception as e:
+                    ai_logger.warning(f"abandoned_cart DM {r['user_id']}: {e}")
+                
+                cur.execute("UPDATE ai_manager_sessions SET escalated=1 WHERE channel_id=?", (r["channel_id"],))
+                db.commit()
+    except Exception as e:
+        ai_logger.exception(f"abandoned_carts_task: {e}")
+
+# ============================================================
+# ЗАПУСК
+# ============================================================
 def run_ai_manager():
     if not AI_MANAGER_TOKEN or not AI_MANAGER_API_KEY:
         ai_logger.error("Токены не заданы")
