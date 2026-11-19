@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import random
@@ -109,6 +110,17 @@ class Order:
     items: List[str]
     ts: int
     paid: bool
+    source: str = "ai"          # ai | import | demo
+    key: str = ""               # уникальный ключ, чтобы не задваивать
+
+
+@dataclass
+class TicketMonth:
+    key: str
+    label: str
+    opened: int = 0
+    closed: int = 0
+    purchased: int = 0   # старые покупки из dc_cache.purchases
 
 
 @dataclass
@@ -158,14 +170,30 @@ class Report:
     path: str
     html: str
     summary: Dict[str, float] = field(default_factory=dict)
-    warning: str = ""
+    warnings: List[str] = field(default_factory=list)
+
+    @property
+    def warning(self) -> str:
+        return "; ".join(self.warnings)
 
     def as_text(self) -> str:
         s = self.summary
-        if not s.get("orders"):
-            return "Оплаченных заказов пока нет."
-        return (f"Выручка: {money(s['revenue'])} · заказов: {int(s['orders'])} · "
-                f"средний чек: {money(s['avg_cheque'])} · покупателей: {int(s['buyers'])}")
+        parts = []
+        if s.get("orders"):
+            parts.append(
+                f"Выручка: {money(s['revenue'])} · заказов: {int(s['orders'])} · "
+                f"средний чек: {money(s['avg_cheque'])} · покупателей: {int(s['buyers'])}"
+            )
+        else:
+            parts.append("Оплаченных счетов пока нет — данные собраны из БД.")
+        if s.get("imported_orders"):
+            parts.append(f"Старых заказов (импорт): {int(s['imported_orders'])} на {money(s['imported_revenue'])}")
+        if s.get("tickets_closed_total") or s.get("old_purchases"):
+            parts.append(
+                f"Тикетов закрыто: {int(s['tickets_closed_total'])} · открыто сейчас: "
+                f"{int(s.get('tickets_open_now', 0))} · старых покупок: {int(s.get('old_purchases', 0))}"
+            )
+        return "\n".join(parts)
 
 
 # ============================================================
@@ -182,68 +210,321 @@ def parse_items(raw: Optional[str]) -> List[str]:
     return [chunk.strip() for chunk in str(raw).replace(";", ",").split(",") if chunk.strip()]
 
 
-def load_orders(db_path: Path) -> Tuple[List[Order], str]:
-    """Возвращает все счета (оплаченные и нет). Ошибки не роняют отчёт."""
-    if not db_path.exists():
-        return [], f"База не найдена: {db_path}"
+def table_columns(conn: sqlite3.Connection, table: str) -> set:
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    except Exception:
+        return set()
+
+
+SNOWFLAKE_EPOCH_MS = 1420070400000
+
+
+def snowflake_ts(value) -> int:
+    """Время создания Discord-канала/сообщения по snowflake ID."""
+    try:
+        return ((int(value) >> 22) + SNOWFLAKE_EPOCH_MS) // 1000
+    except Exception:
+        return 0
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def load_ai_orders(conn: sqlite3.Connection, warnings: List[str]) -> List[Order]:
+    cols = table_columns(conn, "ai_manager_sessions")
+    if not cols:
+        warnings.append("Нет таблицы ai_manager_sessions — новые счета AI-менеджера не учтены.")
+        return []
+    if not {"invoice_amount", "invoice_created_at"} <= cols:
+        warnings.append("В ai_manager_sessions нет invoice_amount/invoice_created_at — "
+                        "счета AI-менеджера не учтены (обновите ai_manager.py).")
+        return []
+
+    items_expr = "COALESCE(invoice_items, '')" if "invoice_items" in cols else "''"
+    receipt_expr = "COALESCE(receipt_url, '')" if "receipt_url" in cols else "''"
+    has_sent = "invoice_sent" in cols
+    sent_expr = "COALESCE(invoice_sent, 0)" if has_sent else "0"
 
     try:
-        conn = connect_readonly(db_path)
-    except Exception as exc:
-        return [], f"Не удалось открыть базу: {exc}"
-
-    try:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(ai_manager_sessions)")}
-        if not cols:
-            return [], "В базе нет таблицы ai_manager_sessions."
-        missing = {"invoice_amount", "invoice_items", "invoice_created_at"} - cols
-        if missing:
-            return [], ("В таблице ai_manager_sessions нет колонок: "
-                        + ", ".join(sorted(missing))
-                        + ". Обновите modules/ai_manager.py и дайте боту поработать.")
-
-        has_receipt = "receipt_url" in cols
-        receipt_expr = "COALESCE(receipt_url, '')" if has_receipt else "''"
-        has_sent = "invoice_sent" in cols
-        sent_expr = "COALESCE(invoice_sent, 0)" if has_sent else "0"
         rows = conn.execute(f"""
-            SELECT user_id, invoice_amount, invoice_items, invoice_created_at,
-                   {receipt_expr} AS receipt_url, {sent_expr} AS invoice_sent
+            SELECT user_id, invoice_amount, {items_expr}, invoice_created_at,
+                   {receipt_expr}, {sent_expr}
             FROM ai_manager_sessions
             WHERE invoice_amount > 0 AND invoice_created_at > 0
             ORDER BY invoice_created_at
         """).fetchall()
     except Exception as exc:
-        return [], f"Ошибка чтения базы: {exc}"
-    finally:
-        conn.close()
+        warnings.append(f"Не удалось прочитать счета AI-менеджера: {exc}")
+        return []
 
-    orders = []
+    now = int(datetime.now().timestamp())
+    orders: List[Order] = []
     for user_id, amount, items, ts, receipt, sent in rows:
+        amount = float(amount or 0)
+        ts = _safe_int(ts)
+        if amount <= 0 or ts <= 0 or ts > now + 86400:
+            continue
         paid = bool((receipt or "").strip())
         # invoice_sent=1 значит выставлен новый счёт: старый чек к нему уже не относится
         if has_sent and sent:
             paid = False
         orders.append(Order(
-            user_id=int(user_id or 0),
-            amount=float(amount or 0),
+            user_id=_safe_int(user_id),
+            amount=amount,
             items=parse_items(items),
-            ts=int(ts or 0),
+            ts=ts,
             paid=paid,
+            source="ai",
+            key=f"ai:{user_id}:{ts}:{amount:.0f}",
         ))
-    return orders, ""
+    return orders
+
+
+def load_imported_orders(conn: sqlite3.Connection, warnings: List[str]) -> List[Order]:
+    """Старые продажи, импортированные из логов Discord (таблица shop_sales)."""
+    cols = table_columns(conn, "shop_sales")
+    if not cols:
+        return []
+
+    buyer_map: Dict[int, int] = {}
+    for table in ("ticket_reviews", "ticket_owners"):
+        if not table_columns(conn, table):
+            continue
+        try:
+            for channel_id, user_id in conn.execute(f"SELECT channel_id, user_id FROM {table}"):
+                if channel_id and user_id:
+                    buyer_map.setdefault(int(channel_id), int(user_id))
+        except Exception:
+            pass
+
+    try:
+        rows = conn.execute("""
+            SELECT id, external_id, channel_id, user_id, amount, items, created_at
+            FROM shop_sales
+            WHERE amount > 0 AND created_at > 0
+            ORDER BY created_at
+        """).fetchall()
+    except Exception as exc:
+        warnings.append(f"Не удалось прочитать shop_sales: {exc}")
+        return []
+
+    now = int(datetime.now().timestamp())
+    orders: List[Order] = []
+    for row_id, external_id, channel_id, user_id, amount, items, ts in rows:
+        ts = _safe_int(ts)
+        amount = float(amount or 0)
+        if amount <= 0 or ts <= 0 or ts > now + 86400:
+            continue
+        channel_id = _safe_int(channel_id)
+        buyer = _safe_int(user_id) or buyer_map.get(channel_id) or -abs(channel_id or row_id)
+        orders.append(Order(
+            user_id=buyer,
+            amount=amount,
+            items=parse_items(items),
+            ts=ts,
+            paid=True,
+            source="import",
+            key=f"import:{external_id or row_id}",
+        ))
+    return orders
+
+
+def load_ticket_stats(conn: sqlite3.Connection, months: int,
+                      today: Optional[date], warnings: List[str]) -> dict:
+    """Открытые/закрытые тикеты по месяцам из closed_orders и ticket_owners."""
+    today = today or date.today()
+    grid = month_sequence(today, months)
+    keys = [month_key(m) for m in grid]
+    index = {k: i for i, k in enumerate(keys)}
+    stats = {k: TicketMonth(key=k, label=MONTHS_RU[grid[i].month - 1]) for i, k in enumerate(keys)}
+
+    opened = 0
+    hours_sum = 0.0
+    hours_n = 0
+    closed_total = 0
+    first_ts = 0
+    last_ts = 0
+
+    cols = table_columns(conn, "closed_orders")
+    if cols and {"channel_id", "closed_at"} <= cols:
+        try:
+            rows = conn.execute(
+                "SELECT channel_id, closed_at FROM closed_orders WHERE closed_at > 0"
+            ).fetchall()
+        except Exception as exc:
+            rows = []
+            warnings.append(f"Не удалось прочитать closed_orders: {exc}")
+
+        for channel_id, closed_at in rows:
+            closed_at = _safe_int(closed_at)
+            if closed_at <= 0:
+                continue
+            closed_total += 1
+            created = snowflake_ts(channel_id)
+            ck = month_key(datetime.fromtimestamp(closed_at).date())
+            if ck in index:
+                stats[ck].closed += 1
+            if created > 0:
+                opened += 1
+                first_ts = min(first_ts or created, created)
+                last_ts = max(last_ts, created)
+                ok = month_key(datetime.fromtimestamp(created).date())
+                if ok in index:
+                    stats[ok].opened += 1
+                lifetime = closed_at - created
+                if 0 < lifetime < 90 * 86400:
+                    hours_sum += lifetime / 3600
+                    hours_n += 1
+
+    open_now = 0
+    if table_columns(conn, "ticket_owners"):
+        try:
+            open_now = int(conn.execute("SELECT COUNT(*) FROM ticket_owners").fetchone()[0] or 0)
+        except Exception:
+            pass
+
+    # старые оплаты AI-менеджера: чек есть, суммы в БД уже нет
+    old_bought = 0
+    ai_cols = table_columns(conn, "ai_manager_sessions")
+    if ai_cols and {"receipt_url", "created_at"} <= ai_cols:
+        ts_col = "invoice_created_at" if "invoice_created_at" in ai_cols else "created_at"
+        amount_filter = ("AND COALESCE(invoice_amount, 0) = 0"
+                         if "invoice_amount" in ai_cols else "")
+        try:
+            rows = conn.execute(
+                f"SELECT {ts_col} FROM ai_manager_sessions "
+                f"WHERE receipt_url IS NOT NULL AND receipt_url != '' {amount_filter}"
+            ).fetchall()
+            for (ts_val,) in rows:
+                ts = _safe_int(ts_val)
+                if ts <= 0:
+                    continue
+                rk = month_key(datetime.fromtimestamp(ts).date())
+                if rk in index:
+                    stats[rk].purchased += 1
+                    old_bought += 1
+        except Exception as exc:
+            warnings.append(f"Не удалось прочитать старые чеки AI: {exc}")
+
+    # старые покупки из dc_cache.purchases (до появления AI-менеджера)
+    if table_columns(conn, "dc_cache"):
+        try:
+            for (raw,) in conn.execute("SELECT purchases FROM dc_cache"):
+                if not raw:
+                    continue
+                try:
+                    items = json.loads(raw)
+                except Exception:
+                    continue
+                if not isinstance(items, list):
+                    continue
+                for p in items:
+                    if not isinstance(p, dict):
+                        continue
+                    ts = _safe_int(p.get("date"))
+                    if ts <= 0:
+                        continue
+                    pk = month_key(datetime.fromtimestamp(ts).date())
+                    if pk in index:
+                        stats[pk].purchased += 1
+                        old_bought += 1
+        except Exception as exc:
+            warnings.append(f"Не удалось прочитать старые покупки: {exc}")
+
+    return {
+        "stats": [stats[k] for k in keys],
+        "open_now": open_now,
+        "avg_hours": hours_sum / hours_n if hours_n else 0.0,
+        "closed_total": closed_total,
+        "opened_total": opened,
+        "old_purchases": old_bought,
+        "first_ts": first_ts,
+        "last_ts": last_ts,
+    }
+
+
+def load_data(db_path: Path, months: int = 12) -> Tuple[List[Order], dict, List[str], dict]:
+    """Читает все источники. Никогда не бросает исключение наружу."""
+    warnings: List[str] = []
+    info: dict = {"db": str(db_path), "tables": {}, "ai_paid": 0, "imported": 0}
+    tickets: dict = {"stats": [], "open_now": 0, "avg_hours": 0.0, "closed_total": 0,
+                     "opened_total": 0, "first_ts": 0, "last_ts": 0}
+
+    if not db_path.exists():
+        warnings.append(f"База не найдена: {db_path}")
+        return [], tickets, warnings, info
+
+    try:
+        conn = connect_readonly(db_path)
+    except Exception as exc:
+        warnings.append(f"Не удалось открыть базу: {exc}")
+        return [], tickets, warnings, info
+
+    try:
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        )]
+        info["tables"] = {t: _safe_int(conn.execute(f"SELECT COUNT(*) FROM '{t}'").fetchone()[0])
+                          for t in tables}
+        info["columns"] = {t: sorted(table_columns(conn, t))
+                           for t in ("ai_manager_sessions", "shop_sales", "closed_orders",
+                                     "ticket_owners", "ticket_reviews")
+                           if t in tables}
+
+        ai_orders = load_ai_orders(conn, warnings)
+        imported = load_imported_orders(conn, warnings)
+        tickets = load_ticket_stats(conn, months, None, warnings)
+    except Exception as exc:
+        warnings.append(f"Ошибка чтения базы: {exc}")
+        ai_orders, imported = [], []
+    finally:
+        conn.close()
+
+    orders = ai_orders + imported
+    info["ai_paid"] = sum(1 for o in ai_orders if o.paid)
+    info["imported"] = len(imported)
+    info["revenue"] = sum(o.amount for o in orders if o.paid)
+    info["range"] = (
+        datetime.fromtimestamp(min(o.ts for o in orders)).strftime("%d.%m.%Y")
+        if orders else "—",
+        datetime.fromtimestamp(max(o.ts for o in orders)).strftime("%d.%m.%Y")
+        if orders else "—",
+    )
+    return orders, tickets, warnings, info
+
+
+def load_orders(db_path: Path) -> Tuple[List[Order], str]:
+    """Совместимость: только заказы + строка предупреждений."""
+    orders, _, warnings, _ = load_data(db_path)
+    return orders, "; ".join(warnings)
 
 
 # ============================================================
 # АГРЕГАЦИЯ
 # ============================================================
-def aggregate(orders: Sequence[Order], months: int, today: Optional[date] = None):
+def aggregate(orders: Sequence[Order], months: int, today: Optional[date] = None,
+              tickets: Optional[dict] = None):
     today = today or date.today()
     grid = month_sequence(today, months)
     keys = [month_key(m) for m in grid]
     index = {k: i for i, k in enumerate(keys)}
 
     paid = [o for o in orders if o.paid]
+    seen_keys = set()
+    unique_paid: List[Order] = []
+    for o in paid:
+        if o.key and o.key in seen_keys:
+            continue
+        if o.key:
+            seen_keys.add(o.key)
+        unique_paid.append(o)
+    paid = unique_paid
+
     first_seen: Dict[int, str] = {}
     for o in sorted(paid, key=lambda x: x.ts):
         k = month_key(datetime.fromtimestamp(o.ts).date())
@@ -334,6 +615,20 @@ def aggregate(orders: Sequence[Order], months: int, today: Optional[date] = None
     prev_month_revenue = stats[keys[-2]].revenue if len(keys) >= 2 else 0
     growth = (stats[keys[-1]].revenue / prev_month_revenue - 1) if prev_month_revenue else 0.0
 
+    imported_orders = sum(1 for o in paid if getattr(o, "source", "") == "import"
+                          and month_key(datetime.fromtimestamp(o.ts).date()) in index)
+    imported_revenue = sum(o.amount for o in paid if getattr(o, "source", "") == "import"
+                           and month_key(datetime.fromtimestamp(o.ts).date()) in index)
+    ai_orders = sum(1 for o in paid if getattr(o, "source", "") == "ai"
+                    and month_key(datetime.fromtimestamp(o.ts).date()) in index)
+
+    tickets = tickets or {}
+    ticket_stats = tickets.get("stats") or []
+    # подрезаем тикеты под выбранный период
+    ticket_by_key = {getattr(t, "key", ""): t for t in ticket_stats}
+    ticket_months = [ticket_by_key.get(k, TicketMonth(key=k, label=MONTHS_RU[grid[i].month - 1]))
+                     for i, k in enumerate(keys)]
+
     summary = {
         "revenue": total_revenue,
         "orders": total_orders,
@@ -343,6 +638,14 @@ def aggregate(orders: Sequence[Order], months: int, today: Optional[date] = None
         "conversion": total_orders / total_issued if total_issued else 0.0,
         "growth": growth,
         "items_per_order": (sum(st.items for st in stats.values()) / total_orders) if total_orders else 0.0,
+        "imported_orders": imported_orders,
+        "imported_revenue": imported_revenue,
+        "ai_orders": ai_orders,
+        "tickets_open_now": int(tickets.get("open_now", 0) or 0),
+        "tickets_closed_total": int(tickets.get("closed_total", 0) or 0),
+        "tickets_opened_total": int(tickets.get("opened_total", 0) or 0),
+        "tickets_avg_hours": float(tickets.get("avg_hours", 0.0) or 0.0),
+        "old_purchases": int(tickets.get("old_purchases", 0) or 0),
     }
 
     return {
@@ -352,6 +655,8 @@ def aggregate(orders: Sequence[Order], months: int, today: Optional[date] = None
         "summary": summary,
         "grid": grid,
         "today": today,
+        "tickets": ticket_months,
+        "ticket_info": tickets,
     }
 
 
@@ -631,7 +936,22 @@ def _arrow(value: float) -> str:
     return "▲" if value > 0 else ("▼" if value < 0 else "•")
 
 
-def render_html(data: dict, months: int, source_note: str, warning: str = "") -> str:
+def _fmt_hours(h: float) -> str:
+    if h <= 0:
+        return "—"
+    if h < 24:
+        return f"{h:.1f}".replace(".", ",") + " ч"
+    d = h / 24
+    return f"{d:.1f}".replace(".", ",") + " дн"
+
+
+def render_html(data: dict, months: int, source_note: str,
+                warnings: Optional[List[str]] = None, info: Optional[dict] = None) -> str:
+    warnings = list(warnings or [])
+    if isinstance(warnings, str):  # совместимость
+        warnings = [warnings] if warnings else []
+    warning = "; ".join(w for w in warnings if w)
+    info = info or {}
     stats: List[MonthStat] = data["stats"]
     summary = data["summary"]
     items: List[ItemStat] = data["items"]
@@ -665,6 +985,10 @@ def render_html(data: dict, months: int, source_note: str, warning: str = "") ->
              f"{stats[-1].orders if stats else 0} заказов · чек {money(stats[-1].avg_cheque) if stats else '—'}"),
         _kpi("Цена позиции", money(stats[-1].avg_item_price) if stats else "—",
              "средняя по счетам"),
+        _kpi("Закрыто тикетов", _group(int(summary.get("tickets_closed_total", 0))),
+              f'открыто сейчас: {int(summary.get("tickets_open_now", 0))}'),
+        _kpi("Старых покупок", _group(int(summary.get("old_purchases", 0))),
+              "из dc_cache.purchases"),
     ]
 
     # тепловая карта
@@ -677,20 +1001,60 @@ def render_html(data: dict, months: int, source_note: str, warning: str = "") ->
     max_item_rev = max((it.revenue for it in items), default=0) or 1
     rows = []
     for it in items[:12]:
-        change = it.change
-        change_html = (f'<span class="{_sign_cls(change)}">{_arrow(change)} {abs(change) * 100:.0f}%</span>'
-                       if it.first_price and it.last_price else '<span class="neu">—</span>')
-        rows.append(
-            f'<tr><td>{esc(it.name)}</td>'
-            f'<td class="num">{it.orders}</td>'
-            f'<td class="num">{money(it.revenue)}</td>'
-            f'<td class="num">{money(it.revenue / it.orders) if it.orders else "—"}</td>'
-            f'<td class="num">{change_html}</td>'
-            f'<td style="width:120px"><div class="bar" style="width:{it.revenue / max_item_rev * 100:.0f}%">'
-            f'</div></td></tr>'
-        )
+        try:
+            change = it.change
+            change_html = (f'<span class="{_sign_cls(change)}">{_arrow(change)} {abs(change) * 100:.0f}%</span>'
+                           if it.first_price and it.last_price else '<span class="neu">—</span>')
+            rows.append(
+                f'<tr><td>{esc(it.name)}</td>'
+                f'<td class="num">{it.orders}</td>'
+                f'<td class="num">{money(it.revenue)}</td>'
+                f'<td class="num">{money(it.revenue / it.orders) if it.orders else "—"}</td>'
+                f'<td class="num">{change_html}</td>'
+                f'<td style="width:120px"><div class="bar" style="width:{it.revenue / max_item_rev * 100:.0f}%">'
+                f'</div></td></tr>'
+            )
+        except Exception:
+            continue
     items_table = ("".join(rows) if rows else
                    '<tr><td colspan="6" class="empty">Нет данных по позициям</td></tr>')
+
+    # тикеты и старые покупки
+    ticket_months = data.get("tickets") or []
+    t_labels = [t.label for t in ticket_months]
+    t_opened = [float(t.opened) for t in ticket_months]
+    t_closed = [float(t.closed) for t in ticket_months]
+    t_purchased = [float(t.purchased) for t in ticket_months]
+    t_any = any(t_opened) or any(t_closed) or any(t_purchased)
+    ticket_chart = ""
+    if t_any:
+        ticket_rows = "".join(
+            f'<tr><td>{MONTHS_FULL_RU[int(tm.key[5:7]) - 1]} {tm.key[:4]}</td>'
+            f'<td class="num">{tm.opened}</td>'
+            f'<td class="num">{tm.closed}</td>'
+            f'<td class="num">{tm.purchased}</td></tr>'
+            for tm in reversed(ticket_months)
+        )
+        ticket_chart = f"""<div class="card">
+    <h2>Тикеты и старые покупки</h2>
+    <div class="cap">Данные из БД: закрытые заказы, открытые тикеты и покупки до AI-менеджера.
+    Среднее время закрытия: {_fmt_hours(summary.get("tickets_avg_hours", 0))} ·
+    открыто сейчас: <b>{int(summary.get("tickets_open_now", 0))}</b></div>
+    <div class="legend">
+      <span><i style="background:{C_ACCENT}"></i>открыто тикетов</span>
+      <span><i style="background:{C_GREEN}"></i>закрыто тикетов</span>
+      <span><i style="background:{C_GOLD}"></i>старых покупок</span>
+    </div>
+    {grouped_bars(list(zip(t_labels, t_opened, t_closed)),
+                  name_a="Открыто", name_b="Закрыто", color_a=C_ACCENT, color_b=C_GREEN)}
+    <div class="note">Старых покупок за период: <b>{int(summary.get("old_purchases", 0))}</b>
+    (старые чеки AI и покупки из dc_cache; сумма не сохранялась). Закрыто тикетов всего: <b>{int(summary.get("tickets_closed_total", 0))}</b>.</div>
+    <table style="margin-top:10px">
+      <thead><tr><th>Месяц</th><th class="num">Открыто тикетов</th>
+      <th class="num">Закрыто тикетов</th><th class="num">Старых покупок</th></tr></thead>
+      <tbody>{ticket_rows}</tbody>
+    </table>
+  </div>"""
 
     # месячная таблица
     month_rows = []
@@ -705,14 +1069,17 @@ def render_html(data: dict, months: int, source_note: str, warning: str = "") ->
         )
 
     if not summary["orders"] and not warning:
-        empty_note = ('<div class="card"><div class="empty">Оплаченных заказов пока нет. '
-                      'Отчёт наполнится, когда AI-менеджер начнёт принимать чеки.</div></div>')
+        empty_note = ('<div class="card"><div class="empty">Оплаченных счетов пока нет. '
+                      'Данные по тикетам и старым покупкам собраны из БД.</div></div>')
     else:
         empty_note = ""
 
-    warning_html = (f'<div class="card" style="border-color:rgba(255,92,122,.35);'
-                    f'background:rgba(255,92,122,.06)"><b>Нет данных:</b> {esc(warning)}</div>'
-                    if warning else "")
+    warning_html = ""
+    if warnings:
+        items_html = "".join(f"<li>{esc(w)}</li>" for w in warnings if w)
+        warning_html = (f'<div class="card" style="border-color:rgba(255,92,122,.35);'
+                        f'background:rgba(255,92,122,.06)"><b>Замечания по данным:</b>'
+                        f'<ul style="margin:6px 0 0;padding-left:18px">{items_html}</ul></div>')
 
     return f"""<!DOCTYPE html>
 <html lang="ru">
@@ -766,6 +1133,8 @@ def render_html(data: dict, months: int, source_note: str, warning: str = "") ->
     {grouped_bars(list(zip(labels, order_vals, buyer_vals)), name_a="Заказы", name_b="Покупатели")}
   </div>
 
+  {ticket_chart}
+
   <div class="grid">
     <div class="card">
       <h2>Приток и отток клиентов</h2>
@@ -806,7 +1175,7 @@ def render_html(data: dict, months: int, source_note: str, warning: str = "") ->
   </div>
 
   <footer>
-    <span>Источник: AI-менеджер · счета и принятые чеки</span>
+    <span>Источник: счета/чеки AI-менеджера + тикеты и старые покупки из БД</span>
     <span>Сгенерировано scripts/shop_analytics.py</span>
   </footer>
 </div>
@@ -898,6 +1267,31 @@ def demo_orders(today: Optional[date] = None, months: int = 14) -> List[Order]:
     return orders
 
 
+def demo_ticket_stats(today: Optional[date] = None, months: int = 14) -> dict:
+    """Демо-статистика тикетов, чтобы предпросмотр показывал все блоки."""
+    today = today or date.today()
+    rnd = random.Random(424242)
+    grid = month_sequence(today, months)
+    stats: List[TicketMonth] = []
+    for i, m in enumerate(grid):
+        base = 20 + i * 2
+        opened = max(4, int(base * rnd.uniform(0.8, 1.3)))
+        closed = max(3, int(opened * rnd.uniform(0.75, 1.05)))
+        purchased = max(2, int(base * 0.35 * rnd.uniform(0.7, 1.4)))
+        stats.append(TicketMonth(
+            key=month_key(m), label=MONTHS_RU[m.month - 1],
+            opened=opened, closed=closed, purchased=purchased,
+        ))
+    return {
+        "stats": stats,
+        "open_now": rnd.randint(2, 9),
+        "avg_hours": rnd.uniform(6, 30),
+        "closed_total": sum(s.closed for s in stats),
+        "opened_total": sum(s.opened for s in stats),
+        "old_purchases": sum(s.purchased for s in stats),
+    }
+
+
 # ============================================================
 # СБОРКА ОТЧЁТА
 # ============================================================
@@ -908,24 +1302,38 @@ def build_report(db_path: Optional[str] = None,
                  today: Optional[date] = None) -> Report:
     months = max(2, min(24, int(months)))
     today = today or date.today()
+    warnings: List[str] = []
+    info: dict = {}
 
     if demo:
-        orders, warning = demo_orders(today, max(months, 14)), ""
+        orders = demo_orders(today, max(months, 14))
+        tickets = demo_ticket_stats(today, max(months, 14))
         source = "Демо-данные (синтетика для предпросмотра)"
     else:
         db = Path(db_path) if db_path else DEFAULT_DB
-        orders, warning = load_orders(db)
-        source = f"База: {db}"
+        try:
+            orders, tickets, warnings, info = load_data(db, months)
+        except Exception as exc:  # последний рубеж: отчёт обязан собраться
+            warnings.append(f"Ошибка чтения базы: {exc}")
+            orders, tickets = [], {}
+        source = f"База: {db.name}"
 
-    data = aggregate(orders, months, today)
-    html = render_html(data, months, source, warning)
+    try:
+        data = aggregate(orders, months, today, tickets)
+        html = render_html(data, months, source, warnings, info)
+    except Exception as exc:
+        # если что-то пошло не так, всё равно отдаём валидный HTML
+        warnings.append(f"Часть графиков недоступна: {exc}")
+        data = aggregate([], months, today, tickets)
+        html = render_html(data, months, source, warnings, info)
 
     out = Path(out_path) if out_path else (DEMO_OUT if demo else DEFAULT_OUT)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
 
     return Report(path=str(out.resolve()), html=html,
-                  summary=data["summary"], warning=warning)
+                  summary=data["summary"], warnings=warnings)
+
 
 
 # ============================================================
