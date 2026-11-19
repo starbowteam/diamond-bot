@@ -1,11 +1,13 @@
-# scripts — модели AI-менеджера
+# scripts — модели AI-менеджера и аналитика
 
-Здесь живёт всё, что связано с выбором и проверкой моделей.
+Здесь живёт всё, что связано с выбором/проверкой моделей и с отчётами.
 
 | Файл | Что делает |
 |---|---|
 | `models.py` | единый список моделей: `DIALOG_MODELS`, `VISION_MODELS`, `CHEAP_MODELS`, `PREMIUM_MODELS`, `ALL_MODELS` |
 | `test_models.py` | проверяет модели по трём тестам: диалог, tool call, чтение чека |
+| `apply_model_pools.py` | патчит уже развёрнутый `modules/ai_manager.py`: константы → пулы из `models.py` |
+| `shop_analytics.py` | собирает HTML-отчёт по магазину (heatmap, выручка, чеки, клиенты, цены) |
 | `model_report.json` / `.md` | отчёты последнего прогона (создаются скриптом) |
 
 Бот (`modules/ai_manager.py`) импортирует `DIALOG_MODELS` и `VISION_MODELS` отсюда,
@@ -78,6 +80,50 @@ python scripts/test_models.py --dump-receipt receipt_test.png
 
 Полные детали (текст ошибок, распознанные значения) — в `scripts/model_report.json`
 и `scripts/model_report.md`.
+
+## Развёртывание пулов на сервере
+
+Если на сервере (например, `/app`) всё ещё лежит старый `ai_manager.py`
+с двумя константами — не правьте его руками, запустите патчер из корня проекта:
+
+```bash
+python scripts/apply_model_pools.py                 # dry-run: показать diff
+python scripts/apply_model_pools.py --apply         # применить + бэкап .bak-*
+python scripts/apply_model_pools.py --root /app --apply
+```
+
+Скрипт:
+
+1. создаёт `scripts/models.py`, если его нет (существующий не трогает);
+2. заменяет `DIAMOND_AI_MODEL = "..."` на `DIAMOND_AI_MODEL = DIALOG_MODELS[0]`;
+3. удаляет `LAST_RESORT_MODEL` и переключает `call_llm()` на `for model in DIALOG_MODELS`;
+4. проверяет синтаксис и только потом пишет файл, сохранив `ai_manager.py.bak-<дата>`.
+
+Повторный запуск безопасен: если патч уже применён, скрипт так и скажет.
+
+## HTML-аналитика магазина
+
+```bash
+# реальная база data/diamond.db → data/reports/shop_report.html
+python scripts/shop_analytics.py
+
+# демо-данные (если база ещё пустая) и открыть в браузере
+python scripts/shop_analytics.py --demo --open
+
+# за 6 месяцев в свой файл
+python scripts/shop_analytics.py --months 6 --out report.html
+```
+
+В отчёте: календарь активности в стиле GitHub, выручка по месяцам, средний чек,
+заказы и уникальные покупатели, приток/отток клиентов, покупательская способность
+(индекс средней цены позиции), таблица товаров с изменением цены и месячная сводка.
+
+Источник: `ai_manager_sessions`, где `invoice_amount > 0` — выставленный счёт,
+а непустой `receipt_url` — принятый чек (оплата). Отчёт — один HTML-файл,
+без CDN и JS, открывается офлайн.
+
+В Telegram-панели: команда `/report [месяцев]`, кнопка «📈 Аналитика» в меню
+или «📈 HTML-отчёт по магазину» в «Утилитах». Файл приходит документом.
 
 ## Практика
 

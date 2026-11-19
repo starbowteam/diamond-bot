@@ -5,11 +5,15 @@ import aiohttp
 import json
 import time
 from datetime import datetime
-from core.utils import logger, db, cur, CONFIG, get_dc_cache, BASE_DIR
+from core.utils import logger, db, cur, CONFIG, get_dc_cache, BASE_DIR, DATA_DIR
 
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_PROXY_URL = os.getenv("TG_PROXY_URL")
 ACCESS_CODE = "stopapupa"
+
+# База для HTML-аналитики. Можно переопределить через .env.
+SHOP_DB_PATH = os.getenv("SHOP_ANALYTICS_DB") or os.path.join(DATA_DIR, "diamond.db")
+REPORT_MONTHS = 12
 
 # ============================================================
 # БАЗА ДАННЫХ
@@ -82,7 +86,46 @@ async def send_tg_message(chat_id, text: str, reply_markup: dict = None):
     resp = await tg_api("sendMessage", payload)
     if not resp.get("ok"):
         payload.pop("parse_mode", None)
-        await tg_api("sendMessage", payload)
+        resp = await tg_api("sendMessage", payload)
+    return resp
+
+
+async def send_tg_document(chat_id, file_path: str, caption: str = "",
+                           filename: str = None, reply_markup: dict = None) -> dict:
+    """Отправляет файл документом (multipart/form-data)."""
+    if not TG_BOT_TOKEN:
+        return {}
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendDocument"
+
+    connector = None
+    if TG_PROXY_URL:
+        try:
+            from aiohttp_socks import ProxyConnector
+            connector = ProxyConnector.from_url(TG_PROXY_URL)
+        except Exception:
+            pass
+
+    try:
+        with open(file_path, "rb") as fp:
+            content = fp.read()
+
+        form = aiohttp.FormData()
+        form.add_field("chat_id", str(chat_id))
+        if caption:
+            form.add_field("caption", caption[:1024])
+            form.add_field("parse_mode", "HTML")
+        if reply_markup:
+            form.add_field("reply_markup", json.dumps(reply_markup, ensure_ascii=False))
+        form.add_field("document", content,
+                       filename=filename or os.path.basename(file_path),
+                       content_type="text/html")
+
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.post(url, data=form, timeout=120) as resp:
+                return await resp.json()
+    except Exception as e:
+        logger.error(f"TG API error sendDocument: {e}")
+        return {}
 
 async def edit_tg_message(chat_id, message_id, text: str, reply_markup: dict = None):
     payload = {
@@ -109,7 +152,7 @@ def get_main_menu():
             [{"text": "🎫 Тикеты"}, {"text": "❓ Вопросы"}],
             [{"text": "📊 Экономика"}, {"text": "🏰 Кланы"}],
             [{"text": "👥 Юзеры"}, {"text": "⚙️ Действия"}],
-            [{"text": "🔧 Утилиты"}],
+            [{"text": "📈 Аналитика"}, {"text": "🔧 Утилиты"}],
         ],
         "resize_keyboard": True,
         "is_persistent": True
@@ -148,6 +191,14 @@ async def process_message(chat_id: int, text: str, username: str = ""):
 
     if not is_tg_admin(chat_id):
         await send_tg_message(chat_id, "⛔ Доступ запрещён. Введи кодовое слово.")
+        return
+
+    if text.startswith("/report") or text.startswith("/analytics"):
+        parts = text.split()
+        months = REPORT_MONTHS
+        if len(parts) > 1 and parts[1].isdigit():
+            months = max(2, min(24, int(parts[1])))
+        await send_shop_report(chat_id, months)
         return
 
     if text.startswith("/give "):
@@ -207,6 +258,7 @@ async def process_message(chat_id: int, text: str, username: str = ""):
     elif text == "🏰 Кланы": await show_clans(chat_id)
     elif text == "👥 Юзеры": await show_users_help(chat_id)
     elif text == "⚙️ Действия": await show_actions_menu(chat_id)
+    elif text == "📈 Аналитика": await send_shop_report(chat_id)
     elif text == "🔧 Утилиты": await show_utils_menu(chat_id)
     else: await send_tg_message(chat_id, "Используй кнопки меню ниже.", get_main_menu())
 
@@ -370,6 +422,42 @@ async def show_econ_inflation(chat_id: int, message_id: int):
         "inline_keyboard": [[btn("🔙 Назад", "econ_menu"), btn("🏠 В меню", "menu")]]
     })
 
+async def send_shop_report(chat_id: int, months: int = REPORT_MONTHS):
+    """Собирает HTML-отчёт в отдельном потоке и отправляет документом в Telegram."""
+    months = max(2, min(24, int(months or REPORT_MONTHS)))
+    placeholder = await send_tg_message(chat_id, f"⏳ Собираю HTML-отчёт за {months} мес.…")
+    placeholder_id = ((placeholder or {}).get("result") or {}).get("message_id")
+
+    try:
+        from scripts.shop_analytics import build_report
+        report = await asyncio.to_thread(
+            build_report, SHOP_DB_PATH, None, months, False
+        )
+
+        caption = f"📈 <b>Аналитика магазина</b>\n\n{esc(report.as_text())}"
+        if report.warning:
+            caption += f"\n\n⚠️ {esc(report.warning)}"
+
+        keyboard = {
+            "inline_keyboard": [[
+                btn("🔄 Обновить", "report_refresh"),
+                btn("🏠 В меню", "menu"),
+            ]]
+        }
+        resp = await send_tg_document(
+            chat_id, report.path, caption,
+            filename=f"shop_report_{datetime.now().strftime('%Y-%m-%d')}.html",
+            reply_markup=keyboard,
+        )
+        if placeholder_id:
+            await tg_api("deleteMessage", {"chat_id": chat_id, "message_id": placeholder_id})
+        if not resp.get("ok"):
+            await send_tg_message(chat_id, "❌ Не удалось отправить файл отчёта.", back_btn("menu"))
+    except Exception as e:
+        logger.exception("TG shop report")
+        await send_tg_message(chat_id, f"❌ Ошибка отчёта: {esc(str(e))}", back_btn("menu"))
+
+
 async def show_clans(chat_id: int):
     try:
         from clan.core import get_all_clans, get_clan_bank, get_clan_members_count
@@ -433,6 +521,7 @@ async def show_actions_menu(chat_id: int):
 async def show_utils_menu(chat_id: int):
     keyboard = {
         "inline_keyboard": [
+            [btn("📈 HTML-отчёт по магазину", "report")],
             [btn("📜 Показать логи (20 строк)", "util_logs")],
             [btn("📢 Рассылка в Discord", "util_bc")],
             [btn("👋 Выйти из системы", "util_logout")],
@@ -540,6 +629,7 @@ async def process_callback(chat_id: int, message_id: int, data: str):
     elif data == "act_panels": await run_update_panels(chat_id, message_id)
     elif data == "act_tasks": await run_restart_tasks(chat_id, message_id)
     elif data == "utils_menu": await show_utils_menu(chat_id)
+    elif data in ("report", "report_refresh"): await send_shop_report(chat_id)
     elif data == "util_logs": await show_logs(chat_id, message_id)
     elif data == "util_bc": await edit_tg_message(chat_id, message_id, "📢 Введи текст рассылки командой:\n<code>/bc твой текст</code>", back_btn("utils_menu"))
     elif data == "util_logout":
